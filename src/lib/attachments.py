@@ -61,18 +61,17 @@ def kind_of(name: str, mime: str = "") -> AttachmentKind:
     return "other"
 
 
-def sync_host_pdf(assets: AssetStore, file: Path) -> str | None:
-    """Sync a mounted PDF into the shared library and queue its extraction, returning the parsed markdown when already cached."""
-    content = file.read_bytes()
-    sync_library_pdf(assets, file.name, content)
-    return materialize(file.name, content, assets, enqueue_on_miss=True)
+def sync_pdf(assets: AssetStore, name: str, content: bytes) -> str | None:
+    """Sync a PDF into the shared library and queue its extraction, returning the parsed markdown when already cached."""
+    sync_library_pdf(assets, name, content)
+    return materialize(name, content, assets, enqueue_on_miss=True)
 
 
 def attach_host_file(assets: AssetStore, file: Path) -> AttachResult:
     """A mounted *file* as a live reference: a PDF with its cached markdown, anything else with its UTF-8 text."""
     result = AttachResult(name=file.name, mime=mime_for(file), path=str(file))
     if kind_of(file.name) == "pdf":
-        result.parsedMd = sync_host_pdf(assets, file)
+        result.parsedMd = sync_pdf(assets, file.name, file.read_bytes())
     else:
         result.content = read_text_or_none(file)
     return result

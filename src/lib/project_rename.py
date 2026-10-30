@@ -1,10 +1,10 @@
-"""Rename a project: move its documents and assets to a new slug and rewrite stored references to it."""
+"""Rewrite stored references in one transaction: rename a project, or relocate one stored document to a new key or disk path."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 import re
-from typing import Any, Iterable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
@@ -14,6 +14,11 @@ from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.json_io import dump_json
 from lib.storage_namespace import ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from psycopg import Connection
 
 SLUG_FIELDS = {"project_slug", "projectSlug", "slug"}
 HISTORY_FIELDS = {"history_file", "historyFile", "parent_file", "filename"}
@@ -60,18 +65,54 @@ class ProjectReferences:
         return self.text(value)
 
     def content(self, key: str, content: bytes) -> bytes:
-        """Rewrite JSON and text documents of app namespaces, leave anything else untouched."""
-        if key.split("/", 1)[0] not in CONTENT_NAMESPACES or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
-            return content
-        try:
-            text = content.decode()
-            if key.endswith(TEXT_SUFFIXES):
-                return self.text(text).encode()
-            data = json.loads(text)
-        except ValueError:
-            return content
-        updated = self.value(data)
-        return content if updated == data else dump_json(updated).encode()
+        return _rewrite_content(key, content, self.text, self.value)
+
+
+class KeyReference:
+    """Map the stored key `old` to `new`, another key or an absolute disk path, in JSON strings and app-relative links."""
+
+    def __init__(self, old: str, new: str) -> None:
+        self.old, self.new = old, new
+        self._link = re.compile(rf"(?<![\w/.-]){re.escape(old)}(?=[?#\s)\]\"']|$)")
+
+    def text(self, value: str) -> str:
+        return self._link.sub(lambda _: self.new, value)
+
+    def value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: self.value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self.value(item) for item in value]
+        return self.text(value) if isinstance(value, str) else value
+
+    def content(self, key: str, content: bytes) -> bytes:
+        return _rewrite_content(key, content, self.text, self.value)
+
+
+def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value: Callable[[Any], Any]) -> bytes:
+    """Rewrite JSON and text documents of app namespaces, leave anything else untouched."""
+    if key.split("/", 1)[0] not in CONTENT_NAMESPACES or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
+        return content
+    try:
+        decoded = content.decode()
+        if key.endswith(TEXT_SUFFIXES):
+            return text(decoded).encode()
+        data = json.loads(decoded)
+    except ValueError:
+        return content
+    updated = value(data)
+    return content if updated == data else dump_json(updated).encode()
+
+
+def _rewrite_canvas_mutations(connection: Connection, user_id: UUID, value: Callable[[Any], Any]) -> None:
+    """Apply *value* to every stored canvas mutation value, so replaying a canvas log yields rewritten references."""
+    mutations = connection.execute(
+        "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (user_id,),
+    ).fetchall()
+    for mutation_id, stored in mutations:
+        updated = value(stored)
+        if updated != stored:
+            connection.execute("UPDATE canvas_mutations SET value = %s WHERE mutation_id = %s", (Jsonb(updated), mutation_id))
 
 
 def renamed_documents(
@@ -148,14 +189,54 @@ class PostgresProjectRenamer:
                     ).fetchone()[0]
                     self._scope.record(connection, kind="asset", key=source, operation="move")
                     self._scope.record(connection, kind="asset", key=target, operation="move", version=version)
-                mutations = connection.execute(
-                    "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (user_id,),
-                ).fetchall()
-                for mutation_id, value in mutations:
-                    updated = refs.value(value)
-                    if updated != value:
-                        connection.execute(
-                            "UPDATE canvas_mutations SET value = %s WHERE mutation_id = %s", (Jsonb(updated), mutation_id),
-                        )
+                _rewrite_canvas_mutations(connection, user_id, refs.value)
         except UniqueViolation as exc:
             raise StorageConflictError("Project rename destination already exists; reload before saving") from exc
+
+
+class PostgresKeyRelocator:
+    """Relocates stored documents of one user, rewriting every reference to them in a single Postgres transaction."""
+
+    def __init__(self, scope: UserScope) -> None:
+        self._scope = scope
+
+    def relocate(self, old: str, new: str) -> None:
+        """Point every reference to the stored document `old` at `new`, then rekey `old` to `new`, or delete it for a disk path `new`.
+
+        - References: project file lists, chat attachments, canvases and their mutation log, app links in notes
+        - A disk path `new` makes `old` a mounted file everywhere, so it is read from disk from then on
+        """
+        refs = KeyReference(old, new)
+        user_id = self._scope.user_id
+        try:
+            with self._scope.connection() as connection, connection.transaction():
+                rows = connection.execute(
+                    "SELECT key, content FROM documents WHERE user_id = %s AND NOT is_dir AND key <> %s ORDER BY key FOR UPDATE",
+                    (user_id, old),
+                ).fetchall()
+                for key, stored in rows:
+                    content = bytes(stored)
+                    updated = refs.content(key, content)
+                    if updated == content:
+                        continue
+                    version = connection.execute(
+                        "UPDATE documents SET content = %s, version = version + 1, updated_at = now()"
+                        " WHERE user_id = %s AND key = %s RETURNING version",
+                        (updated, user_id, key),
+                    ).fetchone()[0]
+                    self._scope.record(connection, kind="document", key=key, operation="write", version=version)
+                _rewrite_canvas_mutations(connection, user_id, refs.value)
+                if Path(new).is_absolute():
+                    connection.execute("DELETE FROM documents WHERE user_id = %s AND key = %s", (user_id, old))
+                    self._scope.record(connection, kind="document", key=old, operation="delete")
+                else:
+                    # Canvas shares and log keys follow the document FK ON UPDATE CASCADE.
+                    version = connection.execute(
+                        "UPDATE documents SET key = %s, version = version + 1, updated_at = now()"
+                        " WHERE user_id = %s AND key = %s RETURNING version",
+                        (new, user_id, old),
+                    ).fetchone()[0]
+                    self._scope.record(connection, kind="document", key=old, operation="move")
+                    self._scope.record(connection, kind="document", key=new, operation="move", version=version)
+        except UniqueViolation as exc:
+            raise StorageConflictError(f"Destination already exists: {new}") from exc

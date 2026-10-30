@@ -19,7 +19,7 @@ from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import PostgresProjectRenamer
+from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.references import References
 from tests.conftest import create_user_and_device
@@ -41,6 +41,7 @@ class Stores:
         self.assets = AssetStore(scope)
         rename = PostgresProjectRenamer(scope).rename
         self.projects = ProjectStore(ChatStore(data_store=self.docs), rename=rename)
+        self.relocate = PostgresKeyRelocator(scope).relocate
 
 
 @pytest.fixture
@@ -89,6 +90,7 @@ def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
         route.MoveDocumentRequest(path="note/sketch.canvas", from_slug="", to_slug=slug),
         alice.projects,
         alice.docs,
+        alice.relocate,
     )
 
     assert meta.path == f"project/{slug}/document/sketch.canvas"
@@ -165,10 +167,14 @@ def test_moving_a_renamed_canvas_keeps_the_name_it_is_shown_under(alice):
     route.write_document(request, alice.projects, alice.docs, alice.assets)
     route.rename_document(route.RenameDocumentRequest(path=key, slug=first, name="Plan"), alice.projects, alice.docs)
 
-    moved = route.move_document(route.MoveDocumentRequest(path=key, from_slug=first, to_slug=second), alice.projects, alice.docs)
+    moved = route.move_document(
+        route.MoveDocumentRequest(path=key, from_slug=first, to_slug=second), alice.projects, alice.docs, alice.relocate
+    )
     assert alice.projects.list_named_files(second) == [(moved.path, "Plan.canvas")]
 
-    note = route.move_document(route.MoveDocumentRequest(path=moved.path, from_slug=second, to_slug=""), alice.projects, alice.docs)
+    note = route.move_document(
+        route.MoveDocumentRequest(path=moved.path, from_slug=second, to_slug=""), alice.projects, alice.docs, alice.relocate
+    )
     assert note.path == "note/Plan.canvas"
 
 
@@ -205,6 +211,7 @@ def test_move_onto_an_existing_name_is_a_conflict(alice):
             route.MoveDocumentRequest(path="note/spec.md", from_slug="", to_slug=slug),
             alice.projects,
             alice.docs,
+            alice.relocate,
         )
     assert exc.value.status_code == 409
     assert alice.docs.read_bytes("note/spec.md")[0] == b"note"

@@ -1,6 +1,6 @@
 import { Archive, FilePlus, GitCompare, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
-import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
+import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { AppSurface } from "@/contexts/TabContext"
 import { projectMount } from "@/features/omp/sessions"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -11,7 +11,7 @@ import type { ArchiveEntry } from "./ArchiveSelector"
 import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
 import type { useProjectActions } from "./useProjectActions"
-import type { useWorkspaceDocuments } from "./useWorkspaceDocuments"
+import { isStoredProjectFile, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
 
 type CodeMounts = ReturnType<typeof useCodeMounts>
 
@@ -44,10 +44,15 @@ type CodeTreeContext =
     activeDocumentPath?: string | null
     onFileSelect?: (path: string) => void
     onDiffSelect?: (path: string) => void
+    /** Move the project file `path` dropped on a directory into `folder`. */
+    moveToFolder: (path: string, folder: string) => Promise<void>
   }
 
 /** Registered path of a file-root node: its mount when set, else its own path. */
 export const mountOf = (node: FileTreeNode): string => node.mount ?? node.path
+
+/** Drag kind of a stored project file: it moves into another project's files or a Code folder, never among chats or canvases. */
+const PROJECT_FILE_DRAG_KIND = "project-file"
 
 /** Project roots followed by the shared "general" root. */
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
@@ -66,6 +71,7 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
           onClick: () => context.openArchitecture(project.slug) },
       ],
       onMoveHere: (path) => move(path, project.slug),
+      accepts: [DEFAULT_DRAG_KIND, PROJECT_FILE_DRAG_KIND],
       onDropFiles: (paths) => importFiles(project.slug, paths),
       children: categoryItems(context, project),
     })),
@@ -125,8 +131,11 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         onSubmit: (name: string) => createAndOpen(scope, name, (path) => onDocumentSelect?.(path, scope)),
       },
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
+      onMoveHere: (path: string) => move(path, scope),
+      accepts: [PROJECT_FILE_DRAG_KIND],
       children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
+        draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
         onSelect: () => onDocumentSelect?.(doc.path, scope),
         onDelete: () => remove(doc, scope),
       })),
@@ -173,6 +182,8 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
           ...omp.directoryActions(mount, node.name),
         ],
         onDelete: () => context.removeMount(mount, node.name),
+        onMoveHere: (path) => context.moveToFolder(path, node.path),
+        accepts: [PROJECT_FILE_DRAG_KIND],
         children: [...generatedRows([context.folder(mount), code]), ...rootFileItems(context, node.children ?? [])],
       }
     })
@@ -183,6 +194,8 @@ function rootFileItems(context: CodeTreeContext, nodes: FileTreeNode[]): FileTre
     id: node.path,
     label: node.name,
     type: node.type === "file" ? "element" : "folder",
+    onMoveHere: node.type === "file" ? undefined : (path: string) => context.moveToFolder(path, node.path),
+    accepts: [PROJECT_FILE_DRAG_KIND],
     multiSelect: true,
     isActive: node.path === context.activeDocumentPath,
     onSelect: node.type === "file" ? () => context.onFileSelect?.(node.path) : undefined,

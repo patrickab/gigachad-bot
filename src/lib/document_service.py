@@ -5,12 +5,16 @@ Also the writes, moves and renames that keep project references in step.
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Callable
 
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, validate_key, write_text
 from lib.project_store import ProjectStore
-from lib.references import Released
+from lib.references import Released, is_project_document
 from lib.storage_namespace import GRAPH, NOTE, PDFS, project_attachment_prefix, project_document, project_document_prefix
+
+Relocate = Callable[[str, str], None]
+"""Point every reference to a stored key at a new key or disk path, then rekey or delete it (`PostgresKeyRelocator.relocate`)."""
 
 
 class DocumentNotFound(Exception):
@@ -131,10 +135,11 @@ def write(store: ProjectStore, docs: DataStore, assets: AssetStore, scope: Docum
     return key
 
 
-def move(store: ProjectStore, docs: DataStore, key: str, source: DocumentScope, target: DocumentScope) -> str:
+def move(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, source: DocumentScope, target: DocumentScope) -> str:
     """Move the stored document *key* from *source* to *target*, keeping the name it is shown under, returning its new key.
 
-    A project keeps the file name in the key and the shown name as display name, a note is stored under the shown name.
+    - A project keeps the file name in the key and the shown name as display name, a note is stored under the shown name
+    - Chats, canvases and other projects referencing *key* follow it to the new key
     """
     if not source.owns(store, key) or not docs.is_file(key):
         raise DocumentNotFound(key)
@@ -144,8 +149,8 @@ def move(store: ProjectStore, docs: DataStore, key: str, source: DocumentScope, 
     if destination != key:
         if docs.exists(destination):
             raise DocumentNameConflict(destination)
-        docs.move(key, destination)
-    source.unlink(store, key)
+        relocate(key, destination)
+    source.unlink(store, destination)
     target.link(store, destination, shown)
     return destination
 
@@ -174,3 +179,28 @@ def rename(store: ProjectStore, docs: DataStore, scope: DocumentScope, key: str,
             raise DocumentNameConflict(destination)
         docs.move(key, destination)
     return destination, name
+
+
+def move_to_folder(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, folder: Path) -> Path:
+    """Write the stored project file *key* into *folder* and relocate every reference to it there, returning the new file.
+
+    - From then on it is a mounted file: projects, chats and canvases read it from disk, and it is never deleted
+    - The file takes the name the document is shown under, an existing file of that name raises DocumentNameConflict
+    - Canvases live in the app, so they raise DocumentNotFound like any key that is not a stored project file
+    """
+    names = dict(store.list_all_named_files())
+    if key not in names or not is_project_document(key) or key.endswith(".canvas") or not docs.is_file(key):
+        raise DocumentNotFound(key)
+    target = folder / Path(names[key]).name
+    content, _ = docs.read_bytes(key)
+    try:
+        with target.open("xb") as file:
+            file.write(content)
+    except FileExistsError as exc:
+        raise DocumentNameConflict(str(target)) from exc
+    try:
+        relocate(key, str(target))
+    except Exception:
+        target.unlink()
+        raise
+    return target

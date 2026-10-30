@@ -413,6 +413,11 @@ export async function moveDocument(path: string, fromSlug: string, toSlug: strin
   return post<ProjectDocument>("/documents/move", { path, from_slug: fromSlug, to_slug: toSlug })
 }
 
+/** Move the stored project file `path` into the file-root `folder`, every project then references the file on disk. */
+export async function moveDocumentToFolder(path: string, folder: string): Promise<ProjectDocument> {
+  return post<ProjectDocument>("/documents/move-to-folder", { path, folder })
+}
+
 export async function renameDocument(slug: string, path: string, name: string): Promise<ProjectDocument> {
   return post<ProjectDocument>("/documents/rename", { slug, path, name })
 }

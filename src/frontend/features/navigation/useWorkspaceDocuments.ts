@@ -4,7 +4,7 @@ import { useCallback, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { errorMessage } from "@/lib/utils"
@@ -20,6 +20,9 @@ function pickFiles(): Promise<File[]> {
     input.click()
   })
 }
+
+/** Whether `path` is a file stored in a project (not a canvas or a file on disk), the kind that can move into a folder. */
+export const isStoredProjectFile = (path: string) => /^project\/[^/]+\/document\//.test(path) && !path.endsWith(".canvas")
 
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
@@ -67,19 +70,28 @@ export function useWorkspaceDocuments({
     open(path)
   }
 
-  /** Move a canvas or chat history `path` into `scope`; architecture sources stay. */
+  /** Move a canvas, stored project file or chat history `path` into `scope`; architecture sources stay. */
   const move = async (path: string, scope: string) => {
     if (isArchitecturePath(path)) return
-    if (path.endsWith(".canvas")) {
+    if (path.endsWith(".canvas") || isStoredProjectFile(path)) {
       const from = Object.entries(documents).find(([, docs]) => docs.some((doc) => doc.path === path))?.[0] ?? ""
       if (from !== scope) {
         await moveDocument(path, from, scope)
         await refresh()
+        onDocumentsChanged?.()
         onCanvasDeleted?.(path)
       }
     } else {
       await moveHistory(path, scope)
     }
+  }
+
+  /** Move the stored project file `path` into the mounted `folder`, where it then behaves as a mounted file. */
+  const moveToFolder = async (path: string, folder: string) => {
+    await moveDocumentToFolder(path, folder)
+    await refresh()
+    onDocumentsChanged?.()
+    onCanvasDeleted?.(path)
   }
 
   /** Pick files from this device and store them as documents of project `scope`. */
@@ -141,5 +153,5 @@ export function useWorkspaceDocuments({
     } catch { /* the panel stays open to retry */ }
   }
 
-  return { documents, notes, createAndOpen, move, remove, importFiles, uploadFiles, uploadError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument }
+  return { documents, notes, createAndOpen, move, moveToFolder, remove, importFiles, uploadFiles, uploadError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument }
 }

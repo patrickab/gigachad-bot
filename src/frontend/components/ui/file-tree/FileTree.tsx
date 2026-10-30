@@ -51,6 +51,8 @@ export interface FileTreeItem<T = unknown> {
   /** Right-aligned row end, e.g. line change counts. The label truncates first. */
   meta?: ReactNode
   draggable?: boolean
+  /** What dragging this row carries, matched against `accepts` of drop targets. Default "item". */
+  dragKind?: string
   multiSelect?: boolean
   onSelect?: () => void
   onDoubleClick?: () => void
@@ -64,6 +66,8 @@ export interface FileTreeItem<T = unknown> {
     onClick: () => void
   }[]
   onMoveHere?: (id: string) => Promise<void>
+  /** Drag kinds `onMoveHere` takes. Default ["item"]. */
+  accepts?: string[]
   onDropFiles?: (paths: string[]) => Promise<void>
 }
 
@@ -83,6 +87,13 @@ interface FileTreeProps<T> {
 }
 
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
+// Drag data is unreadable before the drop, so the kind travels as a data type name, which is readable.
+const DRAG_KIND_TYPE_PREFIX = "application/x-file-tree-kind-"
+export const DEFAULT_DRAG_KIND = "item"
+
+/** Whether a drag with data `types` carries one of the `accepted` kinds. */
+const carriesKind = (types: readonly string[], accepted: string[] = [DEFAULT_DRAG_KIND]) =>
+  accepted.some((kind) => types.includes(DRAG_KIND_TYPE_PREFIX + kind))
 const INDENT_BASE = 8
 const INDENT_STEP = 16
 const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-32 group-hover/row:opacity-100 group-focus-within/row:max-w-32 group-focus-within/row:opacity-100"
@@ -169,6 +180,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       event.dataTransfer.effectAllowed = "copyMove"
     } else {
       event.dataTransfer.setData("text/plain", item.id)
+      event.dataTransfer.setData(DRAG_KIND_TYPE_PREFIX + (item.dragKind ?? DEFAULT_DRAG_KIND), "")
       event.dataTransfer.effectAllowed = "move"
     }
   }
@@ -213,7 +225,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         onDragOver={(event) => {
           event.stopPropagation()
           const files = event.dataTransfer.types.includes(FILE_DRAG_TYPE)
-          if (files ? !item.onDropFiles : !item.onMoveHere) return
+          if (files ? !item.onDropFiles : !item.onMoveHere || !carriesKind(event.dataTransfer.types, item.accepts)) return
           event.preventDefault()
           event.dataTransfer.dropEffect = files ? "copy" : "move"
           setDragOverId(item.id)
@@ -299,7 +311,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     {collapsed ? null : loading ? <div className="space-y-2 px-2 py-1"><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
       : <div className="min-h-2"
         onDragOver={(event) => {
-          if (event.target !== event.currentTarget || !onMoveToRoot || event.dataTransfer.types.includes(FILE_DRAG_TYPE)) return
+          if (event.target !== event.currentTarget || !onMoveToRoot || !carriesKind(event.dataTransfer.types)) return
           event.preventDefault()
           event.dataTransfer.dropEffect = "move"
         }}

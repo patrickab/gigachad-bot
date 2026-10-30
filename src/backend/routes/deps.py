@@ -17,6 +17,7 @@ from lib.changes import UserScope
 from lib.chat_cleanup import ChatCleanup
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
+from lib.document_service import Relocate
 from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.file_roots import FileRoots
 from lib.file_roots_repository import PostgresFileRootRepository
@@ -24,7 +25,7 @@ from lib.memory_store import MemoryStore
 from lib.model_provider_store import ModelProviderStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.postgres_pool import get_postgres_pool
-from lib.project_rename import PostgresProjectRenamer
+from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
@@ -121,6 +122,10 @@ def get_project_store(
     chats: ChatStore = Depends(get_chat_store),
 ) -> ProjectStore:
     return ProjectStore(chats, rename=PostgresProjectRenamer(scope).rename)
+
+
+def get_relocate(scope: UserScope = Depends(get_user_scope)) -> Relocate:
+    return PostgresKeyRelocator(scope).relocate
 
 
 def get_memory_store(docs: DataStore = Depends(get_document_store)) -> MemoryStore:

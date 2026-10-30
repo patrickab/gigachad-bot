@@ -11,7 +11,7 @@ from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import PostgresProjectRenamer, ProjectReferences, renamed_documents
+from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
 from tests.conftest import create_user
 
@@ -194,3 +194,35 @@ def test_rename_never_crosses_user_namespace(stores, postgres_pool):
     assert other_projects.get_project("old")["name"] == "Old"
     assert other_docs.read_bytes("project/old/document/a.md")[0] == b"[old](project/old/document/a.md)"
     assert not other_docs.exists("project/new")
+
+
+@pytest.mark.parametrize("new", ["project/other/document/report.pdf", "/mnt/docs/report.pdf"])
+def test_relocating_a_document_moves_every_reference_and_only_exact_ones(stores, postgres_pool, new):
+    docs, projects, _, user = stores
+    projects.create_project("Old")
+    projects.create_project("Other")
+    old = "project/old/document/report.pdf"
+    docs.write_bytes(old, b"%PDF")
+    projects.add_file("old", old)
+    projects.add_file("other", old)
+    put(docs, "chat/old/main.json", {"messages": [{"attachments": [{"vaultPath": old}, {"vaultPath": old + ".bak"}]}]})
+    canvas = "project/old/document/board.canvas"
+    put(docs, canvas, {"attachments": [{"id": "a", "path": old}]})
+    docs.write_bytes("note/links.md", f"[r]({old}) and {old}x".encode())
+    mutation = uuid4()
+    with postgres_pool.connection() as conn, conn.transaction():
+        conn.execute(
+            "INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value)"
+            " VALUES (%s,%s,%s,1,0,'upsert','attachment','a',%s)", (mutation, user, canvas, Jsonb({"id": "a", "path": old})))
+
+    PostgresKeyRelocator(UserScope(postgres_pool, user)).relocate(old, new)
+
+    assert projects.list_files("old") == projects.list_files("other") == [new]
+    assert get(docs, "chat/old/main.json")["messages"][0]["attachments"] == [{"vaultPath": new}, {"vaultPath": old + ".bak"}]
+    assert get(docs, canvas)["attachments"][0]["path"] == new
+    assert docs.read_bytes("note/links.md")[0] == f"[r]({new}) and {old}x".encode()
+    assert not docs.exists(old)
+    assert new.startswith("/") or docs.read_bytes(new)[0] == b"%PDF"
+    with postgres_pool.connection() as conn:
+        value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]
+    assert value == {"id": "a", "path": new}

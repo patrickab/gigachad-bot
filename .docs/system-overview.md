@@ -64,6 +64,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 - Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view.
 - Add a mounted file to a project as a reference. Editing changes the original disk file; removing the project reference does not delete that source.
+- Upload files into a project's files folder and drag them to another project. Chats, canvases and other projects using the file follow it. Drag an uploaded file onto a Code folder to move it to disk, where it then behaves exactly like a mounted file. Uploaded and moved PDFs get MinerU extraction like mounted ones.
 - Rename a file in a project to change only the name that project shows for it. The file, its chat and canvas attachments and its PDF annotations keep pointing at the original, and renaming back to the original name restores it.
 - Upload PDFs or attach mounted PDFs, view their pages, and use MinerU extraction to supply readable Markdown to chat. Image OCR can transcribe text and LaTeX with the configured vision model.
 - Annotate PDFs with pen and highlighter. Annotations belong to the PDF's content, so every copy shares them and a renamed file keeps them, while changed bytes start empty.

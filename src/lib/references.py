@@ -112,14 +112,14 @@ def _name(key: str) -> str:
     return PurePosixPath(key).name
 
 
-def _is_project_document(key: str) -> bool:
+def is_project_document(key: str) -> bool:
     parts = key.split("/")
     return len(parts) >= 4 and parts[0] == PROJECT and parts[2] == "document"
 
 
 def _deletable(key: str) -> bool:
     """Whether *key* is derived data a release may delete once nothing uses it."""
-    return _under(key, PDFS) or _under(key, PDF_ANNOTATION) or _is_project_document(key)
+    return _under(key, PDFS) or _under(key, PDF_ANNOTATION) or is_project_document(key)
 
 
 def annotation_canvas(docs: DataStore, sha256: str, host: str | None = None) -> str:
@@ -210,7 +210,7 @@ class References:
         """Derived keys nothing uses any more, as a release of every one of them would delete them. Nothing is deleted."""
         candidates = {asset.logical_path for asset in self._assets.list(PDFS)}
         candidates |= {entry.key for entry in self._docs.list(PDF_ANNOTATION, recursive=True) if not entry.is_dir}
-        candidates |= {e.key for e in self._docs.list(PROJECT, recursive=True) if not e.is_dir and _is_project_document(e.key)}
+        candidates |= {e.key for e in self._docs.list(PROJECT, recursive=True) if not e.is_dir and is_project_document(e.key)}
         gone: set[str] = set()
         self._sweep(candidates, gone, dry_run=True)
         return sorted(gone)

@@ -82,7 +82,13 @@ export function Sidebar(props: SidebarProps) {
     const project = projects.find((candidate) => candidate.slug === root.id)
     return project ? learn.withProjectLearn(root, project) : root
   }) : projectTree
-  const codeContext = { ...props, ...code, projects, pending }
+  const codeContext = {
+    ...props, ...code, projects, pending,
+    moveToFolder: async (path: string, folder: string) => {
+      await documents.moveToFolder(path, folder)
+      await code.reloadRootTree()
+    },
+  }
 
   return <motion.aside
     initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.25, ease: "easeInOut" }}

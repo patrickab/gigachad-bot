@@ -21,13 +21,23 @@ from backend.routes.deps import (
     get_file_roots,
     get_project_store,
     get_references,
+    get_relocate,
 )
 from backend.routes.schemas import FileListResponse, FileMeta, file_meta
 from lib import document_service
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
-from lib.data_store import DataStore, validate_key
-from lib.document_service import DocumentNameConflict, DocumentNotFound, DocumentScope, InvalidDocumentName, ProjectNotFound, under
+from lib.attachments import kind_of, sync_pdf
+from lib.data_store import DataStore, StorageConflictError, validate_key
+from lib.document_service import (
+    DocumentNameConflict,
+    DocumentNotFound,
+    DocumentScope,
+    InvalidDocumentName,
+    ProjectNotFound,
+    Relocate,
+    under,
+)
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
 from lib.references import References
@@ -64,6 +74,11 @@ class MoveDocumentRequest(BaseModel):
     path: str
     from_slug: str = ""
     to_slug: str = ""
+
+
+class MoveToFolderRequest(BaseModel):
+    path: str
+    folder: str
 
 
 def _valid_key(path: str) -> str:
@@ -166,13 +181,21 @@ def write_binary_document(
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
+    assets: AssetStore = Depends(get_asset_store),
 ):
-    """Write a binary file (e.g. PDF) to the project's documents/ directory."""
+    """Write a binary file (e.g. PDF) to the project's documents/ directory.
+
+    - PDFs are also synced into the shared library and queued for extraction, as on add-to-project
+    """
     with http_errors((FileNotFoundError, 404, "Project not found")):
         store.require(slug)
-    key = project_document(slug, _upload_name(file))
-    docs.write_bytes(key, file.file.read())
+    name = _upload_name(file)
+    key = project_document(slug, name)
+    content = file.file.read()
+    docs.write_bytes(key, content)
     store.add_file(slug, key)
+    if kind_of(name) == "pdf":
+        sync_pdf(assets, name, content)
     return file_meta(key)
 
 
@@ -225,14 +248,39 @@ def move_document(
     req: MoveDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
+    relocate: Relocate = Depends(get_relocate),
 ):
-    """Move a document (e.g. a canvas) between projects, or to/from the
-    unassigned root notes collection (empty slug = notes)."""
+    """Move a canvas or file between projects, or to/from the unassigned root notes collection (empty slug = notes).
+
+    - Chats, canvases and other projects referencing it follow it to its new key
+    """
     if req.from_slug == req.to_slug:
         raise HTTPException(status_code=400, detail="Source and destination are the same")
     key = _valid_key(req.path)
-    with http_errors(*_DOCUMENT_ERRORS):
-        return file_meta(document_service.move(store, docs, key, DocumentScope(req.from_slug), DocumentScope(req.to_slug)))
+    with http_errors(*_DOCUMENT_ERRORS, (StorageConflictError, 409, None)):
+        moved = document_service.move(store, docs, relocate, key, DocumentScope(req.from_slug), DocumentScope(req.to_slug))
+    return file_meta(moved)
+
+
+@router.post("/move-to-folder", response_model=FileMeta)
+def move_document_to_folder(
+    req: MoveToFolderRequest,
+    store: ProjectStore = Depends(get_project_store),
+    docs: DataStore = Depends(get_document_store),
+    assets: AssetStore = Depends(get_asset_store),
+    roots: FileRoots = Depends(get_file_roots),
+    relocate: Relocate = Depends(get_relocate),
+):
+    """Move a stored project file into a file-root folder, where it then behaves as if it had always been mounted.
+
+    - PDFs are synced into the shared library and queued for extraction, as on add-to-project
+    """
+    key = _valid_key(req.path)
+    with http_errors(*_DOCUMENT_ERRORS, ((NotADirectoryError, ValueError), 404, "Folder not found")):
+        target = document_service.move_to_folder(store, docs, relocate, key, roots.resolve_folder(req.folder))
+    if kind_of(target.name) == "pdf":
+        sync_pdf(assets, target.name, target.read_bytes())
+    return file_meta(str(target))
 
 
 @router.post("/rename", response_model=FileMeta)

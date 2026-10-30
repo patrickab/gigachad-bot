@@ -396,7 +396,9 @@ def _library_pdf(client, alice, tmp_path, monkeypatch, content: bytes) -> str:
 
 
 @pytest.mark.parametrize("store", ["documents", "assets"])
-def test_stored_pdfs_revalidate_serve_ranges_and_hash_without_changing_keys(client, tmp_path, monkeypatch, store):
+def test_stored_pdfs_revalidate_serve_ranges_and_hash_without_changing_keys(
+    client, tmp_path, monkeypatch, documents_root, no_enqueue, store
+):
     """Reopening an unchanged PDF answers 304, pdf.js gets the byte ranges it asks for, annotation keys stay the bytes' SHA-256."""
     alice = headers("alice@example.test", str(uuid4()), host=True)
     pdf = b"%PDF-1.7 " + bytes(range(256)) * 4
@@ -435,3 +437,47 @@ def test_stored_pdfs_revalidate_serve_ranges_and_hash_without_changing_keys(clie
         changed = raw(**{"If-None-Match": etag})
         assert (changed.status_code, changed.content) == (200, pdf + b"v2")
         assert changed.headers["etag"] != etag
+
+
+def test_an_uploaded_pdf_joins_the_library_and_queues_its_extraction(client, documents_root, no_enqueue):
+    alice = headers("alice@example.test", str(uuid4()))
+    slug = f"up-{uuid4().hex[:8]}"
+    assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+
+    _upload_project_pdf(client, alice, slug, b"%PDF-1.7 uploaded")
+
+    assert no_enqueue == ["paper.pdf"]
+    assert client.get("/api/fileviewer/raw", params={"path": "PDFs/paper.pdf"}, headers=alice).content == b"%PDF-1.7 uploaded"
+    assert (documents_root / "PDFs" / "paper.pdf").read_bytes() == b"%PDF-1.7 uploaded"
+
+
+def test_a_stored_project_file_moves_into_a_mounted_folder_for_every_project(client, tmp_path, documents_root, no_enqueue):
+    alice = headers("alice@example.test", str(uuid4()), host=True)
+    first, second = (f"mv-{uuid4().hex[:8]}" for _ in range(2))
+    for slug in (first, second):
+        assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+    mount = tmp_path / "mount"
+    (mount / "docs").mkdir(parents=True)
+    assert client.post("/api/fileroots/roots", json={"path": str(mount)}, headers=alice).status_code == 200
+    key = _upload_project_pdf(client, alice, first, b"%PDF-1.7 moved")
+    assert client.post("/api/documents/add", params={"slug": second}, json={"path": key}, headers=alice).status_code == 200
+
+    def move(folder):
+        return client.post("/api/documents/move-to-folder", json={"path": key, "folder": str(folder)}, headers=alice)
+
+    missing = move(mount / "missing")
+    moved = move(mount / "docs")
+
+    target = mount / "docs" / "paper.pdf"
+    assert missing.status_code == 404
+    assert (moved.status_code, moved.json()["path"]) == (200, str(target))
+    assert target.read_bytes() == b"%PDF-1.7 moved"
+    for slug in (first, second):
+        listed = client.get("/api/documents", params={"slug": slug}, headers=alice).json()["documents"]
+        assert [document["path"] for document in listed] == [str(target)]
+    assert client.get("/api/fileviewer/raw", params={"path": key}, headers=alice).status_code == 404
+
+    again = _upload_project_pdf(client, alice, first, b"%PDF-1.7 other")
+    conflict = client.post("/api/documents/move-to-folder", json={"path": again, "folder": str(mount / "docs")}, headers=alice)
+    assert conflict.status_code == 409
+    assert target.read_bytes() == b"%PDF-1.7 moved"

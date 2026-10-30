@@ -180,6 +180,13 @@ class FileRoots:
             raise FileNotFoundError(path)
         return resolved
 
+    def resolve_folder(self, path: str) -> Path:
+        """Validate *path* against the roots and require it to be an existing directory."""
+        resolved = self._root_for(path)
+        if not resolved.is_dir():
+            raise NotADirectoryError(path)
+        return resolved
+
     def read(self, path: str) -> str:
         """Return the text content of a file-root file."""
         return self.resolve(path).read_text(encoding="utf-8")

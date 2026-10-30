@@ -73,6 +73,6 @@ export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions)
 
   return {
     hostAccess, omp, rootTreeData, mounts, unmounted: omp.unmountedWorkspaces(mounts), folder: worktrees.folder,
-    archived, setArchived, mountThen, removeMount,
+    archived, setArchived, mountThen, removeMount, reloadRootTree: loadRootTree,
   }
 }

@@ -14,7 +14,7 @@ from backend.http_plumbing import http_errors
 from backend.routes.deps import get_asset_store, get_file_roots, get_project_store
 from backend.routes.schemas import FileListResponse, FileMeta, file_meta
 from lib.asset_store import AssetStore
-from lib.attachments import AttachResult, attach_host_file, attach_library_pdf, kind_of, read_text_or_none, sync_host_pdf
+from lib.attachments import AttachResult, attach_host_file, attach_library_pdf, kind_of, read_text_or_none, sync_pdf
 from lib.data_store import StorageNotFoundError
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
@@ -70,7 +70,7 @@ def add_to_project(
     added: list[FileMeta] = []
     for file in files:
         if kind_of(file.name) == "pdf":
-            sync_host_pdf(assets, file)
+            sync_pdf(assets, file.name, file.read_bytes())
         elif read_text_or_none(file) is None:
             continue
         key = str(file)
