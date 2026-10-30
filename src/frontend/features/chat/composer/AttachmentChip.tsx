@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Eye, EyeOff, File as FileIcon, FileX, X } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
@@ -73,6 +74,50 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
         <X className="h-3 w-3" />
       </button>
       {hover.card}
+    </div>
+  )
+}
+
+/** Grace period to move the pointer from the "+N" pill into its popover. */
+const POPOVER_HIDE_DELAY_MS = 150
+
+/**
+ * "+N" pill that gathers the attachments out of context; hovering or focusing it opens a popover of their chips.
+ *
+ * - Hovering a chip in the popover peeks at it like any chip, the popover stays open while the pointer is on that card
+ * - `children` are the chips
+ */
+export function InactiveAttachments({ count, children }: { count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const hideTimer = useRef<number | undefined>(undefined)
+  const show = () => { window.clearTimeout(hideTimer.current); setOpen(true) }
+  const hideSoon = () => { window.clearTimeout(hideTimer.current); hideTimer.current = window.setTimeout(() => setOpen(false), POPOVER_HIDE_DELAY_MS) }
+  useEffect(() => () => window.clearTimeout(hideTimer.current), [])
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={show}
+      onMouseLeave={hideSoon}
+      onFocus={show}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}
+      onKeyDown={(event) => { if (event.key === "Escape") setOpen(false) }}
+    >
+      <button
+        type="button"
+        aria-label={`${count} attachments out of context`}
+        aria-expanded={open}
+        className="inline-flex items-center rounded-xl border border-divider-strong/50 bg-surface-elevated px-2 py-1 text-xs text-ink-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+      >
+        +{count}
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 pb-2">
+          <div className="flex w-max max-w-xs flex-col items-start gap-1.5 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
+            {children}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

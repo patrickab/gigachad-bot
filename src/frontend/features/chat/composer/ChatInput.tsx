@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { useSpeechInput } from "@/hooks/useSpeechInput"
 import type { Attachment } from "@/lib/domain/types"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
-import { AttachmentChip, type ContextAttachment } from "./AttachmentChip"
+import { AttachmentChip, InactiveAttachments, type ContextAttachment } from "./AttachmentChip"
 import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
 import { AttachMenu, ICON_BUTTON, SendButton, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
@@ -140,6 +140,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
   }
 
+  const contextChip = ({ messageIndex, attachment }: ContextAttachment) => context && (
+    <AttachmentChip
+      key={`${messageIndex}-${attachment.name}`}
+      attachment={attachment}
+      onOpen={() => context.onOpen(messageIndex, attachment)}
+      onRemove={() => context.onRemove(messageIndex, attachment.name)}
+      onToggleActive={() => context.onToggleActive(messageIndex, attachment.name)}
+    />
+  )
+  const activeContext = context?.attachments.filter(({ attachment }) => attachment.active) ?? []
+  const inactiveContext = context?.attachments.filter(({ attachment }) => !attachment.active) ?? []
   const canSend = !picker && (text.trim().length > 0 || attachments.length > 0)
   const hintText = hint?.(text, attachments.length) ?? null
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
@@ -152,15 +163,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
       {((context?.attachments.length ?? 0) > 0 || attachments.length > 0) && (
         <div className="relative z-10 mb-2 flex flex-wrap gap-1.5">
-          {context?.attachments.map(({ messageIndex, attachment }) => (
-            <AttachmentChip
-              key={`${messageIndex}-${attachment.name}`}
-              attachment={attachment}
-              onOpen={() => context.onOpen(messageIndex, attachment)}
-              onRemove={() => context.onRemove(messageIndex, attachment.name)}
-              onToggleActive={() => context.onToggleActive(messageIndex, attachment.name)}
-            />
-          ))}
+          {activeContext.map(contextChip)}
           {attachments.map((attachment) => (
             <AttachmentChip
               key={attachment.name}
@@ -170,6 +173,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onRemove={() => drafts.remove(attachment.name)}
             />
           ))}
+          {inactiveContext.length > 0 && (
+            <InactiveAttachments count={inactiveContext.length}>{inactiveContext.map(contextChip)}</InactiveAttachments>
+          )}
         </div>
       )}
 

@@ -57,6 +57,19 @@ describe("ChatInput context chips", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove Roadmap.md" }))
     expect(context.onRemove).toHaveBeenCalledWith(0, "plan.md")
   })
+
+  it("gathers out-of-context attachments into a +N popover that opens on hover", () => {
+    const unused: Attachment = { ...notes("old"), name: "old.md", active: false }
+    const context = contextOf([{ messageIndex: 0, attachment: notes("v1") }, { messageIndex: 1, attachment: unused }])
+    renderComposer(context)
+
+    expect(screen.queryByRole("button", { name: "Preview old.md" })).toBeNull()
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "1 attachments out of context" }).parentElement!)
+    fireEvent.click(screen.getByRole("button", { name: "Include old.md in context" }))
+
+    expect(context.onToggleActive).toHaveBeenCalledWith(1, "old.md")
+    expect(screen.getByRole("button", { name: "Preview notes.md" })).toBeInTheDocument()
+  })
 })
 
 describe("ChatInput Escape", () => {
