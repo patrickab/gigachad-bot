@@ -156,7 +156,8 @@ if ! command -v node >/dev/null; then
     printf 'error: node is not on PATH (%s); the C4 service cannot start\n' "$PATH" >&2
     exit 1
 fi
-# npm ci installs exactly package-lock.json on every start, so a restart never runs stale or drifted packages.
+# Production runs npm ci on every start, so a restart never runs stale or drifted packages. Development reinstalls
+# only when package.json, the lock or .npmrc changed (install_deps.py), as npm ci rewrites node_modules each time.
 # --prefer-offline serves integrity-checked tarballs from the cache, so restarts rarely need the network.
 printf 'Installing C4 service dependencies\n'
 if [[ "$profile" == development ]]; then
