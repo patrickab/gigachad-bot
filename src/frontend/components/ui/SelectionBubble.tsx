@@ -10,12 +10,17 @@ export function SelectionBubble({ bounds, label, onActivate }: { bounds: DOMRect
       aria-label={label}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onActivate}
-      // The SVG's tip sits at (22, 1)
-      style={{ left: bounds.left - 22, top: bounds.bottom - 1 }}
-      className="fixed z-50 h-8 w-8 rounded text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+      // The SVG's tip sits at (20, 1)
+      style={{ left: bounds.left - 20, top: bounds.bottom - 1 }}
+      className="fixed z-50 h-7 w-7 rounded-lg text-ink-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
     >
-      <svg aria-hidden="true" viewBox="0 0 32 32" className="h-8 w-8 fill-paper stroke-current" strokeWidth="2.25" strokeLinejoin="round">
-        <path d="M22 1v6q0 3 3 3h1q5 0 5 6v8q0 6-6 6H7q-6 0-6-6v-8q0-6 6-6h5q2 0 4-2z" />
+      <svg aria-hidden="true" viewBox="0 0 28 28" className="h-7 w-7 fill-paper stroke-current drop-shadow-sm" strokeWidth="1.5" strokeLinejoin="round">
+        <path d="M20 1L14 6H7a6 6 0 0 0-6 6v9a6 6 0 0 0 6 6h14a6 6 0 0 0 6-6v-9a6 6 0 0 0-6-6h-1z" />
+        <g className="fill-current stroke-none">
+          <circle cx="9" cy="16.5" r="1.4" />
+          <circle cx="14" cy="16.5" r="1.4" />
+          <circle cx="19" cy="16.5" r="1.4" />
+        </g>
       </svg>
     </button>,
     document.body,
