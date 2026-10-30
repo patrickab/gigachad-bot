@@ -70,6 +70,18 @@ export function penPressure(e: { pressure: number }): number {
   return e.pressure > 0 ? e.pressure : 0.5
 }
 
+const round = (value: number, decimals: number) => Math.round(value * 10 ** decimals) / 10 ** decimals
+
+/**
+ * Stored stroke point: x/y to 0.01 units, pressure to 0.001.
+ *
+ * - Below 0.03 screen px at max zoom, the outline path is drawn at 0.01 anyway
+ * - Full float64 digits made ink about 3× larger to store, send and parse
+ */
+export function inkPoint(x: number, y: number, pressure: number): number[] {
+  return [round(x, 2), round(y, 2), round(pressure, 3)]
+}
+
 export interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
 
 /** Bounding box of `[x, y, ...]` points, or null when there are none. */

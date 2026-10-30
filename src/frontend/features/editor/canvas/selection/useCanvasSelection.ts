@@ -5,7 +5,7 @@ import { canvasEntityId, type CanvasDocument } from "@/lib/domain/canvasDocument
 import type { Point } from "@/lib/domain/edgeRouting"
 import { polyBounds, resizeBox, scalePoly, scaleStroke, strokesInLasso, type Poly, type SelBox } from "@/features/editor/canvas/selection/canvasSelection"
 import { dropTargetAt, registerDropTarget, remapAcrossCanvases, type StrokeDrop } from "@/features/editor/canvas/attachments/canvasTransfer"
-import type { StrokeData } from "@/lib/drawing"
+import { inkPoint, type StrokeData } from "@/lib/drawing"
 import type { DragSession } from "./useCanvasDrag"
 
 const COPY_OFFSET_PX = 24 // screen px a duplicated selection is nudged by, so it reads as a new object
@@ -128,7 +128,7 @@ export function useCanvasSelection({ liveRef, containerRef, scaleRef, offsetRef,
     const off = COPY_OFFSET_PX / scaleRef.current
     const copies = cur.strokes
       .filter((s) => selectedIds.has(s.id))
-      .map((s) => ({ ...s, id: canvasEntityId(), points: s.points.map((p) => [p[0]! + off, p[1]! + off, p[2] ?? 0.5]) }))
+      .map((s) => ({ ...s, id: canvasEntityId(), points: s.points.map((p) => inkPoint(p[0]! + off, p[1]! + off, p[2] ?? 0.5)) }))
     if (copies.length === 0) return
     commit({ ...cur, strokes: [...cur.strokes, ...copies] })
     setSelectedIds(new Set(copies.map((s) => s.id)))

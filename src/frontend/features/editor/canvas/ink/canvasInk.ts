@@ -1,5 +1,5 @@
 import { canvasEntityId } from "@/lib/domain/canvasDocument"
-import { inkOutlinePath, penPressure, pointsBounds, type Bounds, type StrokeData } from "@/lib/drawing"
+import { inkOutlinePath, inkPoint, penPressure, pointsBounds, type Bounds, type StrokeData } from "@/lib/drawing"
 
 export const PRESET_COLORS = [
   { name: "Black", value: "#000000" },
@@ -50,7 +50,8 @@ export function appendStrokePoint(points: number[][], point: number[]): void {
 
 /** Stroke sample at a pointer position: its point in stroke units plus the pen pressure. */
 export function pointerSample(e: { clientX: number; clientY: number; pressure: number }, toPoint: (clientX: number, clientY: number) => readonly number[]): number[] {
-  return [...toPoint(e.clientX, e.clientY), penPressure(e)]
+  const [x, y] = toPoint(e.clientX, e.clientY)
+  return inkPoint(x!, y!, penPressure(e))
 }
 
 /** Appends every coalesced sample of a pointer move: they carry the pen's full sample rate (~240Hz) instead of one point per frame. */

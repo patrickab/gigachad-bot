@@ -114,6 +114,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 - `UserScope.record` deletes the rows its new row supersedes (same user, kind and key) in the same statement, skipping rows another transaction holds (`FOR UPDATE SKIP LOCKED`), so the table keeps about one row per resource, deletes included. Schema step 0013 pruned the backlog once and added `changes_resource_idx`. Replay from any cursor is unchanged, because it only ever returned each resource's latest row.
 - Send metadata, not document contents. Bound subscriber queues, close lagging streams, and recover through durable replay.
 - Keep `.canvas` snapshots in documents and accepted mutation batches in `canvas_mutations`.
+- New and transformed ink points are stored at 0.01 units (x/y) and 0.001 pressure (`inkPoint`, `lib/drawing.ts`): capture, selection move/scale, duplicate and cross-canvas drop. Existing strokes keep their digits until transformed.
 - Serialize canvas writers with a document row lock. Apply snapshot/log/change-row updates transactionally, deduplicate mutation IDs, and replay accepted batches by revision.
 - Keep canvas editing undo separate from general resource deletion.
 

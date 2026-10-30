@@ -1,4 +1,4 @@
-import { pointInPolygon, pointsBounds, type StrokeData } from "@/lib/drawing"
+import { inkPoint, pointInPolygon, pointsBounds, type StrokeData } from "@/lib/drawing"
 
 // The lasso keeps its freehand shape — that outline is what you drag to move, and it
 // deforms along with the ink when scaled. A single handle at the shape's bottom-right
@@ -37,7 +37,7 @@ export function scalePoly(poly: Poly, from: SelBox, to: SelBox): Poly {
 // Rewrite a stroke's geometry from one selection box into another. `width` is carried
 // over deliberately untouched: squeezing a drawing must not thin the pen that drew it.
 export function scaleStroke(stroke: StrokeData, points: number[][], from: SelBox, to: SelBox): StrokeData {
-  return { ...stroke, points: points.map((p) => remap(p, from, to)) }
+  return { ...stroke, points: points.map((p) => { const [x, y, pressure] = remap(p, from, to); return inkPoint(x!, y!, pressure!) }) }
 }
 
 // Ids of the strokes a finished lasso loop mostly covers — full enclosure meant a stroke

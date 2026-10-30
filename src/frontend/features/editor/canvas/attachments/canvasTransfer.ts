@@ -1,5 +1,5 @@
 import type { Point } from "@/lib/domain/edgeRouting"
-import type { StrokeData } from "@/lib/drawing"
+import { inkPoint, type StrokeData } from "@/lib/drawing"
 
 // Every mounted canvas registers its drawing surface here, so a selection dragged out of
 // one canvas can be handed to whichever canvas is under the pointer on release — into a
@@ -27,11 +27,11 @@ export function remapAcrossCanvases(stroke: StrokeData, from: CanvasSurface, to:
   return {
     ...stroke,
     width: stroke.width * (from.scale / to.scale),
-    points: stroke.points.map((p) => [
+    points: stroke.points.map((p) => inkPoint(
       (from.rect.left + p[0]! * from.scale + from.offset.x - to.rect.left - to.offset.x) / to.scale,
       (from.rect.top + p[1]! * from.scale + from.offset.y - to.rect.top - to.offset.y) / to.scale,
       p[2] ?? 0.5,
-    ]),
+    )),
   }
 }
 
