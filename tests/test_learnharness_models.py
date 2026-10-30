@@ -8,6 +8,7 @@ import stat
 import threading
 import urllib.error
 
+import litellm
 import pytest
 import yaml
 
@@ -59,8 +60,8 @@ def models(monkeypatch):
             raise ValueError(f"unknown {model}")
         return {key: value for key, value in REGISTRY[model].items() if key != "vision"}
 
-    monkeypatch.setattr(learnharness.litellm, "get_model_info", model_info)
-    monkeypatch.setattr(learnharness.litellm, "supports_vision", lambda model: REGISTRY.get(model, {}).get("vision", False))
+    monkeypatch.setattr(litellm, "get_model_info", model_info)
+    monkeypatch.setattr(litellm, "supports_vision", lambda model: REGISTRY.get(model, {}).get("vision", False))
     monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_URL", "http://127.0.0.1:4000/v1")
     monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_TOKEN", "gateway-token")
     return [
@@ -385,8 +386,8 @@ def catalog(monkeypatch):
     monkeypatch.setattr(omp_source, "catalog_entries", gateway)
     monkeypatch.setattr(omp_source, "thinking_registry", registry)
     monkeypatch.setattr(reasoning_levels, "resolve", resolve)
-    monkeypatch.setattr(learnharness.litellm, "get_model_info", lambda model: {"max_input_tokens": 100000, "max_output_tokens": 8000})
-    monkeypatch.setattr(learnharness.litellm, "supports_vision", lambda model: False)
+    monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": 100000, "max_output_tokens": 8000})
+    monkeypatch.setattr(litellm, "supports_vision", lambda model: False)
     return calls
 
 

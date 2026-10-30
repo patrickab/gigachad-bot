@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import urllib.error
 
 import httpx
-import litellm
 from llm_baseclient.config import discover_ollama_models
 from psycopg.errors import UndefinedTable
 from psycopg_pool import PoolTimeout
@@ -40,7 +39,7 @@ from pydantic.alias_generators import to_camel
 import yaml
 
 from config import OLLAMA_BASE_URL
-from lib import omp_source, reasoning_levels
+from lib import omp_source
 from lib.changes import UserScope
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.postgres_data_store import PostgresDataStore
@@ -308,6 +307,8 @@ def _positive(value: object) -> int | None:
 
 def _litellm_info(model: str) -> dict[str, Any]:
     """LiteLLM's registry entry, empty for a model it does not know."""
+    import litellm  # ~2s: the master-key, check-proxy and proxy-tool-pin commands never need it
+
     try:
         return dict(litellm.get_model_info(model=model))
     except Exception:
@@ -315,6 +316,8 @@ def _litellm_info(model: str) -> dict[str, Any]:
 
 
 def _supports_vision(model: str) -> bool:
+    import litellm  # ~2s, see _litellm_info
+
     try:
         return bool(litellm.supports_vision(model=model))
     except Exception:
@@ -680,6 +683,8 @@ async def _ollama_show(client: httpx.AsyncClient, tag: str) -> dict[str, Any]:
 
 async def _reasons(selector: str, omp_levels: Mapping[str, list[str]]) -> bool:
     """gigachad's own answer (OMP registry, Ollama, LiteLLM). A failed lookup raises, it never counts as "no"."""
+    from lib import reasoning_levels  # imports litellm, see _litellm_info
+
     omp_prefix = f"{omp_source.LITELLM_ID}/"
     if selector.startswith(omp_prefix):
         levels = omp_levels.get(selector.removeprefix(omp_prefix))
