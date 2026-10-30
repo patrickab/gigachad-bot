@@ -107,9 +107,12 @@ class ChatUploads:
     def _key(self, filename: str) -> str:
         return validate_key(f"{self._prefix}/{filename}")
 
+    def _taken_names(self) -> set[str]:
+        return {PurePosixPath(asset.logical_path).name for asset in self._assets.list(self._prefix)}
+
     def _free_name(self, filename: str) -> str:
         """*filename*, or the first free ``stem (N).suffix`` when an upload already has it."""
-        taken = {PurePosixPath(asset.logical_path).name for asset in self._assets.list(self._prefix)}
+        taken = self._taken_names()
         if filename not in taken:
             return filename
         stem, suffix = Path(filename).stem, Path(filename).suffix
@@ -118,13 +121,29 @@ class ChatUploads:
             n += 1
         return f"{stem} ({n}){suffix}"
 
+    def _image_name(self, filename: str) -> str:
+        """``img-NN`` plus *filename*'s suffix, NN the first index no upload of the chat uses, whatever its suffix."""
+        used_stems = {PurePosixPath(name).stem for name in self._taken_names()}
+        index = 1
+        while f"img-{index:02d}" in used_stems:
+            index += 1
+        return f"img-{index:02d}{Path(filename).suffix.lower()}"
+
     def store(self, filename: str, content: bytes, mime: str, *, overwrite: bool) -> AttachResult:
-        """Store an upload under *filename* (deduplicated unless *overwrite*), returning text content inline.
+        """Store an upload under *filename*, returning text content inline.
+
+        - An image is renamed ``img-NN`` unless *overwrite*
+        - Any other file is deduplicated as ``stem (N).suffix`` unless *overwrite*
 
         A PDF is mirrored into the library at once: it must reach Nextcloud whether or not
         the user ever sends or parses it, and MinerU needs a real file to read.
         """
-        name = filename if overwrite else self._free_name(filename)
+        if overwrite:
+            name = filename
+        elif kind_of(filename, mime) == "image":
+            name = self._image_name(filename)
+        else:
+            name = self._free_name(filename)
         self._assets.write("upload", self._key(name), content, mime=mime)
         result = AttachResult(name=name, mime=mime)
         kind = kind_of(name, mime)
