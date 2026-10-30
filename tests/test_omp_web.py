@@ -82,6 +82,47 @@ async def test_system_prompt_joins_parts_and_is_none_while_stopped(monkeypatch):
     assert (await omp_web.system_prompt(session_id)).model_dump() == {"running": False, "system_prompt": None}
 
 
+# Active branch of a session as omp-web's context route returns it, trimmed to the parts the conversion reads.
+SESSION_CONTEXT = {
+    "context": {
+        "messages": [
+            {"role": "custom", "customType": "compaction", "content": "Earlier turns summarized."},
+            {"role": "user", "content": [{"type": "text", "text": "Use polars, never pandas."}, {"type": "image", "data": "..."}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "Maybe pandas is installed."}, {"type": "toolCall", "name": "read"}],
+            },
+            {"role": "toolResult", "content": [{"type": "text", "text": "pyproject.toml lists polars"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "Switched the loader to polars."}]},
+            {"role": "custom", "customType": "developer", "content": {"kind": "notice"}},
+            {"role": "user", "content": "  Thanks.  "},
+        ]
+    }
+}
+
+
+async def test_session_history_keeps_user_and_assistant_text_only(monkeypatch):
+    _serve(monkeypatch, {"GET /api/sessions/abc-1/context": (200, SESSION_CONTEXT)})
+
+    history = [message.model_dump() for message in await omp_web.session_history("abc-1")]
+
+    assert history == [
+        {"role": "user", "content": "Use polars, never pandas."},
+        {"role": "assistant", "content": "Switched the loader to polars."},
+        {"role": "user", "content": "Thanks."},
+    ]
+
+
+def test_a_malformed_user_turn_is_502_but_other_messages_may_vary(monkeypatch, client):
+    broken = {"context": {"messages": [{"role": "user", "content": 42}]}}
+    _serve(monkeypatch, {"GET /api/sessions/abc-1/context": (200, broken)})
+    assert client.get("/api/omp/sessions/abc-1/history").status_code == 502
+
+    varied = {"context": {"messages": [{"role": "custom", "content": {"any": "shape"}}, {"role": "bashExecution"}]}}
+    _serve(monkeypatch, {"GET /api/sessions/abc-1/context": (200, varied)})
+    assert client.get("/api/omp/sessions/abc-1/history").json() == []
+
+
 def _client(has_host_access: bool) -> TestClient:
     return route_client(router, overrides={get_request_identity: request_identity(has_host_access)})
 

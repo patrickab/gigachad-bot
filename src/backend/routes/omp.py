@@ -44,3 +44,9 @@ async def post_archive(session_id: SessionId) -> None:
 @router.get("/sessions/{session_id}/system-prompt")
 async def get_system_prompt(session_id: SessionId) -> omp_web.OmpSystemPrompt:
     return await call_upstream(omp_web.system_prompt(session_id))
+
+
+@router.get("/sessions/{session_id}/history")
+async def get_history(session_id: SessionId) -> list[omp_web.ChatMessage]:
+    """The session as a chat history, what `/memorize` reads in an omp tab."""
+    return await call_upstream(omp_web.session_history(session_id))

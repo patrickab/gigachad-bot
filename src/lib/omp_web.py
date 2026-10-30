@@ -8,10 +8,10 @@
 
 import asyncio
 import os
-from typing import Literal, TypeVar
+from typing import Annotated, Literal, TypeVar
 
 import httpx
-from pydantic import AliasGenerator, BaseModel, ConfigDict
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Discriminator, Tag
 from pydantic.alias_generators import to_camel
 
 from lib.upstream import request_json, upstream_url
@@ -74,6 +74,13 @@ class OmpSystemPrompt(BaseModel):
     system_prompt: str | None
 
 
+class ChatMessage(BaseModel):
+    """One turn of a gigachad chat history."""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class _SessionList(ContractModel):
     sessions: list[OmpSession]
     running_session_ids: list[str] = []
@@ -104,6 +111,34 @@ class _Restored(ContractModel):
     session_id: str
 
 
+class _ContentBlock(ContractModel):
+    type: str
+    text: str | None = None
+
+
+class _ChatTurn(ContractModel):
+    role: Literal["user", "assistant"]
+    content: str | list[_ContentBlock]
+
+
+class _OtherMessage(ContractModel):
+    """Tool results, notices and summaries: their shape varies by kind and is never read."""
+
+    role: str
+
+
+def _message_kind(message: object) -> str:
+    return "turn" if isinstance(message, dict) and message.get("role") in ("user", "assistant") else "other"
+
+
+class _SessionContext(ContractModel):
+    messages: list[Annotated[Annotated[_ChatTurn, Tag("turn")] | Annotated[_OtherMessage, Tag("other")], Discriminator(_message_kind)]]
+
+
+class _ContextResponse(ContractModel):
+    context: _SessionContext
+
+
 def omp_web_url() -> str:
     """Base URL the backend reaches omp-web at."""
     return upstream_url("GIGACHAD_OMP_WEB_URL", DEFAULT_URL)
@@ -119,8 +154,12 @@ def _headers() -> dict[str, str]:
     return {TRUSTED_HEADER: auth} if auth else {}
 
 
-async def _request(method: str, path: str, model: type[Model], json: object = None) -> Model:
-    return await request_json(omp_web_url(), method, path, model, label="omp-web", headers=_headers(), json=json, transport=_transport)
+async def _request(
+    method: str, path: str, model: type[Model], json: object = None, params: dict[str, str | int] | None = None
+) -> Model:
+    return await request_json(
+        omp_web_url(), method, path, model, label="omp-web", headers=_headers(), json=json, params=params, transport=_transport
+    )
 
 
 async def overview() -> OmpOverview:
@@ -156,3 +195,22 @@ async def system_prompt(session_id: str) -> OmpSystemPrompt:
     prompt = status.state.system_prompt if status.state else None
     joined = "\n\n".join(prompt) if isinstance(prompt, list) else prompt
     return OmpSystemPrompt(running=status.running, system_prompt=joined)
+
+
+def _visible_text(turn: _ChatTurn) -> str:
+    """Text blocks of *turn*, without thinking, tool calls and images."""
+    if isinstance(turn.content, str):
+        return turn.content.strip()
+    return "\n\n".join(block.text.strip() for block in turn.content if block.type == "text" and block.text and block.text.strip())
+
+
+async def session_history(session_id: str) -> list[ChatMessage]:
+    """The session's active branch as a gigachad chat history: user and assistant text only.
+
+    - Thinking, tool calls, tool results, images and omp notices are dropped, so are turns left without text
+    - Compacted turns stay (`includePreCompaction`), a message's index never moves and memory watermarks hold
+    """
+    params: dict[str, str | int] = {"includePreCompaction": 1, "deferThinking": 1, "deferMedia": 1}
+    response = await _request("GET", f"/api/sessions/{session_id}/context", _ContextResponse, params=params)
+    turns = [message for message in response.context.messages if isinstance(message, _ChatTurn)]
+    return [ChatMessage(role=turn.role, content=text) for turn in turns if (text := _visible_text(turn))]
