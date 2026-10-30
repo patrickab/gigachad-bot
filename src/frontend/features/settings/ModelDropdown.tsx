@@ -12,7 +12,10 @@ import { useCompactLabel } from "@/features/settings/useCompactLabel"
 interface ProviderTab { label: string; models: string[] }
 
 interface ModelDropdownProps {
+  /** The full catalog: Manage models edits and saves this, never a narrowed copy. */
   models: ModelsResponse | null
+  /** Narrows the pick list (a tab's own models); defaults and Manage models still see the full `models`. */
+  pickModels?: (models: ModelsResponse) => ModelsResponse
   loadError?: string | null
   selectedModel: string
   onSelect: (model: string) => void
@@ -30,7 +33,17 @@ function shortName(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1)
 }
 
-export function ModelDropdown({ models, loadError, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
+const byDisplayName = (a: string, b: string) => displayName(a).localeCompare(displayName(b))
+
+/** One tab per provider (Ollama first), models sorted by display name. */
+function providerTabs(models: ModelsResponse): ProviderTab[] {
+  return [
+    { label: "Ollama", models: [...models.ollama].sort(byDisplayName) },
+    ...models.providers.map((provider) => ({ label: provider.label, models: qualifiedModelIds(provider).sort(byDisplayName) })),
+  ]
+}
+
+export function ModelDropdown({ models, pickModels, loadError, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
   const { compact, rootRef, labelRef, contentRef } = useCompactLabel(chatColumn, models === null)
   const settings = useModelSettings(onProvidersChange, onDefaultsChange)
 
@@ -38,13 +51,8 @@ export function ModelDropdown({ models, loadError, selectedModel, onSelect, onPr
     ? <span className="mx-2 text-xs text-ink-muted">Models unavailable</span>
     : <Skeleton className="mx-2 h-4 w-28" />
 
-  const byDisplayName = (a: string, b: string) => displayName(a).localeCompare(displayName(b))
-  const available: ProviderTab[] = [
-    { label: "Ollama", models: [...models.ollama].sort(byDisplayName) },
-    ...models.providers.map((provider) => ({ label: provider.label, models: qualifiedModelIds(provider).sort(byDisplayName) })),
-  ]
-  const orderedProviders = orderProviders(available.filter((provider) => provider.models.length > 0), models.tab_order)
-  const choices = available.flatMap((provider) => provider.models)
+  const orderedProviders = orderProviders(providerTabs(pickModels ? pickModels(models) : models).filter((provider) => provider.models.length > 0), models.tab_order)
+  const choices = providerTabs(models).flatMap((provider) => provider.models)
   const reorderProviders = (labels: string[]) => void onTabOrderChange?.(labels).catch((reason) => settings.setError(errorMessage(reason, "Could not save provider order")))
   const fullLabel = selectedModel ? displayName(selectedModel) : "Select model"
 

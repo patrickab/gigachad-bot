@@ -121,4 +121,21 @@ describe("ModelDropdown OMP source", () => {
     expect(screen.getByRole("menuitemradio", { name: "gemini-3.1-pro" })).toBeInTheDocument()
     expect(screen.queryByText("gemma4:31b-cloud")).not.toBeInTheDocument()
   })
+
+  it("narrows only the pick list with pickModels: Manage models still saves the full catalog", async () => {
+    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    const onProvidersChange = vi.fn().mockResolvedValue(undefined)
+    const ollamaOnly = (catalog: ModelsResponse): ModelsResponse => ({ ...catalog, providers: [] })
+    render(<ModelDropdown models={models} pickModels={ollamaOnly} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
+    expect(screen.queryByRole("button", { name: "Gemini" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Manage models" }))
+    fireEvent.click(screen.getByRole("button", { name: "Expand Gemini" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Model name" }), { target: { value: "gemini-4" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add model" }))
+
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalledTimes(1))
+    expect(onProvidersChange.mock.calls[0][0]).toEqual([{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro", "gemini-4"] }])
+  })
 })
