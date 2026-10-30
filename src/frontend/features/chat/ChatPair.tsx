@@ -19,7 +19,7 @@ function abbreviate(text: string, msg: Message): string {
 }
 
 /** Clipping collapsed answers does not avoid parsing their equations. Reserve the
- * preview's 12.5vh cap offscreen, then use its natural height near the viewport.
+ * preview's 15vh cap offscreen, then use its natural height near the viewport.
  * Short answers can shrink from this estimate, but never stay artificially tall. */
 function CollapsedAnswerPreview({ content, search_result }: { content: string; search_result: Message["search_result"] }) {
   const [ready, setReady] = useState(false)
@@ -55,7 +55,7 @@ function CollapsedAnswerPreview({ content, search_result }: { content: string; s
   }, [])
 
   return (
-    <div ref={attachPreview} style={ready ? undefined : { height: "12.5vh" }}>
+    <div ref={attachPreview} style={ready ? undefined : { height: "15vh" }}>
       {ready
         ? <AssistantMessageContent content={content} search_result={search_result} compact />
         : <span className="sr-only">{content}</span>}

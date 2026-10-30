@@ -107,7 +107,7 @@
   flex: none;
 }
 .gc-turn-preview-scroll {
-  max-height: 12.5vh;
+  max-height: 15vh;
   overflow-y: auto;
   color: var(--ink-muted);
 }
