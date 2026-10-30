@@ -4,7 +4,7 @@ import { Cpu, Settings2 } from "lucide-react"
 import { displayName, orderProviders, qualifiedModelIds } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse } from "@/lib/domain/types"
 import { errorMessage } from "@/lib/utils"
-import { PopoverSelector, PopoverSelectorAction } from "@/components/ui/PopoverSelector"
+import { PopoverSelector } from "@/components/ui/PopoverSelector"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ModelSettingsError, ModelSettingsPanel, useModelSettings } from "@/features/settings/ModelSettingsPanel"
 import { useCompactLabel } from "@/features/settings/useCompactLabel"
@@ -75,7 +75,8 @@ export function ModelDropdown({ models, pickModels, loadError, selectedModel, on
     renderItem={(model) => <span className="flex-1 truncate">{displayName(model)}</span>}
     onSelect={onSelect}
     onReorderCategories={reorderProviders}
-    footer={<><ModelSettingsError error={settings.error} /><PopoverSelectorAction icon={Settings2} label="Manage models" onClick={() => settings.setConfiguring(true)} /></>}
+    headerAction={{ icon: Settings2, label: "Manage models", onClick: () => settings.setConfiguring(true) }}
+    footer={settings.error && <ModelSettingsError error={settings.error} />}
     view={settings.configuring ? <ModelSettingsPanel settings={settings} models={models} choices={choices} /> : undefined}
     emptyText="No models added yet"
     placement={placement}

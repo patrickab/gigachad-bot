@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 
 interface SelectorCategory<T> { key: string; label: string; items: T[] }
 
+interface HeaderAction { icon: LucideIcon; label: string; onClick: () => void }
+
 /** Popover selector: pill trigger, optional category tabs, vertical item list, optional footer.
  *
  * Attributes
@@ -23,9 +25,11 @@ interface SelectorCategory<T> { key: string; label: string; items: T[] }
  * onReorderCategories : ((keys: string[]) => void) | undefined
  *     Set -> tabs are draggable and report the new key order.
  * footer : ReactNode | undefined
- *     Extra options below the list, usually `PopoverSelectorAction` rows.
+ *     Extra content below the list, e.g. an error line.
+ * headerAction : HeaderAction | undefined
+ *     Icon button right of the tabs, e.g. a settings entry. Keeps the header visible with a single category.
  * view : ReactNode | undefined
- *     Replaces tabs, list and footer while set, e.g. a settings screen opened from the footer.
+ *     Replaces tabs, list and footer while set, e.g. a settings screen opened from the header action.
  * onClose : (() => void) | undefined
  *     Runs whenever the panel closes: selection, outside click or trigger toggle.
  */
@@ -41,6 +45,7 @@ interface PopoverSelectorProps<T> {
   onSelect: (item: T) => void
   onReorderCategories?: (keys: string[]) => void
   footer?: ReactNode
+  headerAction?: HeaderAction
   view?: ReactNode
   emptyText?: string
   placement?: "above" | "below"
@@ -53,17 +58,15 @@ const tabClass = (active: boolean) => cn(
   active ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink",
 )
 
-/** Footer row template for extra options such as "Manage models". */
-export function PopoverSelectorAction({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink">
+function HeaderActionButton({ icon: Icon, label, onClick }: HeaderAction) {
+  return <button type="button" onClick={onClick} aria-label={label} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
     <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-    {label}
   </button>
 }
 
 export function PopoverSelector<T>({
   triggerLabel, triggerContent, triggerClassName, label, categories, itemKey, isSelected, renderItem, onSelect,
-  onReorderCategories, footer, view, emptyText = "Nothing to select", placement = "above", panelClassName, onClose,
+  onReorderCategories, footer, headerAction, view, emptyText = "Nothing to select", placement = "above", panelClassName, onClose,
 }: PopoverSelectorProps<T>) {
   const [open, setOpen] = useState(false)
   const [manualCategory, setManualCategory] = useState<string | null>(null)
@@ -90,12 +93,12 @@ export function PopoverSelector<T>({
   )
   const tabs = categories.length > 1 && (onReorderCategories
     // Tabs size to their labels and scroll sideways once they outgrow the panel.
-    ? <Reorder.Group as="div" axis="x" layoutScroll values={categories.map((category) => category.key)} onReorder={onReorderCategories} className="flex overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
+    ? <Reorder.Group as="div" axis="x" layoutScroll values={categories.map((category) => category.key)} onReorder={onReorderCategories} className="flex min-w-0 flex-1 overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
       {categories.map((category) => <Reorder.Item as="div" key={category.key} value={category.key} className="flex-auto shrink-0 cursor-grab active:cursor-grabbing">
         {tabButton(category)}
       </Reorder.Item>)}
     </Reorder.Group>
-    : <div className="flex overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
+    : <div className="flex min-w-0 flex-1 overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
       {categories.map((category) => <div key={category.key} className="flex-auto shrink-0">{tabButton(category)}</div>)}
     </div>)
 
@@ -144,7 +147,7 @@ export function PopoverSelector<T>({
       )}
     >
       {view ?? <>
-        {tabs && <div className="border-b border-divider p-1.5">{tabs}</div>}
+        {(tabs || headerAction) && <div className="flex items-center gap-1 border-b border-divider p-1.5">{tabs}{headerAction && <>{!tabs && <span className="flex-1" />}<HeaderActionButton {...headerAction} /></>}</div>}
         {list}
         {footer && <div className="border-t border-divider p-1.5">{footer}</div>}
       </>}
