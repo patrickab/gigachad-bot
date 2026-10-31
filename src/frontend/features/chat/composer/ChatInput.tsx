@@ -20,6 +20,8 @@ interface ChatInputProps {
   extracting?: boolean
   isStreaming?: boolean
   onCancel?: () => void
+  /** Enter and the send button submit while streaming (the agent queues the message), the button stops only with an empty draft. */
+  sendWhileStreaming?: boolean
   slug?: string | null
   /** gigachad's chat tools menu, off where another agent owns the tools (omp tabs). */
   toolsMenu?: boolean
@@ -66,6 +68,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   extracting,
   isStreaming,
   onCancel,
+  sendWhileStreaming = false,
   slug = null,
   toolsMenu = true,
   placeholder = "Message",
@@ -124,7 +127,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (draftPicker.handleKey(e) || completions.handleKey(e, text)) return
     if (e.key === "Escape" && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur() }
-    if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
+    if (e.key === "Enter" && !e.shiftKey && !submitBlocked) { e.preventDefault(); handleSubmit() }
   }
 
   // Only the first pasted image is attached
@@ -152,6 +155,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const activeContext = context?.attachments.filter(({ attachment }) => attachment.active) ?? []
   const inactiveContext = context?.attachments.filter(({ attachment }) => !attachment.active) ?? []
   const canSend = !picker && (text.trim().length > 0 || attachments.length > 0)
+  const submitBlocked = Boolean(extracting) || (Boolean(isStreaming) && !sendWhileStreaming)
+  const showStop = Boolean(isStreaming) && !(sendWhileStreaming && canSend)
   const hintText = hint?.(text, attachments.length) ?? null
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
     ...attachMenuItems,
@@ -229,7 +234,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               >
                 <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>
-              <SendButton isStreaming={isStreaming} extracting={extracting} ready={canSend} disabled={disabled} onCancel={onCancel} onSend={handleSubmit} />
+              <SendButton isStreaming={showStop} extracting={extracting} ready={canSend} disabled={disabled} onCancel={onCancel} onSend={handleSubmit} />
             </div>
           </div>
         </div>

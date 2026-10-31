@@ -136,3 +136,35 @@ describe("ChatInput picker", () => {
     expect(draft.value).toBe("")
   })
 })
+
+describe("ChatInput while streaming", () => {
+  afterEach(cleanup)
+
+  function renderStreaming(sendWhileStreaming: boolean) {
+    const onSend = vi.fn()
+    const onCancel = vi.fn()
+    render(<ChatInput chatId="c1" onSend={onSend} onCancel={onCancel} isStreaming sendWhileStreaming={sendWhileStreaming} />)
+    return { onSend, onCancel, draft: screen.getByRole("textbox") as HTMLTextAreaElement }
+  }
+
+  it("blocks sends by default, the button only stops", () => {
+    const { onSend, draft } = renderStreaming(false)
+    fireEvent.change(draft, { target: { value: "more" } })
+    fireEvent.keyDown(draft, { key: "Enter" })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument()
+  })
+
+  it("with sendWhileStreaming, sends a draft by Enter or button and stops with an empty draft", () => {
+    const { onSend, onCancel, draft } = renderStreaming(true)
+    fireEvent.click(screen.getByRole("button", { name: "Stop generating" }))
+    expect(onCancel).toHaveBeenCalledOnce()
+    fireEvent.change(draft, { target: { value: "steer this" } })
+    fireEvent.keyDown(draft, { key: "Enter" })
+    expect(onSend).toHaveBeenLastCalledWith("steer this", [])
+    fireEvent.change(draft, { target: { value: "and this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+    expect(onSend).toHaveBeenLastCalledWith("and this", [])
+    expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument()
+  })
+})

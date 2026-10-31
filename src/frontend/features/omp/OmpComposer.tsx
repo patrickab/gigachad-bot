@@ -161,6 +161,7 @@ function useComposerFor(view: OmpView) {
  * - `/skill:` drills into the skills in the same menu, a pick becomes the draft `/skill:<name> `
  * - `shellCommands` (`/memorize`) share the `/` menu, the shell runs them instead of sending them
  * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
+ * - A send while the agent runs is queued by omp (follow-up, or steer per omp-web Settings), the stop button shows with an empty draft
  * - Disabled until the frame reports the composer of this tab's session
  */
 export function OmpComposer({ view, chatId, slug, shellCommands }: { view: OmpView; chatId: string; slug: string | null; shellCommands: ShellCommands }) {
@@ -189,6 +190,7 @@ export function OmpComposer({ view, chatId, slug, shellCommands }: { view: OmpVi
         disabled={!state || preparing}
         extracting={preparing}
         isStreaming={state?.streaming ?? false}
+        sendWhileStreaming
         onCancel={() => sendToComposer({ type: "composer-abort", sessionId })}
         toolsMenu={false}
         placeholder="Message omp"
