@@ -6,6 +6,7 @@ the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
 reads back. This module is the one place that writes those namespaces.
 """
 
+from collections.abc import Callable
 from functools import partial
 import hashlib
 import logging
@@ -18,6 +19,9 @@ from lib.data_store import StorageNotFoundError
 from lib.storage_namespace import library_images_prefix, library_markdown, library_pdf, pdf_stem
 
 log = logging.getLogger(__name__)
+
+# Receives the markdown of a PDF once its extraction is cached.
+OnMarkdown = Callable[[str], None]
 
 
 def _mirror_quietly(assets: AssetStore, asset: Asset) -> None:
@@ -68,13 +72,17 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
                 _mirror_quietly(assets, assets.write("mineru_image", key, image.read_bytes()))
 
 
-def _store_extraction(assets: AssetStore, name: str, content: bytes, stem: str, md_path: Path, images_dir: Path) -> None:
-    """Persist a background parse of *content*, unless the library copy of the PDF *name* changed meanwhile."""
+def _store_extraction(
+    assets: AssetStore, name: str, content: bytes, on_markdown: OnMarkdown | None, stem: str, md_path: Path, images_dir: Path
+) -> None:
+    """Persist a background parse of *content*, unless the library copy of the PDF *name* changed meanwhile, then hand its markdown to *on_markdown*."""
     stored = _library_pdf_sha256(assets, name)
     if stored is not None and stored != hashlib.sha256(content).hexdigest():
         log.info("Discarding extraction of %s: the PDF changed meanwhile", name)
-    else:
-        store_library_output(assets, stem, md_path, images_dir)
+        return
+    store_library_output(assets, stem, md_path, images_dir)
+    if on_markdown is not None:
+        on_markdown(md_path.read_text(encoding="utf-8"))
 
 
 def cached_markdown(assets: AssetStore, name: str) -> str | None:
@@ -85,13 +93,16 @@ def cached_markdown(assets: AssetStore, name: str) -> str | None:
         return None
 
 
-def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_miss: bool = True) -> str | None:
+def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_miss: bool = True, on_markdown: OnMarkdown | None = None) -> str | None:
     """This user's cached MinerU markdown for the PDF *name*, or None on a cache miss.
 
-    A miss queues background extraction unless *enqueue_on_miss* is False
-    (for callers that parse synchronously). *content* is all extraction needs.
+    - A miss queues background extraction unless *enqueue_on_miss* is False (for callers that parse synchronously)
+    - *on_markdown* receives the markdown once it is cached: now on a hit, after the background extraction otherwise
+    - *content* is all extraction needs
     """
     markdown = cached_markdown(assets, name)
-    if markdown is None and enqueue_on_miss:
-        extract_queue.enqueue(name, content, partial(_store_extraction, assets, name, content))
+    if markdown is not None and on_markdown is not None:
+        on_markdown(markdown)
+    elif markdown is None and enqueue_on_miss:
+        extract_queue.enqueue(name, content, partial(_store_extraction, assets, name, content, on_markdown))
     return markdown

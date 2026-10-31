@@ -8,6 +8,7 @@ output are also mirrored into Nextcloud as a convenience copy the app never read
 Where a document lives, how a move repoints its references and how a rename names it is `lib.document_service`.
 """
 
+from functools import partial
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -15,9 +16,11 @@ from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
 from backend.routes.deps import (
+    ExtractionPublisher,
     get_architecture_store,
     get_asset_store,
     get_document_store,
+    get_extraction_publisher,
     get_file_roots,
     get_project_store,
     get_references,
@@ -41,7 +44,7 @@ from lib.document_service import (
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
 from lib.references import References
-from lib.storage_namespace import DRAWING, GRAPH, NOTE, architecture_prefix, project_document
+from lib.storage_namespace import DRAWING, GRAPH, NOTE, architecture_prefix, pdf_stem, project_document
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -182,10 +185,12 @@ def write_binary_document(
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
+    publish: ExtractionPublisher = Depends(get_extraction_publisher),
 ):
     """Write a binary file (e.g. PDF) to the project's documents/ directory.
 
-    - PDFs are also synced into the shared library and queued for extraction, as on add-to-project
+    - PDFs are also synced into the shared library and queued for extraction, as on add-to-project,
+      and their Markdown joins the project's files once done
     """
     with http_errors((FileNotFoundError, 404, "Project not found")):
         store.require(slug)
@@ -195,7 +200,7 @@ def write_binary_document(
     docs.write_bytes(key, content)
     store.add_file(slug, key)
     if kind_of(name) == "pdf":
-        sync_pdf(assets, name, content)
+        sync_pdf(assets, name, content, partial(publish, slug, pdf_stem(name)))
     return file_meta(key)
 
 

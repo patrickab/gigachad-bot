@@ -135,6 +135,14 @@ def write(store: ProjectStore, docs: DataStore, assets: AssetStore, scope: Docum
     return key
 
 
+def add_extraction(store: ProjectStore, docs: DataStore, slug: str, stem: str, markdown: str) -> None:
+    """List the MinerU *markdown* of a PDF in project *slug*'s files as `<stem>.md`, keeping a document already stored under that name."""
+    key = project_document(slug, f"{stem}.md")
+    if not docs.exists(key):
+        write_text(docs, key, markdown)
+    store.add_file(slug, key)
+
+
 def move(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, source: DocumentScope, target: DocumentScope) -> str:
     """Move the stored document *key* from *source* to *target*, keeping the name it is shown under, returning its new key.
 

@@ -11,12 +11,15 @@ from backend.routes import file_roots as file_roots_route
 from backend.routes import fileviewer as fileviewer_route
 from lib.attachment_materialize import sync_library_pdf
 from lib.attachments import attach_library_pdf
-from lib.data_store import StorageNotFoundError
+from lib.chat_store import ChatStore
+from lib.data_store import StorageNotFoundError, write_text
+from lib.document_service import add_extraction
 from lib.file_roots import FileRoots
 from lib.host_access import list_directories
+from lib.project_store import ProjectStore
 from lib.storage_namespace import library_images_prefix, library_markdown
 from tests.conftest import git, mounted_roots, route_client
-from tests.fakes import MemoryAssetStore
+from tests.fakes import MemoryAssetStore, MemoryDataStore
 
 
 def test_list_directories_lists_only_subdirectories_case_insensitively_with_hidden(tmp_path):
@@ -99,6 +102,7 @@ def _reference_client(roots: FileRoots, project: _Project) -> TestClient:
             file_attach_route.get_file_roots: roots,
             file_attach_route.get_project_store: project,
             file_attach_route.get_asset_store: None,
+            file_attach_route.get_extraction_publisher: None,
             documents_route.get_architecture_store: SimpleNamespace(source_paths=lambda: []),
         },
     )
@@ -167,6 +171,7 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
             file_attach_route.get_file_roots: mounted_roots(tmp_path),
             file_attach_route.get_project_store: project,
             file_attach_route.get_asset_store: None,
+            file_attach_route.get_extraction_publisher: None,
             documents_route.get_document_store: None,
         },
     )
@@ -314,3 +319,49 @@ def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
     finally:
         locked.chmod(0o600)
     assert (response.status_code, response.json()["detail"]) == (403, "Unknown file path")
+
+
+def _documents_client(roots: FileRoots, project: _Project, docs: MemoryDataStore, overrides: dict | None = None) -> TestClient:
+    return route_client(
+        documents_route.router,
+        overrides={
+            documents_route.get_file_roots: roots,
+            documents_route.get_project_store: project,
+            documents_route.get_document_store: docs,
+            documents_route.get_asset_store: MemoryAssetStore(),
+            **(overrides or {}),
+        },
+    )
+
+
+def test_an_uploaded_pdf_lists_its_markdown_in_the_project_only_once_extracted(tmp_path, monkeypatch):
+    queued = []
+    monkeypatch.setattr("lib.attachment_materialize.extract_queue.enqueue", lambda name, content, store: queued.append(store))
+    published = []
+    client = _documents_client(
+        mounted_roots(tmp_path), _Project(), MemoryDataStore(),
+        {documents_route.get_extraction_publisher: lambda slug, stem, markdown: published.append((slug, stem, markdown))},
+    )
+
+    uploaded = client.post("/api/documents/write-binary", params={"slug": "test"}, files={"file": ("paper.pdf", b"%PDF", "application/pdf")})
+
+    assert uploaded.status_code == 200
+    assert published == []
+    markdown = tmp_path / "paper.md"
+    markdown.write_text("# text", encoding="utf-8")
+    queued[0]("paper", markdown, tmp_path / "images")
+    assert published == [("test", "paper", "# text")]
+
+
+def test_extraction_markdown_joins_the_project_files_and_keeps_an_edited_copy():
+    docs = MemoryDataStore()
+    projects = ProjectStore(ChatStore(data_store=docs), rename=lambda *_: None)
+    projects.create_project("Thesis")
+    key = "project/thesis/document/paper.md"
+
+    add_extraction(projects, docs, "thesis", "paper", "# v1")
+    write_text(docs, key, "# my edit")
+    add_extraction(projects, docs, "thesis", "paper", "# v2")
+
+    assert projects.list_files("thesis") == [key]
+    assert docs.read_bytes(key)[0] == b"# my edit"

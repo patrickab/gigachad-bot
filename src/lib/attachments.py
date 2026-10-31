@@ -11,7 +11,14 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lib.asset_store import AssetStore
-from lib.attachment_materialize import cached_markdown, materialize, store_library_output, store_library_pdf, sync_library_pdf
+from lib.attachment_materialize import (
+    OnMarkdown,
+    cached_markdown,
+    materialize,
+    store_library_output,
+    store_library_pdf,
+    sync_library_pdf,
+)
 from lib.data_store import StorageNotFoundError, validate_key
 from lib.mime import mime_for
 from lib.mineru import parse_pdf, should_cancel
@@ -61,10 +68,13 @@ def kind_of(name: str, mime: str = "") -> AttachmentKind:
     return "other"
 
 
-def sync_pdf(assets: AssetStore, name: str, content: bytes) -> str | None:
-    """Sync a PDF into the shared library and queue its extraction, returning the parsed markdown when already cached."""
+def sync_pdf(assets: AssetStore, name: str, content: bytes, on_markdown: OnMarkdown | None = None) -> str | None:
+    """Sync a PDF into the shared library and queue its extraction, returning the parsed markdown when already cached.
+
+    *on_markdown* receives the markdown once it is cached, see `materialize`.
+    """
     sync_library_pdf(assets, name, content)
-    return materialize(name, content, assets, enqueue_on_miss=True)
+    return materialize(name, content, assets, enqueue_on_miss=True, on_markdown=on_markdown)
 
 
 def attach_host_file(assets: AssetStore, file: Path) -> AttachResult:

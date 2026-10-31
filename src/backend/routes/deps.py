@@ -1,5 +1,7 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
+from functools import partial
 import hashlib
 from typing import Annotated
 from uuid import UUID
@@ -9,6 +11,7 @@ from llm_baseclient.client import LLMClient
 
 from backend.identity import RequestIdentity, get_request_identity
 from config import env_flag
+from lib import document_service
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, SandboxRunner
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
@@ -30,6 +33,8 @@ from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
+
+ExtractionPublisher = Callable[[str, str, str], None]
 
 _client: LLMClient | None = None
 
@@ -126,6 +131,17 @@ def get_project_store(
 
 def get_relocate(scope: UserScope = Depends(get_user_scope)) -> Relocate:
     return PostgresKeyRelocator(scope).relocate
+
+
+def get_extraction_publisher(scope: UserScope = Depends(get_user_scope)) -> ExtractionPublisher:
+    """List a finished extraction `(slug, stem, markdown)` in a project's files.
+
+    Written as no device, so the device that queued the extraction refreshes its sidebar too.
+    """
+    background = replace(scope, device_id=None)
+    docs = PostgresDataStore(background)
+    store = ProjectStore(ChatStore(data_store=docs), rename=PostgresProjectRenamer(background).rename)
+    return partial(document_service.add_extraction, store, docs)
 
 
 def get_memory_store(docs: DataStore = Depends(get_document_store)) -> MemoryStore:

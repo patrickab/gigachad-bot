@@ -1,13 +1,17 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { errorMessage } from "@/lib/utils"
+
+/** Key of a project's catalog entry, which lists its files. */
+const PROJECT_FILE_LIST = /^chat\/[^/]+\/project\.json$/
 
 /** Open the OS file dialog (any platform, the webview provides it) and resolve with the chosen files, none when cancelled. */
 function pickFiles(): Promise<File[]> {
@@ -56,6 +60,12 @@ export function useWorkspaceDocuments({
 
   useStartupRead("Sidebar notes", listNotes, setNotes, isActive, reloadKey)
   useStartupRead("Sidebar project documents", loadProjectDocuments, setDocuments, isActive, reloadKey)
+
+  // A project's file list changes without this device when an extraction finishes, or on another device.
+  useEffect(() => subscribeToChanges((event) => {
+    if (!isActive || event.resource_kind !== "document" || !PROJECT_FILE_LIST.test(event.resource_key)) return
+    void loadProjectDocuments().then(setDocuments).catch(() => {})
+  }), [isActive, loadProjectDocuments])
 
   const refresh = async () => {
     const [loose, entries] = await Promise.all([listNotes(), loadProjectDocuments()])

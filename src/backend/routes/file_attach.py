@@ -5,19 +5,21 @@ read from (and written back to) the actual file. Handlers are plain `def` becaus
 read files synchronously, so FastAPI runs them in its threadpool.
 """
 
+from functools import partial
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from backend.routes.deps import get_asset_store, get_file_roots, get_project_store
+from backend.routes.deps import ExtractionPublisher, get_asset_store, get_extraction_publisher, get_file_roots, get_project_store
 from backend.routes.schemas import FileListResponse, FileMeta, file_meta
 from lib.asset_store import AssetStore
 from lib.attachments import AttachResult, attach_host_file, attach_library_pdf, kind_of, read_text_or_none, sync_pdf
 from lib.data_store import StorageNotFoundError
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
+from lib.storage_namespace import pdf_stem
 
 router = APIRouter(prefix="/api/fileroots", tags=["fileroots"])
 
@@ -55,12 +57,14 @@ def add_to_project(
     roots: FileRoots = Depends(get_file_roots),
     store: ProjectStore = Depends(get_project_store),
     assets: AssetStore = Depends(get_asset_store),
+    publish: ExtractionPublisher = Depends(get_extraction_publisher),
 ) -> FileListResponse:
     """Reference file-root files (folders expand recursively) from a project.
 
     - Every file is stored as its absolute path, so the project always sees the mounted file
       and removing it from the project never touches the filesystem
-    - PDFs are also synced into the shared library and queued for extraction, as on attach
+    - PDFs are also synced into the shared library and queued for extraction, as on attach,
+      and their Markdown joins the project's files once done
     - Files that are neither PDF nor valid UTF-8 text are skipped
     """
     with http_errors((FileNotFoundError, 404, None), (ValueError, 400, None)):
@@ -70,7 +74,7 @@ def add_to_project(
     added: list[FileMeta] = []
     for file in files:
         if kind_of(file.name) == "pdf":
-            sync_pdf(assets, file.name, file.read_bytes())
+            sync_pdf(assets, file.name, file.read_bytes(), partial(publish, body.slug, pdf_stem(file.name)))
         elif read_text_or_none(file) is None:
             continue
         key = str(file)
