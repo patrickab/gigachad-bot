@@ -95,7 +95,7 @@ Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `featu
 
 ## Restart and live smoke (integrator)
 
-1. Cherry-pick upstream commits into `integration_patrick_ab`. gigachad-bot changes are already in `~/git/gigachad-bot`. Upstream `main` needs no manual rebase: the restart does it (above).
+1. Cherry-pick upstream commits into `integration_patrick_ab` and push it to the fork (`git push fork integration_patrick_ab`, it tracks `fork/integration_patrick_ab`): production moves its own copy of the branch from there (`.docs/deployment.md`, "Update omp-web"). gigachad-bot changes are already in `~/git/gigachad-bot`. Upstream `main` needs no manual rebase: the restart does it (above).
 2. Check omp-web is idle: `curl -s http://127.0.0.1:30177/api/sessions` → `runningSessionIds` empty.
 3. Restart: restarting `run.sh` rebuilds omp-web, it stops the omp-web it started on exit. Without it: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from `~/git/gigachad-bot`. Build takes ~2 min.
 4. Smoke at `http://localhost:2999` (not `127.0.0.1`: Next dev never hydrates there): open an omp session, switch omp tabs, check the changed surface. Send prompts only in an approved throwaway session.

@@ -223,10 +223,18 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 ```
 
 - Serve a ref containing the upstream seams the overlay uses. Until PR #332
-  (issue #314) is merged that is the local branch `integration_patrick_ab`
-  (upstream `main` plus #332's commits), which a fresh clone lacks: create it
-  from `patrickab/ompweb-fork` branch `refactor/314-ui-customization-seams`,
-  then use `origin/main`.
+  (issue #314) is merged that is the branch `integration_patrick_ab` (upstream
+  `main` plus #332's commits), which a fresh clone lacks. The integrator pushes it
+  to `patrickab/ompweb-fork` after every cherry-pick
+  (`.docs/integration-ompweb.md`). Create it tracking the fork, then use
+  `origin/main` once #332 is merged:
+
+```bash
+git -C "$HOME/git/ompweb_original" remote add fork git@github.com:patrickab/ompweb-fork.git
+git -C "$HOME/git/ompweb_original" fetch fork
+git -C "$HOME/git/ompweb_original" branch --track integration_patrick_ab fork/integration_patrick_ab
+```
+
 - `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
   applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
   `@gigachad/chat-ui` into it. The source checkout stays untouched.
@@ -302,7 +310,13 @@ Manual update:
    `curl -s http://127.0.0.1:30177/api/sessions` must show no `runningSessionIds`.
 2. Update Gigachad, whose overlay the restart applies. The restart fetches
    `origin` and rebases `integration_patrick_ab` onto `origin/main` itself
-   (fetch by hand for a remote-tracking ref such as `origin/main`).
+   (fetch by hand for a remote-tracking ref such as `origin/main`). It never
+   fetches the fork: when the overlay needs new seam commits, move the branch
+   first (it is not checked out, the served worktree is detached):
+   `git fetch fork && git branch -f integration_patrick_ab fork/integration_patrick_ab`
+   in `~/git/ompweb_original`. SSH agent forwarding (`ssh -A`) gives the host
+   GitHub access. A ref without the seams fails the overlay checks, and omp-web
+   keeps serving the last working version.
 3. Restart `gigachad-bot-omp-web.service` and verify
    `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref;
    `journalctl --user -u gigachad-bot-omp-web.service | grep auto-update` shows
