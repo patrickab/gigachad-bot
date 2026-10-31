@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ReasoningSelector, effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 
 const fetchReasoningLevels = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/backend/api", () => ({ fetchReasoningLevels }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), fetchReasoningLevels }))
 
 const LEVELS: Record<string, string[]> = {
   "plain-model": [],

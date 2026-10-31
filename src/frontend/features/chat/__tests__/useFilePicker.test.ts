@@ -12,7 +12,8 @@ const { impls } = vi.hoisted(() => ({
   } as Record<string, MockImpl>,
 }))
 
-vi.mock("@/lib/backend/api", () => ({
+vi.mock("@/lib/backend/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/backend/api")>(),
   __setImpl: (k: string, fn: (...a: never[]) => unknown) => { impls[k] = fn as MockImpl },
   __resetImpls: () => {
     impls.listRootFiles = async () => ({ enabled: false, files: [] })

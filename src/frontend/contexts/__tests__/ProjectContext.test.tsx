@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
   loadProject: vi.fn(),
   renameProject: vi.fn(async (_slug: string, name: string) => ({ name, slug: "renamed", archived: false })),
 }))
-vi.mock("@/lib/backend/api", () => api)
+vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), ...api }))
 const sync = vi.hoisted(() => ({ receive: null as null | ((event: { resource_kind: string; resource_key: string }) => void) }))
 vi.mock("@/lib/backend/syncStream", () => ({ syncCursorReady: () => Promise.resolve(), subscribeToChanges: (receive: typeof sync.receive) => { sync.receive = receive; return () => { sync.receive = null } } }))
 

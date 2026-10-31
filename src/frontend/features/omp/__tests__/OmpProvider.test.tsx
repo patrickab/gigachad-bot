@@ -8,7 +8,7 @@ const fetchOmpOverview = vi.hoisted(() => vi.fn(async () => {
   throw new Error("OMP access refused")
 }))
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => settings }))
-vi.mock("@/lib/backend/api", () => ({ fetchOmpOverview }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), fetchOmpOverview }))
 vi.mock("@/hooks/useThemeName", () => ({ useThemeName: () => "light" }))
 
 function Workspace() {
