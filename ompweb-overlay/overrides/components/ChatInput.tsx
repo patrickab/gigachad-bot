@@ -38,7 +38,7 @@ interface ShellSubmission {
 }
 
 const NO_TEXT_FILES: AttachedTextFile[] = [];
-/** The shell owns the draft: submissions always pass their text as `overrideText`. */
+/** The shell owns the draft: submissions always pass their text as `overrideText`, `valueRef` holds the one being submitted. */
 const NO_DRAFT_TEXT = "";
 
 function showAttachError(error: string | null) {
@@ -99,6 +99,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   /** Points the hook's shared refs back at `submission`, for a submit path resuming after an await. */
   const resume = useCallback((submission: ShellSubmission) => {
     submissionRef.current = submission;
+    valueRef.current = submission.text;
     imagesRef.current = submission.attachedImages;
   }, []);
   const clearInput = useCallback(() => {
