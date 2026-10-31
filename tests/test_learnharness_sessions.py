@@ -535,6 +535,17 @@ def test_a_concurrent_project_write_and_the_assignment_both_land():
     assert [card["title"] for card in projects.get_project("physics")["kanban"]] == ["Read chapter 3"]
 
 
+def test_a_concurrent_file_add_and_another_file_add_both_land():
+    data = _RacedDataStore()
+    projects = ProjectStore(ChatStore(data_store=data), rename=lambda *_: None)
+    projects.create_project("Physics")
+    data.race = lambda: projects.add_file("physics", "project/physics/document/b.pdf")
+
+    projects.add_file("physics", "project/physics/document/a.pdf")
+
+    assert sorted(projects.list_files("physics")) == ["project/physics/document/a.pdf", "project/physics/document/b.pdf"]
+
+
 def test_a_project_file_that_keeps_changing_is_a_conflict(monkeypatch):
     data = _RacedDataStore()
     projects = ProjectStore(ChatStore(data_store=data), rename=lambda *_: None)

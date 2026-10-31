@@ -21,8 +21,8 @@ Rename = Callable[[str, str, str], None]
 _META_KEY = f"{chat_root()}/{META_JSON}"
 # The project.json field holding the ids of the project's learn sessions (LearnHarness chats).
 LEARN_SESSIONS = "learn_sessions"
-# Tries of a guarded read-modify-write of `project.json` before it gives up.
-_GUARDED_ATTEMPTS = 3
+# Tries of a guarded read-modify-write of `project.json` before it gives up, one per concurrent writer (parallel uploads).
+_GUARDED_ATTEMPTS = 10
 
 
 class ProjectExists(ValueError):
@@ -236,10 +236,21 @@ class ProjectStore:
                 self._update_learn_sessions(owner, lambda ids: [s for s in ids if s not in session_ids])
 
     def _update_learn_sessions(self, slug: str, change: Callable[[list[str]], list[str]]) -> None:
-        """Apply *change* to project *slug*'s learn sessions, guarded by the revision of the read it changes.
+        """Apply *change* to project *slug*'s learn sessions."""
 
-        Another writer of `project.json` in between (tab autosave, cards, files) retries on its result, so neither
-        write is lost. Raises StorageConflictError when the file keeps changing.
+        def update(data: dict[str, Any]) -> dict[str, Any] | None:
+            sessions = list(data.get(LEARN_SESSIONS, []))
+            changed = change(sessions)
+            return None if changed == sessions else {**data, LEARN_SESSIONS: changed}
+
+        self._update_project(slug, update)
+
+    def _update_project(self, slug: str, change: Callable[[dict[str, Any]], dict[str, Any] | None]) -> None:
+        """Apply *change* to project *slug*'s `project.json`, guarded by the revision of the read it changes.
+
+        - *change* returns the new state, None for no change, and reruns on fresh state after a conflict
+        - Another writer in between (tab autosave, cards, files, parallel uploads) retries, so no write is lost
+        - Raises StorageConflictError when the file keeps changing
         """
         key = _project_key(slug)
         for _ in range(_GUARDED_ATTEMPTS):
@@ -249,59 +260,60 @@ class ProjectStore:
                 data, revision = None, None
             if not isinstance(data, dict):
                 data = self._default_project(slug)
-            sessions = list(data.get(LEARN_SESSIONS, []))
-            changed = change(sessions)
-            if changed == sessions:
+            changed = change(data)
+            if changed is None:
                 return
             try:
-                self._docs.write(key, {**data, LEARN_SESSIONS: changed}, expected=revision)
+                self._docs.write(key, changed, expected=revision)
             except StorageConflictError:
                 continue
             return
-        raise StorageConflictError(f"{key} kept changing while its learn sessions were updated")
+        raise StorageConflictError(f"{key} kept changing while it was updated")
 
     def add_card(self, slug: str, title: str, description: str = "", state: str = "backlog") -> dict[str, Any]:
         self._require(slug)
-        data = self._read_project(slug)
         card = {"id": str(uuid.uuid4()), "title": title, "description": description, "state": state}
-        data.setdefault("kanban", []).append(card)
-        self._write_project(slug, data)
+        self._update_project(slug, lambda data: {**data, "kanban": [*data.get("kanban", []), card]})
         return card
 
     def update_card(self, slug: str, card_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         self._require(slug)
-        data = self._read_project(slug)
-        for card in data.get("kanban", []):
-            if card["id"] == card_id:
-                card.update(updates)
-                self._write_project(slug, data)
-                return card
-        raise FileNotFoundError(f"Card not found: {card_id}")
+        updated: dict[str, Any] = {}
+
+        def change(data: dict[str, Any]) -> dict[str, Any]:
+            card = next((c for c in data.get("kanban", []) if c["id"] == card_id), None)
+            if card is None:
+                raise FileNotFoundError(f"Card not found: {card_id}")
+            card.update(updates)
+            updated.update(card)
+            return data
+
+        self._update_project(slug, change)
+        return updated
 
     def delete_card(self, slug: str, card_id: str) -> dict[str, str]:
         self._require(slug)
-        data = self._read_project(slug)
-        data["kanban"] = [c for c in data.get("kanban", []) if c["id"] != card_id]
-        self._write_project(slug, data)
+        self._update_project(slug, lambda data: {**data, "kanban": [c for c in data.get("kanban", []) if c["id"] != card_id]})
         return {"status": "ok"}
 
     def save_tab(self, slug: str, filename: str, data: dict[str, Any]) -> dict[str, str]:
         self._require(slug)
         self._chats.save(f"{slug}/{filename}", data)
-        project_data = self._read_project(slug)
-        tabs = project_data.get("tabs", [])
-        existing = next((t for t in tabs if t["filename"] == filename), None)
         tab_name = data.get("tab_name")
         title = data.get("title")
-        if existing:
-            if tab_name is not None:
-                existing["name"] = tab_name
-            if title is not None:
-                existing["title"] = title
-        else:
-            tabs.append({"filename": filename, "name": tab_name, "title": title})
-            project_data["tabs"] = tabs
-        self._write_project(slug, project_data)
+
+        def change(project_data: dict[str, Any]) -> dict[str, Any]:
+            tabs = project_data.get("tabs", [])
+            existing = next((t for t in tabs if t["filename"] == filename), None)
+            if existing:
+                if tab_name is not None:
+                    existing["name"] = tab_name
+                if title is not None:
+                    existing["title"] = title
+                return project_data
+            return {**project_data, "tabs": [*tabs, {"filename": filename, "name": tab_name, "title": title}]}
+
+        self._update_project(slug, change)
         return {"status": "ok"}
 
     def list_files(self, slug: str) -> list[str]:
@@ -339,12 +351,17 @@ class ProjectStore:
     def _mutate_files(self, slug: str, transform: Callable[[dict[str, str | None]], dict[str, str | None]]) -> dict[str, str | None]:
         """Read, transform, and (when changed) persist a project's display names by path, in reference order."""
         self._require(slug)
-        data = self._read_project(slug)
-        current = _files_of(data)
-        updated = transform(current)
-        if list(updated.items()) != list(current.items()):
-            data["files"] = [path if name is None else {"path": path, "name": name} for path, name in updated.items()]
-            self._write_project(slug, data)
+        updated: dict[str, str | None] = {}
+
+        def change(data: dict[str, Any]) -> dict[str, Any] | None:
+            nonlocal updated
+            current = _files_of(data)
+            updated = transform(current)
+            if list(updated.items()) == list(current.items()):
+                return None
+            return {**data, "files": [path if name is None else {"path": path, "name": name} for path, name in updated.items()]}
+
+        self._update_project(slug, change)
         return updated
 
     def list_all_files(self) -> list[str]:
