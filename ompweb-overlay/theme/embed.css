@@ -2,7 +2,8 @@
 
    - gigachad-bot owns navigation: ompweb's sidebar, topbar and file panel go
    - Settings: Back and close go, the shell's tab closes Settings (Escape still returns to the chat, the shell reopens Settings)
-   - Composer: the input box goes, gigachad-bot's composer drives it (`custom/overrides/components/ChatInput.tsx`). The queue and status bar above it stay
+   - Composer: the input box goes, gigachad-bot's composer drives it (`custom/overrides/components/ChatInput.tsx`). Its status
+     bar ("Running …") and queue bar stay, restyled as one card above the shell composer
    - Hidden, not removed: the sidebar keeps its running-session stream and the Settings row the bridge clicks */
 
 html.cf-embed #workspace-sidebar,
@@ -17,10 +18,87 @@ html.cf-embed .chat-input-shell {
   display: none !important;
 }
 
-/* The queue or status bar sat on the input box's top edge, close its bottom */
-html.cf-embed :has(+ .chat-input-shell) {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent) !important;
-  border-radius: var(--radius-card) !important;
+/* What is left of the input box: status bar (`role=status`, "Running …") and queue bar (`aria-label` "Queued prompts", the
+   menus beside it are `.dropdown-surface`), in the shell composer's column. Together they form one card like the shell
+   composer, status on top, the queue next to the composer: surface, soft border, round corners, sans sentence case
+   instead of upstream's uppercase labels and top-edge tabs */
+html.cf-embed [role=group] > div:has(> div > .chat-input-shell) {
+  max-width: 672px !important;
+}
+
+html.cf-embed div:has(> .chat-input-shell) {
+  display: flex;
+  flex-direction: column;
+
+  & > :is([role=status], div[aria-label]:not(.dropdown-surface)) {
+    border: 1px solid var(--border) !important;
+    border-radius: 16px !important;
+    background: var(--cf-surface) !important;
+    box-shadow: var(--cf-chat-shadow);
+    font-family: var(--font-sans);
+  }
+
+  &:has(> :is([role=status], div[aria-label]:not(.dropdown-surface))) {
+    padding-bottom: 8px;
+  }
+
+  & > [role=status] {
+    order: -1;
+    gap: 10px !important;
+    padding: 8px 16px !important;
+    color: var(--cf-ink-subtle) !important;
+    font-size: 12px !important;
+
+    & > .live-status-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--cf-ink-subtle);
+    }
+  }
+
+  /* Both: status and queue join, a hairline between them */
+  &:has(> div[aria-label]:not(.dropdown-surface)) > [role=status] {
+    border-bottom: none !important;
+    border-radius: 16px 16px 0 0 !important;
+  }
+
+  &:has(> [role=status]) > div[aria-label]:not(.dropdown-surface) {
+    border-radius: 0 0 16px 16px !important;
+    box-shadow: var(--cf-chat-shadow), 0 -1px 0 var(--border);
+    border-top: none !important;
+  }
+
+  & > div[aria-label]:not(.dropdown-surface) {
+    & * {
+      font-family: inherit !important;
+      letter-spacing: normal !important;
+      text-transform: none !important;
+    }
+
+    /* One message: a single row. Several: a header row above the expandable list */
+    & > div:not(:has(> div)),
+    & > div > div:first-child {
+      padding: 6px 6px 6px 16px !important;
+    }
+
+    & span {
+      font-size: 13px !important;
+    }
+
+    & span:first-child {
+      color: var(--cf-ink-subtle) !important;
+      font-weight: 500 !important;
+    }
+
+    & span:not(:first-child) {
+      color: var(--cf-ink-muted) !important;
+    }
+
+    & button {
+      border-radius: 9999px !important;
+      font-size: 12px !important;
+    }
+  }
 }
 
 /* Endless scroll like a gigachad chat: the shell's top bar and composer lie over the frame (`embed/insets.ts`).
