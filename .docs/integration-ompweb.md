@@ -8,7 +8,7 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
 ~/git/gigachad-bot/                      gigachad-bot checkout (master), run.sh serves it, the only gigachad-bot checkout
   ompweb-overlay/                        private overlay, becomes custom/ in the served omp-web
     root.tsx, framing.ts, next.config.ts   entry (CustomRoot), frame-ancestors CSP, module overrides
-    components/                          EmbedBridge, EmbedMode, QaTurn, turn-summary, EmbeddedMarkdown
+    components/                          EmbedBridge, EmbedMode, QaTurn, LiveTail, turn-summary, EmbeddedMarkdown
     embed/                               postMessage channel, completions, open-file, insets, modal
     overrides/<upstream path>            replaces that upstream module, wraps it by relative import
     theme/                               embed-only CSS (html.cf-embed), palette/tokens mapping

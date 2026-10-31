@@ -177,3 +177,37 @@ test("a live turn cannot be collapsed and has no card actions even when previous
   assert.deepEqual(view.queryAllByRole("button", { name: "Collapse question and answer" }), []);
   assert.equal(view.queryByRole("button", { name: /Copy .* as markdown/ }), null);
 });
+
+const { ChatLiveTail } = await jiti.import("./overrides/components/ChatWindow-live-tail.tsx");
+const streamingReply = { role: "assistant", content: [{ type: "text", text: "Streaming token" }], timestamp: 9000 };
+
+/** ChatWindow's layout: the committed transcript, then the live tail as its sibling. */
+function transcriptWithStream(transcript) {
+  const [row] = planTranscriptRows(transcript);
+  const context = groupContext(transcript);
+  const committed = row.kind === "group" ? renderTranscriptGroupRow(row, context) : context.renderMessage(row.index);
+  const tail = React.createElement(ChatLiveTail, {
+    key: "tail", streamingMessage: streamingReply, pendingToolHeaders: [{ id: "edit-1", name: "edit" }], pendingBash: null,
+    toolResults: new Map(), modelNames: {}, cwd: undefined, sessionId: undefined,
+    toolCallsDefaultCollapsed: true, expandThinkingByDefault: false, hideThinking: false,
+  });
+  return React.createElement(React.Fragment, null, committed, tail);
+}
+
+test("embedded, the live tail renders inside the newest card before any answer is committed", () => {
+  setEmbedded(true);
+  const view = render(transcriptWithStream([messages[4]]));
+  const answer = view.container.querySelector('.gc-turn [data-role="answer"]');
+  assert.match(answer.textContent, /Streaming token/);
+  assert.ok(answer.contains(view.getByRole("status", { name: /edit/ })));
+  assert.equal(view.getAllByText("Streaming token").length, 1);
+});
+
+test("standalone or without a card, the live tail stays where upstream renders it", () => {
+  let view = render(transcriptWithStream([messages[4]]));
+  assert.equal(view.getByText("Streaming token").closest(".gc-turn"), null);
+  view.unmount();
+  setEmbedded(true);
+  view = render(transcriptWithStream([{ ...messages[4], branchSummary: true }]));
+  assert.equal(view.getByText("Streaming token").closest(".gc-turn"), null);
+});

@@ -4,6 +4,7 @@ import { Children, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { FoldVertical } from "lucide-react";
 import { CopyAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui";
 import type { AgentMessage } from "@/lib/types";
+import { useLiveTailHost } from "./LiveTail";
 import { isCompaction, summarizeTurn } from "./turn-summary";
 
 export interface QaTurnProps {
@@ -54,6 +55,7 @@ function copyAction(text: string, subject: "question" | "summary" | "answer") {
  * - The newest turn starts expanded, older ones collapsed; the reader's choice sticks per session and turn
  * - A running turn stays expanded and has no actions
  * - A compaction's turn asks with the compaction (fold icon, its summary as the question), the continued run answers
+ * - The newest turn hosts the streaming reply after its answer nodes (`LiveTail`)
  */
 export function QaTurn({ messages, userIndex, endIndex, live, question, children }: QaTurnProps) {
   const summary = useMemo(() => summarizeTurn(messages, userIndex, endIndex), [messages, userIndex, endIndex]);
@@ -68,6 +70,8 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
   }
   const newest = endIndex === messages.length;
   const expanded = live || (choice ?? newest);
+  const { tailActive, slotRef } = useLiveTailHost(newest);
+  const liveSlot = newest ? <div key="live-tail" ref={slotRef} style={{ display: "contents" }} /> : null;
 
   const toggleRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(false);
@@ -90,14 +94,14 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
     return indices;
   }, [messages, userIndex, endIndex]);
 
-  const hasAnswer = Children.toArray(children).length > 0;
+  const hasAnswer = Children.toArray(children).length > 0 || tailActive;
   if (!expanded) {
     return (
       <TurnCard expanded={false}>
         {anchors.map((idx) => <span key={idx} className="cf-turn-anchor" data-message-index={idx} aria-hidden="true" />)}
         <TurnHeader label={summary.label} icon={anchorIcon} onExpand={toggle} ref={toggleRef} />
         <TurnPreview tools={[]}>
-          {hasAnswer ? <div className="gc-turn-content">{children}</div> : null}
+          {hasAnswer ? <div className="gc-turn-content">{children}{liveSlot}</div> : null}
         </TurnPreview>
       </TurnCard>
     );
@@ -118,6 +122,7 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
         <TurnSurface>
           <TurnRegion role="answer" tail={summary.endsWithText ? "text" : "activity"} actions={live ? undefined : copyAction(summary.answer, "answer")}>
             {children}
+            {liveSlot}
           </TurnRegion>
         </TurnSurface>
       )}
