@@ -607,24 +607,35 @@ export async function fetchOmpSessionHistory(sessionId: string): Promise<Pick<Me
   return request<Pick<Message, "role" | "content">[]>(`/omp/sessions/${encodeURIComponent(sessionId)}/history`)
 }
 
-/** Create the omp prompt files next to the `.tex` file at *path* when missing, resolves to the directory omp sessions run in. */
-export function prepareLatex(path: string): Promise<{ cwd: string }> {
-  return post<{ cwd: string }>("/latex/prepare", { path })
+/** What `prepareWorkbench` resolves: the file's absolute disk path and the directory its omp sessions run in. The response's `kind` is not read, the client derives it from the path. */
+export interface PreparedWorkbench {
+  path: string
+  cwd: string
+}
+
+/** Get the workbench file *path* ready: a stored document moves to disk first, its new path comes back. */
+export function prepareWorkbench(path: string): Promise<PreparedWorkbench> {
+  return post<PreparedWorkbench>("/workbench/prepare", { path })
+}
+
+/** Create workbench document *name* (`.tex` or `.md`) of project *slug* on disk, listed in its files. Resolves to its path. */
+export async function createWorkbenchDocument(slug: string, name: string): Promise<string> {
+  return (await post<{ path: string }>("/workbench/create", { slug, name })).path
+}
+
+/** The omp session linked to the workbench file at absolute *path*, null when none is. */
+export async function loadWorkbenchSession(path: string): Promise<string | null> {
+  return (await request<{ session_id: string | null }>(`/workbench/session${toQuery({ path })}`)).session_id
+}
+
+/** Link the omp session *sessionId* to the workbench file at absolute *path*. */
+export async function saveWorkbenchSession(path: string, sessionId: string): Promise<void> {
+  await put("/workbench/session", { path, session_id: sessionId })
 }
 
 /** Compile the `.tex` file at *path*. A TeX error resolves with `ok: false`, a missing TeX install rejects with ApiError 503. */
 export function buildLatex(path: string): Promise<LatexBuild> {
   return post<LatexBuild>("/latex/build", { path })
-}
-
-/** Create LaTeX document *name* of project *slug* on disk, listed in its files. Resolves to the new `.tex` path. */
-export async function createProjectLatex(slug: string, name: string): Promise<string> {
-  return (await post<{ path: string }>("/latex/create", { slug, name })).path
-}
-
-/** Move the stored `.tex` project file *path* of *slug* to disk so it can build. Resolves to its new path. */
-export async function adoptProjectLatex(slug: string, path: string): Promise<string> {
-  return (await post<{ path: string }>("/latex/adopt", { slug, path })).path
 }
 
 /** Every learn session with the project it is grouped under. Host-access logins only. */

@@ -3,6 +3,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
+import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { ThemeToggle } from "@/features/settings/ThemeToggle"
@@ -18,15 +19,18 @@ import { FactorySurface } from "@/features/factory/FactorySurface"
 import { LearnModelSelector, LearnReasoningSelector } from "@/features/learn/LearnModel"
 import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
 import { LearnSurface } from "@/features/learn/LearnSurface"
-import { LatexSurface } from "@/features/latex/LatexSurface"
+import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
+import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
+import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { TopBarSlot } from "@/features/navigation/TopBarSlots"
-import { itemOf, useTab, type AppSurface } from "@/contexts/TabContext"
-import type { Usage } from "@/lib/domain/types"
+import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import type { OmpView, Usage } from "@/lib/domain/types"
+import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
 
 /** Model picker props shared by the chat, document and omp top bars. */
@@ -61,11 +65,52 @@ interface Surface {
   body: ReactNode
 }
 
+/**
+ * The tab's workbench item once prepared: LaTeX or Markdown by the file's kind, mounted on its disk path.
+ *
+ * - A stored document moves to disk first, the item takes its new path and `onDocumentsChanged` reloads the lists that showed its key
+ * - Preparing shows a quiet loading note, a failure its reason and a retry
+ * - A Markdown preview's `#file:` link opens its target in this tab, in the workbench or the document editor
+ */
+function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
+  item: WorkspaceItem
+  onItemChange: (item: WorkspaceItem) => void
+  onDocumentsChanged: () => void
+  onModeLabel: (label: string) => void
+  drawerOpen: boolean
+  onDrawerOpenChange: (open: boolean) => void
+  onClose: () => void
+  shellCommands: ShellCommands
+  modelProps: ModelProps
+}) {
+  const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => {
+    onItemChange({ ...item, path })
+    onDocumentsChanged()
+  })
+  if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
+  if (!prepared) return <div className="pt-11"><LoadingPlaceholder /></div>
+  const props = {
+    path: prepared.path,
+    cwd: prepared.cwd,
+    ompView: item.omp,
+    onViewChange: (omp: OmpView) => onItemChange({ ...item, omp }),
+    drawerOpen,
+    onDrawerOpenChange,
+    onClose,
+    shellCommands,
+    modelProps,
+  }
+  const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
+  return workbenchKindOf(prepared.path) === "latex"
+    ? <LatexWorkbench key={prepared.path} {...props} />
+    : <MarkdownWorkbench key={prepared.path} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />
+}
+
 /** The top bar and the surface of the tab's current mode. */
 export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
-  const [latexDrawerOpen, setLatexDrawerOpen] = useState(true)
+  const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
 
@@ -177,29 +222,29 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
       }
     },
-    latex: () => {
-      const latexItem = itemOf(tab, "latex")
+    workbench: () => {
+      const workbenchItem = itemOf(tab, "workbench")
       return {
-        left: <TopBarSlot name="latexAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+        left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
         right: <>
-          <TopBarSlot name="latexBuild">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+          <TopBarSlot name="workbenchStatus">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
           <TopBarTransparent>
             <ThemeToggle />
             <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
               <X className="h-4 w-4" />
             </button>
           </TopBarTransparent>
-          {!latexDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setLatexDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
+          {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
         </>,
         runsUnderTopBar: true,
-        body: latexItem ? (
-          <LatexSurface
-            key={latexItem.path}
-            path={latexItem.path}
-            ompView={latexItem.omp}
-            onViewChange={(omp) => setWorkspaceItem({ ...latexItem, omp })}
-            drawerOpen={latexDrawerOpen}
-            onDrawerOpenChange={setLatexDrawerOpen}
+        body: workbenchItem ? (
+          <WorkbenchItemBody
+            item={workbenchItem}
+            onItemChange={setWorkspaceItem}
+            onDocumentsChanged={refreshDocuments}
+            onModeLabel={setModeLabel}
+            drawerOpen={workbenchDrawerOpen}
+            onDrawerOpenChange={setWorkbenchDrawerOpen}
             onClose={() => setAppMode("chat")}
             shellCommands={ompShellCommands}
             modelProps={modelProps}

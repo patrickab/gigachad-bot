@@ -137,7 +137,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
         draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
-        onSelect: () => void context.selectDocument(doc.path, scope),
+        onSelect: () => context.selectDocument(doc.path, scope),
         onDelete: () => remove(doc, scope),
       })),
     }] : []),

@@ -15,7 +15,7 @@ import { useTabActive } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { TEXT_CODEC, useRootFileDocument } from "./useRootFileDocument"
-import { isToolArtifact, useEditorView } from "./useEditorView"
+import { ARTIFACT_FILL, followFileLink, isToolArtifact, useEditorView } from "./useEditorView"
 import { ShowAsToggle, ViewPills } from "./EditorViewSwitch"
 import { EditorShell } from "./EditorShell"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
@@ -116,14 +116,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
 
   useEscapeLayer(() => { if (overlay) onClose(); else setIsFullscreen(false) }, !!overlay || isFullscreen)
 
-  const handlePreviewClick = useCallback((e: React.MouseEvent) => {
-    const anchor = (e.target as HTMLElement).closest("a")
-    if (!anchor) return
-    const href = anchor.getAttribute("href")
-    if (!href?.startsWith("#file:")) return
-    e.preventDefault()
-    onNavigate?.(decodeURIComponent(href.slice("#file:".length)))
-  }, [onNavigate])
+  const handlePreviewClick = useCallback((e: React.MouseEvent) => followFileLink(e, onNavigate), [onNavigate])
 
   if (loadError === "binary") {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">This is not a text file, so it cannot be opened in the editor.</div>
@@ -136,14 +129,10 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
 
   const pills = !isArtifact && <ViewPills view={view} onViewChange={setView} />
 
-  // A tool artifact is the whole document, so its figure takes the pane (`cqh`: the container's height, which
-  // the map and diagram read as their own) instead of the inline chat size.
+  // A tool artifact is the whole document, so its figure takes the pane.
   const preview = (
     <div
-      className={cn(
-        "flex-1 overflow-y-auto min-h-0 p-4 pt-10",
-        isArtifact && "[container-type:size] [--markmap-height:100cqh] [&_.gc-diagram_svg]:h-[calc(100cqh-5rem)]! [&_.gc-diagram_svg]:max-w-none! [&_.gc-diagram_svg]:w-full",
-      )}
+      className={cn("flex-1 overflow-y-auto min-h-0 p-4 pt-10", isArtifact && ARTIFACT_FILL)}
       onClick={handlePreviewClick}
     >
       {path.endsWith(".plot.json")

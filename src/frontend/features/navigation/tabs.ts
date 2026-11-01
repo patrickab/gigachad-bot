@@ -1,6 +1,7 @@
 import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
+import { relocatedWorkbenchPath, workbenchKindOf } from "@/lib/domain/workbench"
 import { baseName } from "@/lib/paths"
 
 /** The display name project `slug` gives its file `path`, if any. */
@@ -16,20 +17,24 @@ export function nextTab(config?: Partial<TabConfig>): Tab {
   return { id: `tab-${crypto.randomUUID()}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
 }
 
-/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. */
+/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. A file in the project's workbench folder moves with it. */
 export function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
   const relocate = (path: string, prefix: string) => path.startsWith(`${prefix}${oldSlug}/`) ? `${prefix}${newSlug}${path.slice(prefix.length + oldSlug.length)}` : path
   const historyFile = tab.historyFile && relocate(tab.historyFile, "")
   const item = tab.workspaceItem
-  const isInProject = tab.projectSlug === oldSlug || historyFile !== tab.historyFile || item?.projectSlug === oldSlug
-  if (!isInProject) return tab
+  const itemInProject = item?.projectSlug === oldSlug
+  const movedItem = item && {
+    ...item,
+    projectSlug: itemInProject ? newSlug : item.projectSlug,
+    path: relocatedWorkbenchPath(itemInProject ? relocate(relocate(item.path, "project/"), "graph/") : item.path, oldSlug, newSlug),
+  }
+  const itemMoved = itemInProject || (!!item && movedItem?.path !== item.path)
+  if (tab.projectSlug !== oldSlug && historyFile === tab.historyFile && !itemMoved) return tab
   return {
     ...tab,
     historyFile,
     projectSlug: tab.projectSlug === oldSlug ? newSlug : tab.projectSlug,
-    workspaceItem: item?.projectSlug === oldSlug
-      ? { ...item, projectSlug: newSlug, path: relocate(relocate(item.path, "project/"), "graph/") }
-      : item,
+    workspaceItem: itemMoved ? movedItem : item,
   }
 }
 
@@ -44,8 +49,9 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "omp") {
     return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
   }
-  if (tab.appMode === "latex") {
-    return { category: "latex", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "LaTeX") }
+  if (tab.appMode === "workbench") {
+    const kind = tab.workspaceItem ? workbenchKindOf(tab.workspaceItem.path) : null
+    return { category: kind ?? "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File") }
   }
   if (tab.appMode === "factory") {
     return { category: "factory", file: tab.name ?? (tab.workspaceItem?.path.includes("/") ? "task" : tab.workspaceItem?.path ?? "board") }
@@ -72,7 +78,7 @@ export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: Sho
   if (tab.appMode !== "chat" && tab.workspaceItem) {
     if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
     if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
-    if (tab.appMode === "latex") return tab.name ?? baseName(tab.workspaceItem.path)
+    if (tab.appMode === "workbench") return tab.name ?? baseName(tab.workspaceItem.path)
     if (tab.appMode === "factory") return tab.name ?? "Factory"
     return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName))
   }

@@ -3,16 +3,18 @@
 import { useCallback, useEffect, useEffectEvent, useState, type RefObject } from "react"
 import { usePolling } from "@/hooks/usePolling"
 import { loadFileViewerText } from "@/lib/backend/api"
+import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 
 /** Time between reads of the file while the agent runs. */
 const POLL_MS = 500
 
 /**
- * Mirror the agent's edits of the file at `path` into Neovim while it runs, then hand over once the run ends.
+ * Mirror edits of the file at `path` from outside Neovim into it: the agent's while it runs, then a handover once the run ends, and other devices' saves.
  *
  * - While `streaming`, the file on disk is read every 500 ms and pushed through `setContent` when it differs from `syncedRef`
  * - `syncedRef` holds the text Neovim and the disk last agreed on, the owner updates it on every save
  * - A run ending reads the file one last time, then awaits `onRunEnd` (the build). `editing` covers the run and that handover
+ * - A `document` change event for `path` (a save on another device) reads the file and pushes it the same way, the backend merges it into unsaved edits
  * - A push that Neovim could not take yet (`setContent` false) is retried by the next read
  */
 export function useAgentSync({ path, streaming, setContent, syncedRef, onRunEnd }: {
@@ -39,6 +41,11 @@ export function useAgentSync({ path, streaming, setContent, syncedRef, onRunEnd 
   }, [path, setContent, syncedRef])
 
   usePolling(pull, { intervalMs: POLL_MS, active: streaming })
+
+  const pullOnRemoteChange = useEffectEvent((event: ChangeEvent) => {
+    if (event.resource_kind === "document" && event.resource_key === path) void pull()
+  })
+  useEffect(() => subscribeToChanges((event) => pullOnRemoteChange(event)), [])
 
   const finishRun = useEffectEvent(async () => {
     await pull()

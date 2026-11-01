@@ -34,6 +34,7 @@ const api = vi.hoisted(() => ({
     path: `project/${scope}/document/${name}`, name, mime: "text/plain",
   })),
   addRootFilesToProject: vi.fn<typeof import("@/lib/backend/api").addRootFilesToProject>(async () => []),
+  createWorkbenchDocument: vi.fn<typeof import("@/lib/backend/api").createWorkbenchDocument>(async (slug, name) => `/data/workbench/latex/${slug}/${name.replace(/\.tex$/, "")}/${name}`),
   fileRootTree: vi.fn<typeof import("@/lib/backend/api").fileRootTree>(async () => ({ enabled: true, tree: [{
     path: "/source", name: "source", type: "root", children: [
       { path: "/source/first.md", name: "first.md", type: "file" },
@@ -342,6 +343,69 @@ describe("Project navigation", () => {
     fireEvent.click(await project.findByText("Roadmap.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/plan.md", "proj")
     expect(project.queryByText("plan.md")).not.toBeInTheDocument()
+  })
+
+  it("opens Markdown and LaTeX files in the workbench where it is available, the rest in the editor", async () => {
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [
+        { path: "project/proj/document/notes.md", name: "notes.md", mime: "text/markdown" },
+        { path: "/data/workbench/latex/proj/paper/paper.tex", name: "paper.tex", mime: "text/x-tex" },
+        { path: "project/proj/document/data.csv", name: "data.csv", mime: "text/csv" },
+      ]
+      : [])
+    const onDocumentSelect = vi.fn()
+    const onWorkbenchSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onWorkbenchSelect={onWorkbenchSelect} />)
+
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    fireEvent.click(await project.findByText("notes.md"))
+    expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
+    fireEvent.click(project.getByText("paper.tex"))
+    expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj")
+    fireEvent.click(project.getByText("data.csv"))
+    expect(onDocumentSelect).toHaveBeenCalledExactlyOnceWith("project/proj/document/data.csv", "proj")
+  })
+
+  it("reads the project files again once opening moved a stored document to disk", async () => {
+    let moved = false
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [{ path: moved ? "/data/workbench/markdown/proj/plan/plan.md" : "project/proj/document/plan.md", name: "plan.md", mime: "text/markdown" }]
+      : [])
+    const onWorkbenchSelect = vi.fn()
+    const view = render(<Sidebar appMode="workbench" activeDocumentPath="project/proj/document/plan.md" onWorkbenchSelect={onWorkbenchSelect} />)
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    await within(view.getByLabelText("Proj contents")).findByText("plan.md")
+
+    moved = true
+    view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+      <Sidebar appMode="workbench" activeDocumentPath="/data/workbench/markdown/proj/plan/plan.md" onWorkbenchSelect={onWorkbenchSelect} />
+    </TabContext.Provider>)
+    await waitFor(() => {
+      fireEvent.click(within(view.getByLabelText("Proj contents")).getByText("plan.md"))
+      expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/markdown/proj/plan/plan.md", "proj")
+    })
+  })
+
+  it("creates a LaTeX file on disk and a Markdown file in the project, both opening in the workbench", async () => {
+    const onWorkbenchSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+
+    fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "paper" } })
+    fireEvent.click(project.getByRole("button", { name: "File type" }))
+    fireEvent.click(project.getByRole("option", { name: "LaTeX" }))
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj"))
+    expect(api.createWorkbenchDocument).toHaveBeenCalledWith("proj", "paper.tex")
+
+    fireEvent.click(project.getByRole("button", { name: "New file in Proj" }))
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "draft" } })
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/draft.md", "proj"))
+    expect(api.writeDocument).toHaveBeenCalledWith("proj", "draft.md")
   })
 
   it("creates the architecture of a project without one when its icon is used", async () => {

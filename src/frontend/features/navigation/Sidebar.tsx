@@ -35,8 +35,8 @@ interface SidebarProps {
   onRootsChanged?: () => void
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
-  /** Opens `.tex` project files in the LaTeX tab, absent where it is unavailable. */
-  onLatexSelect?: (path: string, scope: string) => void
+  /** Opens `.md` and `.tex` files in the workbench, absent where it is unavailable. */
+  onWorkbenchSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
   onNewChat?: (slug: string | null) => void
@@ -68,8 +68,10 @@ export function Sidebar(props: SidebarProps) {
   const fileMountController = usePathTree()
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)
+  // A workbench item's path changes when opening moved its stored document to disk, and this device hears no change event for it.
+  const workbenchPath = appMode === "workbench" ? props.activeDocumentPath : null
   const documents = useWorkspaceDocuments({
-    ...props, projects, moveHistory: branches.moveHistory, reloadKey: `${activeCanvasPath}\n${appMode}`,
+    ...props, projects, moveHistory: branches.moveHistory, reloadKey: `${activeCanvasPath}\n${appMode}\n${workbenchPath}`,
   })
   const code = useCodeMounts(props)
   const { omp } = code

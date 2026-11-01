@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
 import {
   composerImageFile, isComposerOf, mergeRestoredText, offersSkills, ompModelOf, ompPrompt, ompSelectorModels, optionParts, rankByName, rankOptions, selectorModelId, shellHint,
-  skillQueryOf, slashQueryOf,
+  skillQueryOf, slashQueryOf, withLead,
 } from "../composer"
 
 describe("isComposerOf", () => {
@@ -151,5 +151,17 @@ describe("extension select options", () => {
     expect(rankOptions(options, " ")).toEqual(options)
     expect(rankOptions(options, "rdme")).toEqual(["./README.md"])
     expect(rankOptions(options, "zzz")).toEqual([])
+  })
+})
+
+describe("withLead", () => {
+  it("leads a prompt with the lead and a blank line", () => {
+    expect(withLead("Fix the intro", "File: paper/paper.tex")).toBe("File: paper/paper.tex\n\nFix the intro")
+  })
+
+  it("keeps commands and lead-less prompts as typed", () => {
+    expect(withLead("/skill:review", "File: a.md")).toBe("/skill:review")
+    expect(withLead("!ls", "File: a.md")).toBe("!ls")
+    expect(withLead("Hello", undefined)).toBe("Hello")
   })
 })

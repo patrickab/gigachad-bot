@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
 import type { PdfPageBox } from "@/components/content/PdfViewer"
 import { cn } from "@/lib/utils"
-import { TOP_BAR_PX } from "./LatexSplit"
+import { TOP_BAR_PX } from "@/features/workbench/WorkbenchSplit"
 
 /** Longest time the pane stays blurred for a new PDF's pages to draw. */
 const SETTLE_TIMEOUT_MS = 2000

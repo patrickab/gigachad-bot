@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react"
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, useNeovimTerminal, type NeovimSelection } from "@/features/editor/NeovimEditor"
@@ -14,34 +14,27 @@ import { writeRootFile } from "@/lib/backend/api"
 import type { OmpView } from "@/lib/domain/types"
 import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
-import { LatexBuildStatus } from "./LatexBuildStatus"
-import { LatexSplit, ShowPaneButton, useHiddenPane, usePaneLayout } from "./LatexSplit"
-import { LatexPdfPane } from "./LatexPdfPane"
-import { quoteSelection } from "./latexBuild"
+import { fileLead, quoteSelection } from "./quote"
 import { useAgentSync } from "./useAgentSync"
-import { useLatexBuild } from "./useLatexBuild"
-import { useLatexView, useLatexWorkspace } from "./useLatexSession"
+import { useWorkbenchChat } from "./useWorkbenchChat"
+import { ShowPaneButton, WorkbenchSplit, useHiddenPane, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
-/** Width of the chat panel (the tab's file panel card, like the PDF assistant), editor and PDF share what is left. */
-const DRAWER_WIDTH_PX = 360
-/** Neovim sits on a page like the PDF's (`.pdf-page`), its size set by the pane layout. */
-const EDITOR_PAGE = "rounded-2xl px-3 pt-3 shadow-[var(--shadow-md)]"
-/** The view that shows no session, so no agent runs in it. */
-const NO_VIEW: OmpView = { kind: "settings" }
+/** What the rendered pane draws from: where it sits, the synced text, and whether the agent is editing. */
+export interface WorkbenchPane {
+  layout: PaneLayout
+  /** The text Neovim and the disk last agreed on: the loaded file, then every save and every agent edit. Null while loading or after a failed load. */
+  text: string | null
+  /** Why the file could not load, null otherwise. */
+  loadError: string | null
+  /** An agent run and its handover are in progress. */
+  editing: boolean
+}
 
-const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
-
-/**
- * One `.tex` file as an Overleaf-like workspace: Neovim on the left, its PDF in the middle, the omp chat in a drawer on the right.
- *
- * - The PDF builds once on open, after every `:w` while omp is idle, and once when an omp run ends
- * - While omp runs, its edits on disk flow into Neovim and the PDF blurs until the run's build arrives
- * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
- * - The chat runs in the file's directory, its session is remembered for the file
- * - The top bar's agent controls and build status render into its `latexAgent` and `latexBuild` slots
- */
-export function LatexSurface({ path, ompView, onViewChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
+export interface WorkbenchProps {
+  /** Absolute disk path of the file. */
   path: string
+  /** The directory a new chat session starts in. */
+  cwd: string
   /** The chat session this tab's item shows, undefined before the first one. */
   ompView: OmpView | undefined
   onViewChange: (view: OmpView) => void
@@ -51,29 +44,61 @@ export function LatexSurface({ path, ompView, onViewChange, drawerOpen, onDrawer
   onClose: () => void
   shellCommands: ShellCommands
   modelProps: Omit<ComponentProps<typeof OmpModelSelector>, "view">
-}) {
+  /** Names the rendered pane in the show and hide labels: "PDF" gives "Show PDF" and "Hide PDF". */
+  renderLabel: string
+  renderPane: (pane: WorkbenchPane) => ReactNode
+  /** Shown in the `workbenchStatus` top-bar slot after the show-pane button. */
+  status?: ReactNode
+  /** A `:w` stored `text`, `agentRunning` while omp runs. */
+  onSaved?: (text: string, agentRunning: boolean) => void
+  /** Awaited once an omp run's last edits are in Neovim, `editing` stays on until it resolves. */
+  onRunEnd: () => Promise<void>
+  /** Fence language of the lines `<leader>a` quotes into the chat. */
+  quoteLanguage: string
+}
+
+/** Width of the chat panel (the tab's file panel card, like the PDF assistant), editor and rendered file share what is left. */
+const DRAWER_WIDTH_PX = 360
+/** Neovim sits on a page like the PDF's (`.pdf-page`), its size set by the pane layout. */
+const EDITOR_PAGE = "rounded-2xl px-3 pt-3 shadow-[var(--shadow-md)]"
+/** The view that shows no session, so no agent runs in it. */
+const NO_VIEW: OmpView = { kind: "settings" }
+
+const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
+
+/**
+ * One file as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
+ *
+ * - While omp runs, its edits on disk flow into Neovim and `renderPane` gets `editing` until `onRunEnd` resolves
+ * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
+ * - The chat's session is linked to the file, a new one starts in `cwd` and its first message names the file (`File: <path>`)
+ * - Another device's save of the file reaches Neovim, merged into unsaved edits by the backend
+ * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots
+ */
+export function Workbench({
+  path, cwd, ompView, onViewChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
+  renderLabel, renderPane, status, onSaved, onRunEnd, quoteLanguage,
+}: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  const build = useLatexBuild(path)
-  const { cwd, error: prepareError } = useLatexWorkspace(path)
-  const { view, adopt } = useLatexView(path, ompView, cwd, onViewChange)
+  const { view, adopt, error: chatError } = useWorkbenchChat(path, cwd, ompView, onViewChange)
   const streaming = useOmpStreaming(view ?? NO_VIEW)
 
   const write = useCallback((text: string) => writeRootFile(path, text), [path])
   const { value: content, loadError, reload, saveFromNeovim } = useRootFileDocument({ path, codec: TEXT_CODEC, write, blankWhenMissing: false })
   useEffect(() => { reload() }, [reload])
-  // The text Neovim and the disk last agreed on: what was loaded, then what each save or push stored
+  // The text Neovim and the disk last agreed on: what was loaded, then what each save or push stored.
+  // The ref serves the agent sync, the state the rendered pane
   const syncedRef = useRef<string | null>(null)
+  const [syncedText, setSyncedText] = useState<string | null>(null)
   useEffect(() => {
     if (content !== null && syncedRef.current === null) syncedRef.current = content
   }, [content])
 
-  const { trigger } = build
-  useEffect(() => { void trigger() }, [trigger])
-
-  const saveAndBuild = async (text: string) => {
+  const save = async (text: string) => {
     const stored = await saveFromNeovim(text)
     syncedRef.current = stored
-    if (!streaming) void trigger()
+    setSyncedText(stored)
+    onSaved?.(stored, streaming)
     return stored
   }
 
@@ -81,23 +106,28 @@ export function LatexSurface({ path, ompView, onViewChange, drawerOpen, onDrawer
   const insertionCount = useRef(0)
   const quoteIntoChat = (selection: NeovimSelection) => {
     onDrawerOpenChange(true)
-    setInsertion({ id: ++insertionCount.current, text: quoteSelection(path, selection) })
+    setInsertion({ id: ++insertionCount.current, text: quoteSelection(path, selection, quoteLanguage) })
   }
 
   const editor = useNeovimTerminal(
     neovim.enabled && content !== null ? { key: path, path, filename: baseName(path), content } : null,
-    saveAndBuild,
+    save,
     onClose,
     { askKeymap: true, onSelection: quoteIntoChat },
   )
-  const { editing } = useAgentSync({ path, streaming, setContent: editor.setContent, syncedRef, onRunEnd: trigger })
+  const { setContent: pushToNeovim } = editor
+  const setContent = useCallback((text: string) => {
+    const taken = pushToNeovim(text)
+    if (taken) setSyncedText(text)
+    return taken
+  }, [pushToNeovim])
+  const { editing } = useAgentSync({ path, streaming, setContent, syncedRef, onRunEnd })
 
-  const pdfFailure = build.failure?.message ?? (build.result && !build.result.ok ? "Build failed" : null)
   const [hiddenPane, setHiddenPane] = useHiddenPane()
   const splitRef = useRef<HTMLDivElement>(null)
   const layout = usePaneLayout(splitRef, hiddenPane)
 
-  // Editor and PDF share the width and line up at the top, the PDF pages scroll on below.
+  // Editor and rendered file share the width and line up at the top, rendered pages scroll on below.
   // A hidden pane stays mounted, so Neovim keeps its session
   return (
     <div className="flex h-full">
@@ -112,21 +142,15 @@ export function LatexSurface({ path, ompView, onViewChange, drawerOpen, onDrawer
                 : <NeovimEditor terminal={editor.terminal} status={editor.status} onRestart={editor.restart} className={EDITOR_PAGE} />}
             </div>
           </div>
-          <LatexSplit hidden={hiddenPane} onChange={setHiddenPane} />
-          <div className={cn("min-w-0 flex-1", hiddenPane === "pdf" && "hidden")}>
-            <LatexPdfPane
-              url={build.pdfUrl}
-              documentKey={build.pdfPath}
-              building={build.building}
-              editing={editing}
-              emptyMessage={pdfFailure}
-              pageBox={layout}
-            />
+          <WorkbenchSplit hidden={hiddenPane} onChange={setHiddenPane} renderLabel={renderLabel} />
+          <div className={cn("min-w-0 flex-1", hiddenPane === "render" && "hidden")}>
+            {renderPane({ layout, text: syncedText ?? content, loadError: loadError ? LOAD_MESSAGES[loadError] : null, editing })}
           </div>
         </div>
       </div>
       {drawerOpen && (
         <FilePanel label="Chat" bare onClose={() => onDrawerOpenChange(false)} width={DRAWER_WIDTH_PX}>
+          {view && <ErrorText className="px-4 pt-2">{chatError}</ErrorText>}
           <div className="relative min-h-0 flex-1">
             {view ? (
               <OmpSurface
@@ -138,23 +162,24 @@ export function LatexSurface({ path, ompView, onViewChange, drawerOpen, onDrawer
                 backdrop="surface"
                 insertion={insertion}
                 onInserted={() => setInsertion(null)}
+                newSessionLead={fileLead(path, cwd)}
               />
             ) : (
-              <div className={`${CENTERED_NOTE} h-full`}>{prepareError ? <ErrorText>{prepareError}</ErrorText> : "Preparing…"}</div>
+              <div className={`${CENTERED_NOTE} h-full`}>{chatError ? <ErrorText>{chatError}</ErrorText> : "Loading…"}</div>
             )}
           </div>
         </FilePanel>
       )}
-      <InTopBar name="latexAgent">
+      <InTopBar name="workbenchAgent">
         {view && <>
           <TopBarPill><OmpReasoningSelector view={view} /></TopBarPill>
           <TopBarTransparent><OmpModelSelector view={view} {...modelProps} /></TopBarTransparent>
         </>}
       </InTopBar>
-      <InTopBar name="latexBuild">
+      <InTopBar name="workbenchStatus">
         <TopBarPill>
-          <ShowPaneButton hidden={hiddenPane} onChange={setHiddenPane} />
-          <LatexBuildStatus build={build} />
+          <ShowPaneButton hidden={hiddenPane} onChange={setHiddenPane} renderLabel={renderLabel} />
+          {status}
         </TopBarPill>
       </InTopBar>
     </div>

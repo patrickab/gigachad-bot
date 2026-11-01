@@ -15,7 +15,7 @@ import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { ErrorText } from "@/components/ui/ErrorText"
 import {
   composerImageFile, isComposerOf, mergeRestoredText, offersSkills, ompModelOf, ompPrompt, ompSelectorModels, optionParts, rankByName, rankOptions, selectorModelId,
-  shellHint, SKILL_PREFIX, skillQueryOf, slashQueryOf, type ComposerCommands,
+  shellHint, SKILL_PREFIX, skillQueryOf, slashQueryOf, withLead, type ComposerCommands,
 } from "./composer"
 import { useOmp } from "./OmpProvider"
 import type { Completion, SlashCommand } from "@gigachad/chat-ui/protocol"
@@ -186,15 +186,17 @@ export function useOmpStreaming(view: OmpView): boolean {
  * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
  * - A send while the agent runs is queued by omp (follow-up, or steer per omp-web Settings), the stop button shows with an empty draft
  * - `insertion` is appended to the draft once, with focus, as soon as the composer is enabled. `onInserted` follows
+ * - `newSessionLead` leads the first message of a new session (not commands), separated by a blank line
  * - Disabled until the frame reports the composer of this tab's session
  */
-export function OmpComposer({ view, chatId, slug, shellCommands, insertion = null, onInserted }: {
+export function OmpComposer({ view, chatId, slug, shellCommands, insertion = null, onInserted, newSessionLead }: {
   view: OmpView
   chatId: string
   slug: string | null
   shellCommands: ShellCommands
   insertion?: ComposerInsertion | null
   onInserted?: () => void
+  newSessionLead?: string
 }) {
   const { state, commands, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
@@ -205,7 +207,7 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
   const complete = useComposerCompletions(state?.sessionId, commands, shellCommands.names)
 
   const { run: send, pending: preparing, error } = useAsyncAction(async (text: string, attachments: Attachment[]) => {
-    const prompt = await ompPrompt(text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
+    const prompt = await ompPrompt(view.kind === "new" ? withLead(text, newSessionLead) : text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
     sendToComposer({ type: "composer-send", sessionId, ...prompt })
   }, "Could not attach these files")
   const submit = async (text: string, attachments: Attachment[]) => {

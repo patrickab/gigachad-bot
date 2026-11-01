@@ -131,3 +131,9 @@ export async function ompPrompt(
   const hiddenContent = buildHiddenContent(await parse(documents))
   return { text: composeUserMessage(text, hiddenContent), images }
 }
+
+/** `text` led by `lead` and a blank line, for the first message of a new session. Commands (`/`, `!`) and a missing lead keep `text` as typed. */
+export function withLead(text: string, lead: string | undefined): string {
+  if (!lead || /^[/!]/.test(text.trimStart())) return text
+  return `${lead}\n\n${text}`
+}
