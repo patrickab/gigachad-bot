@@ -3,7 +3,7 @@
 import { createContext, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
-import { useThemeName } from "@/hooks/useThemeName"
+import { useFrameThemeName } from "@/hooks/useFrameThemeName"
 import type { LearnSession, LearnView } from "@/lib/domain/types"
 import type { LearnEventType, LearnFrameMessageOf, LearnStateType } from "@gigachad/chat-ui/learn-protocol"
 import { createLearnBridge, type LearnBridge, type LearnDrive, type LearnDriveMessage, type LearnFrameState } from "./bridge"
@@ -140,7 +140,7 @@ function useFrameOverSlot(frame: HTMLIFrameElement | null, slot: HTMLElement | n
 export function LearnProvider({ onOpenItem, children }: { onOpenItem: OpenItem; children: ReactNode }) {
   const { learnharnessUrl, hostAccess } = useSettings()
   const learnUrl = hostAccess ? learnharnessUrl : null
-  const theme = useThemeName()
+  const theme = useFrameThemeName()
   const [attachment, setAttachment] = useState<LearnFrameAttachment | null>(null)
   const sessions = useLearnSessions(learnUrl !== null, attachment !== null)
   const [mounted, setMounted] = useState(false)

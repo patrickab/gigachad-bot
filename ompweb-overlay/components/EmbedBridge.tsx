@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useTheme } from "@/hooks/useTheme";
+import { useTheme, type ThemePreference } from "@/hooks/useTheme";
 import { OPEN_SESSION_EVENT } from "@/lib/notification-client";
 import { onShellMessage, postToShell } from "../embed/channel";
 import { installEmbedHints } from "../embed/hints";
@@ -39,6 +39,21 @@ function openSettings() {
 }
 
 /**
+ * Apply the shell's theme at once, the shell's bloom animates the frame.
+ *
+ * - The shell's bloom reveals the frame live, upstream's own reveal would play a second, off-center one inside it
+ * - Hiding `startViewTransition` takes upstream's own no-transition path (persist, recolor, notify)
+ */
+function applyThemeAtOnce(setTheme: (theme: ThemePreference) => void, theme: ThemePreference) {
+  Object.defineProperty(document, "startViewTransition", { value: undefined, configurable: true });
+  try {
+    setTheme(theme);
+  } finally {
+    delete (document as { startViewTransition?: unknown }).startViewTransition;
+  }
+}
+
+/**
  * Connect the app to gigachad-bot's shell while it runs in its frame (`@gigachad/chat-ui/protocol`).
  *
  * - In: open a session (upstream's notification-click event), open Settings, theme, close the open dialog. New session: `custom/overrides/hooks/useKeyboardShortcuts.ts`
@@ -70,11 +85,11 @@ export function EmbedBridge() {
     const unsubscribers = [
       onShellMessage("hello", (message) => {
         forwardedChords = message.forwardKeys;
-        setTheme(message.theme);
+        applyThemeAtOnce(setTheme, message.theme);
       }),
       onShellMessage("open-session", (message) => window.dispatchEvent(new CustomEvent(OPEN_SESSION_EVENT, { detail: message.sessionId }))),
       onShellMessage("open-settings", openSettings),
-      onShellMessage("set-theme", (message) => setTheme(message.theme)),
+      onShellMessage("set-theme", (message) => applyThemeAtOnce(setTheme, message.theme)),
       onShellMessage("insets", applyShellInsets),
       onShellMessage("close-modal", closeModal),
       trackComposerArea(),

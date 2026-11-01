@@ -1,6 +1,24 @@
 // Color switches share one document, even when several workspace tabs are mounted.
 let activeTransition: ViewTransition | undefined
 
+/** Run `callback` once the running color switch shows its reveal, at once without one. Returns the cancel.
+ *
+ * - For cross-origin frames: Chrome paints their updates while it holds the page for the switch, so they recolor
+ *   only once the old snapshot (with their old colors) covers them
+ */
+export function afterColorReveal(callback: () => void): () => void {
+  const transition = activeTransition
+  if (!transition) {
+    callback()
+    return () => {}
+  }
+  let isCancelled = false
+  void transition.ready.catch(() => {}).then(() => {
+    if (!isCancelled) callback()
+  })
+  return () => { isCancelled = true }
+}
+
 /** Apply a color change through the theme bloom: the new palette reveals from the viewport center.
  *
  * - `applyColors` must update the DOM synchronously (wrap React state in `flushSync`)

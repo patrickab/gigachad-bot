@@ -7,7 +7,7 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
-import { useThemeName } from "@/hooks/useThemeName"
+import { useFrameThemeName } from "@/hooks/useFrameThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerCommands, ComposerState } from "./composer"
@@ -188,7 +188,7 @@ function FrameModalBackdrop({ onClose }: { onClose: () => void }) {
 export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl, hostAccess } = useSettings()
   const { overview, refreshOverview } = useOverviewPolling(hostAccess)
-  const theme = useThemeName()
+  const theme = useFrameThemeName()
   const [attachment, setAttachment] = useState<FrameAttachment | null>(null)
   /** View the frame (re)loaded with, null until the first omp tab attached. */
   const [loadedView, setLoadedView] = useState<OmpView | null>(null)
