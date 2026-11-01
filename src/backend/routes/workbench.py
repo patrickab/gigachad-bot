@@ -1,5 +1,6 @@
 """Workbench files on disk (`lib.workbench`) and the omp session of each, for logins with host access."""
 
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -52,21 +53,36 @@ class SessionLink(BaseModel):
 
 
 class LinkedSession(BaseModel):
-    """The active session (None: a new one) and every session the file had, first linked first."""
+    """The active session (None: a new one), every session the file had (first linked first) and those owed its new path."""
 
     session_id: str | None
     session_ids: list[str]
+    moved: list[str] = []
+
+
+class SessionNotice(BaseModel):
+    """The session `session_id` of the absolute file `path` was told where the file is now."""
+
+    path: str
+    session_id: str
 
 
 def _linked(value: object) -> LinkedSession:
-    """The stored link of one file: `{"active", "sessions"}`, or a bare session id as stored before sessions were kept."""
+    """The stored link of one file: `{"active", "sessions", "moved"}`, or a bare session id as stored before sessions were kept."""
     if isinstance(value, str):
         return LinkedSession(session_id=value, session_ids=[value])
     if not isinstance(value, dict):
         return LinkedSession(session_id=None, session_ids=[])
     sessions = [session for session in value.get("sessions", []) if isinstance(session, str)]
+    moved = [session for session in value.get("moved", []) if session in sessions]
     active = value.get("active")
-    return LinkedSession(session_id=active if isinstance(active, str) else None, session_ids=sessions)
+    return LinkedSession(session_id=active if isinstance(active, str) else None, session_ids=sessions, moved=moved)
+
+
+def _stored(linked: LinkedSession) -> dict[str, object]:
+    """The `sessions.json` value of *linked*, without an empty `moved`."""
+    stored: dict[str, object] = {"active": linked.session_id, "sessions": linked.session_ids}
+    return {**stored, "moved": linked.moved} if linked.moved else stored
 
 
 def _kind(name: str) -> Kind:
@@ -161,10 +177,9 @@ def get_session(path: str = Query(...), docs: DataStore = Depends(get_document_s
     return _linked(links.get(path) if isinstance(links, dict) else None)
 
 
-@router.put("/session")
-def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
-    """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
-    if not PurePosixPath(body.path).is_absolute():
+def _update_link(docs: DataStore, path: str, change: Callable[[LinkedSession], LinkedSession]) -> LinkedSession:
+    """Apply *change* to the link of the absolute file *path* and store it when it changed."""
+    if not PurePosixPath(path).is_absolute():
         raise HTTPException(status_code=400, detail="Path must be absolute")
     json_docs = JsonDocs(docs)
     try:
@@ -172,12 +187,27 @@ def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)
     except (StorageNotFoundError, ValueError):
         links, revision = {}, None
     links = links if isinstance(links, dict) else {}
-    current = _linked(links.get(body.path))
-    sessions = current.session_ids
-    if body.session_id is not None and body.session_id not in sessions:
-        sessions = [*sessions, body.session_id]
-    linked = LinkedSession(session_id=body.session_id, session_ids=sessions)
-    if linked != current or not isinstance(links.get(body.path), dict):
-        stored = {"active": linked.session_id, "sessions": linked.session_ids}
-        json_docs.write(WORKBENCH_SESSIONS, {**links, body.path: stored}, expected=revision)
+    current = _linked(links.get(path))
+    linked = change(current)
+    if linked != current or not isinstance(links.get(path), dict):
+        json_docs.write(WORKBENCH_SESSIONS, {**links, path: _stored(linked)}, expected=revision)
     return linked
+
+
+@router.put("/session")
+def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
+    """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
+    def activate(current: LinkedSession) -> LinkedSession:
+        sessions = current.session_ids
+        if body.session_id is not None and body.session_id not in sessions:
+            sessions = [*sessions, body.session_id]
+        return current.model_copy(update={"session_id": body.session_id, "session_ids": sessions})
+    return _update_link(docs, body.path, activate)
+
+
+@router.post("/session/informed")
+def post_session_informed(body: SessionNotice, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
+    """The session `session_id` knows where the file `path` is now, so its messages stop naming it."""
+    return _update_link(docs, body.path, lambda current: current.model_copy(
+        update={"moved": [session for session in current.moved if session != body.session_id]},
+    ))

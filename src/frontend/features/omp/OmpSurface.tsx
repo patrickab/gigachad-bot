@@ -20,9 +20,9 @@ const TOP_BAR_PX = 44
  * - Settings keep the plain layout below the top bar (`WorkspaceSurface`)
  * - A drawer inside another surface passes `topInset` 0 and `adoptTitle` false, so the tab keeps its own title
  * - `backdrop` names the shell surface behind it, the frame and the composer's fade take its color
- * - `insertion` goes into the composer draft once (`OmpComposer`), `newSessionLead` leads a new session's first message
+ * - `insertion` goes into the composer draft once (`OmpComposer`), `lead` leads the next message, `onLeadSent` follows it
  */
-export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_BAR_PX, adoptTitle = true, backdrop = "paper", insertion, onInserted, newSessionLead }: {
+export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_BAR_PX, adoptTitle = true, backdrop = "paper", insertion, onInserted, lead, onLeadSent }: {
   view: OmpView
   onViewChange: (view: OmpView) => void
   shellCommands: ShellCommands
@@ -31,7 +31,8 @@ export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_B
   backdrop?: FrameBackdrop
   insertion?: ComposerInsertion | null
   onInserted?: () => void
-  newSessionLead?: string
+  lead?: string
+  onLeadSent?: () => void
 }) {
   const { tab, isActive, setTitle } = useTab()
   const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
@@ -74,7 +75,7 @@ export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_B
         <div ref={composerRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
           <div className={`absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t ${backdrop === "surface" ? "from-surface via-surface/40" : "from-paper via-paper/40"} via-30% to-transparent`} />
           <div className="pointer-events-auto relative">
-            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} shellCommands={shellCommands} insertion={insertion} onInserted={onInserted} newSessionLead={newSessionLead} />
+            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} shellCommands={shellCommands} insertion={insertion} onInserted={onInserted} lead={lead} onLeadSent={onLeadSent} />
           </div>
         </div>
       )}

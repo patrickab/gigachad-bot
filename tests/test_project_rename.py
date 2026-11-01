@@ -49,7 +49,7 @@ def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root
     ]
     changed = {target: content for _, target, content in renamed_documents(rows, refs, "New", [])}
     assert json.loads(changed["chat/new/project.json"])["files"] == [moved, {"path": other, "name": "A"}]
-    assert json.loads(changed[WORKBENCH_SESSIONS]) == {moved: "s1", other: "s2"}
+    assert json.loads(changed[WORKBENCH_SESSIONS]) == {moved: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, other: "s2"}
     assert changed["note/links.md"].decode() == f"[p]({moved}) {other} x{paper}"
 
 
@@ -274,7 +274,7 @@ def test_rename_moves_workbench_folders_and_rewrites_paths_into_them(stores, wor
     moved_plan = workbench_root / "markdown" / "new" / "plan" / "plan.md"
     assert moved_paper.is_file() and moved_plan.is_file() and not (workbench_root / "latex" / "old").exists()
     assert sorted(projects.list_files("new")) == sorted([str(moved_paper), str(moved_plan)])
-    assert get(docs, WORKBENCH_SESSIONS) == {str(moved_paper): "s1", "/elsewhere.md": "s2"}
+    assert get(docs, WORKBENCH_SESSIONS) == {str(moved_paper): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/elsewhere.md": "s2"}
     assert get(docs, "project/new/document/board.canvas")["attachments"][0]["path"] == str(moved_plan)
 
 
@@ -359,7 +359,7 @@ def test_relocating_a_disk_path_repoints_references_without_touching_rows_and_re
     PostgresKeyRelocator(UserScope(postgres_pool, user)).relocate(old, new)
 
     assert projects.list_files("old") == [new]
-    assert get(docs, WORKBENCH_SESSIONS) == {new: {"active": "s1", "sessions": ["s1"]}, "/mnt/docs/c.md": "s2"}
+    assert get(docs, WORKBENCH_SESSIONS) == {new: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/mnt/docs/c.md": "s2"}
     assert get(docs, canvas)["attachments"][0]["path"] == new
     with postgres_pool.connection() as conn:
         value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]

@@ -55,5 +55,5 @@ function PreparedFileChat({ path, cwd, width, onClose, shellCommands }: {
   shellCommands: ShellCommands
 }) {
   const chat = useFileChat(path, cwd, undefined, () => {})
-  return <OmpChatPanel chat={chat} path={path} cwd={cwd} width={width} onClose={onClose} shellCommands={shellCommands} />
+  return <OmpChatPanel chat={chat} width={width} onClose={onClose} shellCommands={shellCommands} />
 }

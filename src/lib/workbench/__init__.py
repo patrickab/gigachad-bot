@@ -142,3 +142,22 @@ def restore_directories(moves: list[tuple[Path, Path]]) -> None:
             target.rename(source)
         except OSError:
             log.exception("Could not move workbench folder %s back to %s", target, source)
+
+
+def owe_new_paths(before: object, after: object) -> object:
+    """The session links *after* a relocation, every file whose path changed owing each of its sessions the new path (`moved`).
+
+    A session told its file's path earlier would edit the old one, so its next message names the file again
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return after
+    return {path: link if path in before else _owing_every_session(link) for path, link in after.items()}
+
+
+def _owing_every_session(link: object) -> object:
+    """A file's session link with all its sessions in `moved`, a bare session id as stored before sessions were kept too."""
+    if isinstance(link, str):
+        return {"active": link, "sessions": [link], "moved": [link]}
+    if not isinstance(link, dict):
+        return link
+    return {**link, "moved": [session for session in link.get("sessions", []) if isinstance(session, str)]}

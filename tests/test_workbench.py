@@ -342,25 +342,38 @@ def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(clie
     def link(session_id: str | None, file: str = path) -> dict:
         return client.put("/api/workbench/session", json={"path": file, "session_id": session_id}).json()
 
-    assert linked() == {"session_id": None, "session_ids": []}
-    assert link("s1") == {"session_id": "s1", "session_ids": ["s1"]}
+    assert linked() == {"session_id": None, "session_ids": [], "moved": []}
+    assert link("s1") == {"session_id": "s1", "session_ids": ["s1"], "moved": []}
     link("other", "/other.md")
 
     # Reset: a new session is active, the earlier one stays listed until the new one is linked
-    assert link(None) == {"session_id": None, "session_ids": ["s1"]}
+    assert link(None) == {"session_id": None, "session_ids": ["s1"], "moved": []}
     link("s2")
     # Picking an earlier session makes it active without reordering or duplicating it
-    assert link("s1") == {"session_id": "s1", "session_ids": ["s1", "s2"]}
-    assert linked() == {"session_id": "s1", "session_ids": ["s1", "s2"]}
-    assert client.get("/api/workbench/session", params={"path": "/other.md"}).json() == {"session_id": "other", "session_ids": ["other"]}
+    assert link("s1") == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": []}
+    assert linked() == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": []}
+    assert client.get("/api/workbench/session", params={"path": "/other.md"}).json() == {"session_id": "other", "session_ids": ["other"], "moved": []}
     assert client.put("/api/workbench/session", json={"path": "relative.md", "session_id": "s"}).status_code == 400
 
 
 def test_a_bare_session_id_stored_before_session_lists_reads_as_one_active_session(client, docs):
     docs.write_bytes(WORKBENCH_SESSIONS, json.dumps({"/a.md": "old"}).encode(), expected=None)
-    assert client.get("/api/workbench/session", params={"path": "/a.md"}).json() == {"session_id": "old", "session_ids": ["old"]}
+    assert client.get("/api/workbench/session", params={"path": "/a.md"}).json() == {"session_id": "old", "session_ids": ["old"], "moved": []}
     client.put("/api/workbench/session", json={"path": "/a.md", "session_id": "new"})
     assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/a.md": {"active": "new", "sessions": ["old", "new"]}}
+
+
+def test_sessions_of_a_moved_file_name_it_again_until_each_was_told(client, docs):
+    links = {"/b.md": {"active": "s2", "sessions": ["s1", "s2"], "moved": ["s1", "s2"]}}
+    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode(), expected=None)
+
+    # Switching sessions keeps what each still has to be told
+    assert client.put("/api/workbench/session", json={"path": "/b.md", "session_id": "s1"}).json()["moved"] == ["s1", "s2"]
+    told = client.post("/api/workbench/session/informed", json={"path": "/b.md", "session_id": "s1"}).json()
+
+    assert told == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": ["s2"]}
+    client.post("/api/workbench/session/informed", json={"path": "/b.md", "session_id": "s2"})
+    assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/b.md": {"active": "s1", "sessions": ["s1", "s2"]}}
 
 
 @pytest.mark.parametrize(("method", "url", "request_args"), [

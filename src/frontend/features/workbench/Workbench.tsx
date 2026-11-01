@@ -153,8 +153,6 @@ export function Workbench({
       {drawerOpen && (
         <OmpChatPanel
           chat={chat}
-          path={path}
-          cwd={cwd}
           width={DRAWER_WIDTH_PX}
           onClose={() => onDrawerOpenChange(false)}
           shellCommands={shellCommands}

@@ -231,7 +231,7 @@ def test_renaming_a_mounted_file_renames_it_on_disk_and_repoints_every_reference
     assert alice.projects.list_named_files(first) == [(str(target), "ideas.md")]
     assert alice.projects.list_named_files(second) == [(str(target), "ideas.md")]
     assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {
-        str(target): {"active": "s1", "sessions": ["s1"]}, "/elsewhere/notes.md": "s2",
+        str(target): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/elsewhere/notes.md": "s2",
     }
     assert json.loads(alice.docs.read_bytes("note/board.canvas")[0]) == {"attachments": [{"path": str(target)}]}
     assert alice.docs.read_bytes("note/links.md")[0] == f"[notes]({target})".encode()

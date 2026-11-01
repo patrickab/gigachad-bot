@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 
+type Sessions = { active: string | null; sessionIds: string[]; moved: string[] }
 const api = vi.hoisted(() => ({
-  loadFileSessions: vi.fn<(path: string) => Promise<{ active: string | null; sessionIds: string[] }>>(),
-  saveFileSession: vi.fn(async (_path: string, sessionId: string | null) => ({ active: sessionId, sessionIds: sessionId ? [sessionId] : [] })),
+  loadFileSessions: vi.fn<(path: string) => Promise<Sessions>>(),
+  saveFileSession: vi.fn(async (_path: string, sessionId: string | null): Promise<Sessions> => ({ active: sessionId, sessionIds: sessionId ? [sessionId] : [], moved: [] })),
+  informFileSession: vi.fn<(path: string, sessionId: string) => Promise<Sessions>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
 
@@ -11,7 +13,7 @@ import { useFileChat } from "../useFileChat"
 
 const PATH = "/data/workbench/markdown/proj/plan/plan.md"
 const CWD = "/data/workbench/markdown"
-const sessions = (active: string | null, sessionIds: string[] = active ? [active] : []) => ({ active, sessionIds })
+const sessions = (active: string | null, sessionIds: string[] = active ? [active] : [], moved: string[] = []) => ({ active, sessionIds, moved })
 
 afterEach(() => {
   cleanup()
@@ -74,5 +76,23 @@ describe("useFileChat", () => {
     const { result } = renderHook(() => useFileChat(PATH, CWD, undefined, vi.fn()))
     await waitFor(() => expect(result.current.error).toBe("offline"))
     expect(result.current.view).toBeNull()
+  })
+
+  it("names the file in a new session and once more in each session the file moved away from", async () => {
+    api.loadFileSessions.mockResolvedValueOnce(sessions("renamed", ["renamed", "told"], ["renamed"]))
+    api.informFileSession.mockResolvedValueOnce(sessions("renamed", ["renamed", "told"]))
+    const { result, rerender } = renderHook(({ view }) => useFileChat(PATH, CWD, view, vi.fn()), {
+      initialProps: { view: undefined as undefined | { kind: "session"; sessionId: string } | { kind: "new"; cwd: string } },
+    })
+    await waitFor(() => expect(result.current.lead).toBe("File: proj/plan/plan.md"))
+
+    act(() => result.current.onLeadSent())
+    expect(api.informFileSession).toHaveBeenCalledWith(PATH, "renamed")
+    await waitFor(() => expect(result.current.lead).toBeUndefined())
+
+    rerender({ view: { kind: "session", sessionId: "told" } })
+    expect(result.current.lead).toBeUndefined()
+    rerender({ view: { kind: "new", cwd: CWD } })
+    expect(result.current.lead).toBe("File: proj/plan/plan.md")
   })
 })
