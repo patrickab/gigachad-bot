@@ -142,6 +142,28 @@ fi
 omp_web_new="$(git -C "$omp_web_repo" rev-parse "$omp_web_ref^{commit}")"
 omp_web_old="$(git -C "$omp_web_dir" rev-parse HEAD 2>/dev/null || true)"
 
+# Whether the overlay's seams apply to commit $1, checked in a throwaway index: nothing is checked out or stopped.
+seams_apply() {
+    local index
+    index="$(mktemp)"
+    GIT_INDEX_FILE="$index" git -C "$omp_web_repo" read-tree "$1" \
+        && GIT_INDEX_FILE="$index" git -C "$omp_web_repo" apply --cached --check "$prod/ompweb-overlay/seams.patch"
+    local status=$?
+    rm -f "$index"
+    return $status
+}
+
+# Up, or exit as soon as the unit failed once (systemd counts its automatic restarts, a manual restart resets the count).
+omp_web_started() {
+    omp_web_up && return 0
+    if (( $(systemctl --user show -p NRestarts --value "$omp_web_unit") > 0 )); then
+        journalctl --user -u "$omp_web_unit" -n 30 --no-pager -o cat >&2 || true
+        printf "%s failed to start at %s, see the log above\n" "$omp_web_unit" "$omp_web_ref" >&2
+        exit 1
+    fi
+    return 1
+}
+
 # A new origin/main alone also restarts: run-omp-web.sh rebases the branch onto it on start. Not when its
 # auto-update already failed for this branch and origin/main (the stamp's key starts with both), nor offline.
 omp_web_behind=false
@@ -162,12 +184,17 @@ if [[ $omp_web_old != "$omp_web_new" ]] || $omp_web_behind || ! git diff --quiet
         printf "omp-web not restarted: %s omp session(s) running, run systemctl --user restart %s when they are idle\n" \
             "$running" "$omp_web_unit" >&2
     else
+        if ! seams_apply "$omp_web_new"; then
+            printf "omp-web not restarted: ompweb-overlay/seams.patch does not apply to %s (%s), it keeps serving %s\n" \
+                "$omp_web_ref" "${omp_web_new:0:7}" "${omp_web_old:0:7}" >&2
+            exit 1
+        fi
         if [[ -n $omp_web_old && $omp_web_old != "$omp_web_new" ]]; then
             git -C "$omp_web_repo" --no-pager log --oneline "$omp_web_old..$omp_web_new" || true
         fi
-        printf "Restarting %s at %s (a change rebuilds, about 2 min)\n" "$omp_web_unit" "$omp_web_ref"
+        printf "Restarting %s at %s\n" "$omp_web_unit" "$omp_web_ref"
         systemctl --user restart "$omp_web_unit"
-        if ! wait_until 600 1 omp_web_up; then
+        if ! wait_until 600 1 omp_web_started; then
             systemctl --user --no-pager status "$omp_web_unit" >&2 || true
             printf "%s did not come up within 10 min\n" "$omp_web_unit" >&2
             exit 1
