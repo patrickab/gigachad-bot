@@ -68,7 +68,7 @@ export function useCanvasAttachments({ liveRef, commit, applyChange, slug }: Can
     } catch { /* the stored name stays authoritative when rename fails */ }
   }, [liveRef, patchAttachment, renameDocument, slug])
 
-  // Attachments on this canvas follow a note the add menu renames (a project file keeps its key); they go once its delete commits, since the file is then gone for good.
+  // Attachments on this canvas follow a file the add menu renames; they go once its delete commits, since the file is then gone for good.
   const followRenamedDocument = useCallback((oldPath: string, newPath: string) => {
     editAttachments((all) => all.some((a) => a.path === oldPath) ? all.map((a) => a.path === oldPath ? { ...a, path: newPath } : a) : all)
   }, [editAttachments])

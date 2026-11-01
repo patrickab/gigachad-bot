@@ -10,6 +10,7 @@ import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
 import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
 import { fileRootTree, removeFileRoot } from "@/lib/backend/api"
+import { subscribeToChanges } from "@/lib/backend/syncStream"
 import type { FileTreeNode } from "@/lib/domain/files"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
@@ -53,6 +54,11 @@ export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions)
   const readRootTree = useCallback((signal?: AbortSignal) => fileRootTree(worktreeKeys, signal), [worktreeKeys])
   const loadRootTree = useCallback(() => readRootTree().then((result) => setRootTreeData(result.tree)), [readRootTree])
   useStartupRead("Sidebar file mounts", readRootTree, (result) => setRootTreeData(result.tree), isActive)
+
+  // A file renamed on another device keeps its place in the tree under its new name
+  useEffect(() => subscribeToChanges((event) => {
+    if (isActive && event.resource_kind === "document" && event.moved_to && event.resource_key.startsWith("/")) void loadRootTree().catch(() => {})
+  }), [isActive, loadRootTree])
 
   useEffect(() => {
     if (isActive) reloadWorktrees()

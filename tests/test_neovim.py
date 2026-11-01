@@ -323,6 +323,41 @@ async def test_write_after_the_file_changed_on_disk_saves_the_merged_text(neovim
 
 
 @requires_nvim
+async def test_rename_keeps_the_unsaved_text_and_the_next_write_merges_with_the_renamed_file(neovim_home, tmp_path):
+    saved: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        await saved.put(text)
+        return text
+
+    old, new = tmp_path / "notes.md", tmp_path / "ideas.md"
+    old.write_text("a\nb\nc\n")
+    session = NeovimSession.spawn("notes.md", "a\nb\nc\n", rows=24, cols=80, cwd=neovim_home, disk_path=old)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        session.write_input(b"Gox\x1b")
+        await _evaluates_to(session, "&modified", 1)
+
+        old.rename(new)
+        await session.rename("ideas.md", new)
+
+        state = await session._rpc.request("nvim_eval", "[expand('%:t'), join(getline(1, '$'), '|'), &modified]")
+        assert state == ["ideas.md", "a|b|c|x", 1]
+        new.write_text("A\nb\nc\n")
+        session.write_input(b":w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\n"
+        await _shows(session, "Saved, merged with the agent's edits")
+
+        # Back to the first name: the buffer left under it by the rename must not refuse it
+        await session.rename("notes.md", old)
+        assert await session._rpc.request("nvim_eval", "expand('%:t')") == "notes.md"
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
 async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_text(neovim_home, tmp_path):
     saved: asyncio.Queue[str] = asyncio.Queue()
     answer = asyncio.Event()

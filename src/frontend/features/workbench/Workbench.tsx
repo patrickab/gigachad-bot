@@ -79,6 +79,8 @@ export function Workbench({
   renderLabel, renderPane, status, onSaved, onPulled, onRunEnd, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
+  // A rename changes `path` under the running editor: its session goes on and learns the new name, it never restarts
+  const [sessionKey] = useState(path)
   const chat = useFileChat(path, cwd, ompView, onViewChange)
   const { view } = chat
   const streaming = useOmpStreaming(view ?? NO_VIEW)
@@ -110,7 +112,7 @@ export function Workbench({
   }
 
   const editor = useNeovimTerminal(
-    neovim.enabled && content !== null ? { key: path, path, filename: baseName(path), content } : null,
+    neovim.enabled && content !== null ? { key: sessionKey, path, filename: baseName(path), content } : null,
     save,
     onClose,
     { askKeymap: true, onSelection: quoteIntoChat },

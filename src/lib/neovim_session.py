@@ -11,6 +11,8 @@
   a modified one merges them and stays modified
 - `:w` of a session with a `disk_path` whose text left `base` saves the buffer merged with the disk text, and fails
   without writing when that text is not UTF-8 or the merge fails. `set_text` waits for a running `:w`
+- `rename` moves the session to the file's new name: the buffer is renamed keeping text, cursor and unsaved state,
+  and `:w` merges with the new `disk_path`
 - `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
 - Closing a session discards unsaved edits
 """
@@ -220,6 +222,19 @@ class NeovimSession:
                     self.base = agreed
                     return
         raise RuntimeError("Neovim buffer kept changing, the changed file was not applied")
+
+    async def rename(self, filename: str, disk_path: Path | None) -> None:
+        """Continue on the renamed file: the buffer takes *filename* keeping its text and modified flag, merges read *disk_path*.
+
+        Waits for a running `:w`. The private copy is dropped: Neovim refuses to `:w` a renamed buffer onto a name that exists.
+        """
+        document = self._workdir / _document_name(filename)
+        async with self._sync:
+            if document != self._document:
+                await self._lua("return _G.gigachad_rename(...)", str(document))
+                self._document.unlink(missing_ok=True)
+                self._document = document
+            self._disk_path = disk_path
 
     async def _save(self, save: SaveDocument, text: str) -> dict[str, str | bool]:
         """Store *text* merged with the edits made elsewhere since `base`, `merged` tells whether they changed it."""

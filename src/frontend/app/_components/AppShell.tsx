@@ -18,6 +18,7 @@ import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
+import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -106,6 +107,15 @@ export function AppShell() {
     tabManagerRef.current?.relocateProject(oldSlug, newSlug)
   }, [])
 
+  const handleDocumentRenamed = useCallback((oldPath: string, newPath: string) => {
+    tabManagerRef.current?.relocateDocument(oldPath, newPath)
+  }, [])
+
+  // A rename on another device moves the files this device shows, its own renames call `handleDocumentRenamed`.
+  useEffect(() => subscribeToChanges((event) => {
+    if (event.resource_kind === "document" && event.moved_to) handleDocumentRenamed(event.resource_key, event.moved_to)
+  }), [handleDocumentRenamed])
+
   useEventListener("document", "keydown", (event) => {
     if (!event.altKey || event.key !== "d") return
     event.preventDefault()
@@ -125,7 +135,7 @@ export function AppShell() {
                 <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
                   <EnabledToolsProvider>
                     <FilePanelProvider>
-                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
                     </FilePanelProvider>
                   </EnabledToolsProvider>
                 </TabManager>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useRef, useState, type ElementType, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type ElementType, type ReactNode } from "react"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 import { cn, errorMessage, toggled } from "@/lib/utils"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -10,6 +10,7 @@ import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useTabActive } from "@/contexts/TabContext"
 import type { FileBranchController } from "./useFileTree"
+import type { InlineRename } from "./useInlineRename"
 
 /** A second input of a create form, e.g. the branch a new worktree starts from. */
 interface FileTreeCreateChoice {
@@ -55,7 +56,8 @@ export interface FileTreeItem<T = unknown> {
   dragKind?: string
   multiSelect?: boolean
   onSelect?: () => void
-  onDoubleClick?: () => void
+  /** Double-click renames the row in place (`useInlineRename`). */
+  rename?: InlineRename
   onDelete?: () => void
   /** Shown under the row, e.g. an inline confirmation. */
   detail?: ReactNode
@@ -126,6 +128,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     action: Extract<FileTreeCreateAction, { onSubmit: unknown }>
   } | null>(null)
   const [actionError, setActionError] = useState("")
+  const [renameError, setRenameError] = useState<{ id: string; message: string } | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const selectionAnchorId = useRef<string | null>(null)
@@ -239,14 +242,18 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           onClick={() => controller.toggleBranch(item.id)}
           className="flex h-6 w-3 shrink-0 items-center text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
         >{disclosure}</button>}
-        <button
+        {item.rename?.editing ? <div className="flex h-6 min-w-0 flex-1 items-center gap-2">
+          {!(branch && item.onSelect) && (branch ? disclosure : <span className="w-3 shrink-0" />)}
+          <RenameInput label={item.label} rename={item.rename}
+            onError={(message) => setRenameError(message ? { id: item.id, message } : null)} />
+        </div> : <button
           aria-expanded={branch && !item.onSelect ? expanded : undefined}
           aria-current={!branch && item.isActive ? "page" : undefined}
           aria-describedby={item.description ? `${descriptionId}-${item.id}` : undefined}
           draggable={item.draggable || item.multiSelect}
           onDragStart={(event) => handleDragStart(event, item)}
           onClick={(event) => handleSelect(item, event)}
-          onDoubleClick={item.onDoubleClick}
+          onDoubleClick={item.rename?.start}
           className={cn("flex h-6 min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
             item.isActive ? "font-medium text-ink" : item.type === "root" ? "font-medium text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
         >
@@ -261,9 +268,9 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
             {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
           </span>
           {item.meta != null && <span className="ml-auto flex shrink-0 gap-1.5 text-[10px] tabular-nums">{item.meta}</span>}
-        </button>
+        </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
-        <div className={ACTIONS_CLASS}>
+        {!item.rename?.editing && <div className={ACTIONS_CLASS}>
           {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
             <action.icon className="h-3 w-3" />
           </button>)}
@@ -273,8 +280,11 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
             <Trash2 className="h-3 w-3" />
           </button>}
-        </div>
+        </div>}
       </div>
+      {renameError?.id === item.id && item.rename?.editing && <div style={{ marginLeft: paddingLeft + 20 }}>
+        <ErrorText className="px-1 py-0.5">{renameError.message}</ErrorText>
+      </div>}
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`}>
         {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1)}
@@ -375,4 +385,52 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
     </div>}
     <ErrorText className="py-1">{error}</ErrorText>
   </div>
+}
+
+/** A row's label while it is renamed: Enter saves, leaving saves a changed name, Escape keeps the old one. */
+function RenameInput({ label, rename, onError }: { label: string; rename: InlineRename; onError: (message: string) => void }) {
+  const [name, setName] = useState(label)
+  const [saving, setSaving] = useState(false)
+  // Leaving after a refused name drops it instead of asking again
+  const refused = useRef<string | null>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const tabActive = useTabActive()
+  const stop = () => {
+    onError("")
+    rename.stop()
+  }
+  useEscapeLayer(stop, tabActive)
+
+  useEffect(() => {
+    const suffixAt = rename.keepSuffix ? label.lastIndexOf(".") : -1
+    input.current?.focus()
+    input.current?.setSelectionRange(0, suffixAt > 0 ? suffixAt : label.length)
+  }, [label, rename.keepSuffix])
+
+  const save = async (leaving: boolean) => {
+    const next = name.trim()
+    if (saving) return
+    if (!next || next === label || (leaving && next === refused.current)) return stop()
+    setSaving(true)
+    try {
+      await rename.submit(next)
+      stop()
+    } catch (error) {
+      refused.current = next
+      onError(errorMessage(error, "Could not rename this item"))
+      setSaving(false)
+    }
+  }
+
+  // Read-only rather than disabled while saving, so a refused name keeps the focus for another try
+  return <input ref={input} aria-label={`Rename ${label}`} value={name} readOnly={saving} aria-busy={saving}
+    onChange={(event) => setName(event.target.value)}
+    onKeyDown={(event) => {
+      if (event.key !== "Enter") return
+      event.preventDefault()
+      void save(false)
+    }}
+    onBlur={() => { void save(true) }}
+    className="h-5 min-w-0 flex-1 rounded bg-surface-elevated px-1 text-xs text-ink outline-none ring-1 ring-ink-muted/40 transition-[box-shadow,opacity] duration-160 focus:ring-ink-muted/70 aria-busy:opacity-60 motion-reduce:transition-none"
+  />
 }

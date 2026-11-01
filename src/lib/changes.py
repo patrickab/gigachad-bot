@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from psycopg import Connection
     from psycopg_pool import ConnectionPool
 
-EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id")
+EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id", "moved_to")
 
 
 def like_prefix(key: str) -> str:
@@ -32,8 +32,13 @@ class UserScope:
     def connection(self) -> AbstractContextManager[Connection]:
         return self.pool.connection()
 
-    def record(self, connection: Connection, *, kind: str, key: str, operation: str, version: int | None = None) -> None:
-        """Insert one change row and prune the rows it supersedes. ``version`` is None for deletes, vacated sources and vault roots."""
+    def record(
+        self, connection: Connection, *, kind: str, key: str, operation: str, version: int | None = None, moved_to: str | None = None,
+    ) -> None:
+        """Insert one change row and prune the rows it supersedes. ``version`` is None for deletes, vacated sources and vault roots.
+
+        ``moved_to`` is the key a renamed resource now lives under, so devices showing it can follow.
+        """
         # Replay sends only the latest row per resource, so older rows of it carry nothing.
         # Rows another open transaction holds are skipped, not waited for: the next write of the resource prunes them.
         connection.execute(
@@ -45,11 +50,11 @@ class UserScope:
             ), pruned AS (
                 DELETE FROM changes WHERE seq IN (SELECT seq FROM superseded)
             )
-            INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
-            VALUES (%(user_id)s, %(kind)s, %(key)s, %(version)s, %(operation)s, %(device_id)s)
+            INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id, moved_to)
+            VALUES (%(user_id)s, %(kind)s, %(key)s, %(version)s, %(operation)s, %(device_id)s, %(moved_to)s)
             """,
             {"user_id": self.user_id, "kind": kind, "key": key, "version": version, "operation": operation,
-             "device_id": self.device_id},
+             "device_id": self.device_id, "moved_to": moved_to},
         )
 
 
@@ -62,9 +67,9 @@ def latest_changes(pool: ConnectionPool, user_id: UUID, since: int) -> list[dict
     with pool.connection() as connection:
         rows = connection.execute(
             """
-            SELECT seq, resource_kind, resource_key, version, device_id FROM (
+            SELECT seq, resource_kind, resource_key, version, device_id, moved_to FROM (
                 SELECT DISTINCT ON (resource_kind, resource_key)
-                    seq, resource_kind, resource_key, version, device_id
+                    seq, resource_kind, resource_key, version, device_id, moved_to
                 FROM changes
                 WHERE user_id = %s AND seq > %s
                 ORDER BY resource_kind, resource_key, seq DESC

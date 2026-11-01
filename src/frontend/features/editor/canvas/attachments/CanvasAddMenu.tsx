@@ -52,7 +52,7 @@ function FileButton({ icon, name, onClick }: { icon: ReactNode; name: string; on
  * The toolbar's "+" popover: pages, project images/PDFs/documents, an architecture window and canvases.
  * It fetches project assets itself, so chat and canvas mode share one data path. Only the outermost
  * editor offers other canvases, so a canvas window can hold a file without handing out more.
- * Documents (generated tool artifacts included) are renamed and deleted in place: a project file only takes a display name.
+ * Documents (generated tool artifacts included) are renamed and deleted in place: a rename moves the file, canvases and chats follow its new path.
  */
 export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onAddPdf, onAddDocument, onAddArchitecture, onAddNewCanvas, onAddCanvasFile, onDocumentRenamed, onDocumentDeleted }: CanvasAddMenuProps) {
   const { ref: menuRef, open, toggle, close } = useMenuPopover({ escape: false })

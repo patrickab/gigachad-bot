@@ -23,8 +23,10 @@ export function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
   const historyFile = tab.historyFile && relocate(tab.historyFile, "")
   const item = tab.workspaceItem
   const itemInProject = item?.projectSlug === oldSlug
+  // A moved project folder remounts its workbench file, so the old editor session key no longer applies.
   const movedItem = item && {
     ...item,
+    sessionKey: undefined,
     projectSlug: itemInProject ? newSlug : item.projectSlug,
     path: relocatedWorkbenchPath(itemInProject ? relocate(relocate(item.path, "project/"), "graph/") : item.path, oldSlug, newSlug),
   }
@@ -36,6 +38,16 @@ export function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
     projectSlug: tab.projectSlug === oldSlug ? newSlug : tab.projectSlug,
     workspaceItem: itemMoved ? movedItem : item,
   }
+}
+
+const FILE_ITEM_KINDS: readonly WorkspaceItem["kind"][] = ["canvas", "document", "workbench"]
+
+/** `tab` with its file item moved from `oldPath` to `newPath` after a rename, or `tab` itself. A workbench item keeps its editor session. */
+export function renamedTab(tab: Tab, oldPath: string, newPath: string): Tab {
+  const item = tab.workspaceItem
+  if (!item || item.path !== oldPath || !FILE_ITEM_KINDS.includes(item.kind)) return tab
+  const sessionKey = item.kind === "workbench" ? { sessionKey: item.sessionKey ?? oldPath } : {}
+  return { ...tab, workspaceItem: { ...item, path: newPath, ...sessionKey } }
 }
 
 /** Id of the tab that takes over when `id` closes: the one before it, else the new first tab. */

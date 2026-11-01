@@ -27,33 +27,39 @@ export interface LatexBuildState {
 
 interface InternalState extends Omit<LatexBuildState, "pdfUrl"> {
   revision: number
+  /** The file this state belongs to. */
+  path: string
 }
 
-const INITIAL: InternalState = { building: false, result: null, failure: null, pdfPath: null, revision: 0 }
+const initialState = (path: string): InternalState => ({ building: false, result: null, failure: null, pdfPath: null, revision: 0, path })
 
 /**
  * Build the `.tex` file at `path` on demand.
  *
  * - `trigger()` resolves when a build started after the call has finished, builds never overlap and extra triggers collapse into one follow-up
  * - A failed build keeps the last good PDF, an error reply is a result with `ok: false`, a failed request a `failure`
+ * - Another `path` (the file was renamed) starts clean: the old PDF is gone and an answer of an old build is dropped
  */
 export function useLatexBuild(path: string): LatexBuildState & { trigger: () => Promise<void> } {
-  const [state, setState] = useState(INITIAL)
+  const [stored, setState] = useState(() => initialState(path))
+  const state = stored.path === path ? stored : initialState(path)
+  if (stored !== state) setState(state)
 
   const run = useCallback(async () => {
-    setState((current) => ({ ...current, building: true }))
+    setState((current) => current.path === path ? { ...current, building: true } : current)
     try {
       const result = await buildLatex(path)
-      setState((current) => ({
+      setState((current) => current.path !== path ? current : {
+        path,
         building: false,
         result,
         failure: null,
         pdfPath: result.pdf_path ?? current.pdfPath,
         revision: result.ok || (result.pdf_path !== null && result.pdf_path !== current.pdfPath) ? current.revision + 1 : current.revision,
-      }))
+      })
     } catch (error) {
       const notInstalled = error instanceof ApiError && error.status === SERVICE_UNAVAILABLE
-      setState((current) => ({ ...current, building: false, failure: { message: errorMessage(error, "Build failed"), notInstalled } }))
+      setState((current) => current.path !== path ? current : { ...current, building: false, failure: { message: errorMessage(error, "Build failed"), notInstalled } })
     }
   }, [path])
   const trigger = useMemo(() => createBuildQueue(run), [run])

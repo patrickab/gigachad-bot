@@ -348,6 +348,11 @@ class ProjectStore:
 
         self._mutate_files(slug, rename)
 
+    def forget_file_names(self, path: str) -> None:
+        """Show *path* under its file name in every project that gives it a display name."""
+        for project in self._read_meta().get("projects", []):
+            self._mutate_files(project["slug"], lambda files: {f: None if f == path else name for f, name in files.items()})
+
     def _mutate_files(self, slug: str, transform: Callable[[dict[str, str | None]], dict[str, str | None]]) -> dict[str, str | None]:
         """Read, transform, and (when changed) persist a project's display names by path, in reference order."""
         self._require(slug)

@@ -1,6 +1,7 @@
 """LaTeX builds with `latexmk`.
 
 - `build` compiles one file into `<directory>/.latex-build`, one build at a time per file, without shell escape
+- `discard_build` deletes the outputs of a file that was renamed or replaced, so a build never shows or reuses another file's PDF
 - `NEW_DOCUMENT` is the content of a new `.tex` file
 """
 
@@ -203,6 +204,17 @@ def _publish(pdf: Path) -> None:
 
 def _read_log(log: Path) -> str:
     return log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+
+
+def discard_build(source: Path) -> None:
+    """Delete `<directory>/.latex-build/<stem>.*` of *source*, leaving the outputs of a sibling whose stem extends it (`a.b` for `a`)."""
+    outputs = source.parent / BUILD_DIRECTORY
+    if not outputs.is_dir():
+        return
+    longer = [f"{sibling.stem}." for sibling in source.parent.glob("*.tex") if sibling.stem.startswith(f"{source.stem}.")]
+    for output in outputs.iterdir():
+        if output.is_file() and output.name.startswith(f"{source.stem}.") and not output.name.startswith(tuple(longer)):
+            output.unlink()
 
 
 def _read_head(source: Path) -> str:

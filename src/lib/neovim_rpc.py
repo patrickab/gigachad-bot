@@ -7,6 +7,7 @@
 - `_G.gigachad_buffer_state` reports the buffer text, modified flag and change tick
 - `_G.gigachad_set_text` rewrites only the changed hunks, for edits made to the file elsewhere, keeping the modified flag
   (or setting it when the text differs from the stored file)
+- `_G.gigachad_rename` gives the buffer the file's new name, keeping its text, cursor and modified flag
 """
 
 from __future__ import annotations
@@ -91,6 +92,17 @@ function _G.gigachad_set_text(text, tick, dirty)
   if text ~= buffer_text() then apply_text(text) end
   vim.bo[buffer].modified = modified
   return true
+end
+
+-- Renames the buffer for a file that was renamed, `:w` and the saved message follow the new name.
+function _G.gigachad_rename(new_path)
+  local modified = vim.bo[buffer].modified
+  -- A buffer left under that name by an earlier rename would refuse it (E95)
+  local stale = vim.fn.bufnr(new_path)
+  if stale ~= -1 and stale ~= buffer then vim.api.nvim_buf_delete(stale, { force = true }) end
+  vim.api.nvim_buf_set_name(buffer, new_path)
+  vim.bo[buffer].modified = modified
+  path = new_path
 end
 
 -- `save` answers { text = stored text, merged = whether edits made elsewhere changed the buffer's text }.

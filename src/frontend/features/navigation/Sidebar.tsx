@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Brain, Pencil } from "lucide-react"
+import { Brain } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
-import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FileTree } from "@/components/ui/file-tree/FileTree"
 import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
+import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import { useProject } from "@/contexts/ProjectContext"
 import { useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
@@ -25,6 +25,7 @@ import { useSidebar } from "./SidebarContext"
 import { TabList } from "./TabList"
 import { useCodeMounts } from "./useCodeMounts"
 import { useDeleteChat } from "./useDeleteChat"
+import { useFileRename } from "./useFileRename"
 import { useProjectActions } from "./useProjectActions"
 import { useWorkspaceDocuments } from "./useWorkspaceDocuments"
 import { codeItems, directoryEntries, projectItems } from "./workspaceTree"
@@ -39,6 +40,8 @@ interface SidebarProps {
   onWorkbenchSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
+  /** A file was renamed: tabs showing `oldPath` follow it to `newPath`. */
+  onDocumentRenamed?: (oldPath: string, newPath: string) => void
   onNewChat?: (slug: string | null) => void
   activeCanvasPath?: string | null
   activeDocumentPath?: string | null
@@ -68,6 +71,7 @@ export function Sidebar(props: SidebarProps) {
   const fileMountController = usePathTree()
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)
+  const { renameOf } = useInlineRename()
   // A workbench item's path changes when opening moved its stored document to disk, and this device hears no change event for it.
   const workbenchPath = appMode === "workbench" ? props.activeDocumentPath : null
   const documents = useWorkspaceDocuments({
@@ -75,11 +79,23 @@ export function Sidebar(props: SidebarProps) {
   })
   const code = useCodeMounts(props)
   const { omp } = code
+  const fileRename = useFileRename({
+    // Opening a stored file in the workbench moves it to disk, so the row may hold the key it had before
+    currentPath: ({ path, name, scope }) => {
+      const shown = documents.documents[scope] ?? []
+      return shown.some((doc) => doc.path === path) ? path : shown.find((doc) => doc.name === name)?.path ?? path
+    },
+    onRenamed: async (oldPath, newPath) => {
+      props.onDocumentRenamed?.(oldPath, newPath)
+      await Promise.all([documents.refresh(), code.reloadRootTree()])
+      props.onDocumentsChanged?.()
+    },
+  })
 
   const learn = useLearnSidebar({ open: props.onItemOpen ?? (() => {}), projects, sidebar: { collapsed, toggle: toggleCollapsed } })
 
   const projectTree = projectItems({
-    ...props, ...branches, ...documents, ...projectActions, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
+    ...props, ...branches, ...documents, ...projectActions, ...fileRename, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
   })
   // Host logins see each project's learn sessions in its group.
   const items = code.hostAccess ? projectTree.map((root) => {
@@ -87,7 +103,7 @@ export function Sidebar(props: SidebarProps) {
     return project ? learn.withProjectLearn(root, project) : root
   }) : projectTree
   const codeContext = {
-    ...props, ...code, projects, pending,
+    ...props, ...code, ...fileRename, renameOf, projects, pending,
     moveToFolder: async (path: string, folder: string) => {
       await documents.moveToFolder(path, folder)
       await code.reloadRootTree()
@@ -135,7 +151,7 @@ export function Sidebar(props: SidebarProps) {
         <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
         {code.hostAccess && <>
           <div role="separator" className="my-4 border-t border-divider/50" />
-          <LearnSection section={learn.section} renameDialog={learn.renameDialog} />
+          <LearnSection section={learn.section} />
         </>}
       </nav>
       <ProviderUsage />
@@ -143,7 +159,6 @@ export function Sidebar(props: SidebarProps) {
     </>}
     <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)}
       onConfirm={(path) => code.mountThen(() => addFileRoot(path))} onClone={(url) => code.mountThen(() => cloneFileRoot(url))} />
-    <SaveAsModal {...projectActions.renameDialog} title="Rename project" icon={Pencil} submitLabel="Rename" />
     <CreateDocumentPanel open={documents.createTarget != null} onClose={() => documents.setCreateTarget(null)}
       onCreate={(name) => void documents.createDocument(name)} />
   </motion.aside>

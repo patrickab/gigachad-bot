@@ -8,12 +8,12 @@ import pytest
 import config
 from lib.architecture_workspace import ArchitectureStore, DirectoryFiles
 from lib.asset_store import AssetStore
-from lib.changes import UserScope
+from lib.changes import UserScope, latest_changes
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
+from lib.project_rename import KeyReference, PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
 from tests.conftest import create_user
@@ -333,3 +333,50 @@ def test_relocating_a_document_moves_every_reference_and_only_exact_ones(stores,
     with postgres_pool.connection() as conn:
         value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]
     assert value == {"id": "a", "path": new}
+
+
+def test_key_reference_rewrites_object_keys_values_and_links_but_not_longer_paths():
+    refs = KeyReference("/mnt/a.md", "/mnt/b.md")
+    assert refs.value({"/mnt/a.md": {"active": "s1"}, "/mnt/a.md.bak": "x", "path": "/mnt/a.md", "list": ["/mnt/a.md"]}) == {
+        "/mnt/b.md": {"active": "s1"}, "/mnt/a.md.bak": "x", "path": "/mnt/b.md", "list": ["/mnt/b.md"]}
+    assert refs.text("[a](/mnt/a.md) /mnt/a.md.bak") == "[a](/mnt/b.md) /mnt/a.md.bak"
+
+
+def test_relocating_a_disk_path_repoints_references_without_touching_rows_and_records_where_it_went(stores, postgres_pool):
+    docs, projects, _, user = stores
+    projects.create_project("Old")
+    old, new = "/mnt/docs/a.md", "/mnt/docs/b.md"
+    projects.add_file("old", old)
+    put(docs, WORKBENCH_SESSIONS, {old: {"active": "s1", "sessions": ["s1"]}, "/mnt/docs/c.md": "s2"})
+    canvas = "note/board.canvas"
+    put(docs, canvas, {"attachments": [{"id": "a", "path": old}]})
+    mutation = uuid4()
+    with postgres_pool.connection() as conn, conn.transaction():
+        conn.execute(
+            "INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value)"
+            " VALUES (%s,%s,%s,1,0,'upsert','attachment','a',%s)", (mutation, user, canvas, Jsonb({"id": "a", "path": old})))
+
+    PostgresKeyRelocator(UserScope(postgres_pool, user)).relocate(old, new)
+
+    assert projects.list_files("old") == [new]
+    assert get(docs, WORKBENCH_SESSIONS) == {new: {"active": "s1", "sessions": ["s1"]}, "/mnt/docs/c.md": "s2"}
+    assert get(docs, canvas)["attachments"][0]["path"] == new
+    with postgres_pool.connection() as conn:
+        value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]
+    assert value == {"id": "a", "path": new}
+    moved_to = {row["resource_key"]: row["moved_to"] for row in latest_changes(postgres_pool, user, 0)}
+    assert moved_to[old] == new and moved_to[new] is None
+
+
+def test_relocating_within_one_directory_records_where_the_key_went_and_across_directories_does_not(stores, postgres_pool):
+    docs, _, _, user = stores
+    for key in ("project/old/document/a.md", "project/old/document/c.md"):
+        docs.write_bytes(key, b"x")
+    relocator = PostgresKeyRelocator(UserScope(postgres_pool, user))
+
+    relocator.relocate("project/old/document/a.md", "project/old/document/b.md")
+    relocator.relocate("project/old/document/c.md", "project/other/document/c.md")
+
+    moved_to = {row["resource_key"]: row["moved_to"] for row in latest_changes(postgres_pool, user, 0)}
+    assert moved_to["project/old/document/a.md"] == "project/old/document/b.md"
+    assert moved_to["project/old/document/c.md"] is None

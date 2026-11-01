@@ -18,6 +18,7 @@ const render = (element: ReactElement) => testingRender(
 const fixtures = vi.hoisted(() => ({
   projects: [{ slug: "proj", name: "Proj", tabs: [], file_names: { "project/proj/document/plan.md": "Roadmap.md" } }, { slug: "empty", name: "Empty project", tabs: [] }],
   renameProject: vi.fn<(slug: string, name: string) => Promise<string>>(),
+  renameDocument: vi.fn<(slug: string, path: string, name: string) => Promise<{ path: string; name: string; mime: string }>>(),
   documents: [
     { path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" },
     { path: "graph/proj/backend/backend.c4", name: "backend/backend.c4", mime: "text/plain" },
@@ -82,6 +83,7 @@ vi.mock("@/contexts/ProjectContext", async () => {
       createProject: vi.fn(), deleteProject: vi.fn(),
       renameProject: fixtures.renameProject,
     }),
+    useRenameDocument: () => fixtures.renameDocument,
     useDisplayName: () => (slug: string | null, path: string) => displayName(fixtures.projects, slug, path),
   }
 })
@@ -161,6 +163,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** The contents of project "Proj" once the test expanded it. */
+function openedProject(view: RenderResult) {
+  fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+  return within(view.getByLabelText("Proj contents"))
+}
+
 function WorkspaceLabel() {
   const { tab } = useTab()
   return <output>{tab.name ?? "Initial workspace"}</output>
@@ -172,34 +180,38 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
-  it("renames with Enter, blocks duplicate submits, retains failures for retry and cancels with Escape", async () => {
+  it("renames in place with Enter, blocks duplicate submits, retains failures for retry and cancels with Escape", async () => {
     let resolveRename!: (slug: string) => void
     fixtures.renameProject.mockImplementationOnce(() => new Promise((resolve) => { resolveRename = resolve }))
     const onProjectRenamed = vi.fn()
     const view = render(<Sidebar appMode="chat" onProjectRenamed={onProjectRenamed} />)
     fireEvent.doubleClick(view.getByRole("button", { name: "Proj" }))
-    const input = view.getByRole("textbox", { name: "Rename project" })
+    const input = view.getByRole("textbox", { name: "Rename Proj" })
     expect(input).toHaveValue("Proj")
+    expect(input).toHaveFocus()
     fireEvent.change(input, { target: { value: "  New project  " } })
-    fireEvent.submit(input.closest("form")!)
+    fireEvent.keyDown(input, { key: "Enter" })
     expect(fixtures.renameProject).toHaveBeenCalledWith("proj", "New project")
-    expect(input).toBeDisabled()
-    fireEvent.submit(input.closest("form")!)
+    expect(input).toHaveAttribute("readonly")
+    fireEvent.keyDown(input, { key: "Enter" })
     expect(fixtures.renameProject).toHaveBeenCalledTimes(1)
     await act(async () => resolveRename("new-project"))
     expect(onProjectRenamed).toHaveBeenCalledWith("proj", "new-project")
-    expect(view.queryByRole("dialog", { name: "Rename project" })).not.toBeInTheDocument()
+    expect(view.queryByRole("textbox", { name: "Rename Proj" })).not.toBeInTheDocument()
 
     fixtures.renameProject.mockRejectedValueOnce(new Error("Name could not be saved"))
     fireEvent.doubleClick(view.getByRole("button", { name: "Proj" }))
-    const retry = view.getByRole("textbox", { name: "Rename project" })
+    const retry = view.getByRole("textbox", { name: "Rename Proj" })
     fireEvent.change(retry, { target: { value: "Try again" } })
-    fireEvent.submit(retry.closest("form")!)
+    fireEvent.keyDown(retry, { key: "Enter" })
     expect(await view.findByRole("alert")).toHaveTextContent("Name could not be saved")
     expect(retry).toHaveValue("Try again")
-    expect(retry).not.toBeDisabled()
+    expect(retry).not.toHaveAttribute("readonly")
+    expect(retry).toHaveFocus()
     fireEvent.keyDown(document, { key: "Escape" })
-    expect(view.queryByRole("dialog", { name: "Rename project" })).not.toBeInTheDocument()
+    expect(view.queryByRole("textbox", { name: "Rename Proj" })).not.toBeInTheDocument()
+    expect(view.queryByRole("alert")).not.toBeInTheDocument()
+    expect(view.getByRole("button", { name: "Proj" })).toBeInTheDocument()
   })
 
   it("relocates the renamed project's tabs without replacing their mounted drafts", async () => {
@@ -218,6 +230,105 @@ describe("Project navigation", () => {
     })
     expect(tabs.find((current) => current.id === other.id)).toBe(other)
     expect(draft).toHaveValue("unsaved content")
+  })
+
+  it("opens a file on click and renames it on double-click, then follows it in tabs and lists", async () => {
+    fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown" })
+    const onDocumentSelect = vi.fn()
+    const onDocumentRenamed = vi.fn()
+    const onDocumentsChanged = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onDocumentRenamed={onDocumentRenamed} onDocumentsChanged={onDocumentsChanged} />)
+    const file = await openedProject(view).findByRole("button", { name: "notes.md" })
+    fireEvent.click(file)
+    expect(onDocumentSelect).toHaveBeenCalledWith("project/proj/document/notes.md", "proj")
+    expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
+    expect(view.getByRole("button", { name: "Delete notes.md" })).toBeInTheDocument()
+
+    fireEvent.doubleClick(file)
+    const input = view.getByRole("textbox", { name: "Rename notes.md" }) as HTMLInputElement
+    expect(input).toHaveValue("notes.md")
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, "notes".length])
+    fireEvent.change(input, { target: { value: "ideas" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    await waitFor(() => expect(onDocumentRenamed).toHaveBeenCalledWith("project/proj/document/notes.md", "project/proj/document/ideas.md"))
+    expect(fixtures.renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/notes.md", "ideas")
+    await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalled())
+    expect(api.listProjectDocuments.mock.calls.length).toBeGreaterThan(1)
+    expect(api.fileRootTree.mock.calls.length).toBeGreaterThan(1)
+    expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
+  })
+
+  it("keeps the input open with the reason when the name is taken, and leaving or Escape keeps the old name", async () => {
+    fixtures.renameDocument.mockRejectedValueOnce(new Error("A document with that name already exists there"))
+    const onDocumentRenamed = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
+    fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
+    const input = view.getByRole("textbox", { name: "Rename notes.md" })
+    fireEvent.change(input, { target: { value: "board.md" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    expect(await view.findByRole("alert")).toHaveTextContent("A document with that name already exists there")
+    expect(input).toHaveValue("board.md")
+    // Leaving with the refused name drops it instead of asking again
+    fireEvent.blur(input)
+    expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
+    expect(fixtures.renameDocument).toHaveBeenCalledTimes(1)
+
+    fireEvent.doubleClick(view.getByRole("button", { name: "notes.md" }))
+    fireEvent.change(view.getByRole("textbox", { name: "Rename notes.md" }), { target: { value: "other.md" } })
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
+    expect(fixtures.renameDocument).toHaveBeenCalledTimes(1)
+    expect(onDocumentRenamed).not.toHaveBeenCalled()
+  })
+
+  it("renames a mounted file of the Code section outside any project when leaving the input", async () => {
+    fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown" })
+    const onDocumentRenamed = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
+    const code = within(view.getByLabelText("Code"))
+    fireEvent.click(await code.findByRole("button", { name: "source" }))
+    fireEvent.doubleClick(code.getByRole("button", { name: "first.md" }))
+    const input = code.getByRole("textbox", { name: "Rename first.md" })
+    fireEvent.change(input, { target: { value: "renamed.md" } })
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(onDocumentRenamed).toHaveBeenCalledWith("/source/first.md", "/source/renamed.md"))
+    expect(fixtures.renameDocument).toHaveBeenCalledWith("", "/source/first.md", "renamed.md")
+  })
+
+  it("offers no rename on folders and library PDFs", async () => {
+    fixtures.documents.push({ path: "PDFs/paper.pdf", name: "paper.pdf", mime: "application/pdf" })
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "paper.pdf" }))
+      const code = within(view.getByLabelText("Code"))
+      fireEvent.click(await code.findByRole("button", { name: "source" }))
+      fireEvent.doubleClick(code.getByRole("button", { name: "docs" }))
+      expect(view.queryByRole("textbox", { name: /^Rename / })).not.toBeInTheDocument()
+    } finally {
+      fixtures.documents.pop()
+    }
+  })
+
+  it("moves a tab showing a renamed file and keeps its workbench session", () => {
+    const manager = createRef<TabManagerHandle>()
+    testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
+    const workbench = { ...nextTab(), appMode: "workbench" as const, workspaceItem: { kind: "workbench" as const, path: "/data/workbench/latex/proj/paper/paper.tex", projectSlug: "proj" } }
+    const document = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "project/proj/document/notes.md", projectSlug: "proj" } }
+    const other = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "project/proj/document/other.md", projectSlug: "proj" } }
+    act(() => { manager.current!.openTab(workbench); manager.current!.openTab(document); manager.current!.openTab(other) })
+
+    act(() => manager.current!.relocateDocument("/data/workbench/latex/proj/paper/paper.tex", "/data/workbench/latex/proj/paper/thesis.tex"))
+    act(() => manager.current!.relocateDocument("project/proj/document/notes.md", "project/proj/document/ideas.md"))
+
+    const tabs = manager.current!.getTabs()
+    expect(tabs.find((tab) => tab.id === workbench.id)?.workspaceItem).toEqual({
+      kind: "workbench", path: "/data/workbench/latex/proj/paper/thesis.tex", projectSlug: "proj", sessionKey: "/data/workbench/latex/proj/paper/paper.tex",
+    })
+    expect(tabs.find((tab) => tab.id === document.id)?.workspaceItem?.path).toBe("project/proj/document/ideas.md")
+    expect(tabs.find((tab) => tab.id === other.id)).toBe(other)
   })
   it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
@@ -669,11 +780,11 @@ describe("Project navigation", () => {
       expect(section.getByRole("button", { name: "Optics compacting 5m" })).toBeInTheDocument()
 
       fireEvent.doubleClick(section.getByRole("button", { name: "Eigenvalues practice" }))
-      const input = view.getByRole("textbox", { name: "Rename learn session" })
+      const input = section.getByRole("textbox", { name: "Rename Eigenvalues" })
       expect(input).toHaveValue("Eigenvalues")
       fireEvent.change(input, { target: { value: "Linear algebra" } })
-      fireEvent.submit(input.closest("form")!)
-      await waitFor(() => expect(view.queryByRole("dialog", { name: "Rename learn session" })).not.toBeInTheDocument())
+      fireEvent.keyDown(input, { key: "Enter" })
+      await waitFor(() => expect(section.queryByRole("textbox", { name: "Rename Eigenvalues" })).not.toBeInTheDocument())
       expect(learn.sessions.rename).toHaveBeenCalledWith("chat_b", "Linear algebra")
 
       fireEvent.click(section.getByRole("button", { name: "Delete Pendulum" }))
@@ -814,12 +925,13 @@ describe("Project navigation", () => {
       await press("sessions-search")
       expect(view.getByRole("searchbox", { name: "Filter learn sessions" })).toHaveFocus()
       await press("rename-session")
-      expect(view.getByRole("textbox", { name: "Rename learn session" })).toHaveValue("Eigenvalues")
+      expect(view.getByRole("textbox", { name: "Rename Eigenvalues" })).toHaveValue("Eigenvalues")
       fireEvent.keyDown(document, { key: "Escape" })
-      await waitFor(() => expect(view.queryByRole("dialog", { name: "Rename learn session" })).not.toBeInTheDocument())
+      expect(view.queryByRole("textbox", { name: "Rename Eigenvalues" })).not.toBeInTheDocument()
+      expect(view.getByRole("searchbox", { name: "Filter learn sessions" })).toBeInTheDocument()
 
       fireEvent.keyDown(window, { key: "F2" })
-      expect(view.getByRole("textbox", { name: "Rename learn session" })).toHaveValue("Eigenvalues")
+      expect(view.getByRole("textbox", { name: "Rename Eigenvalues" })).toHaveValue("Eigenvalues")
       expect(setWorkspaceItem).not.toHaveBeenCalled()
       view.unmount()
 

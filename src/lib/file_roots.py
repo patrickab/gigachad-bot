@@ -195,6 +195,25 @@ class FileRoots:
         """Overwrite a file-root file in place (validated under a file root)."""
         self._root_for(path).write_text(content, encoding="utf-8")
 
+    def rename(self, path: str, new_name: str) -> Path:
+        """Rename the file-root file *path* inside its folder (validated like `write`), returning the new path.
+
+        Raises FileNotFoundError when *path* is no file, FileExistsError when *new_name* is taken and ValueError for a name with a separator.
+        """
+        if not new_name or Path(new_name).name != new_name:
+            raise ValueError(f"Invalid file name: {new_name}")
+        source = Path(path)
+        folder = self._root_for(str(source.parent))
+        target = folder / new_name
+        self._root_for(str(target))
+        entry = folder / source.name
+        if not entry.is_file():
+            raise FileNotFoundError(path)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(str(target))
+        entry.rename(target)
+        return target
+
     def resolve_wiki_content(self, content: str, source_path: str) -> str:
         """Rewrite ``![[embed]]``, ``[[link]]``, and relative images of *content* to standard markdown links to root files."""
         return resolve_wiki_content(content, source_path, self._roots, self.contains)

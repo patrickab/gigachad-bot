@@ -31,14 +31,16 @@ function prepareOnce(path: string): Promise<PreparedWorkbench> {
  *
  * - `prepared` is null until the backend answers, then holds the disk path and the chat's directory
  * - The path `onMoved` hands back counts as prepared, so the item's new path does not prepare again
+ * - A renamed file stays prepared: its item keeps the path it was opened under as `sessionKey`, and `prepared.path` is its current path
  * - `error` says why preparing `path` failed, `retry` asks again. Another path clears it
  */
-export function usePreparedWorkbench(path: string, onMoved: (path: string) => void) {
+export function usePreparedWorkbench(path: string, onMoved: (path: string) => void, sessionKey?: string) {
   const [prepared, setPrepared] = useState<PreparedWorkbench | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [requestedPath, setRequestedPath] = useState(path)
   const [attempt, setAttempt] = useState(0)
-  const ready = prepared?.path === path
+  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey) ? { ...prepared, path } : null
+  const ready = current !== null
   const reportMoved = useEffectEvent(onMoved)
 
   // An earlier path's failure must not hide this path's answer.
@@ -68,5 +70,5 @@ export function usePreparedWorkbench(path: string, onMoved: (path: string) => vo
     setFailure(null)
     setAttempt((count) => count + 1)
   }
-  return { prepared: ready ? prepared : null, error: ready ? null : failure, retry }
+  return { prepared: current, error: ready ? null : failure, retry }
 }

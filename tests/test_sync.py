@@ -87,8 +87,21 @@ def test_insert_notifies_once_with_metadata_only(postgres_pool, listener):
         "resource_key": "notes/a.md",
         "version": 3,
         "device_id": str(device_id),
+        "moved_to": None,
     }
     assert list(listener.notifies(timeout=0.5)) == []
+
+
+def test_a_rename_records_where_the_resource_went_and_replays_it(postgres_pool):
+    user_id = create_user(postgres_pool, "alice@example.test")
+    scope = UserScope(postgres_pool, user_id)
+    with postgres_pool.connection() as connection, connection.transaction():
+        scope.record(connection, kind="document", key="/a/old.md", operation="move", moved_to="/a/new.md")
+        scope.record(connection, kind="document", key="/a/new.md", operation="move")
+
+    assert [(row["resource_key"], row["moved_to"]) for row in latest_changes(postgres_pool, user_id, 0)] == [
+        ("/a/old.md", "/a/new.md"), ("/a/new.md", None),
+    ]
 
 
 def test_replay_returns_rows_after_since_in_seq_order(postgres_pool):
@@ -239,6 +252,7 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "resource_key": "old.md",
         "version": 1,
         "device_id": None,
+        "moved_to": None,
     }
     assert json.loads(live["data"]) == {
         "seq": live_seq,
@@ -246,6 +260,7 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "resource_key": "new.md",
         "version": 2,
         "device_id": None,
+        "moved_to": None,
     }
 
 

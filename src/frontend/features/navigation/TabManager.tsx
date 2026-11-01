@@ -7,7 +7,7 @@ import { TabContext, showingItem, type Tab, type TabActions, type TabContextValu
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
-import { TabStripContext, nextTab, relocatedTab, tabAfterClosing, tabLabel, type TabStripValue } from "./tabs"
+import { TabStripContext, nextTab, relocatedTab, renamedTab, tabAfterClosing, tabLabel, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -28,6 +28,8 @@ export interface TabManagerHandle {
   relocateHistories: (moves: ReadonlyMap<string, string>) => void
   /** Point every tab of project `oldSlug` at `newSlug`, its content then reloads from the moved keys. */
   relocateProject: (oldSlug: string, newSlug: string) => void
+  /** Point every tab showing the file `oldPath` at `newPath`, a renamed file keeps its editor session. */
+  relocateDocument: (oldPath: string, newPath: string) => void
 }
 
 /** A tab's latest activity description, and whether the switcher shows a spinner for it. */
@@ -111,6 +113,9 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     },
     relocateProject: (oldSlug, newSlug) => {
       setTabs((current) => current.map((tab) => relocatedTab(tab, oldSlug, newSlug)))
+    },
+    relocateDocument: (oldPath, newPath) => {
+      setTabs((current) => current.map((tab) => renamedTab(tab, oldPath, newPath)))
     },
   }), [tabs, activeTab, updateTab, setActiveTab])
 

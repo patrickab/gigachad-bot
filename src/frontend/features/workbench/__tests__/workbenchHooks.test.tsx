@@ -118,6 +118,19 @@ describe("usePreparedWorkbench", () => {
     expect(result.current.prepared?.path).toBe(a)
     expect(result.current.error).toBeNull()
   })
+
+  it("stays prepared under the path the item was opened with when the file is renamed", async () => {
+    const opened = "/data/workbench/markdown/renamed/plan/plan.md"
+    const renamed = "/data/workbench/markdown/renamed/plan/roadmap.md"
+    api.prepareWorkbench.mockResolvedValueOnce({ path: opened, cwd: CWD })
+    const { result, rerender } = renderHook(({ path, sessionKey }) => usePreparedWorkbench(path, vi.fn(), sessionKey), { initialProps: { path: opened, sessionKey: undefined as string | undefined } })
+    await waitFor(() => expect(result.current.prepared?.path).toBe(opened))
+
+    rerender({ path: renamed, sessionKey: opened })
+    expect(result.current.prepared).toEqual({ path: renamed, cwd: CWD })
+    expect(result.current.error).toBeNull()
+    expect(api.prepareWorkbench).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("useAgentSync", () => {

@@ -29,6 +29,7 @@ interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number) => void
   onOpenProject: (slug: string) => void
   onProjectRenamed: (oldSlug: string, newSlug: string) => void
+  onDocumentRenamed: (oldPath: string, newPath: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   focus: ChatFocus
@@ -40,7 +41,7 @@ export function TabContent(props: TabContentProps) {
 }
 
 /** The tab's sidebar, surfaces and the top bar whose slots they render their controls into. */
-function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, focus }: TabContentProps) {
+function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentRenamed, onNewChat, onOpenItem, focus }: TabContentProps) {
   const { tab, isActive, setModeLabel, updateConfig } = useTab()
   const { projectSlug, config, appMode } = tab
   const { researchEnabled } = useEnabledTools()
@@ -93,6 +94,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
         {...canvas.sidebarProps}
         onProjectSelect={onOpenProject}
         onProjectRenamed={onProjectRenamed}
+        onDocumentRenamed={onDocumentRenamed}
         onNewChat={onNewChat}
         onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
         onWorkbenchSelect={opensWorkbench ? (path, scope) => onOpenItem({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: scope || null }) : undefined}

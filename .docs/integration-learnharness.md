@@ -127,7 +127,7 @@ Every LearnHarness v0.4.0 feature, and where it lives in learn mode: upstream's 
 | Cheap and vision tiers, every other setting | learn header Settings → `open-settings` → upstream's dialog | yes |
 | Stats bar: context · cost, per-turn popover | upstream's, visible in the frame | yes |
 | Title display | tab and row title from `session-meta` | yes |
-| Rename (title bar click, sidebar inline, F2) | row pencil, double-click, rename dialog; F2 in the shell or in the frame (`chrome-key`) | yes |
+| Rename (title bar click, sidebar inline, F2) | row pencil, double-click, inline rename in the row; F2 in the shell or in the frame (`chrome-key`) | yes |
 | Plan chip → full-plan popup | row menu "Plan" (when `session-plan` says so) → `open-panel plan` → upstream's PlanPopup | yes |
 | Coverage ring + popover, session menu coverage block + Extract now | row menu "Coverage" → card with upstream's `CoverageRingDetail` and `CoverageMenuBlock` | yes |
 | Phase chip / Practice tag | row chip | yes |

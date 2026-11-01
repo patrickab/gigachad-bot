@@ -4,7 +4,6 @@ import { useState, useRef, type ElementType, type ReactNode } from "react"
 import { Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog } from "./Dialog"
-import { ErrorText } from "./ErrorText"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 
 interface SaveAsModalProps {
@@ -17,19 +16,15 @@ interface SaveAsModalProps {
   placeholder?: string
   /** Rendered between the header and the input. */
   beforeInput?: ReactNode
-  initialName?: string
-  pending?: boolean
-  error?: string
-  submitLabel?: string
 }
 
 /** Modal with one text input; Enter submits the trimmed value. */
-export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput, initialName = "", pending = false, error, submitLabel }: SaveAsModalProps) {
-  const [name, setName] = useState(initialName)
+export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput }: SaveAsModalProps) {
+  const [name, setName] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Reset to the supplied name on each opening.
-  useResetOnOpen(open, () => setName(initialName))
+  // Start empty on each opening.
+  useResetOnOpen(open, () => setName(""))
 
   return (
     <Dialog open={open} onClose={onClose} icon={icon} title={title} initialFocusRef={inputRef}>
@@ -37,7 +32,7 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (name.trim() && !pending) onSave(name.trim())
+          if (name.trim()) onSave(name.trim())
         }}
         className="px-5 pb-5"
       >
@@ -45,7 +40,6 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
           ref={inputRef}
           type="text"
           aria-label={title}
-          disabled={pending}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={placeholder}
@@ -57,8 +51,6 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
           autoComplete="off"
           spellCheck={false}
         />
-        <ErrorText className="mt-2">{error}</ErrorText>
-        {submitLabel && <button type="submit" disabled={pending || !name.trim()} className="mt-3 rounded-md px-3 py-1.5 text-sm text-ink hover:bg-hover disabled:opacity-40">{pending ? "Renaming…" : submitLabel}</button>}
       </form>
     </Dialog>
   )

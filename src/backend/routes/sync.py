@@ -6,7 +6,9 @@ streaming live rows as they are committed. Event data is JSON::
 
     event: change
     data: {"seq": 41, "resource_kind": "document", "resource_key": "notes/a.md",
-           "version": 3, "device_id": "0f1e...-uuid" | null}
+           "version": 3, "device_id": "0f1e...-uuid" | null, "moved_to": null}
+
+`moved_to` names the key a renamed resource now lives under (on the vacated old key's event), so a device showing the old key can follow.
 
 Without `since` (a fresh page) nothing is replayed: the first event is the user's current
 head, `event: cursor` with `data: {"seq": 41}`, taken after the live subscription, and only

@@ -14,6 +14,8 @@ export interface WorkspaceItem {
   path: string
   projectSlug: string | null
   rootFile?: boolean
+  /** The path a `workbench` item was opened under, kept when the file is renamed so its editor session goes on. */
+  sessionKey?: string
   /** What an `omp` item shows in omp-web's frame, and the chat session of a `workbench` item. */
   omp?: OmpView
   /** What a `learn` item shows in LearnHarness's frame. */

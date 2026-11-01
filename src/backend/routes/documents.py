@@ -9,7 +9,7 @@ Where a document lives, how a move repoints its references and how a rename name
 """
 
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -293,9 +293,33 @@ def rename_document(
     req: RenameDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
+    assets: AssetStore = Depends(get_asset_store),
+    roots: FileRoots = Depends(get_file_roots),
+    relocate: Relocate = Depends(get_relocate),
+    references: References = Depends(get_references),
 ):
-    """Rename a document: a project file only changes the name it is shown under, a note moves to its new name."""
+    """Rename a stored document or a file-root file in place, repointing every reference to it.
+
+    - A stored file or note takes the new key, a mounted or workbench file is renamed on disk where saving is allowed
+    - Chats, canvases, project file lists, workbench sessions and other projects follow the new key or path
+    - An existing file of that name answers 409, a path the roots refuse 403, a PDF's library copy follows its name
+    """
+    scope = DocumentScope(req.slug)
+    errors = (
+        *_DOCUMENT_ERRORS,
+        (StorageConflictError, 409, None),
+        (FileNotFoundError, 404, _DOCUMENT_NOT_FOUND),
+        (PermissionError, 403, "This file cannot be renamed"),
+        (ValueError, 403, None),
+        (OSError, 400, None),
+    )
+    if Path(req.path).is_absolute():
+        with http_errors(*errors):
+            target = document_service.rename_on_disk(store, relocate, roots, scope, req.path, req.name)
+        document_service.follow_library_pdf(assets, references, Path(req.path).name, target.name, target.read_bytes)
+        return file_meta(str(target), name=target.name)
     key = _valid_key(req.path)
-    with http_errors(*_DOCUMENT_ERRORS):
-        path, name = document_service.rename(store, docs, DocumentScope(req.slug), key, req.name)
-    return file_meta(path, name=name)
+    with http_errors(*errors):
+        destination, name = document_service.rename(store, docs, relocate, scope, key, req.name)
+    document_service.follow_library_pdf(assets, references, PurePosixPath(key).name, name, lambda: docs.read_bytes(destination)[0])
+    return file_meta(destination, name=name)

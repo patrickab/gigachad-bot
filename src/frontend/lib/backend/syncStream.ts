@@ -9,6 +9,8 @@ export interface ChangeEvent {
   resource_key: string
   version: number | null
   device_id: string | null
+  /** On the vacated key of a renamed resource: the key it now lives under. */
+  moved_to?: string | null
 }
 
 type Listener = (event: ChangeEvent) => void

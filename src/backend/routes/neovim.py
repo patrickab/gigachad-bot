@@ -7,8 +7,9 @@ bytes both ways, text frames carry JSON control messages:
   (a string `base_content` opens a read-only left diff buffer against the editable document, `ask_keymap`
   maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
   `{"type": "saved", "id", "content" | "error"}`, `{"type": "set_content", "content"}` (the file changed on disk,
-  the buffer takes the text without moving the cursor, merged into unsaved edits, after a running `:w`) and
-  `{"type": "background", "light"}` (the theme behind the terminal, Neovim's 'background' follows it)
+  the buffer takes the text without moving the cursor, merged into unsaved edits, after a running `:w`),
+  `{"type": "renamed", "path", "filename"}` (the file was renamed, the session continues on the new name with its
+  unsaved edits) and `{"type": "background", "light"}` (the theme behind the terminal, Neovim's 'background' follows it)
 - server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "yank", "content"}`,
   `{"type": "selection", "start_line", "end_line", "text"}` (1-based inclusive lines),
   `{"type": "exit", "code"}` when `nvim` quits
@@ -142,8 +143,15 @@ async def _set_content(session: NeovimSession, content: str) -> None:
         log.warning("Neovim could not take the changed file: %s", exc)
 
 
-async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves) -> None:
-    # `set_text` waits for a running `:w`, whose answer arrives on this socket, so it runs beside the relay
+async def _rename(session: NeovimSession, roots: FileRoots, path: str, filename: str) -> None:
+    try:
+        await session.rename(filename, disk_file(roots, path))
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        log.warning("Neovim could not take the renamed file: %s", exc)
+
+
+async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves, roots: FileRoots) -> None:
+    # `set_text` and `rename` wait for a running `:w`, whose answer arrives on this socket, so they run beside the relay
     updates: set[asyncio.Task] = set()
     try:
         while True:
@@ -162,6 +170,10 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
                 update = asyncio.create_task(_set_content(session, control["content"]))
                 updates.add(update)
                 update.add_done_callback(updates.discard)
+            elif control.get("type") == "renamed" and isinstance(control.get("path"), str) and isinstance(control.get("filename"), str):
+                update = asyncio.create_task(_rename(session, roots, control["path"], control["filename"]))
+                updates.add(update)
+                update.add_done_callback(updates.discard)
             elif control.get("type") == "background" and isinstance(control.get("light"), bool):
                 try:
                     await session.set_background(control["light"])
@@ -172,12 +184,12 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
             update.cancel()
 
 
-async def _run(websocket: WebSocket, session: NeovimSession, *, ask_keymap: bool) -> None:
+async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *, ask_keymap: bool) -> None:
     """Relay until `nvim` exits, the browser leaves, or the save hook cannot be installed."""
     saves = _BrowserSaves(websocket)
     relays = [
         asyncio.create_task(_relay_output(websocket, session)),
-        asyncio.create_task(_relay_input(websocket, session, saves)),
+        asyncio.create_task(_relay_input(websocket, session, saves, roots)),
     ]
     # Input flows while connecting, so a startup prompt from the user's config can be answered.
     connecting = asyncio.create_task(
@@ -224,7 +236,7 @@ async def neovim_session(
         disk_path=disk_file(roots, opening.path),
     )
     try:
-        await _run(websocket, session, ask_keymap=opening.ask_keymap)
+        await _run(websocket, session, roots, ask_keymap=opening.ask_keymap)
     finally:
         await session.close()
         if websocket.client_state == WebSocketState.CONNECTED:

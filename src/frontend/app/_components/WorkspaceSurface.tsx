@@ -73,6 +73,7 @@ interface Surface {
  * - A stored document moves to disk first, the item takes its new path and `onDocumentsChanged` reloads the lists that showed its key
  * - Preparing shows a quiet loading note, a failure its reason and a retry
  * - A Markdown preview's `#file:` link opens its target in this tab, in the workbench or the document editor
+ * - A rename gives the item its new path and keeps the editor mounted under the path the item was opened with (`sessionKey`)
  */
 function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
   item: WorkspaceItem
@@ -88,7 +89,7 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
   const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => {
     onItemChange({ ...item, path })
     onDocumentsChanged()
-  })
+  }, item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
   if (!prepared) return <div className="pt-11"><LoadingPlaceholder /></div>
   const props = {
@@ -103,9 +104,10 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
     modelProps,
   }
   const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
+  const sessionKey = item.sessionKey ?? prepared.path
   return workbenchKindOf(prepared.path) === "latex"
-    ? <LatexWorkbench key={prepared.path} {...props} />
-    : <MarkdownWorkbench key={prepared.path} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />
+    ? <LatexWorkbench key={sessionKey} {...props} />
+    : <MarkdownWorkbench key={sessionKey} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />
 }
 
 /** The top bar and the surface of the tab's current mode. */

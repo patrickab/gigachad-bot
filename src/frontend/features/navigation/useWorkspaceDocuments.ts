@@ -194,7 +194,7 @@ export function useWorkspaceDocuments({
   }
 
   return {
-    documents, notes, createAndOpen, selectDocument, createFile, canCreateLatex: !!onWorkbenchSelect, move, moveToFolder, remove, importFiles,
+    documents, notes, refresh, createAndOpen, selectDocument, createFile, canCreateLatex: !!onWorkbenchSelect, move, moveToFolder, remove, importFiles,
     uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
   }
 }

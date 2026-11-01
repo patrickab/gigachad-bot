@@ -4,12 +4,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { Activity, Dumbbell, Ellipsis, GraduationCap, Network, Pencil, Plus, Search, Settings2 } from "lucide-react"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { usePathTree } from "@/components/ui/file-tree/useFileTree"
+import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { PillTabs } from "@/components/ui/PillTabs"
-import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { useTab } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useStoredString } from "@/hooks/useStoredString"
@@ -148,21 +147,10 @@ export interface LearnSectionState {
   error: string | null
 }
 
-/** Props of the learn session rename `SaveAsModal`. */
-export interface LearnRenameDialog {
-  open: boolean
-  onClose: () => void
-  initialName?: string
-  pending: boolean
-  error: string
-  onSave: (title: string) => void
-}
-
 export interface LearnSidebar {
   /** Project root `root` with an action starting a session that joins the project, and a "learn" folder of its sessions when it has any. */
   withProjectLearn: (root: FileTreeItem<string>, project: { slug: string; name: string }) => FileTreeItem<string>
   section: LearnSectionState
-  renameDialog: LearnRenameDialog
 }
 
 /** The shell sidebar the learn section sits in: LearnHarness's ⌘B toggles it, ⌘⇧F opens it on the filter. */
@@ -190,7 +178,7 @@ function SessionMenu({ entries, onClose }: { entries: readonly { label: string; 
  * The learn parts of the sidebar, LearnHarness's own sidebar and title bar being hidden in the frame.
  *
  * - Session rows open in the current tab and show the hidden chrome's chip: the row's state ("waiting 5m"), else the
- *   title bar's practice tag or phase. They rename on double-click, their pencil or F2 (also pressed in the frame), delete
+ *   title bar's practice tag or phase. They rename in place on double-click, their pencil or F2 (also pressed in the frame), delete
  *   with undo (Knowledge stays), and their menu holds the rest: upstream's Plan popup, coverage with "Extract now",
  *   Markdown export, delete with the graph traces
  * - The Learn section starts teaching and practice sessions, opens the knowledge graph and LearnHarness's settings,
@@ -217,16 +205,14 @@ export function useLearnSidebar({ open, projects, sidebar }: {
   const [focusRequest, setFocusRequest] = useState(0)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [renameTarget, setRenameTarget] = useState<LearnSession | null>(null)
-  const { run: rename, pending: renamePending, error: renameError, setError: setRenameError } = useAsyncAction(async (target: LearnSession, title: string) => {
-    await sessions.rename(target.id, title)
-    setRenameTarget(null)
-  }, "Could not rename this session")
+  const { renameOf, start: startRenaming } = useInlineRename()
 
   const shown = tab.workspaceItem?.kind === "learn" ? tab.workspaceItem.learn : undefined
   const activeSessionId = shown?.kind === "session" ? shown.sessionId : null
   const listed = sessions.sessions.filter((session) => !pending(`learn:${session.id}`))
   const activeSession = sessions.sessions.find((session) => session.id === activeSessionId) ?? null
+  // Filtering searches every session, a project's sessions name their project. The walked match (else the first) is highlighted.
+  const matches = query === null ? [] : filterSessions(listed, query, kind)
 
   // This tab's session was deleted: go home like upstream's sidebar does.
   const deleted = activeSessionId !== null && sessions.missing.has(activeSessionId)
@@ -234,9 +220,12 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     if (deleted) setWorkspaceItem(learnItem({ kind: "home" }, tab.projectSlug))
   }, [deleted, setWorkspaceItem, tab.projectSlug])
 
+  // A session shows in its project's learn folder, and in this section when it has no project or the filter matches it.
+  const renameKey = (session: LearnSession, place: "project" | "section") => `learn:${place}:${session.id}`
   const startRename = (session: LearnSession) => {
-    setRenameError("")
-    setRenameTarget(session)
+    if (sidebar.collapsed) sidebar.toggle()
+    const inSection = session.project_slug === null || matches.some((match) => match.id === session.id)
+    startRenaming(renameKey(session, inSection ? "section" : "project"))
   }
 
   const openFilter = () => {
@@ -280,16 +269,17 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     { label: "Delete with graph traces", run: () => schedule(`learn:${session.id}`, `${session.title} and its graph traces`, () => sessions.remove(session.id, "delete-nodes")) },
   ]
 
-  const sessionRow = (session: LearnSession, options: { prefix?: string; walked?: boolean } = {}): FileTreeItem<string> => {
+  const sessionRow = (session: LearnSession, options: { place: "project" | "section"; prefix?: string; walked?: boolean }): FileTreeItem<string> => {
     const chip = sessionChip(session, metas[session.id])
+    const key = renameKey(session, options.place)
     return {
       id: `learn:${session.id}`, label: session.title, prefix: options.prefix, type: "element",
       isActive: options.walked ?? session.id === activeSessionId,
       meta: chip ? <span className="text-ink-faint">{chip}</span> : undefined,
       onSelect: () => open(learnItem({ kind: "session", sessionId: session.id }, session.project_slug)),
-      onDoubleClick: () => startRename(session),
+      rename: renameOf(key, (title) => sessions.rename(session.id, title)),
       actions: [
-        { label: `Rename ${session.title}`, icon: Pencil, onClick: () => startRename(session) },
+        { label: `Rename ${session.title}`, icon: Pencil, onClick: () => startRenaming(key) },
         { label: `More actions for ${session.title}`, icon: Ellipsis, onClick: () => setMenuFor((current) => current === session.id ? null : session.id) },
       ],
       onDelete: () => schedule(`learn:${session.id}`, session.title, () => sessions.remove(session.id)),
@@ -301,18 +291,16 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     const own = listed.filter((session) => session.project_slug === project.slug)
     const action = { label: `New learn session in ${project.name}`, icon: GraduationCap, onClick: () => open(learnItem({ kind: "new" }, project.slug), true) }
     const folder: FileTreeItem<string> = {
-      id: `project:${project.slug}:learn`, label: "learn", type: "folder", children: own.map((session) => sessionRow(session)),
+      id: `project:${project.slug}:learn`, label: "learn", type: "folder", children: own.map((session) => sessionRow(session, { place: "project" })),
     }
     return { ...root, actions: [...root.actions ?? [], action], children: own.length > 0 ? [...root.children ?? [], folder] : root.children }
   }
 
   const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name
-  // Filtering searches every session, a project's sessions name their project. The walked match (else the first) is highlighted.
-  const matches = query === null ? [] : filterSessions(listed, query, kind)
   const walked = matches.length === 0 ? null : (walk ?? 0) % matches.length
   const rows = query !== null
-    ? matches.map((session, index) => sessionRow(session, { prefix: projectName(session.project_slug), walked: index === walked }))
-    : listed.filter((session) => session.project_slug === null).map((session) => sessionRow(session))
+    ? matches.map((session, index) => sessionRow(session, { place: "section", prefix: projectName(session.project_slug), walked: index === walked }))
+    : listed.filter((session) => session.project_slug === null).map((session) => sessionRow(session, { place: "section" }))
   const agents = activity?.items ?? []
   const agentsFolder: FileTreeItem<string>[] = agents.length === 0 ? [] : [{
     id: "learn-activity", label: "background agents", type: "folder",
@@ -364,14 +352,6 @@ export function useLearnSidebar({ open, projects, sidebar }: {
       openSettings: drive === "mismatch" ? undefined : () => showInFrame({ type: "open-settings", section: null }),
       error: actionError ?? sessions.error,
     },
-    renameDialog: {
-      open: renameTarget != null,
-      onClose: () => { if (!renamePending) setRenameTarget(null) },
-      initialName: renameTarget?.title,
-      pending: renamePending,
-      error: renameError,
-      onSave: (title: string) => { if (renameTarget && !renamePending) void rename(renameTarget, title) },
-    },
   }
 }
 
@@ -389,8 +369,8 @@ function LearnFilter({ filter }: { filter: LearnFilterState }) {
   </div>
 }
 
-/** The sidebar's Learn section and the learn session rename dialog. */
-export function LearnSection({ section, renameDialog }: { section: LearnSectionState; renameDialog: LearnRenameDialog }) {
+/** The sidebar's Learn section. */
+export function LearnSection({ section }: { section: LearnSectionState }) {
   const controller = usePathTree()
   const filtering = section.filter !== null
   return <>
@@ -416,6 +396,5 @@ export function LearnSection({ section, renameDialog }: { section: LearnSectionS
     />
     {section.filter && <LearnFilter filter={section.filter} />}
     <ErrorText className="px-2 py-1">{section.error}</ErrorText>
-    <SaveAsModal {...renameDialog} title="Rename learn session" icon={Pencil} submitLabel="Rename" />
   </>
 }

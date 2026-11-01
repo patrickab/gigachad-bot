@@ -7,14 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
+from lib import latex
 from lib.asset_store import AssetStore
-from lib.data_store import DataStore, validate_key, write_text
+from lib.attachment_materialize import sync_library_pdf
+from lib.data_store import DataStore, InvalidStorageKey, validate_key, write_text
+from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
-from lib.references import Released, is_project_document
-from lib.storage_namespace import GRAPH, NOTE, PDFS, project_attachment_prefix, project_document, project_document_prefix
+from lib.references import References, Released, is_project_document
+from lib.storage_namespace import (
+    GRAPH, NOTE, PDFS, library_pdf, project_attachment_prefix, project_document, project_document_prefix,
+)
 
 Relocate = Callable[[str, str], None]
-"""Point every reference to a stored key at a new key or disk path, then rekey or delete it (`PostgresKeyRelocator.relocate`)."""
+"""Point every reference to a stored key or disk path at its new key or path, then rekey or delete the stored one (`PostgresKeyRelocator.relocate`)."""
 
 
 class DocumentNotFound(Exception):
@@ -163,30 +168,97 @@ def move(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, sou
     return destination
 
 
-def rename(store: ProjectStore, docs: DataStore, scope: DocumentScope, key: str, name: str) -> tuple[str, str]:
-    """Rename *key* of *scope* to *name*, keeping its suffixes, returning its key and the name it is shown under.
+def renamed(file_name: str, name: str) -> str:
+    """*name* as the new name of the file *file_name*, which keeps its suffixes unless *name* ends in its last one.
 
-    A project file keeps its key and only takes *name* as display name, a note moves to the key *name* gives it.
+    Raises InvalidDocumentName for an empty name, a path separator or a control character.
+    """
+    name = name.strip()
+    if not name:
+        raise InvalidDocumentName("Document name is required")
+    if "/" in name or "\\" in name or name in {".", ".."} or any(ord(character) < 32 for character in name):
+        raise InvalidDocumentName("A file name cannot hold a path separator")
+    suffix = Path(file_name).suffix
+    if suffix and not name.lower().endswith(suffix.lower()):
+        name += "".join(Path(file_name).suffixes)
+    return name
+
+
+def is_name_taken(store: ProjectStore, scope: DocumentScope, path: str, name: str) -> bool:
+    """Whether another file of *scope*'s project is shown as *name*, ignoring case."""
+    if not scope.slug:
+        return False
+    return any(other != path and shown.lower() == name.lower() for other, shown in store.list_named_files(scope.slug))
+
+
+def rename(store: ProjectStore, docs: DataStore, relocate: Relocate, scope: DocumentScope, key: str, name: str) -> tuple[str, str]:
+    """Rename the stored document *key* of *scope* to *name* (see `renamed`), returning its new key and file name.
+
+    - The key moves, so its file name is the shown name, and a display name any project gave it is dropped
+    - Chats, canvases and projects referencing the key follow it, an existing document of that name raises DocumentNameConflict
+    - Only notes and project documents can be renamed: anything else raises InvalidDocumentName
     """
     if not scope.owns(store, key):
         raise DocumentNotFound(key)
-    name = Path(name).name.strip()
-    if not name:
-        raise InvalidDocumentName("Document name is required")
-    suffix = "".join(Path(PurePosixPath(key).name).suffixes)
-    if suffix and not name.endswith(suffix):
-        name += suffix
-    if scope.slug:
-        store.set_file_name(scope.slug, key, name)
-        return key, name
+    if not (under(key, NOTE) or is_project_document(key)):
+        raise InvalidDocumentName("This file cannot be renamed")
     if not docs.is_file(key):
         raise DocumentNotFound(key)
-    destination = scope.key_for(name)
+    destination = str(PurePosixPath(key).with_name(renamed(PurePosixPath(key).name, name)))
+    try:
+        validate_key(destination)
+    except InvalidStorageKey as exc:
+        raise InvalidDocumentName("Invalid file name") from exc
     if destination != key:
-        if docs.exists(destination):
+        if docs.exists(destination) or is_name_taken(store, scope, key, PurePosixPath(destination).name):
             raise DocumentNameConflict(destination)
-        docs.move(key, destination)
-    return destination, name
+        relocate(key, destination)
+    store.forget_file_names(destination)
+    return destination, PurePosixPath(destination).name
+
+
+def rename_on_disk(store: ProjectStore, relocate: Relocate, roots: FileRoots, scope: DocumentScope, path: str, name: str) -> Path:
+    """Rename the file at the absolute *path* inside its folder (see `renamed`), then repoint every reference to it, returning the new path.
+
+    - Allowed where saving is: *roots* decides, and a project scope must reference the file
+    - An existing file of that name raises DocumentNameConflict. The move is undone when the references cannot follow
+    - References: project file lists, `workbench/sessions.json`, chats, canvases and their mutation log, notes
+    - A `.tex` file leaves its build outputs behind, so they are discarded and the next build starts clean
+    """
+    scope.require(store)
+    if scope.slug and path not in set(store.list_files(scope.slug)):
+        raise DocumentNotFound(path)
+    source = Path(path)
+    target = source.with_name(renamed(source.name, name))
+    if target == source:
+        return source
+    if is_name_taken(store, scope, path, target.name):
+        raise DocumentNameConflict(str(target))
+    try:
+        roots.rename(path, target.name)
+    except FileExistsError as exc:
+        raise DocumentNameConflict(str(target)) from exc
+    try:
+        relocate(path, str(target))
+    except BaseException:
+        target.rename(source)
+        raise
+    store.forget_file_names(str(target))
+    if source.suffix == ".tex":
+        latex.discard_build(source)
+        latex.discard_build(target)
+    return target
+
+
+def follow_library_pdf(assets: AssetStore, references: References, old_name: str, new_name: str, content: Callable[[], bytes]) -> None:
+    """Give the renamed PDF its library copy under *new_name* and let go of the one under *old_name* once nothing uses it.
+
+    A PDF that was never synced into the library gets no copy.
+    """
+    if old_name == new_name or not new_name.lower().endswith(".pdf") or assets.stat(library_pdf(old_name)) is None:
+        return
+    sync_library_pdf(assets, new_name, content())
+    references.release(Released(refs={library_pdf(old_name)}))
 
 
 def file_name(store: ProjectStore, docs: DataStore, key: str) -> str:

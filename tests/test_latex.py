@@ -168,3 +168,22 @@ def test_errors_raised_inside_a_package_are_reported_with_the_package_file():
     assert latex.parse_errors(log, "main.tex") == [
         latex.LatexIssue(None, "babel.sty:4330: Package babel Error: Unknown option 'ngerman'."),
     ]
+
+
+def test_discarding_a_build_removes_the_outputs_of_that_stem_only(tmp_path):
+    for name in ("paper.tex", "paper.v2.tex", "other.tex"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    outputs = tmp_path / latex.BUILD_DIRECTORY
+    outputs.mkdir()
+    for name in ("paper.pdf", "paper.view.pdf", "paper.aux", "paper.v2.pdf", "paper.v2.view.pdf", "other.pdf", "papers.pdf"):
+        (outputs / name).write_bytes(b"x")
+
+    latex.discard_build(tmp_path / "paper.tex")
+
+    assert sorted(path.name for path in outputs.iterdir()) == ["other.pdf", "paper.v2.pdf", "paper.v2.view.pdf", "papers.pdf"]
+
+
+def test_discarding_a_build_of_a_folder_without_one_does_nothing(tmp_path):
+    latex.discard_build(tmp_path / "paper.tex")
+
+    assert not (tmp_path / latex.BUILD_DIRECTORY).exists()

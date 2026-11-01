@@ -339,6 +339,38 @@ def test_writing_a_file_records_a_document_change_keyed_by_its_resolved_path(tmp
     assert scope.changes == [{"kind": "document", "key": str(note.resolve()), "operation": "write"}]
 
 
+def test_renaming_a_file_stays_in_its_folder_inside_the_roots(tmp_path):
+    mounted = tmp_path / "mounted"
+    (mounted / "docs").mkdir(parents=True)
+    (mounted / "docs" / "notes.md").write_text("v1")
+    (mounted / "docs" / "taken.md").write_text("other")
+    roots = mounted_roots(mounted)
+
+    assert roots.rename(str(mounted / "docs" / "notes.md"), "ideas.md") == (mounted / "docs" / "ideas.md").resolve()
+
+    assert (mounted / "docs" / "ideas.md").read_text() == "v1" and not (mounted / "docs" / "notes.md").exists()
+    with pytest.raises(FileExistsError):
+        roots.rename(str(mounted / "docs" / "ideas.md"), "taken.md")
+    with pytest.raises(FileNotFoundError):
+        roots.rename(str(mounted / "docs" / "notes.md"), "gone.md")
+    for name in ("", "../escape.md", "sub/x.md"):
+        with pytest.raises(ValueError, match="Invalid file name"):
+            roots.rename(str(mounted / "docs" / "ideas.md"), name)
+    assert (mounted / "docs" / "ideas.md").is_file() and (mounted / "docs" / "taken.md").read_text() == "other"
+
+
+def test_a_file_outside_the_roots_is_not_renamed(tmp_path):
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("x")
+
+    with pytest.raises(ValueError, match="outside file roots"):
+        mounted_roots(mounted).rename(str(outside), "inside.md")
+
+    assert outside.is_file() and not (tmp_path / "inside.md").exists()
+
+
 def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
     mounted = tmp_path / "mounted"
     mounted.mkdir()

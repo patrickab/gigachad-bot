@@ -5,7 +5,7 @@ A project rename also moves the project's workbench folders (`lib.workbench`) an
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 
@@ -84,7 +84,7 @@ class ProjectReferences:
 
 
 class KeyReference:
-    """Map the stored key `old` to `new`, another key or an absolute disk path, in JSON strings and app-relative links."""
+    """Map the key or disk path `old` to `new` in JSON strings, JSON object keys and app-relative links."""
 
     def __init__(self, old: str, new: str) -> None:
         self.old, self.new = old, new
@@ -95,7 +95,7 @@ class KeyReference:
 
     def value(self, value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: self.value(item) for key, item in value.items()}
+            return {self.text(key): self.value(item) for key, item in value.items()}
         if isinstance(value, list):
             return [self.value(item) for item in value]
         return self.text(value) if isinstance(value, str) else value
@@ -235,10 +235,13 @@ class PostgresKeyRelocator:
         self._scope = scope
 
     def relocate(self, old: str, new: str) -> None:
-        """Point every reference to the stored document `old` at `new`, then rekey `old` to `new`, or delete it for a disk path `new`.
+        """Point every reference to `old` at `new`, then rekey the stored document `old` to `new`, or delete it for a disk path `new`.
 
-        - References: project file lists, chat attachments, canvases and their mutation log, app links in notes
+        - References: project file lists, chat attachments, canvases and their mutation log, app links in notes,
+          and the paths a JSON document uses as object keys (the omp sessions of workbench files)
         - A disk path `new` makes `old` a mounted file everywhere, so it is read from disk from then on
+        - A disk path `old` has no row to rekey, it is renamed on disk by the caller and only its references and change events move
+        - Renaming within one directory records where `old` went (`moved_to`), so devices showing it follow
         """
         refs = KeyReference(old, new)
         user_id = self._scope.user_id
@@ -260,7 +263,10 @@ class PostgresKeyRelocator:
                     ).fetchone()[0]
                     self._scope.record(connection, kind="document", key=key, operation="write", version=version)
                 _rewrite_canvas_mutations(connection, user_id, refs.value)
-                if Path(new).is_absolute():
+                if Path(old).is_absolute():
+                    self._scope.record(connection, kind="document", key=old, operation="move", moved_to=new)
+                    self._scope.record(connection, kind="document", key=new, operation="move")
+                elif Path(new).is_absolute():
                     connection.execute("DELETE FROM documents WHERE user_id = %s AND key = %s", (user_id, old))
                     self._scope.record(connection, kind="document", key=old, operation="delete")
                 else:
@@ -270,7 +276,8 @@ class PostgresKeyRelocator:
                         " WHERE user_id = %s AND key = %s RETURNING version",
                         (new, user_id, old),
                     ).fetchone()[0]
-                    self._scope.record(connection, kind="document", key=old, operation="move")
+                    renamed = PurePosixPath(old).parent == PurePosixPath(new).parent
+                    self._scope.record(connection, kind="document", key=old, operation="move", moved_to=new if renamed else None)
                     self._scope.record(connection, kind="document", key=new, operation="move", version=version)
         except UniqueViolation as exc:
             raise StorageConflictError(f"Destination already exists: {new}") from exc

@@ -113,6 +113,14 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   const reportSelection = useEffectEvent((selection: NeovimSelection) => onSelection?.(selection))
   const sendContentRef = useRef<((text: string) => boolean) | null>(null)
   const setContent = useCallback((text: string) => sendContentRef.current?.(text) ?? false, [])
+  const sendRenamedRef = useRef<((path: string, filename: string) => void) | null>(null)
+
+  // A renamed file keeps its session (same `document.key`), which learns the new name for its saves and merges
+  const openPath = document?.path
+  const openFilename = document?.filename
+  useEffect(() => {
+    if (openPath !== undefined && openFilename !== undefined) sendRenamedRef.current?.(openPath, openFilename)
+  }, [openPath, openFilename])
 
   const documentKey = document?.key ?? null
   useEffect(() => {
@@ -162,9 +170,13 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (!redrawn) xterm.write(SYNC_END)
       }
 
+      // A rename that lands while the socket connects opens the session under the latest name
+      let announcedPath = opened.path
       socket.onopen = () => {
+        const latest = readDocument() ?? opened
+        announcedPath = latest.path
         sentSize = `${xterm.rows}x${xterm.cols}`
-        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap }))
+        send(JSON.stringify({ type: "open", path: latest.path, filename: latest.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap }))
         if (backgroundIsLight !== null) sendBackground(backgroundIsLight)
       }
       socket.onmessage = async (event: MessageEvent<ArrayBuffer | string>) => {
@@ -246,7 +258,12 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         send(JSON.stringify({ type: "set_content", content }))
         return true
       }
-      dispose = () => { sendContentRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
+      sendRenamedRef.current = (path, filename) => {
+        if (path === announcedPath || socket.readyState !== WebSocket.OPEN) return
+        announcedPath = path
+        send(JSON.stringify({ type: "renamed", path, filename }))
+      }
+      dispose = () => { sendContentRef.current = null; sendRenamedRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
     })()
 
     return () => {

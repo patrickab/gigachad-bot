@@ -1,6 +1,7 @@
 import { Archive, FilePlus, GitCompare, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
+import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import type { AppSurface } from "@/contexts/TabContext"
 import { projectMount } from "@/features/omp/sessions"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -11,14 +12,17 @@ import type { ArchiveEntry } from "./ArchiveSelector"
 import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
 import type { useProjectActions } from "./useProjectActions"
+import type { useFileRename } from "./useFileRename"
 import { isStoredProjectFile, NEW_FILE_KINDS, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
 
 type CodeMounts = ReturnType<typeof useCodeMounts>
+type Renames = Pick<ReturnType<typeof useInlineRename>, "renameOf"> & Pick<ReturnType<typeof useFileRename>, "renameFile">
 
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
   & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "canCreateLatex" | "remove" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
-  & Pick<ReturnType<typeof useProjectActions>, "startRename" | "removeProject" | "changeArchive">
+  & Pick<ReturnType<typeof useProjectActions>, "renameProjectTo" | "removeProject" | "changeArchive">
+  & Renames
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
   & {
     projects: ProjectListItem[]
@@ -37,6 +41,7 @@ type ProjectTreeContext =
 /** Everything the Code tree shows and does: the omp-web parts are session folders and extra actions of directory rows. */
 type CodeTreeContext =
   & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "folder" | "archived" | "setArchived" | "removeMount">
+  & Renames
   & {
     omp: Pick<CodeMounts["omp"], "directoryCode" | "directoryActions" | "archivedSessions">
     projects: ProjectListItem[]
@@ -54,6 +59,9 @@ export const mountOf = (node: FileTreeNode): string => node.mount ?? node.path
 /** Drag kind of a stored project file: it moves into another project's files or a Code folder, never among chats or canvases. */
 const PROJECT_FILE_DRAG_KIND = "project-file"
 
+/** Whether the sidebar can rename the project file `path`: a stored file or one on disk, not a library PDF. */
+const isRenamableFile = (path: string) => isStoredProjectFile(path) || path.startsWith("/")
+
 /** Project roots followed by the shared "general" root. */
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
   const { projects, pending, hasArchitecture, move, importFiles } = context
@@ -62,7 +70,7 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: context.activeProjectSlug === project.slug,
       onSelect: () => context.onProjectSelect?.(project.slug),
-      onDoubleClick: () => context.startRename(project),
+      rename: context.renameOf(`project:${project.slug}`, (name) => context.renameProjectTo(project, name)),
       onDelete: () => context.removeProject(project),
       actions: [
         { label: `Archive ${project.name}`, icon: Archive, onClick: () => context.changeArchive(project.slug, true) },
@@ -139,6 +147,9 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
         onSelect: () => context.selectDocument(doc.path, scope),
         onDelete: () => remove(doc, scope),
+        rename: isRenamableFile(doc.path)
+          ? context.renameOf(`file:${scope}:${doc.path}`, (name) => context.renameFile({ path: doc.path, name: doc.name, scope }, name), true)
+          : undefined,
       })),
     }] : []),
   ]
@@ -200,6 +211,9 @@ function rootFileItems(context: CodeTreeContext, nodes: FileTreeNode[]): FileTre
     multiSelect: true,
     isActive: node.path === context.activeDocumentPath,
     onSelect: node.type === "file" ? () => context.onFileSelect?.(node.path) : undefined,
+    rename: node.type === "file"
+      ? context.renameOf(`code:${node.path}`, (name) => context.renameFile({ path: node.path, name: node.name, scope: "" }, name), true)
+      : undefined,
     children: node.children ? rootFileItems(context, node.children) : undefined,
   }))
 }

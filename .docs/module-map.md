@@ -81,7 +81,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- db_schema.py              Checksum-protected migration application
 |   |   |-- chat_store.py             Chat model, I/O, indexing and atomic tree operations
 |   |   |-- project_store.py          Catalog, slugs, kanban and tab persistence, project file references with display names
-|   |   |-- document_service.py       `DocumentScope` (notes or a project), document write/move with reference repointing, display-name rename
+|   |   |-- document_service.py       `DocumentScope` (notes or a project), document write/move with reference repointing, file rename (stored key move, disk rename)
 |   |   |-- chat_cleanup.py           `ChatCleanup`: release uploads, derived data and sandbox state after chat deletion
 |   |   |-- references.py             Reference model, post-delete cleanup of unused derived data, `--dry-run` orphan report, `annotation_canvas` (PDF annotation key, recorded host files)
 |   |   |-- project_rename.py         Project rename transaction and reference rewriting
