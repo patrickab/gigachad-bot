@@ -12,13 +12,18 @@ bytes both ways, text frames carry JSON control messages:
   without moving the cursor, merged into unsaved edits, after a running `:w`),
   `{"type": "renamed", "from", "path"}` (the file of buffer *from* was renamed, the session continues on the new
   name with its unsaved edits, nothing for a buffer that is not open), `{"type": "insert_lines", "text"}` (lines below the
-  cursor of the shown buffer, the cursor lands on the first one) and `{"type": "background", "light"}` (the theme behind
-  the terminal, Neovim's 'background' follows it)
+  cursor of the shown buffer, the cursor lands on the first one), `{"type": "background", "light"}` (the theme behind
+  the terminal, Neovim's 'background' follows it), `{"type": "clipboard", "id", "text" | "error"}` (the answer to
+  `clipboard_read`: what to paste, linewise when it ends with a newline and charwise otherwise, an empty text pastes
+  nothing, an `error` is shown as an error in Neovim and its last copy is pasted instead) and `{"type": "message", "text"}`
+  (Neovim shows *text* as an error, for failures that have no request)
 - server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
   `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
   `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
-  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file and
-  `{"type": "exit", "code"}` when `nvim` quits
+  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file,
+  `{"type": "clipboard_read", "id", "path"}` when Neovim pastes from `+` or `*` (`path` names the shown buffer, the browser
+  answers with `clipboard`, none within 15 s shows "Clipboard did not answer" and pastes the last copy, so does a closed
+  socket) and `{"type": "exit", "code"}` when `nvim` quits
 
 `nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
 
@@ -44,7 +49,7 @@ from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
 from backend.websocket_origin import is_trusted_origin
 from lib.file_roots import FileRoots
-from lib.neovim_session import NeovimSession, Selection, is_neovim_installed
+from lib.neovim_session import ClipboardError, NeovimSession, Selection, is_neovim_installed
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -93,25 +98,37 @@ class SaveFailed(RuntimeError):
 
 
 class _BrowserSaves:
-    """Forward `:w` to the browser and wait for what it stored, and tell it what happens in Neovim."""
+    """Forward `:w` to the browser and wait for what it stored, ask it for its clipboard, and tell it what happens in Neovim."""
 
     def __init__(self, websocket: WebSocket) -> None:
         self._websocket = websocket
         self._pending: dict[int, asyncio.Future[dict]] = {}
         self._next_id = 0
 
-    async def save(self, path: str, text: str) -> str:
+    async def _ask(self, frame: dict, seconds: float | None = None) -> dict:
+        """Send *frame* under a new id and wait for the browser's reply to it."""
         self._next_id += 1
-        save_id = self._next_id
-        reply = self._pending[save_id] = asyncio.get_running_loop().create_future()
+        request_id = self._next_id
+        reply = self._pending[request_id] = asyncio.get_running_loop().create_future()
         try:
-            await self._websocket.send_json({"type": "save", "id": save_id, "path": path, "content": text})
-            result = await asyncio.wait_for(reply, _SAVE_TIMEOUT_SECONDS)
+            await self._websocket.send_json({**frame, "id": request_id})
+            return await asyncio.wait_for(reply, seconds)
         finally:
-            self._pending.pop(save_id, None)
+            self._pending.pop(request_id, None)
+
+    async def save(self, path: str, text: str) -> str:
+        result = await self._ask({"type": "save", "path": path, "content": text}, _SAVE_TIMEOUT_SECONDS)
         if result.get("error"):
             raise SaveFailed(str(result["error"]))
         return str(result.get("content", text))
+
+    async def read_clipboard(self, path: str) -> str:
+        """The text the browser answers for a paste into *path*, a `ClipboardError` when it answers an error."""
+        reply = await self._ask({"type": "clipboard_read", "path": path})
+        if reply.get("error"):
+            raise ClipboardError(str(reply["error"]))
+        text = reply.get("text")
+        return text if isinstance(text, str) else ""
 
     async def yank(self, text: str) -> None:
         await self._websocket.send_json({"type": "yank", "content": text})
@@ -126,6 +143,7 @@ class _BrowserSaves:
         await self._websocket.send_json({"type": "open_failed", "path": path, "message": message})
 
     def resolve(self, reply: dict) -> None:
+        """The browser's `saved` or `clipboard` answer to the question with the same id."""
         pending = self._pending.get(reply.get("id"))
         if pending is not None and not pending.done():
             pending.set_result(reply)
@@ -175,7 +193,7 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
             kind = control.get("type")
             if kind == "resize":
                 session.resize(int(control["rows"]), int(control["cols"]))
-            elif kind == "saved":
+            elif kind in ("saved", "clipboard"):
                 saves.resolve(control)
             elif kind == "set_content" and isinstance(control.get("content"), str) and isinstance(control.get("path"), str):
                 beside_relay(_guarded("take the changed file", session.set_text(control["content"], control["path"])))
@@ -189,6 +207,8 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
                 beside_relay(_guarded("take the renamed file", rename))
             elif kind == "background" and isinstance(control.get("light"), bool):
                 await _guarded("take the theme", session.set_background(control["light"]))
+            elif kind == "message" and isinstance(control.get("text"), str):
+                beside_relay(_guarded("show the message", session.show_error(control["text"])))
     finally:
         for update in updates:
             update.cancel()
@@ -208,6 +228,7 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
             lambda text: asyncio.create_task(saves.yank(text)),
             (lambda selection: asyncio.create_task(saves.selection(selection))) if ask_keymap else None,
             lambda path: asyncio.create_task(saves.switched(path)),
+            saves.read_clipboard,
         )
     )
     try:

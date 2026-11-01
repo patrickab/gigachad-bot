@@ -1,16 +1,18 @@
 import asyncio
 import contextlib
+import json
 from pathlib import Path
 import shutil
 
 import pytest
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from backend.identity import get_request_identity
 from backend import websocket_origin
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
-from lib.neovim_session import NeovimSession, is_neovim_installed
+from lib import neovim_session
+from lib.neovim_session import ClipboardError, NeovimSession, is_neovim_installed
 from tests.conftest import mounted_roots, request_identity, route_client
 
 requires_nvim = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
@@ -489,12 +491,12 @@ def _two_files(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @contextlib.asynccontextmanager
-async def _editing(first: Path, home: Path, save, on_switched=None):
+async def _editing(first: Path, home: Path, save, on_switched=None, read_clipboard=None):
     """A connected session on *first* (path = its absolute path), closed afterwards."""
     session = NeovimSession.spawn(first.name, first.read_text(), rows=24, cols=80, cwd=home, disk_path=first, path=str(first))
     drain = asyncio.create_task(_drain(session))
     try:
-        await asyncio.wait_for(session.connect(save, lambda text: None, None, on_switched), 15)
+        await asyncio.wait_for(session.connect(save, lambda text: None, None, on_switched, read_clipboard), 15)
         yield session
     finally:
         await session.close()
@@ -639,3 +641,301 @@ async def test_open_file_loads_a_deleted_buffer_again_from_disk(neovim_home, tmp
         await session.open_file(str(second), second)
 
         assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix, edited", 0]
+
+
+def _clipboard_config(home: Path, *lua: str) -> None:
+    """A config like the developer's, `clipboard=unnamedplus` so plain `p` reads the `+` register, then *lua*."""
+    (home / "init.lua").write_text("\n".join(['vim.o.clipboard = "unnamedplus"', *lua]))
+
+
+# User configs whose provider is already in use when the session starts.
+_HOST_PROVIDER = [
+    'local function host() return { { "from the host" }, "v" } end',
+    'vim.g.clipboard = { name = "host", copy = { ["+"] = host, ["*"] = host }, paste = { ["+"] = host, ["*"] = host } }',
+    'vim.fn.getreg("+")',
+]
+_NO_PROVIDER = ["vim.g.loaded_clipboard_provider = 1", 'vim.fn.has("clipboard")']
+
+
+def _notes(directory: Path, text: str = "abc\n") -> Path:
+    file = directory / "notes.md"
+    file.write_text(text)
+    return file
+
+
+@requires_nvim
+@pytest.mark.parametrize("keys", [b'"+p', b'"*p', b"p"])
+async def test_paste_puts_the_text_of_the_browsers_clipboard_in_charwise(neovim_home, tmp_path, keys):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+    asked: list[str] = []
+
+    async def read_clipboard(path: str) -> str:
+        asked.append(path)
+        return "XY\nZ"
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(keys)
+
+        await _evaluates_to(session, "getline(1, '$')", ["aXY", "Zbc"])
+        assert asked == [str(file)]
+
+
+@requires_nvim
+async def test_paste_of_text_ending_in_a_newline_goes_below_the_cursor_line(neovim_home, tmp_path):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path, "a\nb\n")
+
+    async def read_clipboard(path: str) -> str:
+        return "x\ny\n"
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b'"+p')
+
+        await _evaluates_to(session, "[getline(1, '$'), line('.')]", [["a", "x", "y", "b"], 2])
+
+
+@requires_nvim
+async def test_paste_of_an_empty_text_changes_nothing(neovim_home, tmp_path):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+
+    async def read_clipboard(path: str) -> str:
+        return ""
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b'"+px')  # `x` runs once the paste finished, on the text the paste left alone
+
+        await _evaluates_to(session, "getline(1, '$')", ["bc"])
+
+
+@requires_nvim
+@pytest.mark.parametrize(
+    ("yank", "text"), [(b"", ["abc"]), (b"yy", ["abc", "abc"]), (b"yl", ["aabc"])], ids=["nothing yanked", "line", "character"]
+)
+async def test_clipboard_error_shows_the_message_and_pastes_the_last_yank(neovim_home, tmp_path, yank, text):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+
+    async def read_clipboard(path: str) -> str:
+        raise ClipboardError("Clipboard access denied")
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(yank + b'"+p')
+
+        await _evaluates_to(session, "getline(1, '$')", text)
+        await _shows(session, "Clipboard access denied")
+
+
+@requires_nvim
+async def test_no_answer_pastes_nothing_after_the_timeout_and_stops_waiting(neovim_home, tmp_path, monkeypatch):
+    monkeypatch.setattr(neovim_session, "_CLIPBOARD_SECONDS", 0.3)
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+    stopped = asyncio.Event()
+
+    async def read_clipboard(path: str) -> str:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+        return ""
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b'"+p')
+
+        await _shows(session, "Clipboard did not answer")
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), &modified]") == [["abc"], 0]
+        assert stopped.is_set()
+
+
+@requires_nvim
+@pytest.mark.parametrize("user_config", [_HOST_PROVIDER, _NO_PROVIDER], ids=["provider of its own", "no provider"])
+async def test_the_browsers_clipboard_replaces_the_provider_of_the_users_config(neovim_home, tmp_path, user_config):
+    _clipboard_config(neovim_home, *user_config)
+    file = _notes(tmp_path)
+
+    async def read_clipboard(path: str) -> str:
+        return "XY"
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b'"+p')
+        await _evaluates_to(session, "getline(1, '$')", ["aXYbc"])
+
+        session.write_input(b"p")
+        await _evaluates_to(session, "getline(1, '$')", ["aXYXYbc"])
+
+
+@requires_nvim
+async def test_a_session_without_a_clipboard_reader_keeps_the_provider_of_the_users_config(neovim_home, tmp_path):
+    _clipboard_config(neovim_home, *_HOST_PROVIDER)
+    file = _notes(tmp_path)
+    async with _editing(file, neovim_home, _store) as session:
+        session.write_input(b'"+p')
+
+        await _evaluates_to(session, "getline(1, '$')", ["afrom the hostbc"])
+
+
+@requires_nvim
+async def test_requests_are_answered_while_a_paste_waits_for_the_browser(neovim_home, tmp_path):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+    asking, answer = asyncio.Event(), asyncio.Event()
+
+    async def read_clipboard(path: str) -> str:
+        asking.set()
+        await answer.wait()
+        return "XY"
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b'"+p')
+        await asyncio.wait_for(asking.wait(), 10)
+
+        await asyncio.wait_for(session.set_text("abc\ndef\n", str(file)), 5)
+        answer.set()
+
+        await _evaluates_to(session, "getline(1, '$')", ["aXYbc", "def"])
+
+
+class _Socket:
+    """The part of the websocket that `_BrowserSaves` writes to."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_json(self, frame: dict) -> None:
+        self.sent.append(frame)
+
+
+async def _asking(saves, socket: _Socket, path: str = "notes.md") -> tuple[asyncio.Task[str], int]:
+    """Start a clipboard read and wait until the browser was asked, with the id of the question."""
+    questions = len(socket.sent)
+    read = asyncio.create_task(saves.read_clipboard(path))
+
+    async def asked() -> bool:
+        return len(socket.sent) > questions
+
+    await _until(asked)
+    question = socket.sent[-1]
+    assert (question["type"], question["path"]) == ("clipboard_read", path)
+    return read, question["id"]
+
+
+@pytest.mark.parametrize(("reply", "text"), [({"text": "pasted"}, "pasted"), ({"text": ""}, ""), ({"text": 5}, ""), ({}, "")])
+async def test_clipboard_read_returns_the_text_the_browser_answers(reply, text):
+    socket = _Socket()
+    saves = neovim_route._BrowserSaves(socket)
+    read, read_id = await _asking(saves, socket)
+
+    saves.resolve({"type": "clipboard", "id": read_id, **reply})
+
+    assert await asyncio.wait_for(read, 5) == text
+
+
+async def test_clipboard_read_raises_the_error_the_browser_answers():
+    socket = _Socket()
+    saves = neovim_route._BrowserSaves(socket)
+    read, read_id = await _asking(saves, socket)
+
+    saves.resolve({"type": "clipboard", "id": read_id, "error": "Clipboard access denied"})
+
+    with pytest.raises(ClipboardError, match="Clipboard access denied"):
+        await asyncio.wait_for(read, 5)
+
+
+class _Browser:
+    """The browser's end of the session websocket, driven by the test."""
+
+    def __init__(self) -> None:
+        self.headers = {"origin": "http://localhost:2999"}
+        self.client_state = WebSocketState.CONNECTED
+        self._incoming: asyncio.Queue[dict] = asyncio.Queue()
+        self._frames: asyncio.Queue[dict] = asyncio.Queue()
+        self.terminal = bytearray()
+
+    async def accept(self) -> None:
+        pass
+
+    async def close(self, code: int = 1000) -> None:
+        pass
+
+    async def receive_json(self) -> dict:
+        return json.loads((await self._incoming.get())["text"])
+
+    async def receive(self) -> dict:
+        return await self._incoming.get()
+
+    async def send_json(self, frame: dict) -> None:
+        await self._frames.put(frame)
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.terminal += data
+
+    def send(self, frame: dict) -> None:
+        self._incoming.put_nowait({"type": "websocket.receive", "text": json.dumps(frame)})
+
+    def type(self, keys: bytes) -> None:
+        self._incoming.put_nowait({"type": "websocket.receive", "bytes": keys})
+
+    def leave(self) -> None:
+        self._incoming.put_nowait({"type": "websocket.disconnect"})
+
+    async def next_frame(self, kind: str) -> dict:
+        """The next frame of type *kind* the server sent, skipping the others."""
+
+        async def receive() -> dict:
+            while (frame := await self._frames.get())["type"] != kind:
+                pass
+            return frame
+
+        return await asyncio.wait_for(receive(), 10)
+
+    async def shows(self, text: str) -> None:
+        """Wait until the terminal output holds *text*."""
+
+        async def holds() -> bool:
+            return text.encode() in self.terminal
+
+        await _until(holds)
+
+
+@contextlib.asynccontextmanager
+async def _browsing(monkeypatch, file: Path):
+    """The session endpoint serving a browser that opened *file*, with Neovim connected once the body starts."""
+    monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
+    browser = _Browser()
+    serving = asyncio.create_task(neovim_route.neovim_session(browser, request_identity(), mounted_roots(file.parent)))
+    browser.send({"type": "open", "path": str(file), "filename": file.name, "content": file.read_text(), "rows": 24, "cols": 80})
+    try:
+        # A message frame is only shown once Neovim is connected, which is when the clipboard is the browser's
+        browser.send({"type": "message", "text": "Connected"})
+        await browser.shows("Connected")
+        yield browser
+    finally:
+        browser.leave()
+        await asyncio.wait_for(serving, 10)
+
+
+@requires_nvim
+async def test_paste_asks_the_browser_for_the_shown_file_and_pastes_its_answer(neovim_home, tmp_path, monkeypatch):
+    _clipboard_config(neovim_home)
+    file = _notes(tmp_path)
+    async with _browsing(monkeypatch, file) as browser:
+        browser.type(b'"+p:w\r')
+
+        read = await browser.next_frame("clipboard_read")
+        assert read["path"] == str(file)
+        browser.send({"type": "clipboard", "id": read["id"], "text": "XY"})
+
+        save = await browser.next_frame("save")
+        assert save["content"] == "aXYbc\n"
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+
+@requires_nvim
+async def test_message_frame_shows_its_text_in_neovim(neovim_home, tmp_path, monkeypatch):
+    file = _notes(tmp_path)
+    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "message", "text": "Image is too large"})
+
+        await browser.shows("Image is too large")

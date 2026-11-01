@@ -4,6 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
 import { cn, errorMessage } from "@/lib/utils"
 import { neovimSessionUrl } from "@/lib/backend/urls"
+import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { readToken } from "@/lib/palette"
@@ -98,8 +99,8 @@ interface NeovimOptions {
   onSwitched?: (path: string) => void
   /** `openFile(path)` could not load the file, the buffer shown did not change. */
   onOpenFailed?: (path: string, message: string) => void
-  /** Takes the PNG of a paste instead of pasting text, resolves to the text to insert below the cursor, null for none. */
-  onPasteImage?: (image: Blob) => Promise<string | null>
+  /** The path of the buffer on screen, what a pasted image is stored next to. The document's own path without it, right while the session shows one buffer. */
+  shownPath?: () => string
 }
 
 /** The PNG a paste carries, null when the clipboard holds none or also plain text (copied spreadsheet cells come with a picture and paste as text). */
@@ -123,6 +124,7 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  *   - A modified buffer gets the text merged into its unsaved edits, the agent's lines win where both changed, and stays modified
  * - `renameFile(from, to)` renames the buffer of `from` (kept while connecting too), keeping its text and unsaved edits. A changed `document.path` under the same `key` renames the buffer of the previous path
  * - `insertLines(text)` inserts lines below the cursor of the shown buffer, false while the session is not open
+ * - Neovim's `p` and `"+p` ask the browser clipboard (`clipboard_read`). A screenshot is stored in `imgs/` next to the shown LaTeX or Markdown file and pasted as its reference, text as text, a failure is shown in Neovim. Ctrl+Shift+V of a screenshot does the same through `insert_lines`
  * - Unmounting or a new `document.key` discards unsaved edits
  */
 export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string, path: string) => Promise<string>, onQuit: () => void, options: NeovimOptions = {}) {
@@ -197,15 +199,17 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         return true
       }
 
-      // A pasted PNG is uploaded by `onPasteImage` instead of pasted as text, what it returns goes below the cursor.
+      // A pasted PNG (Ctrl+Shift+V) is stored next to the shown file and its reference inserted below the cursor instead of pasted as text.
       // Capturing at the host stops the paste before xterm's own handler on its textarea
       host.addEventListener("paste", (event) => {
-        const upload = readOptions().onPasteImage
-        const image = upload && pastedImage(event.clipboardData)
-        if (!upload || !image) return
+        const image = pastedImage(event.clipboardData)
+        if (!image) return
         event.preventDefault()
         event.stopPropagation()
-        void upload(image).then((text) => { if (text !== null) sendFrame({ type: "insert_lines", text }, false) })
+        storeClipboardImage(readOptions().shownPath?.() ?? readDocument()?.path ?? "", image).then(
+          (reference) => sendFrame({ type: "insert_lines", text: reference }, false),
+          (error) => sendFrame({ type: "message", text: errorMessage(error, "Could not store the image") }, false),
+        )
       }, true)
 
       // A resize swaps in one frame, so the text never flickers: Neovim redraws for the new size first, its
@@ -251,6 +255,14 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (message.type === "selection") { readOptions().onSelection?.({ path: message.path, start_line: message.start_line, end_line: message.end_line, text: message.text }); return }
         if (message.type === "switched") { readOptions().onSwitched?.(message.path); return }
         if (message.type === "open_failed") { readOptions().onOpenFailed?.(message.path, message.message); return }
+        if (message.type === "clipboard_read") {
+          try {
+            send(JSON.stringify({ type: "clipboard", id: message.id, text: await readClipboardForPaste(message.path) }))
+          } catch (error) {
+            send(JSON.stringify({ type: "clipboard", id: message.id, error: errorMessage(error, "Could not read the clipboard") }))
+          }
+          return
+        }
         if (message.type !== "save") return
         try {
           send(JSON.stringify({ type: "saved", id: message.id, content: await saveText(message.content, message.path) }))

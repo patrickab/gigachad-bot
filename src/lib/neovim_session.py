@@ -18,6 +18,13 @@
 - `rename` moves a document to the file's new path: the buffer is renamed keeping text, cursor and unsaved state,
   and `:w` merges with the new `disk_path`
 - `insert_lines` puts lines below the cursor of the shown document
+- `show_error` shows a message in Neovim as an error
+- With a `read_clipboard` callback, `+` and `*` are the clipboard it reads (the browser's, not the machine's Neovim runs on)
+  and replace the provider of the user's config: a paste asks `read_clipboard(path)` with the path of the shown document,
+  which answers the text to paste (linewise when it ends with a newline) or raises `ClipboardError`. Neovim shows its
+  message and pastes its last copy instead, and so after 15 s without an answer ("Clipboard did not answer"). A copy
+  stays in Neovim's registers, the yank reaches the caller through `on_yank`. Reads run beside the other requests, so a
+  paste waiting for the browser never holds up `set_text`, `:w` or the others
 - `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
 - Closing a session discards unsaved edits
 """
@@ -44,6 +51,7 @@ YankText = Callable[[str], None]
 Selection = dict[str, int | str]
 SelectLines = Callable[[Selection], None]
 SwitchDocument = Callable[[str], None]
+ReadClipboard = Callable[[str], Awaitable[str]]
 
 _STARTUP_SECONDS = 15
 _RPC_SECONDS = 10
@@ -51,6 +59,8 @@ _SHUTDOWN_SECONDS = 2
 _READ_CHUNK = 65536
 # `set_text` retries while keystrokes change the buffer between reading and merging it.
 _SET_TEXT_ATTEMPTS = 5
+# How long a paste waits for the browser, which may be asking the user for permission first.
+_CLIPBOARD_SECONDS = 15
 
 
 def is_neovim_installed() -> bool:
@@ -81,6 +91,20 @@ def _read_for_opening(file: Path) -> str:
         raise RuntimeError(f"{file.name} is not UTF-8 text") from exc
     except OSError as exc:
         raise RuntimeError(f"cannot read {file.name}: {exc}") from exc
+
+
+class ClipboardError(RuntimeError):
+    """The clipboard could not be read, Neovim shows the message."""
+
+
+async def _read_clipboard(read: ReadClipboard, path: str) -> dict[str, str]:
+    """The answer to Neovim's `paste` request: `{"text"}` to paste, or `{"error"}` to show before it pastes its last copy."""
+    try:
+        return {"text": await asyncio.wait_for(read(path), _CLIPBOARD_SECONDS)}
+    except TimeoutError:
+        return {"error": "Clipboard did not answer"}
+    except ClipboardError as exc:
+        return {"error": str(exc)}
 
 
 @dataclass
@@ -214,6 +238,7 @@ class NeovimSession:
         on_yank: YankText,
         on_selection: SelectLines | None = None,
         on_switched: SwitchDocument | None = None,
+        read_clipboard: ReadClipboard | None = None,
     ) -> None:
         """Route `:w` of every document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*.
 
@@ -223,12 +248,19 @@ class NeovimSession:
 
         Giving *on_selection* also installs the visual-mode `<leader>a` mapping, it receives `{"path", "start_line", "end_line",
         "text"}`. *on_switched* receives the path of the document that Neovim itself put on screen, not of one `open_file` showed.
+
+        Giving *read_clipboard* makes it the clipboard of `+` and `*`: a paste calls it with the path of the shown document and
+        pastes the text it returns (linewise when it ends with a newline). When it raises a `ClipboardError`, or gives no answer
+        within 15 s ("Clipboard did not answer"), Neovim shows the message and pastes its last copy instead.
+        It runs beside every other request, Neovim answers those while it waits.
         """
 
         async def handle_request(method: str, params: list) -> object:
-            if method != "save":
-                raise NeovimRpcError(f"Unknown request {method!r}")
-            return await self._save(save, params[0], params[1])
+            if method == "save":
+                return await self._save(save, params[0], params[1])
+            if method == "paste" and read_clipboard is not None:
+                return await _read_clipboard(read_clipboard, params[0])
+            raise NeovimRpcError(f"Unknown request {method!r}")
 
         def handle_notification(method: str, params: list) -> None:
             if method == "yank":
@@ -255,7 +287,8 @@ class NeovimSession:
             await asyncio.sleep(0.02)  # config and plugins still loading, FileType handlers not registered yet
         first = next(iter(self._documents.values()))
         base = str(self._baseline) if self._baseline is not None else None
-        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, [channel, str(first.copy), first.path, base, on_selection is not None])
+        arguments = [channel, str(first.copy), first.path, base, on_selection is not None, read_clipboard is not None]
+        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, arguments)
         await asyncio.wait_for(setup, _STARTUP_SECONDS)
         self._ready.set()
         if self._background is not None:
@@ -334,6 +367,10 @@ class NeovimSession:
     async def insert_lines(self, text: str) -> None:
         """Insert *text* as lines below the cursor of the shown document, the cursor lands on the first inserted line."""
         await self._lua("return _G.gigachad_insert_lines(...)", text)
+
+    async def show_error(self, text: str) -> None:
+        """Show *text* in Neovim's message area as an error."""
+        await self._lua("return _G.gigachad_show_error(...)", text)
 
     async def _save(self, save: SaveDocument, path: str, text: str) -> dict[str, str | bool]:
         """Store *text* of document *path* merged with the edits made elsewhere since its `base`, `merged` tells if they changed it."""

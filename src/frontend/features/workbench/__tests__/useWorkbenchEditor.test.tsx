@@ -1,14 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import type { NeovimDocument, NeovimSelection } from "@/features/editor/NeovimEditor"
-import { announceFileMove, onFileChange } from "@/lib/backend/fileEvents"
+import { announceFileMove } from "@/lib/backend/fileEvents"
 import type { ChangeEvent } from "@/lib/backend/syncStream"
 
 const api = vi.hoisted(() => ({
   ApiError: class ApiError extends Error { status = 500 },
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
   writeRootFile: vi.fn<(path: string, text: string) => Promise<void>>(async () => {}),
-  storeWorkbenchImage: vi.fn<(path: string, image: Blob) => Promise<{ path: string; reference: string; changed: string[] }>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
 const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
@@ -28,7 +27,6 @@ interface Session {
     onSelection: (selection: NeovimSelection) => void
     onSwitched: (path: string) => void
     onOpenFailed: (path: string, message: string) => void
-    onPasteImage: (image: Blob) => Promise<string | null>
   }
 }
 const editor = vi.hoisted(() => ({
@@ -210,34 +208,6 @@ describe("useWorkbenchEditor", () => {
     expect(api.writeRootFile).toHaveBeenLastCalledWith(CHAPTER, "hidden edit")
     expect(props.onSaved).toHaveBeenLastCalledWith("hidden edit", CHAPTER)
     expect(synced().has(CHAPTER)).toBe(false)
-  })
-
-  it("stores a pasted image next to the shown file and hands its reference back", async () => {
-    const { rerender, session } = await openEditor()
-    rerender({ path: CHAPTER })
-    await waitFor(() => expect(editor.ops.openFile).toHaveBeenCalledTimes(1))
-    const reference = "\\includegraphics[width=\\linewidth]{imgs/img-20260101-120000.png}"
-    api.storeWorkbenchImage.mockResolvedValueOnce({ path: "/home/me/thesis/imgs/img-20260101-120000.png", reference, changed: ["/home/me/thesis/main.tex"] })
-    const heard = vi.fn()
-    const stop = onFileChange(() => true, heard)
-    const image = new Blob(["png"], { type: "image/png" })
-
-    let inserted: string | null = null
-    await act(async () => { inserted = await session().options.onPasteImage(image) })
-    expect(api.storeWorkbenchImage).toHaveBeenCalledExactlyOnceWith(CHAPTER, image)
-    expect(inserted).toBe(reference)
-    expect(heard.mock.calls).toEqual([["/home/me/thesis/imgs/img-20260101-120000.png"], ["/home/me/thesis/main.tex"]])
-    stop()
-  })
-
-  it("shows why a pasted image was not stored and inserts nothing", async () => {
-    const { result, session } = await openEditor()
-    api.storeWorkbenchImage.mockRejectedValueOnce(new Error("Image is too large"))
-
-    let inserted: string | null = "unset"
-    await act(async () => { inserted = await session().options.onPasteImage(new Blob(["png"])) })
-    expect(inserted).toBeNull()
-    expect(result.current.notice).toBe("Image is too large")
   })
 
   it("takes text for the rendered pane without Neovim when it is disabled", async () => {

@@ -13,6 +13,12 @@
   (or setting it when the text differs from the stored file)
 - `_G.gigachad_rename` gives the buffer the file's new name and id, keeping its text, cursor and modified flag
 - `_G.gigachad_insert_lines` inserts lines below the cursor of the shown document
+- `_G.gigachad_show_error` shows a message as an error
+- With `own_clipboard`, `+` and `*` are the caller's clipboard (the browser's, not the machine's Neovim runs on): a paste
+  is a `paste` request with the path of the current buffer, answered `{ text }` or `{ error }`. An error is shown and the
+  last copy is pasted instead (`yy` then `p` works without the browser's clipboard), a copy stays in Neovim's registers.
+  It replaces the provider the user's config chose (`vim.g.clipboard`, even one already in use), the `clipboard` option
+  decides which registers reach it
 """
 
 from __future__ import annotations
@@ -28,10 +34,10 @@ if TYPE_CHECKING:
 
 _READ_CHUNK = 65536
 
-# Receives (channel, first document's private path, its id, optional baseline path, ask_keymap). Mirrors Neovim's write
-# rules: empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
+# Receives (channel, first document's private path, its id, optional baseline path, ask_keymap, own_clipboard). Mirrors
+# Neovim's write rules: empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
 SETUP_LUA = r"""
-local channel, first_path, first_id, base_path, ask_keymap = ...
+local channel, first_path, first_id, base_path, ask_keymap, own_clipboard = ...
 if base_path == vim.NIL then base_path = nil end
 
 -- Buffers of the documents by id, and back
@@ -166,6 +172,11 @@ function _G.gigachad_insert_lines(text)
   vim.api.nvim_win_set_cursor(window, { row + 1, 0 })
 end
 
+-- Shows `text` as an error message.
+function _G.gigachad_show_error(text)
+  vim.api.nvim_echo({ { text, "ErrorMsg" } }, true, {})
+end
+
 -- `save` answers { text = stored text, merged = whether edits made elsewhere changed the buffer's text }.
 local function track(private_path, id)
   if tracked[id] ~= nil then untrack(id) end
@@ -245,6 +256,45 @@ vim.api.nvim_create_autocmd("TextYankPost", {
     vim.rpcnotify(channel, "yank", text)
   end,
 })
+
+if own_clipboard == true then
+  -- What the last copy put in `+` or `*`, pasted when the browser cannot answer so `yy` then `p` works without its clipboard
+  local yanked = { { "" }, "v" }
+
+  local function copy(lines, regtype) yanked = { lines, regtype } end
+
+  -- `{ lines, regtype }` for `text`: linewise when it ends with a newline. An empty register would be an error (E353) that
+  -- replaces the message shown for a failed paste, one empty line pastes nothing
+  local function register_of(text)
+    local lines = vim.split(text, "\n", { plain = true })
+    if #lines > 1 and lines[#lines] == "" then
+      table.remove(lines)
+      return { lines, "V" }
+    end
+    return { lines, "v" }
+  end
+
+  local function paste()
+    local buffer = vim.api.nvim_get_current_buf()
+    local ok, answer = pcall(vim.rpcrequest, channel, "paste", ids[buffer] or vim.api.nvim_buf_get_name(buffer))
+    if not ok then answer = { error = tostring(answer) } end
+    if answer.error ~= nil then
+      _G.gigachad_show_error(answer.error)
+      return yanked
+    end
+    return register_of(answer.text or "")
+  end
+
+  vim.g.clipboard = {
+    name = "gigachad",
+    copy = { ["+"] = copy, ["*"] = copy },
+    paste = { ["+"] = paste, ["*"] = paste },
+    cache_enabled = 0,
+  }
+  -- Neovim resolves the provider once, its script has to load again to take the new `vim.g.clipboard`
+  vim.g.loaded_clipboard_provider = nil
+  vim.cmd("runtime autoload/provider/clipboard.vim")
+end
 
 if base_path then
   local document_window = vim.api.nvim_get_current_win()

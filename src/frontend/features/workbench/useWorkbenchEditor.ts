@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react"
 import { useNeovimTerminal, type NeovimSelection, type NeovimStatus, type NeovimTerminal } from "@/features/editor/NeovimEditor"
 import { loadFailureOf, type FileLoadFailure } from "@/features/editor/useRootFileDocument"
-import { loadFileViewerText, storeWorkbenchImage, writeRootFile } from "@/lib/backend/api"
-import { announceFileChange, onFileMove } from "@/lib/backend/fileEvents"
+import { loadFileViewerText, writeRootFile } from "@/lib/backend/api"
+import { onFileMove } from "@/lib/backend/fileEvents"
 import { syncCursorReady } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
@@ -36,7 +36,7 @@ interface WorkbenchEditor {
   loadError: FileLoadFailure | null
   /** The text Neovim and the disk last agreed on for the shown file, null while unknown. */
   shownText: string | null
-  /** The last thing that went wrong beside the editor (a file that did not open, an image that did not store), null after the next success. */
+  /** The last thing that went wrong beside the editor (a file that did not open), null after the next success. */
   notice: string | null
   /** Every file open in Neovim and the text Neovim and the disk last agreed on. */
   synced: RefObject<ReadonlyMap<string, string>>
@@ -53,7 +53,6 @@ interface WorkbenchEditor {
  * - A `:bnext` in Neovim reports the new buffer to `onPathChange`, the owner's `path` follows
  * - Saves go to the path Neovim names, one write at a time
  * - A file this device renames (`onFileMove`) or any device does (a change event with `moved_to`) is renamed in Neovim, unsaved edits stay
- * - A pasted image is stored next to the shown file and its reference is inserted below the cursor
  * - A restart keeps the first file and the shown one, the other buffers are gone
  */
 export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClose, onSelection }: WorkbenchEditorOptions): WorkbenchEditor {
@@ -113,23 +112,11 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     onPathChange(shown.current)
   }
 
-  const pasteImage = async (image: Blob) => {
-    setNotice(null)
-    try {
-      const stored = await storeWorkbenchImage(shown.current, image)
-      for (const path of [stored.path, ...stored.changed]) announceFileChange(path)
-      return stored.reference
-    } catch (cause) {
-      setNotice(errorMessage(cause, "Could not store the image"))
-      return null
-    }
-  }
-
   const openPaths = [...synced.keys()]
 
   const startText = synced.get(startPath)
   const opening = enabled && startText !== undefined ? { key: sessionKey, path: startPath, filename: baseName(startPath), content: startText } : null
-  const editor = useNeovimTerminal(opening, save, onClose, { askKeymap: true, onSelection, onSwitched: switchedTo, onOpenFailed: openFailed, onPasteImage: pasteImage })
+  const editor = useNeovimTerminal(opening, save, onClose, { askKeymap: true, onSelection, onSwitched: switchedTo, onOpenFailed: openFailed, shownPath: () => shown.current })
   const { setContent: pushToNeovim } = editor
 
   // Without Neovim there is no buffer to merge into: the disk text is what the rendered pane shows
