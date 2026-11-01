@@ -22,7 +22,8 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
   run-omp-web.sh                         builds and serves omp-web (auto-rebase onto origin/main, reset to ref + seams.patch + overlay + chat-ui), starts the host daemon
 
 ~/git/ompweb_original/                   upstream clone kahme247/ompweb (main), remote `fork` = patrickab/ompweb-fork
-~/git/worktrees/ompweb_original/refactor-314/  branch refactor/314-ui-customization-seams: PR #332, upstream main + our seams, the ref we serve
+~/git/worktrees/ompweb_original/<branch>/      one worktree per branch, path = branch name
+  refactor/314-ui-customization-seams/        PR #332: upstream main + our seams, the ref we serve
 ~/.local/share/gigachad-bot/ompweb-upstream/   served build checkout (D), owned by run-omp-web.sh, never edit by hand
 ```
 
@@ -70,7 +71,7 @@ An override typechecks against the upstream module it wraps, so an upstream chan
 Every real start of `run-omp-web.sh` (`run.sh`, and in production `gigachad-bot-omp-web.service` via `deploy/run-production-omp-web.sh server`) first updates the ref branch, so omp-web serves the newest upstream `main` the overlay passes on. An omp-web already listening is reused untouched: the update applies at its next start. `redeploy.sh` also restarts the unit when `origin/main` moved past the branch, unless the last update already failed for that same branch tip and `origin/main`, or an omp session runs. `GIGACHAD_AUTO_UPDATE=0` opts out.
 
 1. `git fetch origin` in `GIGACHAD_OMP_WEB_REPO` (60 s limit, no prompts). Branch already contains `origin/main` → nothing to do, silently.
-2. A worktree holding the branch (e.g. `~/git/worktrees/ompweb_original/refactor-314`) with tracked changes → keep, it gets moved only when clean.
+2. A worktree holding the branch (e.g. `~/git/worktrees/ompweb_original/refactor/314-ui-customization-seams`) with tracked changes → keep, it gets moved only when clean.
 3. Rebase a copy in a temporary detached worktree `<GIGACHAD_OMP_WEB_DIR>.update.XXXXXX` (no autostash, autosquash or update-refs: other branches stay). Conflict → `rebase --abort`.
 4. Overlay checks on the result, as in the private check checkout: `seams.patch` applies, overlay as `custom/`, `npm ci`, chat-ui packed, `tsc --noEmit`, `node --experimental-strip-types --test custom/*.test.mjs`. Output: `<GIGACHAD_OMP_WEB_DIR>.auto-update.log`.
 5. Pass → the branch moves to the result (`reset --keep` in its worktree, else a compare-and-swap `update-ref`), the temporary worktree is removed. Never pushed: the local PR branch is then ahead of the fork, push it with `--force-with-lease` when the PR should follow.
@@ -79,7 +80,7 @@ Any failure (offline, no `origin/main`, conflict, failed check, dirty or moved w
 
 ### Upstream change (seam or fix)
 
-1. Commit on `refactor/314-ui-customization-seams` in `~/git/worktrees/ompweb_original/refactor-314`. A change unrelated to #314 gets its own topic branch off `main` and its own PR, and is served only once merged.
+1. Commit on `refactor/314-ui-customization-seams` in `~/git/worktrees/ompweb_original/refactor/314-ui-customization-seams`. A change unrelated to #314 gets its own topic branch off `main` (worktree path = branch name) and its own PR, and is served only once merged.
 2. Add/adjust upstream tests, run upstream checks (`npm run typecheck`, `npm run lint`, `npm test`). Compare failures against `origin/main`: a few environment-dependent tests fail there too.
 3. Only commits reach the served omp-web: `run-omp-web.sh` resets D to the ref, uncommitted edits in any worktree are invisible to it (and block its automatic rebase until committed or stashed).
 4. Push to the fork (`git push --force-with-lease fork refactor/314-ui-customization-seams`, it updates PR #332) only with the user's approval.
