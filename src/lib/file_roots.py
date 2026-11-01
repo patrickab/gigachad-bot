@@ -113,6 +113,13 @@ class FileRoots:
             raise ValueError(f"Path outside file roots: {path}")
         return max(holding, key=lambda root: len(root.parts))
 
+    def ceiling_of(self, path: Path) -> Path:
+        """`root_of` *path*, else its own folder when only host access reaches it."""
+        try:
+            return self.root_of(str(path))
+        except ValueError:
+            return path if path.is_dir() else path.parent
+
     # ─── listing ───
 
     def list_files(self) -> list[dict[str, str]]:
@@ -191,9 +198,22 @@ class FileRoots:
         """Return the text content of a file-root file."""
         return self.resolve(path).read_text(encoding="utf-8")
 
-    def write(self, path: str, content: str) -> None:
-        """Overwrite a file-root file in place (validated under a file root)."""
-        self._root_for(path).write_text(content, encoding="utf-8")
+    def write(self, path: str, content: str) -> Path:
+        """Overwrite a file-root file in place (validated under a file root), returning its resolved path."""
+        target = self._root_for(path)
+        target.write_text(content, encoding="utf-8")
+        return target
+
+    def create(self, path: str, data: str | bytes) -> Path:
+        """Create the file-root file *path* with *data*, validated like `write`, returning its resolved path. FileExistsError when taken."""
+        target = self._root_for(path)
+        if isinstance(data, str):
+            with target.open("x", encoding="utf-8") as file:
+                file.write(data)
+        else:
+            with target.open("xb") as file:
+                file.write(data)
+        return target
 
     def rename(self, path: str, new_name: str) -> Path:
         """Rename the file-root file *path* inside its folder (validated like `write`), returning the new path.

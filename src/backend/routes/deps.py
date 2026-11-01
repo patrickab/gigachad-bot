@@ -20,6 +20,7 @@ from lib.changes import UserScope
 from lib.chat_cleanup import ChatCleanup
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
+from lib.disk_files import DiskFiles
 from lib.document_service import Relocate
 from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.file_roots import FileRoots
@@ -153,6 +154,10 @@ def get_file_roots(
     scope: UserScope = Depends(get_user_scope),
 ) -> FileRoots:
     return FileRoots(repository=PostgresFileRootRepository(scope), host_access=identity.has_host_access)
+
+
+def get_disk_files(roots: FileRoots = Depends(get_file_roots), scope: UserScope = Depends(get_user_scope)) -> DiskFiles:
+    return DiskFiles(roots, scope)
 
 
 def get_architecture_store(

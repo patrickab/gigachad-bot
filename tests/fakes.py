@@ -1,6 +1,7 @@
 """In-memory stand-ins for the stores, sandbox and LLM client that tests share."""
 
 from collections.abc import Iterable
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import io
@@ -19,6 +20,20 @@ from lib.data_store import Entry, Revision, StorageNotFoundError
 from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult
 from lib.tool_context import ToolOptions
+
+
+class RecordingScope:
+    """`UserScope` stand-in that keeps every recorded change."""
+
+    def __init__(self) -> None:
+        self.changes: list[dict] = []
+
+    @contextmanager
+    def connection(self):
+        yield SimpleNamespace(transaction=nullcontext)
+
+    def record(self, connection, **change) -> None:
+        self.changes.append(change)
 
 
 class MemoryDataStore:
