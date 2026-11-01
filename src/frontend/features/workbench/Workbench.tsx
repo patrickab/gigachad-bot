@@ -16,7 +16,7 @@ import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { quoteSelection } from "./quote"
 import { useAgentSync } from "./useAgentSync"
-import { ShowPaneButton, WorkbenchSplit, useHiddenPane, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
+import { WorkbenchViewSwitch, useWorkbenchView, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
 /** What the rendered pane draws from: where it sits, the synced text, and why it could not load. */
 export interface WorkbenchPane {
@@ -41,10 +41,8 @@ export interface WorkbenchProps {
   onClose: () => void
   shellCommands: ShellCommands
   modelProps: Omit<ComponentProps<typeof OmpModelSelector>, "view">
-  /** Names the rendered pane in the show and hide labels: "PDF" gives "Show PDF" and "Hide PDF". */
-  renderLabel: string
   renderPane: (pane: WorkbenchPane) => ReactNode
-  /** Shown in the `workbenchStatus` top-bar slot after the show-pane button. */
+  /** Shown in the `workbenchStatus` top-bar slot after the view switch. */
   status?: ReactNode
   /** A `:w` stored `text`. */
   onSaved?: (text: string) => void
@@ -76,7 +74,7 @@ const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs t
  */
 export function Workbench({
   path, cwd, ompView, onViewChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
-  renderLabel, renderPane, status, onSaved, onPulled, onRunEnd, quoteLanguage,
+  renderPane, status, onSaved, onPulled, onRunEnd, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
   // A rename changes `path` under the running editor: its session goes on and learns the new name, it never restarts
@@ -125,9 +123,9 @@ export function Workbench({
   }, [pushToNeovim])
   useAgentSync({ path, streaming, setContent, syncedRef, onPulled, onRunEnd })
 
-  const [hiddenPane, setHiddenPane] = useHiddenPane()
+  const [workbenchView, setWorkbenchView] = useWorkbenchView()
   const splitRef = useRef<HTMLDivElement>(null)
-  const layout = usePaneLayout(splitRef, hiddenPane)
+  const layout = usePaneLayout(splitRef, workbenchView)
 
   // Editor and rendered file share the width and line up at the top, rendered pages scroll on below.
   // A hidden pane stays mounted, so Neovim keeps its session
@@ -136,7 +134,7 @@ export function Workbench({
       {/* The padding sits outside the measured area: `useElementSize` reads the content box */}
       <div className="flex min-w-0 flex-1 px-3">
         <div ref={splitRef} className="flex min-w-0 flex-1">
-          <div className={cn("flex min-w-0 flex-1 flex-col items-center", hiddenPane === "editor" && "hidden")}>
+          <div className={cn("flex min-w-0 flex-1 flex-col items-center", workbenchView === "render" && "hidden")}>
             <div className="flex flex-col" style={{ marginTop: layout.top, width: layout.width, height: layout.height }}>
               {loadError ? <div className={CENTERED_NOTE}>{LOAD_MESSAGES[loadError]}</div>
                 : content === null ? <div className={CENTERED_NOTE}>Loading…</div>
@@ -144,8 +142,7 @@ export function Workbench({
                 : <NeovimEditor terminal={editor.terminal} status={editor.status} onRestart={editor.restart} className={EDITOR_PAGE} />}
             </div>
           </div>
-          <WorkbenchSplit hidden={hiddenPane} onChange={setHiddenPane} renderLabel={renderLabel} />
-          <div className={cn("min-w-0 flex-1", hiddenPane === "render" && "hidden")}>
+          <div className={cn("min-w-0 flex-1", workbenchView === "editor" && "hidden")}>
             {renderPane({ layout, text: syncedText ?? content, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
           </div>
         </div>
@@ -168,7 +165,7 @@ export function Workbench({
       </InTopBar>
       <InTopBar name="workbenchStatus">
         <TopBarPill>
-          <ShowPaneButton hidden={hiddenPane} onChange={setHiddenPane} renderLabel={renderLabel} />
+          <WorkbenchViewSwitch view={workbenchView} onChange={setWorkbenchView} />
           {status}
         </TopBarPill>
       </InTopBar>

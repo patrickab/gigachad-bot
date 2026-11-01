@@ -89,7 +89,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Visual-mode `<leader>a` quotes the selected lines into the chat draft. Each file keeps its own list of chat sessions, shared by all devices: the chevron beside the session title switches between them, `+` starts a new one. The first message of a new session names the file (`File: <path>`), and after a rename the next message of each earlier session names it again.
 - Agent edits appear in Neovim while the agent runs. Unsaved edits on other lines survive. On lines both changed, the agent's version wins, so save often. A save never overwrites an agent edit it has not seen: `:w` merges first and reports "Saved, merged with the agent's edits".
 - Edits from another device show up after it saves. Edits made outside the app (a shell) appear on the next reload or agent run.
-- Workbench chats use a short Markdown or LaTeX prompt kept in this repository, without coding rules or `AGENTS.md`. Hide either pane from the split line or bring it back from the top bar.
+- Workbench chats use a short Markdown or LaTeX prompt kept in this repository, without coding rules or `AGENTS.md`. Switch between editor only, split and preview only with the three-icon switch in the top bar (remembered per device).
 
 ## Canvas
 

@@ -6,7 +6,7 @@ import { LatexBuildStatus } from "./LatexBuildStatus"
 import { LatexPdfPane } from "./LatexPdfPane"
 import { useLatexBuild } from "./useLatexBuild"
 
-type LatexWorkbenchProps = Omit<WorkbenchProps, "renderLabel" | "renderPane" | "status" | "onSaved" | "onPulled" | "onRunEnd" | "quoteLanguage">
+type LatexWorkbenchProps = Omit<WorkbenchProps, "renderPane" | "status" | "onSaved" | "onPulled" | "onRunEnd" | "quoteLanguage">
 
 /**
  * One `.tex` file in the workbench: Neovim, its built PDF and the omp chat drawer.
@@ -26,7 +26,6 @@ export function LatexWorkbench(props: LatexWorkbenchProps) {
   return (
     <Workbench
       {...props}
-      renderLabel="PDF"
       renderPane={({ layout }) => (
         <LatexPdfPane
           url={build.pdfUrl}

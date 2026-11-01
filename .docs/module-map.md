@@ -209,7 +209,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
-|       |   |   |-- WorkbenchSplit.tsx Hidden pane, shared page box (`usePaneLayout`)
+|       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`)
 |       |   |   |-- usePreparedWorkbench.ts, useAgentSync.ts Prepare once per path, agent/remote sync (`onPulled`)
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, useLatexBuild, LatexPdfPane, LatexBuildStatus

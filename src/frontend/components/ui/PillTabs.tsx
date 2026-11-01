@@ -21,12 +21,15 @@ interface TabSemantics {
  * - With `tabs` the row is a `tablist` of focus-ringed `tab`s controlling one panel
  * - Without it the pills are plain buttons
  */
-export function PillTabs<T extends string>({ options, value, onChange, tabs, className }: {
-  options: readonly { value: T; label: ReactNode }[]
+export function PillTabs<T extends string>({ options, value, onChange, tabs, className, pillClassName }: {
+  /** `ariaLabel` names an icon-only option. */
+  options: readonly { value: T; label: ReactNode; ariaLabel?: string }[]
   value: T
   onChange: (value: T) => void
   tabs?: TabSemantics
   className?: string
+  /** Overrides the pill padding, e.g. `px-2` for icon pills. */
+  pillClassName?: string
 }) {
   return (
     <div role={tabs && "tablist"} aria-label={tabs?.label} className={cn("flex gap-1", className)}>
@@ -35,17 +38,19 @@ export function PillTabs<T extends string>({ options, value, onChange, tabs, cla
         return (
           <button
             key={option.value}
-            {...tabs && {
+            type="button"
+            aria-label={option.ariaLabel}
+            {...tabs ? {
               id: `${tabs.idPrefix}-${option.value}`,
-              type: "button" as const,
               role: "tab",
               "aria-selected": selected,
               "aria-controls": tabs.panelId,
-            }}
+            } : { "aria-pressed": selected }}
             onClick={() => onChange(option.value)}
             className={cn(
               PILL_CLASS,
-              tabs && PILL_FOCUS_CLASS,
+              PILL_FOCUS_CLASS,
+              pillClassName,
               selected ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface/50 hover:text-ink",
             )}
           >
