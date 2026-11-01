@@ -22,7 +22,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   mounted,
   keep,
   rendersPlaceholder,
-  documentRef,
+  pdf,
   onPlaceholderChange,
   snap,
   registerSlot,
@@ -37,13 +37,13 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   mounted: boolean
   keep: boolean
   rendersPlaceholder: boolean
-  documentRef: { readonly current: PdfDocument | null }
+  pdf: PdfDocument
   onPlaceholderChange: (pageNumber: number, settled: boolean) => void
   snap: boolean
   registerSlot: (pageNumber: number, slot: HTMLDivElement | null) => void
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
-  /** Called each time this page's live canvas finished drawing. */
-  onRendered?: () => void
+  /** Called with the page number each time this page's live canvas finished drawing, or failed to. */
+  onRendered?: (pageNumber: number) => void
 }) {
   const [regions, setRegions] = useState<PageRegions | null>(null)
   // masks over a blank canvas would show as light boxes
@@ -88,9 +88,8 @@ export const PdfPageSlot = memo(function PdfPageSlot({
 
   // Pages that never rendered get a placeholder from a scratch render, the live canvas takes over once mounted.
   useEffect(() => {
-    const pdf = documentRef.current
     const backup = backupRef.current
-    if (!rendersPlaceholder || mounted || !pdf || !backup) return
+    if (!rendersPlaceholder || mounted || !backup) return
     let cancelled = false
     let task: RenderTask | null = null
     renderPlaceholder(pdf, pageNumber, (renderTask) => { task = renderTask })
@@ -107,7 +106,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
       cancelled = true
       task?.cancel()
     }
-  }, [rendersPlaceholder, mounted, documentRef, pageNumber, publishPlaceholder])
+  }, [rendersPlaceholder, mounted, pdf, pageNumber, publishPlaceholder])
 
   const onRenderSuccess = useCallback(() => {
     mapCanvasToDevicePixels(canvasRef.current, devicePixelRatio)
@@ -115,8 +114,10 @@ export const PdfPageSlot = memo(function PdfPageSlot({
     releaseCanvas(backupRef.current)
     publishPlaceholder(false)
     setDrawn(true)
-    onRendered?.()
-  }, [devicePixelRatio, publishPlaceholder, onRendered])
+    onRendered?.(pageNumber)
+  }, [devicePixelRatio, publishPlaceholder, onRendered, pageNumber])
+
+  const onRenderFailed = useCallback(() => onRendered?.(pageNumber), [onRendered, pageNumber])
 
   // Images skip both color layers, link text skips the ink layer. Shares the operator list the canvas render fetches.
   const collectRegions = useCallback((page: PdfPage) => {
@@ -153,7 +154,9 @@ export const PdfPageSlot = memo(function PdfPageSlot({
               canvasRef={canvasRef}
               loading={null}
               onLoadSuccess={collectRegions}
+              onLoadError={onRenderFailed}
               onRenderSuccess={onRenderSuccess}
+              onRenderError={onRenderFailed}
               renderTextLayer
             />
           </div>

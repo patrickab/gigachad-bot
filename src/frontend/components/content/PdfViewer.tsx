@@ -31,14 +31,20 @@ if (typeof window !== "undefined") {
 /** Page layout set by the parent: page `width`, and the scroller's px above the first page and below the last. */
 export type PdfPageBox = { width: number; top: number; bottom: number }
 
+/** A loaded document, its url and its pages' height / width ratios. */
+type PdfLayout = { url: string; pdf: PdfDocument; aspects: number[] }
+
+/** Callback for the incoming layer, whose pages stay out of the page window until they swap in. */
+function ignore() {}
+
 /** PDF viewer with zoom and page tracking.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
  * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
  * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
  * - Controls show only while the pointer is near them
- * - `documentKey` names the document apart from its `url`: a new `url` under the same key reloads in place, keeping zoom and scroll position, while a new key starts over
- * - `onPageRendered` fires each time a page finished drawing
+ * - `documentKey` names the document apart from its `url`: a new `url` under the same key loads behind the shown pages and swaps in once its pages near the viewport have drawn, keeping zoom and scroll position, while a new key starts over
+ * - `onPageRendered` gets the shown url each time one of its pages finished drawing, or failed to, and when a new url swaps in
  * - `pageBox` sets the page width and the space around the pages, e.g. to line them up with a neighboring pane
  * - Only pages near the viewport hold a canvas, the rest are sized placeholders
  */
@@ -66,13 +72,37 @@ export function PdfViewer({
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
   onScrollerChange?: (scroller: HTMLDivElement | null) => void
   documentKey?: string
-  onPageRendered?: () => void
+  onPageRendered?: (url: string) => void
   pageBox?: PdfPageBox
 }) {
   const identity = documentKey ?? url
-  const [numPages, setNumPages] = useState<number | null>(null)
-  const [pageAspects, setPageAspects] = useState<number[] | null>(null) // height / width per page
-  const documentRef = useRef<PdfDocument | null>(null)
+  // The url on screen. Under the same `documentKey` a new url is the incoming one, loading hidden until it swaps in
+  const [shownUrl, setShownUrl] = useState(url)
+  const [shownIdentity, setShownIdentity] = useState(identity)
+  const [layout, setLayout] = useState<PdfLayout | null>(null)
+  const [incoming, setIncoming] = useState<PdfLayout | null>(null)
+  // Incoming pages that finished drawing
+  const [incomingDrawn, setIncomingDrawn] = useState<ReadonlySet<number>>(() => new Set())
+  // The last layout that swapped in, its callbacks fire after the commit
+  const [swapped, setSwapped] = useState<PdfLayout | null>(null)
+  // The document each layer loaded last, so a superseded load never lays out
+  const shownLoadRef = useRef<PdfDocument | null>(null)
+  const incomingLoadRef = useRef<PdfDocument | null>(null)
+  if (url !== shownUrl && !(documentKey !== undefined && identity === shownIdentity && layout?.url === shownUrl)) setShownUrl(url)
+  if (identity !== shownIdentity) setShownIdentity(identity)
+  const incomingUrl = url === shownUrl ? null : url
+  // A url change while a swap is pending replaces the pending one
+  const [incomingFor, setIncomingFor] = useState<string | null>(null)
+  if (incomingFor !== incomingUrl) {
+    setIncomingFor(incomingUrl)
+    setIncoming(null)
+    setIncomingDrawn(new Set())
+  }
+  useLayoutEffect(() => {
+    incomingLoadRef.current = null
+  }, [incomingUrl])
+  const numPages = layout?.aspects.length ?? null
+  const pageAspects = layout?.aspects ?? null // height / width per page
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [availWidth, setAvailWidth] = useState<number | null>(null)
@@ -84,20 +114,16 @@ export function PdfViewer({
   const onPageChangeRef = useRef(onPageChange)
   const onScrollerChangeRef = useRef(onScrollerChange)
   const onPageRenderedRef = useRef(onPageRendered)
+  const onPageAspectRef = useRef(onPageAspect)
   useLayoutEffect(() => {
     onPageChangeRef.current = onPageChange
     onScrollerChangeRef.current = onScrollerChange
     onPageRenderedRef.current = onPageRendered
+    onPageAspectRef.current = onPageAspect
   })
-  const notifyPageRendered = useCallback(() => onPageRenderedRef.current?.(), [])
-  // The pages' height, held as a blank spacer while a reload under the same `documentKey` loads, so the scroll position survives
-  const pagesRef = useRef<HTMLDivElement>(null)
-  const pagesHeightRef = useRef(0)
-  useLayoutEffect(() => {
-    if (documentKey !== undefined && pagesRef.current) pagesHeightRef.current = pagesRef.current.offsetHeight
-  })
-  const holdPagesHeight = useCallback((spacer: HTMLDivElement | null) => {
-    if (spacer) spacer.style.height = `${pagesHeightRef.current}px`
+  const notifyPageRendered = useCallback(() => onPageRenderedRef.current?.(shownUrl), [shownUrl])
+  const onIncomingPageRendered = useCallback((pageNumber: number) => {
+    setIncomingDrawn((drawn) => (drawn.has(pageNumber) ? drawn : new Set(drawn).add(pageNumber)))
   }, [])
   const setScroller = useCallback((scroller: HTMLDivElement | null) => {
     scrollRef.current = scroller
@@ -107,6 +133,19 @@ export function PdfViewer({
   const pageAspect = pageAspects?.[0] ?? null
   const ready = numPages != null && availWidth != null && pageAspects != null
   const { nearPages, keepPages, slotsRef, registerSlot, onPlaceholderChange, activePlaceholderTarget, markScrolled } = usePdfPageWindow(scrollRef, ready, pageRef)
+
+  // Swap once every incoming page near the viewport has drawn: the incoming layer becomes the shown one in this render
+  if (incoming !== null && incoming.url === incomingUrl && [...nearPages].every((page) => page > incoming.aspects.length || incomingDrawn.has(page))) {
+    setShownUrl(incoming.url)
+    setLayout(incoming)
+    setIncoming(null)
+    setSwapped(incoming)
+  }
+  useEffect(() => {
+    if (!swapped) return
+    onPageAspectRef.current?.(swapped.aspects[0])
+    onPageRenderedRef.current?.(swapped.url)
+  }, [swapped])
 
   // measure the parent-controlled dimension — debounced so resizing doesn't re-render every frame
   useEffect(() => {
@@ -149,26 +188,35 @@ export function PdfViewer({
     node?.scrollIntoView({ behavior: "smooth", block: "start" })
   })
 
-  const onDocumentLoadSuccess = useCallback(
-    async (pdf: PdfDocument) => {
-      documentRef.current = pdf
-      // first page's real dimensions (any page size, not just A4) lay out every page until all are read
-      let firstAspect = Math.SQRT2
-      try {
-        const viewport = (await pdf.getPage(1)).getViewport({ scale: 1 })
-        firstAspect = viewport.height / viewport.width
-        onPageAspect?.(firstAspect)
-      } catch {
-        /* lay out at A4 */
-      }
-      if (documentRef.current !== pdf) return
-      setNumPages(pdf.numPages)
-      setPageAspects(Array.from({ length: pdf.numPages }, () => firstAspect))
-      const aspects = await readPageAspects(pdf, firstAspect)
-      if (documentRef.current === pdf) setPageAspects(aspects)
-    },
-    [onPageAspect],
-  )
+  const loadDocument = useCallback(async (layerUrl: string, incomingLayer: boolean, pdf: PdfDocument) => {
+    const loadRef = incomingLayer ? incomingLoadRef : shownLoadRef
+    loadRef.current = pdf
+    // first page's real dimensions (any page size, not just A4) lay out every page until all are read
+    let firstAspect = Math.SQRT2
+    try {
+      const viewport = (await pdf.getPage(1)).getViewport({ scale: 1 })
+      firstAspect = viewport.height / viewport.width
+      if (!incomingLayer && loadRef.current === pdf) onPageAspectRef.current?.(firstAspect)
+    } catch {
+      /* lay out at A4 */
+    }
+    if (loadRef.current !== pdf) return
+    const loaded = { url: layerUrl, pdf, aspects: Array.from({ length: pdf.numPages }, () => firstAspect) }
+    if (incomingLayer) setIncoming(loaded)
+    else setLayout(loaded)
+    const aspects = await readPageAspects(pdf, firstAspect)
+    // the layer may have swapped in meanwhile
+    const withAspects = (current: PdfLayout | null) => (current?.pdf === pdf ? { ...current, aspects } : current)
+    setLayout(withAspects)
+    setIncoming(withAspects)
+  }, [])
+
+  // An incoming url that failed to load swaps in right away, showing its error
+  const showFailedLoad = useCallback((failedUrl: string) => {
+    setShownUrl(failedUrl)
+    setLayout(null)
+    setIncoming(null)
+  }, [])
 
   useLayoutEffect(() => {
     restoredPageUrlRef.current = null
@@ -281,32 +329,50 @@ export function PdfViewer({
           ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined),
         }}
       >
-        {/* A new url gets a fresh Document: pages kept across the swap would render against the destroyed old one */}
-        <Document key={url} file={url} onLoadSuccess={onDocumentLoadSuccess} onItemClick={goToPage} externalLinkTarget="_blank" externalLinkRel="noopener noreferrer" loading={documentKey === undefined ? undefined : <div ref={holdPagesHeight} />}>
-          {ready && pageAspects && (
-            <div ref={pagesRef} style={{ width: pageWidth }} className="mx-auto">
-              {pageAspects.map((aspect, index) => (
-                <PdfPageSlot
-                  key={`${identity}:${index}`}
-                  pageNumber={index + 1}
-                  width={pageWidth}
-                  height={Math.round(pageWidth * aspect)}
-                  rasterWidth={rasterPageWidth}
-                  devicePixelRatio={devicePixelRatio}
-                  mounted={nearPages.has(index + 1)}
-                  keep={keepPages.has(index + 1)}
-                  rendersPlaceholder={activePlaceholderTarget === index + 1}
-                  documentRef={documentRef}
-                  onPlaceholderChange={onPlaceholderChange}
-                  snap={!!fitWidth}
-                  registerSlot={registerSlot}
-                  renderPageOverlay={renderPageOverlay}
-                  onRendered={notifyPageRendered}
-                />
-              ))}
+        {/* Each url gets its own Document: pages kept across a url change would render against the destroyed old one */}
+        {(incomingUrl === null ? [shownUrl] : [shownUrl, incomingUrl]).map((layerUrl) => {
+          const incomingLayer = layerUrl === incomingUrl
+          const loaded = incomingLayer ? incoming : ready ? layout : null
+          const aspects = availWidth != null && loaded?.url === layerUrl ? loaded.aspects : null
+          return (
+            // The incoming layer draws its pages out of sight, swapping in only flips this wrapper and drops the shown one
+            <div key={layerUrl} inert={incomingLayer} className={incomingLayer ? "invisible h-0 overflow-hidden" : undefined}>
+              <Document
+                file={layerUrl}
+                onLoadSuccess={(pdf) => loadDocument(layerUrl, incomingLayer, pdf)}
+                onLoadError={incomingLayer ? () => showFailedLoad(layerUrl) : undefined}
+                onItemClick={goToPage}
+                externalLinkTarget="_blank"
+                externalLinkRel="noopener noreferrer"
+                loading={documentKey === undefined ? undefined : null}
+              >
+                {loaded && aspects && (
+                  <div style={{ width: pageWidth }} className="mx-auto">
+                    {aspects.map((aspect, index) => (
+                      <PdfPageSlot
+                        key={`${identity}:${index}`}
+                        pageNumber={index + 1}
+                        width={pageWidth}
+                        height={Math.round(pageWidth * aspect)}
+                        rasterWidth={rasterPageWidth}
+                        devicePixelRatio={devicePixelRatio}
+                        mounted={nearPages.has(index + 1)}
+                        keep={!incomingLayer && keepPages.has(index + 1)}
+                        rendersPlaceholder={!incomingLayer && activePlaceholderTarget === index + 1}
+                        pdf={loaded.pdf}
+                        onPlaceholderChange={incomingLayer ? ignore : onPlaceholderChange}
+                        snap={!!fitWidth}
+                        registerSlot={incomingLayer ? ignore : registerSlot}
+                        renderPageOverlay={renderPageOverlay}
+                        onRendered={incomingLayer ? onIncomingPageRendered : notifyPageRendered}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Document>
             </div>
-          )}
-        </Document>
+          )
+        })}
       </div>
     </div>
   )
