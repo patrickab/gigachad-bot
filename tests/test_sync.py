@@ -86,6 +86,7 @@ def test_insert_notifies_once_with_metadata_only(postgres_pool, listener):
         "resource_kind": "document",
         "resource_key": "notes/a.md",
         "version": 3,
+        "operation": "write",
         "device_id": str(device_id),
         "moved_to": None,
     }
@@ -251,6 +252,7 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "resource_kind": "document",
         "resource_key": "old.md",
         "version": 1,
+        "operation": "write",
         "device_id": None,
         "moved_to": None,
     }
@@ -259,6 +261,7 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "resource_kind": "document",
         "resource_key": "new.md",
         "version": 2,
+        "operation": "write",
         "device_id": None,
         "moved_to": None,
     }

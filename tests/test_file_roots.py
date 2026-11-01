@@ -14,6 +14,7 @@ from lib.attachment_materialize import sync_library_pdf
 from lib.attachments import attach_library_pdf
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError, write_text
+from lib.disk_files import DiskFiles
 from lib.document_service import add_extraction
 from lib.file_roots import FileRoots
 from lib.host_access import list_directories
@@ -165,6 +166,7 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
     note = tmp_path / "AGENTS.md"
     note.write_text("v1")
     project = _Project()
+    scope = RecordingScope()
     client = route_client(
         file_attach_route.router,
         documents_route.router,
@@ -174,6 +176,7 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
             file_attach_route.get_asset_store: None,
             file_attach_route.get_extraction_publisher: None,
             documents_route.get_document_store: None,
+            documents_route.get_disk_files: DiskFiles(mounted_roots(tmp_path), scope),
         },
     )
 
@@ -186,8 +189,10 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
     removed = client.delete("/api/documents", params={"slug": "test", "path": str(note.resolve())})
 
     assert removed.status_code == 200
+    assert removed.json() == {"status": "ok", "removed": []}
     assert project.files == []
     assert note.read_text() == "v1"
+    assert scope.changes == []
 
 
 def test_workspace_files_serve_raw_bytes_and_refuse_binary_as_text(tmp_path):

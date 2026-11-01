@@ -1,11 +1,12 @@
 """Writes of file-root files that tell the user's other devices.
 
-Every write through the app records one ``document`` change keyed by the resolved path. Disk files carry no version, so
-the change row's version is None.
+Every write through the app records one ``document`` change keyed by the resolved path, every removal one ``delete``
+change. Disk files carry no version, so the change row's version is None.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,3 +38,9 @@ class DiskFiles:
         """Record the change of *path* that a writer already made."""
         with self._scope.connection() as connection, connection.transaction():
             self._scope.record(connection, kind="document", key=str(path), operation="write")
+
+    def record_removed(self, paths: Iterable[str | Path]) -> None:
+        """Record the removal of *paths* that a deleter already removed, in one transaction."""
+        with self._scope.connection() as connection, connection.transaction():
+            for path in paths:
+                self._scope.record(connection, kind="document", key=str(path), operation="delete")

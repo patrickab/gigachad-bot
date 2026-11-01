@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from psycopg import Connection
     from psycopg_pool import ConnectionPool
 
-EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id", "moved_to")
+EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "operation", "device_id", "moved_to")
 
 
 def like_prefix(key: str) -> str:
@@ -67,9 +67,9 @@ def latest_changes(pool: ConnectionPool, user_id: UUID, since: int) -> list[dict
     with pool.connection() as connection:
         rows = connection.execute(
             """
-            SELECT seq, resource_kind, resource_key, version, device_id, moved_to FROM (
+            SELECT seq, resource_kind, resource_key, version, operation, device_id, moved_to FROM (
                 SELECT DISTINCT ON (resource_kind, resource_key)
-                    seq, resource_kind, resource_key, version, device_id, moved_to
+                    seq, resource_kind, resource_key, version, operation, device_id, moved_to
                 FROM changes
                 WHERE user_id = %s AND seq > %s
                 ORDER BY resource_kind, resource_key, seq DESC

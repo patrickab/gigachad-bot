@@ -250,15 +250,21 @@ def remove_document(
     path: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
     references: References = Depends(get_references),
+    files: DiskFiles = Depends(get_disk_files),
 ):
     """Unassign a document from a project, then delete it with what was derived from it (library PDF copy,
     extraction, annotations, a canvas's references) once nothing else references it. Empty slug = non-project
-    note, deleted directly since there's no project to unlink from."""
+    note, deleted directly since there's no project to unlink from.
+
+    - `removed` lists the keys and absolute paths that are gone, a mounted file only unlinked stays out of it
+    - Each removed absolute path records a `delete` change (stored keys record their own), so other devices close what shows it
+    """
     scope = DocumentScope(slug)
     with http_errors((FileNotFoundError, 404, None)):
         scope.unlink(store, path)
-    references.release(scope.removal(path))
-    return {"status": "ok"}
+    removed = references.release(scope.removal(path))
+    files.record_removed(key for key in removed if Path(key).is_absolute())
+    return {"status": "ok", "removed": removed}
 
 
 @router.post("/move", response_model=FileMeta)

@@ -273,7 +273,7 @@ class PostgresKeyRelocator:
                     self._scope.record(connection, kind="document", key=new, operation="move")
                 elif Path(new).is_absolute():
                     connection.execute("DELETE FROM documents WHERE user_id = %s AND key = %s", (user_id, old))
-                    self._scope.record(connection, kind="document", key=old, operation="delete")
+                    self._scope.record(connection, kind="document", key=old, operation="move")
                 else:
                     # Canvas shares and log keys follow the document FK ON UPDATE CASCADE.
                     version = connection.execute(

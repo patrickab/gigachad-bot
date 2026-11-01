@@ -405,7 +405,7 @@ def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice)
         route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
     )
 
-    route.remove_document(slug, "note/idea.md", alice.projects, References(alice.docs, alice.assets))
+    remove(alice, slug, "note/idea.md")
 
     assert alice.docs.read_bytes("note/idea.md")[0] == b"x"
 
@@ -426,6 +426,18 @@ def test_another_users_document_is_invisible_and_answers_404(alice, bob):
     with pytest.raises(StorageNotFoundError):
         bob.docs.read_bytes(meta.path)
     assert alice.docs.read_bytes(meta.path)[0] == b"mine"
+
+
+def remove(alice, slug, path):
+    """`DELETE /api/documents` for *path* of project *slug*, answering what it removed."""
+    return route.remove_document(
+        slug, str(path), alice.projects, References(alice.docs, alice.assets), DiskFiles(mounted_roots(), alice.scope),
+    )["removed"]
+
+
+def deleted_changes(alice):
+    """The keys whose latest change is a delete."""
+    return sorted(row["resource_key"] for row in latest_changes(alice.pool, alice.user_id, 0) if row["operation"] == "delete")
 
 
 def folder_entry(tmp_path):
@@ -465,7 +477,7 @@ def test_deleting_a_folder_entry_unlists_it_and_leaves_the_folder_on_disk(alice,
     slug = alice.projects.create_project("Thesis")["slug"]
     alice.projects.add_file(slug, str(folder))
 
-    route.remove_document(slug, str(folder), alice.projects, References(alice.docs, alice.assets))
+    remove(alice, slug, folder)
 
     assert list_project(alice, slug, mounted_roots(mount)) == []
     assert sorted(path.name for path in folder.iterdir()) == [".latex-build", "main.aux", "main.tex", "refs.bib"]
@@ -489,8 +501,16 @@ def workbench_document(alice, workbench, slug, folder, name):
     return source
 
 
-def remove(alice, slug, path):
-    route.remove_document(slug, str(path), alice.projects, References(alice.docs, alice.assets))
+def test_deleting_a_stored_file_reports_its_key_and_records_it_as_deleted(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    meta = route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
+    )
+
+    removed = remove(alice, slug, meta.path)
+
+    assert removed == [meta.path]
+    assert deleted_changes(alice) == [meta.path]
 
 
 def test_deleting_a_renamed_workbench_tex_removes_its_folder_and_chat_link(alice, workbench):
@@ -511,9 +531,11 @@ def test_deleting_a_promoted_folder_entry_removes_the_workbench_folder(alice, wo
     source = workbench_document(alice, workbench, slug, "paper", "paper.tex")
     alice.projects.replace_file(slug, str(source), str(source.parent))
 
-    remove(alice, slug, source.parent)
+    removed = remove(alice, slug, source.parent)
 
     assert not source.parent.exists()
+    assert removed == [str(source.parent)]
+    assert deleted_changes(alice) == [str(source.parent)]
 
 
 def test_the_slug_folder_stays_while_another_document_is_in_it(alice, workbench):
@@ -546,6 +568,7 @@ def test_deleting_a_mounted_file_only_unlinks_it(alice, workbench, tmp_path):
     mounted.write_text("x", encoding="utf-8")
     alice.projects.add_file(slug, str(mounted))
 
-    remove(alice, slug, mounted)
+    removed = remove(alice, slug, mounted)
 
     assert mounted.is_file() and alice.projects.list_files(slug) == []
+    assert removed == [] and deleted_changes(alice) == []
