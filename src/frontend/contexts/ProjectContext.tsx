@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
-import { displayName, type ProjectDocument, type ProjectListItem } from "@/lib/domain/projects"
+import { displayName, type ProjectListItem } from "@/lib/domain/projects"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
@@ -12,6 +12,7 @@ import {
   setProjectArchived as apiSetProjectArchived,
   renameProject as apiRenameProject,
   renameDocument as apiRenameDocument,
+  type RenamedDocument,
 } from "@/lib/backend/api"
 
 const PROJECT_CATALOG_KEY = "chat/projects-meta.json"
@@ -40,7 +41,7 @@ export function useDisplayName(): (slug: string | null | undefined, path: string
 }
 
 /** Rename `path` of project `slug` (a note when empty), then read the projects again so every view shows the new name. */
-export function useRenameDocument(): (slug: string, path: string, name: string) => Promise<ProjectDocument> {
+export function useRenameDocument(): (slug: string, path: string, name: string) => Promise<RenamedDocument> {
   const refreshProjects = useContext(ProjectContext)?.refreshProjects
   return useCallback(async (slug, path, name) => {
     const renamed = await apiRenameDocument(slug, path, name)

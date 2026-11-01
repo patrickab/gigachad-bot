@@ -419,8 +419,11 @@ export async function moveDocumentToFolder(path: string, folder: string): Promis
   return post<ProjectDocument>("/documents/move-to-folder", { path, folder })
 }
 
-export async function renameDocument(slug: string, path: string, name: string): Promise<ProjectDocument> {
-  return post<ProjectDocument>("/documents/rename", { slug, path, name })
+/** The renamed document, and the absolute paths of other files the rename rewrote to follow it (references to it). */
+export type RenamedDocument = ProjectDocument & { changed: string[] }
+
+export async function renameDocument(slug: string, path: string, name: string): Promise<RenamedDocument> {
+  return post<RenamedDocument>("/documents/rename", { slug, path, name })
 }
 
 export async function writeDocument(slug: string, name: string, content: string = ""): Promise<ProjectDocument> {

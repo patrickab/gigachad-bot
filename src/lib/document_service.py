@@ -4,19 +4,23 @@ Also the writes, moves and renames that keep project references in step.
 """
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from lib import latex
+from lib import latex, latex_references
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import sync_library_pdf
 from lib.data_store import DataStore, InvalidStorageKey, validate_key, write_text
+from lib.disk_files import DiskFiles
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
 from lib.references import References, Released, is_project_document
 from lib.storage_namespace import (
     GRAPH, NOTE, PDFS, library_pdf, project_attachment_prefix, project_document, project_document_prefix,
 )
+
+logger = logging.getLogger(__name__)
 
 Relocate = Callable[[str, str], None]
 """Point every reference to a stored key or disk path at its new key or path, then rekey or delete the stored one (`PostgresKeyRelocator.relocate`)."""
@@ -217,13 +221,20 @@ def rename(store: ProjectStore, docs: DataStore, relocate: Relocate, scope: Docu
     return destination, PurePosixPath(destination).name
 
 
-def rename_on_disk(store: ProjectStore, relocate: Relocate, roots: FileRoots, scope: DocumentScope, path: str, name: str) -> Path:
-    """Rename the file at the absolute *path* inside its folder (see `renamed`), then repoint every reference to it, returning the new path.
+def rename_on_disk(
+    store: ProjectStore, relocate: Relocate, roots: FileRoots, files: DiskFiles, scope: DocumentScope, path: str, name: str,
+) -> tuple[Path, list[Path]]:
+    """Rename the file at the absolute *path* inside its folder (see `renamed`), then repoint every reference to it.
+
+    Returns the new path and the other files whose content the references followed into (empty when none did).
 
     - Allowed where saving is: *roots* decides, and a project scope must reference the file
     - An existing file of that name raises DocumentNameConflict. The move is undone when the references cannot follow
     - References: project file lists, `workbench/sessions.json`, chats, canvases and their mutation log, notes
     - A `.tex` file leaves its build outputs behind, so they are discarded and the next build starts clean
+    - Inside a tex project, its `.tex` and `.bib` files follow the new name (`latex_references`) and each is recorded as changed
+      through *files*, one failing record leaves the others recorded. A failure there is logged and leaves the rename in place
+    - A `.tex` file without a root of its own follows in the nearest folder above that holds a root document
     """
     scope.require(store)
     if scope.slug and path not in set(store.list_files(scope.slug)):
@@ -231,7 +242,7 @@ def rename_on_disk(store: ProjectStore, relocate: Relocate, roots: FileRoots, sc
     source = Path(path)
     target = source.with_name(renamed(source.name, name))
     if target == source:
-        return source
+        return source, []
     if is_name_taken(store, scope, path, target.name):
         raise DocumentNameConflict(str(target))
     try:
@@ -247,7 +258,29 @@ def rename_on_disk(store: ProjectStore, relocate: Relocate, roots: FileRoots, sc
     if source.suffix == ".tex":
         latex.discard_build(source)
         latex.discard_build(target)
-    return target
+    return target, _follow_in_tex_project(roots, files, source, target)
+
+
+def _follow_in_tex_project(roots: FileRoots, files: DiskFiles, source: Path, target: Path) -> list[Path]:
+    """Rewrite the references to the renamed *source* in the tex project holding *target*, returning the files rewritten, never raising."""
+    try:
+        project = latex.project_of(target, ceiling=roots.ceiling_of(target))
+        if project.root is not None:
+            folder = project.folder
+        elif project.candidates:
+            folder = project.candidates[0].parent
+        else:
+            return []
+        rewritten = latex_references.rewrite_references(folder, source, target)
+    except Exception:
+        logger.exception("Could not repoint the references to %s", target)
+        return []
+    for path in rewritten:
+        try:
+            files.record(path)
+        except Exception:
+            logger.exception("Could not record the change to %s", path)
+    return rewritten
 
 
 def follow_library_pdf(assets: AssetStore, references: References, old_name: str, new_name: str, content: Callable[[], bytes]) -> None:

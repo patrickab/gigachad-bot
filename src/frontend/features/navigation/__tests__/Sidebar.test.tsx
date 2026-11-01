@@ -6,6 +6,7 @@ import { TabManager, type TabManagerHandle } from "@/features/navigation/TabMana
 import { TabList } from "@/features/navigation/TabList"
 import { nextTab } from "@/features/navigation/tabs"
 import { TabContext, useTab } from "@/contexts/TabContext"
+import { onFileChange } from "@/lib/backend/fileEvents"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
 
@@ -18,7 +19,7 @@ const render = (element: ReactElement) => testingRender(
 const fixtures = vi.hoisted(() => ({
   projects: [{ slug: "proj", name: "Proj", tabs: [], file_names: { "project/proj/document/plan.md": "Roadmap.md" } }, { slug: "empty", name: "Empty project", tabs: [] }],
   renameProject: vi.fn<(slug: string, name: string) => Promise<string>>(),
-  renameDocument: vi.fn<(slug: string, path: string, name: string) => Promise<{ path: string; name: string; mime: string }>>(),
+  renameDocument: vi.fn<(slug: string, path: string, name: string) => Promise<{ path: string; name: string; mime: string; changed: string[] }>>(),
   documents: [
     { path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" },
     { path: "graph/proj/backend/backend.c4", name: "backend/backend.c4", mime: "text/plain" },
@@ -235,7 +236,7 @@ describe("Project navigation", () => {
   })
 
   it("opens a file on click and renames it on double-click, then follows it in tabs and lists", async () => {
-    fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown" })
+    fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: [] })
     const onDocumentSelect = vi.fn()
     const onDocumentRenamed = vi.fn()
     const onDocumentsChanged = vi.fn()
@@ -260,6 +261,19 @@ describe("Project navigation", () => {
     expect(api.fileRootTree.mock.calls.length).toBeGreaterThan(1)
     expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
   })
+
+  it("announces the files a rename rewrote to follow it", async () => {
+    fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: ["/work/paper.tex", "/work/intro.tex"] })
+    const changed: string[] = []
+    const stop = onFileChange(() => true, (path) => changed.push(path))
+    const view = render(<Sidebar appMode="chat" onDocumentRenamed={vi.fn()} />)
+    fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
+    fireEvent.change(view.getByRole("textbox", { name: "Rename notes.md" }), { target: { value: "ideas" } })
+    fireEvent.keyDown(view.getByRole("textbox", { name: "Rename notes.md" }), { key: "Enter" })
+    await waitFor(() => expect(changed).toEqual(["/work/paper.tex", "/work/intro.tex"]))
+    stop()
+  })
+
 
   it("keeps the input open with the reason when the name is taken, and leaving or Escape keeps the old name", async () => {
     fixtures.renameDocument.mockRejectedValueOnce(new Error("A document with that name already exists there"))
@@ -286,7 +300,7 @@ describe("Project navigation", () => {
   })
 
   it("renames a mounted file of the Code section outside any project when leaving the input", async () => {
-    fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown" })
+    fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown", changed: [] })
     const onDocumentRenamed = vi.fn()
     const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
     const code = within(view.getByLabelText("Code"))

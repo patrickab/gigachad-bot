@@ -19,6 +19,7 @@ from backend.routes.deps import (
     ExtractionPublisher,
     get_architecture_store,
     get_asset_store,
+    get_disk_files,
     get_document_store,
     get_extraction_publisher,
     get_file_roots,
@@ -32,6 +33,7 @@ from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
 from lib.attachments import kind_of, sync_pdf
 from lib.data_store import DataStore, StorageConflictError, validate_key
+from lib.disk_files import DiskFiles
 from lib.document_service import (
     DocumentNameConflict,
     DocumentNotFound,
@@ -71,6 +73,12 @@ class RenameDocumentRequest(BaseModel):
     slug: str
     path: str
     name: str
+
+
+class RenamedDocument(FileMeta):
+    """The renamed document and the absolute paths of the other files whose content the rename rewrote."""
+
+    changed: list[str] = []
 
 
 class MoveDocumentRequest(BaseModel):
@@ -293,7 +301,7 @@ def move_document_to_folder(
     return file_meta(str(target))
 
 
-@router.post("/rename", response_model=FileMeta)
+@router.post("/rename", response_model=RenamedDocument)
 def rename_document(
     req: RenameDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
@@ -302,12 +310,14 @@ def rename_document(
     roots: FileRoots = Depends(get_file_roots),
     relocate: Relocate = Depends(get_relocate),
     references: References = Depends(get_references),
+    files: DiskFiles = Depends(get_disk_files),
 ):
     """Rename a stored document or a file-root file in place, repointing every reference to it.
 
     - A stored file or note takes the new key, a mounted or workbench file is renamed on disk where saving is allowed
     - Chats, canvases, project file lists, workbench sessions and other projects follow the new key or path
     - An existing file of that name answers 409, a path the roots refuse 403, a PDF's library copy follows its name
+    - `changed` lists the project files the rename rewrote on disk (LaTeX references), empty for stored documents
     """
     scope = DocumentScope(req.slug)
     errors = (
@@ -320,11 +330,11 @@ def rename_document(
     )
     if Path(req.path).is_absolute():
         with http_errors(*errors):
-            target = document_service.rename_on_disk(store, relocate, roots, scope, req.path, req.name)
+            target, changed = document_service.rename_on_disk(store, relocate, roots, files, scope, req.path, req.name)
         document_service.follow_library_pdf(assets, references, Path(req.path).name, target.name, target.read_bytes)
-        return file_meta(str(target), name=target.name)
+        return RenamedDocument(**file_meta(str(target), name=target.name).model_dump(), changed=[str(path) for path in changed])
     key = _valid_key(req.path)
     with http_errors(*errors):
         destination, name = document_service.rename(store, docs, relocate, scope, key, req.name)
     document_service.follow_library_pdf(assets, references, PurePosixPath(key).name, name, lambda: docs.read_bytes(destination)[0])
-    return file_meta(destination, name=name)
+    return RenamedDocument(**file_meta(destination, name=name).model_dump())

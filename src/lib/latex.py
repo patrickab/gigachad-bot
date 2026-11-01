@@ -38,10 +38,10 @@ NEW_DOCUMENT = """\
 
 _BUILD_TIMEOUT_SECONDS = 120
 _LOG_TAIL_LINES = 40
-_MAGIC_COMMENT_LINES = 5
+MAGIC_COMMENT_LINES = 5
 _ANCESTOR_LEVELS = 2
-_ROOT_COMMENT = re.compile(r"^\s*%\s*!TEX\s+root\s*=\s*(?P<root>\S.*?)\s*$", re.IGNORECASE)
-_COMMENT = re.compile(r"(?<!\\)%.*")
+ROOT_COMMENT = re.compile(r"^(?P<head>\s*%\s*!TEX\s+root\s*=\s*)(?P<root>\S.*?)(?P<tail>\s*)$", re.IGNORECASE)
+COMMENT = re.compile(r"(?<!\\)%.*")
 _PACKAGE_LOAD = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{(?P<names>[^}]*)\}")
 _ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-pdfxe", "lualatex": "-pdflua"}
 _ENGINE_COMMENT = re.compile(r"^\s*%\s*!TEX\s+program\s*=\s*(\w+)", re.IGNORECASE)
@@ -92,7 +92,7 @@ def is_latexmk_installed() -> bool:
 
 def engine_flag(source: str) -> str:
     """The latexmk flag for the `% !TEX program = ...` magic comment in the first lines of *source*, `-pdf` without one."""
-    for line in source.splitlines()[:_MAGIC_COMMENT_LINES]:
+    for line in source.splitlines()[:MAGIC_COMMENT_LINES]:
         if match := _ENGINE_COMMENT.match(line):
             return _ENGINE_FLAGS.get(match.group(1).lower(), "-pdf")
     return "-pdf"
@@ -250,7 +250,7 @@ def is_build_output(path: Path) -> bool:
 
 def _read_head(source: Path) -> str:
     with source.open(encoding="utf-8", errors="replace") as file:
-        return "".join(file.readline() for _ in range(_MAGIC_COMMENT_LINES))
+        return "".join(file.readline() for _ in range(MAGIC_COMMENT_LINES))
 
 
 def ensure_package(root: Path, package: str) -> bool:
@@ -265,11 +265,11 @@ def ensure_package(root: Path, package: str) -> bool:
     except (OSError, UnicodeDecodeError):
         return False
     lines = text.splitlines(keepends=True)
-    code = "".join(_COMMENT.sub("", line) for line in lines)
+    code = "".join(COMMENT.sub("", line) for line in lines)
     for loaded in _PACKAGE_LOAD.finditer(code):
         if package in (name.strip() for name in loaded.group("names").split(",")):
             return False
-    begun = next((index for index, line in enumerate(lines) if r"\begin{document}" in _COMMENT.sub("", line)), None)
+    begun = next((index for index, line in enumerate(lines) if r"\begin{document}" in COMMENT.sub("", line)), None)
     if begun is None:
         return False
     newline = "\r\n" if "\r\n" in text else "\n"
@@ -286,7 +286,7 @@ def is_root_document(path: Path) -> bool:
     try:
         with path.open(encoding="utf-8", errors="replace") as file:
             for line in file:
-                code = _COMMENT.sub("", line)
+                code = COMMENT.sub("", line)
                 declared, begun = code.find(r"\documentclass"), code.find(r"\begin{document}")
                 if declared >= 0 and (begun < 0 or declared < begun):
                     return True
@@ -320,7 +320,7 @@ def _magic_root(path: Path, ceiling: Path) -> Path | None:
     except OSError:
         return None
     for line in head.splitlines():
-        if match := _ROOT_COMMENT.match(line):
+        if match := ROOT_COMMENT.match(line):
             target = Path(os.path.normpath(path.parent / match["root"]))
             return target if target.is_relative_to(ceiling) and target.suffix == ".tex" and target.is_file() else None
     return None
@@ -351,9 +351,9 @@ def project_of(path: Path, *, ceiling: Path) -> TexProject:
 def set_root(path: Path, root: Path) -> None:
     """Make `% !TEX root = <root relative to the folder>` the first line of the `.tex` file *path*, replacing its current one."""
     lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
-    head = [line for line in lines[:_MAGIC_COMMENT_LINES] if not _ROOT_COMMENT.match(line)]
+    head = [line for line in lines[:MAGIC_COMMENT_LINES] if not ROOT_COMMENT.match(line)]
     line = f"% !TEX root = {Path(os.path.relpath(root, path.parent)).as_posix()}\n"
-    path.write_bytes("".join([line, *head, *lines[_MAGIC_COMMENT_LINES:]]).encode("utf-8"))
+    path.write_bytes("".join([line, *head, *lines[MAGIC_COMMENT_LINES:]]).encode("utf-8"))
 
 
 def new_file_content(path: Path, root: Path | None) -> str:

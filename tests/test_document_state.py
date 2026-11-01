@@ -20,6 +20,7 @@ from lib.asset_store import AssetStore
 from lib.changes import UserScope, latest_changes
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
+from lib.disk_files import DiskFiles
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer
@@ -41,7 +42,7 @@ class Stores:
     def __init__(self, pool, login):
         self.pool = pool
         self.user_id, device_id = create_user_and_device(pool, login)
-        scope = UserScope(pool, self.user_id, device_id)
+        scope = self.scope = UserScope(pool, self.user_id, device_id)
         self.docs = PostgresDataStore(scope)
         self.assets = AssetStore(scope)
         rename = PostgresProjectRenamer(scope).rename
@@ -62,8 +63,10 @@ def bob(postgres_pool):
 def rename(alice, path, slug, name, roots=None):
     """`POST /api/documents/rename` against *roots* (nothing mounted by default)."""
     request = route.RenameDocumentRequest(path=path, slug=slug, name=name)
+    roots = roots or mounted_roots()
     return route.rename_document(
-        request, alice.projects, alice.docs, alice.assets, roots or mounted_roots(), alice.relocate, References(alice.docs, alice.assets),
+        request, alice.projects, alice.docs, alice.assets, roots, alice.relocate, References(alice.docs, alice.assets),
+        DiskFiles(roots, alice.scope),
     )
 
 

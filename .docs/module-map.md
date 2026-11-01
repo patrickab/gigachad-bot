@@ -89,7 +89,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- model_provider_store.py   Provider catalog and model defaults
 |   |   |-- reasoning_levels.py       Reasoning-effort levels: live discovery, stored answers, send-time kwargs
 |   |   |-- prompt_store.py           User prompt storage (read lazily) and seed/block loading
-|   |   |-- file_roots.py             Mounted-file roots, path safety, read/write/create, `ceiling_of`, tree
+|   |   |-- file_roots.py             Mounted-file roots, path safety, read/write/create, `ceiling_of` (root, else home for host access), tree
 |   |   |-- disk_files.py             `DiskFiles`: create/write/record files under the roots with their `document` change
 |   |   |-- file_roots_repository.py  Per-user root registry (`vault_roots`)
 |   |   |-- file_walk.py              `.gitignore`-aware directory walk and tree, build output hidden, `folder_stamp`
@@ -131,6 +131,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
+|   |   |-- latex_references.py       `rewrite_references`: repoint `\input`, `\include`, `\includegraphics`, `\bibliography` and `\addbibresource` references of a LaTeX project after a rename
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner
 |   |   |-- workbench/                Workbench kinds, folders, omp prompt mirror, rename folder moves
 |   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `pdf.md`, `config.yml` (source of truth)
