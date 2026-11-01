@@ -56,6 +56,13 @@ git -C "$REPO" fetch origin master
 git -C "$REPO" worktree add --track -b production "$PROD" origin/master
 ```
 
+Fetch over HTTPS, push over SSH. The settings menu's redeploy runs without an SSH agent, and both repositories are public:
+
+```bash
+git -C "$REPO" remote set-url origin https://github.com/patrickab/gigachad-bot.git
+git -C "$REPO" remote set-url --push origin git@github.com:patrickab/gigachad-bot.git
+```
+
 For each reviewed update:
 
 ```bash
@@ -229,7 +236,8 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
   constant to `origin/main` once #332 is merged:
 
 ```bash
-git -C "$HOME/git/ompweb_original" remote add fork git@github.com:patrickab/ompweb-fork.git
+git -C "$HOME/git/ompweb_original" remote add fork https://github.com/patrickab/ompweb-fork.git
+git -C "$HOME/git/ompweb_original" remote set-url --push fork git@github.com:patrickab/ompweb-fork.git
 git -C "$HOME/git/ompweb_original" fetch fork
 ```
 
@@ -306,23 +314,25 @@ systemctl --user restart gigachad-bot.service
 - Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`,
   the embed UI in `ompweb-overlay/`. Both ship with the gigachad-bot commit, so
   `redeploy.sh` restarts omp-web when they or the served ref change.
+- Production serves `fork/refactor/314-ui-customization-seams` as pushed: `redeploy.sh`
+  fetches the fork, production never rebases it.
+  Rebase and run the overlay checks locally, then push.
+- `redeploy.sh` exits with an error instead of serving a broken omp-web:
+  - before the restart, when `seams.patch` does not apply to the new commit
+    (checked in a throwaway index, the old omp-web keeps serving)
+  - right after it, when the unit fails to start (systemd restarted it once), printing its log.
+    omp-web is down until a fixed commit is pushed and redeployed, runs survive in the daemon.
 - The protocol is unversioned: a stale omp-web silently drops messages it does
   not know until restarted.
 
 Manual update:
 
-1. Before restarting the server unit, prefer an idle omp-web:
-   `curl -s http://127.0.0.1:30177/api/sessions` shows no `runningSessionIds`. Runs survive a server
-   restart (`gigachad-bot-omp-web-host.service` holds them), never restart the host unit during one.
-2. Update Gigachad, whose overlay the restart applies. Production serves
-   `fork/refactor/314-ui-customization-seams` as pushed: `redeploy.sh` fetches the fork and restarts
-   omp-web when its tip moved, the launcher never rebases it (rebase locally, then push). SSH agent
-   forwarding (`ssh -A`) gives the host GitHub access. A tip the overlay does not fit makes the server
-   unit fail at `git apply`: run the overlay checks before pushing.
-3. Restart `gigachad-bot-omp-web.service` and verify
-   `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref;
-   `journalctl --user -u gigachad-bot-omp-web.service | grep auto-update` shows
-   whether the rebase applied or why it was kept.
+1. Prefer an idle omp-web (`curl -s http://127.0.0.1:30177/api/sessions`, empty
+   `runningSessionIds`). Runs survive a server restart (`gigachad-bot-omp-web-host.service`
+   holds them), never restart the host unit during one.
+2. Push the PR branch to the fork and commit Gigachad, whose overlay the restart applies.
+3. Run `redeploy.sh` (or restart `gigachad-bot-omp-web.service`) and verify
+   `curl -sf http://127.0.0.1:30177/login`.
 4. Reload the frontend.
 5. Smoke session loading, history, turn rendering, and tab switching. Test prompt
    sending, Stop, model/thinking controls, and completion only in an explicitly
