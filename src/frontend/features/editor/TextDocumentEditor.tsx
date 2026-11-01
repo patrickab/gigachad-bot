@@ -7,7 +7,6 @@ import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
-import { isPlotFigure, type PlotFigure } from "@/lib/domain/types"
 import { readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile } from "@/lib/backend/api"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { baseName } from "@/lib/paths"
@@ -15,7 +14,7 @@ import { useTabActive } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { TEXT_CODEC, useRootFileDocument } from "./useRootFileDocument"
-import { ARTIFACT_FILL, followFileLink, isToolArtifact, useEditorView } from "./useEditorView"
+import { ARTIFACT_FILL, followFileLink, isMarkdownArtifact, plotFigureOf, useEditorView } from "./useEditorView"
 import { ShowAsToggle, ViewPills } from "./EditorViewSwitch"
 import { EditorShell } from "./EditorShell"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
@@ -41,15 +40,6 @@ function editorLanguage(path: string): string {
   if (path.endsWith(".tex")) return "latex"
   if (path.endsWith(".c4")) return "likec4"
   return "markdown"
-}
-
-function parsePlotFigure(content: string): PlotFigure | null {
-  try {
-    const figure: unknown = JSON.parse(content)
-    return isPlotFigure(figure) ? figure : null
-  } catch {
-    return null
-  }
 }
 
 /** Edit a workspace's `.c4` source as text; the architecture route refuses text that no longer parses into a model. */
@@ -82,8 +72,9 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const [view, setView] = useEditorView(path, content, loadedPath)
 
   const language = editorLanguage(path)
-  const isArtifact = isToolArtifact(path, content ?? "")
-  const plotFigure = useMemo(() => path.endsWith(".plot.json") && content !== null ? parsePlotFigure(content) : null, [content, path])
+  const plotFigure = useMemo(() => content === null ? null : plotFigureOf(path, content), [content, path])
+  const isPlot = path.endsWith(".plot.json") || plotFigure !== null
+  const isArtifact = isPlot || isMarkdownArtifact(content ?? "")
 
   useModeLabel(shownName, !!overlay, onModeLabel)
 
@@ -135,7 +126,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
       className={cn("flex-1 overflow-y-auto min-h-0 p-4 pt-10", isArtifact && ARTIFACT_FILL)}
       onClick={handlePreviewClick}
     >
-      {path.endsWith(".plot.json")
+      {isPlot
         ? plotFigure ? <PlotElement figure={plotFigure} fill /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
         : <LaTeXMarkdown content={renderedContent ?? content} />}
     </div>

@@ -107,6 +107,19 @@ describe("DocumentEditor tool artifacts", () => {
     expect(screen.getByTestId("rendered-plot")).toBeInTheDocument()
   })
 
+  it("renders a Plotly figure in any .json file, but not other JSON", async () => {
+    const figure = { data: [{ type: "scatter", y: [1, 2] }], layout: { title: { text: "Loss" } } }
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify(figure))
+    const { unmount } = render(<DocumentEditor path="project/proj/document/gradient-descent.json" slug="proj" onClose={vi.fn()} />)
+    expect(await screen.findByTestId("rendered-plot")).toHaveTextContent(JSON.stringify(figure))
+    unmount()
+
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ data: [1, 2], layout: {} }))
+    render(<DocumentEditor path="project/proj/document/response.json" slug="proj" onClose={vi.fn()} />)
+    expect(await screen.findByRole("textbox", { name: "Document text" })).toBeInTheDocument()
+    expect(screen.queryByTestId("rendered-plot")).not.toBeInTheDocument()
+  })
+
   it("renders markmap markdown by default", async () => {
     const mindmap = "```markmap\n# Topic\n```"
     api.loadFileViewerText.mockResolvedValueOnce(mindmap)

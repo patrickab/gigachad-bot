@@ -2,13 +2,41 @@
 
 import { useState, type MouseEvent } from "react"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { isPlotFigure, type PlotFigure } from "@/lib/domain/types"
 
 export type EditorView = "edit" | "preview"
 
-/** Plots, mind maps and the diagram tool's documents open rendered, their text is the secondary view.
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+
+/**
+ * The figure a `.json` document holds, null when it holds none.
+ *
+ * - `.plot.json` (the plot tool's documents): any JSON object, Plotly validates the interior
+ * - Any other `.json`: only what `fig.to_json()` writes, a `data` array of traces beside a `layout` object
+ */
+export function plotFigureOf(path: string, content: string): PlotFigure | null {
+  const isPlotTool = path.endsWith(".plot.json")
+  // Cheap guards first: a large unrelated JSON file is edited per keystroke and must not be parsed each time.
+  if (!isPlotTool && (!path.endsWith(".json") || !content.includes('"data"') || !content.includes('"layout"'))) return null
+  try {
+    const parsed: unknown = JSON.parse(content)
+    if (!isPlotFigure(parsed)) return null
+    if (isPlotTool) return parsed
+    return Array.isArray(parsed.data) && parsed.data.every(isRecord) && isRecord(parsed.layout) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** A Markdown document the diagram or mind map tool wrote: a markmap fence, or the diagram tool's header plus a mermaid fence.
  *  A note that merely contains a mermaid block is ordinary Markdown: it opens in edit and previews inline. */
+export function isMarkdownArtifact(content: string): boolean {
+  return /```markmap\b/i.test(content) || /^# Mermaid diagram\s+```mermaid\b/.test(content)
+}
+
+/** Plots, mind maps and diagrams open rendered, their text is the secondary view. */
 export function isToolArtifact(path: string, content: string): boolean {
-  return path.endsWith(".plot.json") || /```markmap\b/i.test(content) || /^# Mermaid diagram\s+```mermaid\b/.test(content)
+  return path.endsWith(".plot.json") || plotFigureOf(path, content) !== null || isMarkdownArtifact(content)
 }
 
 /** Classes that let a tool artifact's figure take its container: `cqh` is the container's height, which the map and diagram read as their own, instead of the inline chat size. */
