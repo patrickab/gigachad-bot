@@ -7,6 +7,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from backend.identity import get_request_identity
+from backend import websocket_origin
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
 from lib.neovim_session import NeovimSession, is_neovim_installed
@@ -37,8 +38,8 @@ def neovim_home(tmp_path, monkeypatch):
     ],
 )
 def test_terminal_origin_policy(monkeypatch, cors_origins, origin, trusted):
-    monkeypatch.setattr(neovim_route, "CORS_ORIGINS", cors_origins)
-    assert neovim_route.is_trusted_origin(origin) is trusted
+    monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", cors_origins)
+    assert websocket_origin.is_trusted_origin(origin) is trusted
 
 
 @requires_nvim
@@ -53,7 +54,7 @@ def test_neovim_needs_a_config_to_load(neovim_home):
     [(False, "http://localhost:2999"), (True, "https://evil.example")],
 )
 def test_session_refuses_untrusted_requests(monkeypatch, neovim_home, has_host_access, origin):
-    monkeypatch.setattr(neovim_route, "CORS_ORIGINS", ["*"])
+    monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
     client = route_client(
         neovim_route.router, overrides={get_request_identity: request_identity(has_host_access), get_file_roots: None}
     )

@@ -37,6 +37,7 @@ from backend.routes.neovim import router as neovim_router
 from backend.routes.latex import router as latex_router
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
+from backend.routes.file_watch import router as file_watch_router
 from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
@@ -169,6 +170,7 @@ app.include_router(architecture_router)
 app.include_router(config_router)
 app.include_router(documents_router)
 app.include_router(files_router)
+app.include_router(file_watch_router)
 app.include_router(assets_router)
 app.include_router(fileviewer_router)
 app.include_router(histories_router)

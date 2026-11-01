@@ -60,3 +60,8 @@ export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number
 export function neovimSessionUrl(): string {
   return `${getApiBase().replace(/^http/, "ws")}/neovim/session`
 }
+
+/** WebSocket that pushes the changes of watched disk files, see `backend/routes/file_watch.py`. */
+export function fileWatchUrl(): string {
+  return `${getApiBase().replace(/^http/, "ws")}/files/watch`
+}

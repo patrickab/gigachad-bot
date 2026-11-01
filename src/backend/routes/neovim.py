@@ -35,7 +35,6 @@ import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, WebSocket
 from pydantic import BaseModel, Field, ValidationError
@@ -43,7 +42,7 @@ from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
-from config import CORS_ORIGINS
+from backend.websocket_origin import is_trusted_origin
 from lib.file_roots import FileRoots
 from lib.neovim_session import NeovimSession, Selection, is_neovim_installed
 
@@ -57,7 +56,6 @@ router = APIRouter(prefix="/api/neovim", tags=["neovim"])
 _SAVE_TIMEOUT_SECONDS = 60
 _POLICY_VIOLATION = 1008
 _UNSUPPORTED_DATA = 1003
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class OpenMessage(BaseModel):
@@ -92,19 +90,6 @@ def disk_file(roots: FileRoots, path: str) -> Path | None:
 
 class SaveFailed(RuntimeError):
     """The browser could not persist a `:w`."""
-
-
-def is_trusted_origin(origin: str | None) -> bool:
-    """Allow-listed origins, or loopback ones while CORS is the `*` default.
-
-    CORS does not cover WebSockets, and a terminal is code execution on this host,
-    so any page a user visits must not be able to open one.
-    """
-    if not origin:
-        return False
-    if "*" not in CORS_ORIGINS:
-        return origin in CORS_ORIGINS
-    return urlsplit(origin).hostname in _LOOPBACK_HOSTS
 
 
 class _BrowserSaves:

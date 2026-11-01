@@ -30,12 +30,12 @@ export function onFileMove(listener: FileMoveListener): () => void {
   }
 }
 
-/** Tell every `onFileChange` listener that this device changed or created the file at `path` through the backend (its own change events never come back). */
+/** Tell every `onFileChange` listener that the file at `path` changed. The file watcher announces what it sees on disk, and this device announces its own changes through the backend (their change events never come back). */
 export function announceFileChange(path: string): void {
   for (const listener of localChangeListeners) listener(path)
 }
 
-/** Call `listener` with the path of every file the predicate (or the exact path) accepts whose content changed: on another device, through the backend, or announced by this device. Returns the unsubscribe. */
+/** Call `listener` with the path of every file the predicate (or the exact path) accepts whose content changed: on another device, through the backend, on disk (file watcher), or announced by this device. Returns the unsubscribe. */
 export function onFileChange(match: string | ((path: string) => boolean), listener: (path: string) => void): () => void {
   const accepts = typeof match === "string" ? (path: string) => path === match : match
   const local = (path: string) => {
