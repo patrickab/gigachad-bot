@@ -40,6 +40,8 @@ interface WorkbenchEditor {
   notice: string | null
   /** Every file open in Neovim and the text Neovim and the disk last agreed on. */
   synced: RefObject<ReadonlyMap<string, string>>
+  /** The paths of the files open in Neovim. */
+  openPaths: readonly string[]
   /** Hand text of the file at `path`, already on disk, to Neovim. False while it cannot take it. */
   setContent: (text: string, path: string) => boolean
 }
@@ -123,6 +125,8 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     }
   }
 
+  const openPaths = [...synced.keys()]
+
   const startText = synced.get(startPath)
   const opening = enabled && startText !== undefined ? { key: sessionKey, path: startPath, filename: baseName(startPath), content: startText } : null
   const editor = useNeovimTerminal(opening, save, onClose, { askKeymap: true, onSelection, onSwitched: switchedTo, onOpenFailed: openFailed, onPasteImage: pasteImage })
@@ -205,6 +209,7 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     shownText: synced.get(path) ?? null,
     notice,
     synced: syncedRef,
+    openPaths,
     setContent,
   }
 }

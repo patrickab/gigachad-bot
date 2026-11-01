@@ -1,27 +1,25 @@
 import { StrictMode, useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react"
-import type { ChangeEvent } from "@/lib/backend/syncStream"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
   prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string; cwd: string }>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
-const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
-vi.mock("@/lib/backend/syncStream", () => ({
-  subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
-    feed.listener = listener
-    return () => { feed.listener = null }
+const follow = vi.hoisted(() => ({ paths: [] as readonly string[], changed: null as ((path: string) => void) | null }))
+vi.mock("@/hooks/useFollowFiles", () => ({
+  useFollowFiles: (files: readonly string[], onChange: (path: string) => void) => {
+    follow.paths = files
+    follow.changed = onChange
   },
 }))
 
-import { useAgentSync } from "../useAgentSync"
+import { useFollowBuffers } from "../useFollowBuffers"
 import { usePreparedWorkbench } from "../usePreparedWorkbench"
 
 const PATH = "/data/workbench/markdown/proj/plan/plan.md"
 const CWD = "/data/workbench/markdown"
-const change = (key: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: key, version: null, device_id: "other" })
 
 afterEach(() => {
   cleanup()
@@ -146,73 +144,54 @@ describe("usePreparedWorkbench", () => {
   })
 })
 
-describe("useAgentSync", () => {
+describe("useFollowBuffers", () => {
   const OTHER = "/data/workbench/markdown/proj/plan/notes.md"
   const synced = (entries: Record<string, string>) => ({ current: new Map(Object.entries(entries)) as ReadonlyMap<string, string> })
 
-  it("pushes another device's save of an open file into Neovim when it differs from the synced text", async () => {
+  it("follows the open files and pushes a changed one into Neovim when its disk text differs from the synced text", async () => {
     const setContent = vi.fn(() => true)
     const buffers = synced({ [PATH]: "old", [OTHER]: "same" })
-    const onPulled = vi.fn()
-    renderHook(() => useAgentSync({ synced: buffers, streaming: false, setContent, onPulled }))
+    renderHook(() => useFollowBuffers({ synced: buffers, paths: [PATH, OTHER], setContent }))
+    expect(follow.paths).toEqual([PATH, OTHER])
 
     api.loadFileViewerText.mockResolvedValueOnce("remote")
-    act(() => feed.listener?.(change(OTHER)))
-    await waitFor(() => expect(setContent).toHaveBeenCalledWith("remote", OTHER))
-    expect(onPulled).toHaveBeenCalledWith("remote", OTHER)
+    act(() => follow.changed?.(OTHER))
+    await waitFor(() => expect(setContent).toHaveBeenCalledExactlyOnceWith("remote", OTHER))
 
-    // Unchanged text and files that are not open push nothing
-    api.loadFileViewerText.mockResolvedValueOnce("same")
-    act(() => feed.listener?.(change(OTHER)))
-    act(() => feed.listener?.(change("/data/closed.md")))
-    await waitFor(() => expect(api.loadFileViewerText).toHaveBeenCalledTimes(2))
+    // Text equal to the synced text and a file that is not open push nothing
+    api.loadFileViewerText.mockResolvedValue("old")
+    act(() => follow.changed?.(PATH))
+    act(() => follow.changed?.("/data/closed.md"))
+    await waitFor(() => expect(api.loadFileViewerText).toHaveBeenCalledTimes(3))
+    await act(async () => {})
     expect(setContent).toHaveBeenCalledTimes(1)
-    expect(onPulled).toHaveBeenCalledTimes(1)
   })
 
-  it("hands each agent edit to every open file as it arrives during a run, then calls onRunEnd once the run ends", async () => {
-    // The owner records what Neovim took, like `useWorkbenchEditor.setContent`
-    const buffers = synced({ [PATH]: "old", [OTHER]: "old notes" })
-    const setContent = vi.fn((text: string, path: string) => {
-      buffers.current = new Map(buffers.current).set(path, text)
-      return true
-    })
-    const onPulled = vi.fn()
-    const onRunEnd = vi.fn()
-    api.loadFileViewerText.mockImplementation(async (path) => path === PATH ? "first edit" : "old notes")
-    const { rerender } = renderHook(({ streaming }) => useAgentSync({ synced: buffers, streaming, setContent, onPulled, onRunEnd }), { initialProps: { streaming: true } })
-    await waitFor(() => expect(onPulled).toHaveBeenCalledWith("first edit", PATH))
-    expect(onPulled).toHaveBeenCalledTimes(1)
-    expect(onRunEnd).not.toHaveBeenCalled()
-
-    api.loadFileViewerText.mockImplementation(async (path) => path === PATH ? "first edit" : "edited notes")
-    await waitFor(() => expect(onPulled).toHaveBeenCalledWith("edited notes", OTHER))
-    expect(onPulled).toHaveBeenCalledTimes(2)
-
-    rerender({ streaming: false })
-    await waitFor(() => expect(onRunEnd).toHaveBeenCalledTimes(1))
-    expect(onPulled).toHaveBeenCalledTimes(2)
-  })
-
-  it("retries a push Neovim could not take yet and skips a file closed while it was read", async () => {
+  it("pushes again on the next change when Neovim could not take a push and skips a file closed while it was read", async () => {
     const buffers = synced({ [PATH]: "old", [OTHER]: "old notes" })
     const setContent = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
-    const onPulled = vi.fn()
-    renderHook(() => useAgentSync({ synced: buffers, streaming: false, setContent, onPulled }))
+    renderHook(() => useFollowBuffers({ synced: buffers, paths: [PATH, OTHER], setContent }))
 
     api.loadFileViewerText.mockResolvedValue("remote")
-    act(() => feed.listener?.(change(PATH)))
+    act(() => follow.changed?.(PATH))
     await waitFor(() => expect(setContent).toHaveBeenCalledTimes(1))
-    expect(onPulled).not.toHaveBeenCalled()
-    act(() => feed.listener?.(change(PATH)))
-    await waitFor(() => expect(onPulled).toHaveBeenCalledWith("remote", PATH))
+    act(() => follow.changed?.(PATH))
+    await waitFor(() => expect(setContent).toHaveBeenCalledTimes(2))
 
     const gate = Promise.withResolvers<string>()
     api.loadFileViewerText.mockReturnValueOnce(gate.promise)
-    act(() => feed.listener?.(change(OTHER)))
+    act(() => follow.changed?.(OTHER))
     buffers.current = new Map([[PATH, "remote"]])
     await act(async () => { gate.resolve("late") })
     expect(setContent).toHaveBeenCalledTimes(2)
-    expect(onPulled).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps quiet when the file cannot be read", async () => {
+    const setContent = vi.fn(() => true)
+    renderHook(() => useFollowBuffers({ synced: synced({ [PATH]: "old" }), paths: [PATH], setContent }))
+
+    api.loadFileViewerText.mockRejectedValueOnce(new Error("gone"))
+    await act(async () => { follow.changed?.(PATH) })
+    expect(setContent).not.toHaveBeenCalled()
   })
 })

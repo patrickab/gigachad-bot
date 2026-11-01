@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { Workbench, type WorkbenchProps } from "@/features/workbench/Workbench"
 import type { TexProject } from "@/lib/domain/latex"
@@ -10,7 +10,7 @@ import { LatexRootPicker } from "./LatexRootPicker"
 import { useLatexBuild } from "./useLatexBuild"
 import { useTexProject } from "./useTexProject"
 
-type ProjectWorkbenchProps = Omit<WorkbenchProps, "project" | "renderPane" | "status" | "onSaved" | "onPulled" | "onRunEnd" | "onStreamingChange" | "quoteLanguage">
+type ProjectWorkbenchProps = Omit<WorkbenchProps, "project" | "renderPane" | "status" | "onSaved" | "quoteLanguage">
 
 type LatexWorkbenchProps = ProjectWorkbenchProps & {
   /** The project folder the tab's item remembers, undefined before the first one. */
@@ -27,8 +27,7 @@ const NO_ROOT = "No root document"
  *
  * - The project (folder, root) is read from the shown file, a new `path` under the same workbench is a buffer switch and reads it again
  * - The chat belongs to the project folder, so every file of the project shares it
- * - The root builds, not the shown file: on open, after every `:w`, on every agent edit or remote save as it arrives, when an omp run ends,
- *   and when any file in the folder changes (a `.bib`, an image, a file the agent edited that is not open)
+ * - The root builds, not the shown file: on open, and whenever any file in the folder changes, whoever wrote it (a `:w`, the agent, another device, a `.bib`, an image)
  * - Builds go through one queue, so they never overlap and a burst of edits collapses into one follow-up build
  * - A failed build, e.g. of a half-written file, keeps the last good PDF
  * - Without a root the PDF pane lists the files that could be one, choosing writes it into the shown file
@@ -53,11 +52,9 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
   reload: () => void
   choose: (root: string) => Promise<void>
 }) {
-  const [streaming, setStreaming] = useState(false)
-  const build = useLatexBuild(project.root, { folder: project.folder, streaming })
+  const build = useLatexBuild(project.root, { folder: project.folder })
   const { trigger } = build
   useEffect(() => { void trigger() }, [trigger])
-  const rebuild = () => { void trigger() }
 
   const pdfFailure = build.failure?.message ?? (build.result && !build.result.ok ? "Build failed" : null)
   return (
@@ -79,11 +76,7 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
       onSaved={(_, savedPath) => {
         // A saved magic comment may change the root
         if (savedPath === props.path) reload()
-        rebuild()
       }}
-      onPulled={rebuild}
-      onRunEnd={rebuild}
-      onStreamingChange={setStreaming}
       quoteLanguage="latex"
     />
   )

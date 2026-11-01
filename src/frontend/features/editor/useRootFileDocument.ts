@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
+import { useFollowFiles } from "@/hooks/useFollowFiles"
 import { ApiError, loadFileViewerText } from "@/lib/backend/api"
 import { subscribeToChanges, syncCursorReady, type ChangeEvent } from "@/lib/backend/syncStream"
 
@@ -25,7 +26,11 @@ interface RootFileDocumentOptions<T> {
   /** Re-read the stored text after each save, for stores that normalize what they keep. */
   readBackAfterSave?: boolean
   onSaved?: (text: string) => void
+  /** Called with the text of a followed disk change whatever the state of the edit, for editors that merge it themselves. */
+  onFollowed?: (text: string, path: string) => void
 }
+
+const isDiskPath = (path: string) => path.startsWith("/")
 
 /** Why a failed read of a file could not load it. */
 export function loadFailureOf(error: unknown): FileLoadFailure {
@@ -40,11 +45,12 @@ export function loadFailureOf(error: unknown): FileLoadFailure {
  * Load, edit and save one file the backend serves, as `codec` reads its text.
  *
  * - Saves are chained so an earlier slow write can never resolve after, and clobber, a newer one
- * - `dirty` while the value is not the one last loaded or saved; reloads on a remote change of the document only when clean
+ * - `dirty` while the value is not the one last loaded or saved
+ * - Follows the file: a change of an absolute `path` on disk (by anyone) and a remote change event of a stored key reload the value only when clean
  * - The caller starts the first load, `reload()` in an effect
  * - Any load failure except a tolerated 404 leaves `value` null, so nothing can save a blank document over the stored file
  */
-export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, readBackAfterSave = false, onSaved }: RootFileDocumentOptions<T>) {
+export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, readBackAfterSave = false, onSaved, onFollowed }: RootFileDocumentOptions<T>) {
   const [value, setValueState] = useState<T | null>(null)
   const [loadedPath, setLoadedPath] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<FileLoadFailure | null>(null)
@@ -56,39 +62,55 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
     setDirtyState(next)
   }, [])
   const savedRef = useRef<{ value: T | null; text: string }>({ value: null, text: "" })
+  // The file's text as last read or written, which a codec may have normalized in `savedRef`.
+  const diskTextRef = useRef<string | null>(null)
+
+  const apply = useCallback((text: string) => {
+    const loaded = codec.parse(text)
+    setLoadError(null)
+    setValueState(loaded)
+    setLoadedPath(path)
+    savedRef.current = { value: loaded, text: codec.serialize(loaded) }
+    diskTextRef.current = text
+  }, [path, codec])
 
   const reload = useCallback(() => {
-    const apply = (text: string) => {
-      const loaded = codec.parse(text)
-      setLoadError(null)
-      setValueState(loaded)
-      setLoadedPath(path)
-      savedRef.current = { value: loaded, text: codec.serialize(loaded) }
-    }
     // After the change feed holds its head, so a change racing this read still arrives as an event.
     return syncCursorReady().then(() => loadFileViewerText(path)).then(apply).catch((error: unknown) => {
       const failure = loadFailureOf(error)
       if (failure === "missing" && blankWhenMissing) apply("")
       else setLoadError(failure)
     })
-  }, [path, codec, blankWhenMissing])
+  }, [path, blankWhenMissing, apply])
 
   const setValue = useCallback((next: T) => {
     setValueState(next)
     setDirty(next !== savedRef.current.value)
   }, [setDirty])
 
-  // `resource_key` may be a path suffix.
+  // Stored keys follow their change events (`resource_key` may be a path suffix), absolute paths follow the disk below.
   const reloadOnRemoteChange = useEffectEvent((event: ChangeEvent) => {
-    if (dirtyRef.current || event.resource_kind !== "document") return
+    if (dirtyRef.current || isDiskPath(path) || event.resource_kind !== "document") return
     if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
     reload()
   })
   useEffect(() => subscribeToChanges((event) => reloadOnRemoteChange(event)), [])
 
+  // A read still running when the path changes must not land on the new document.
+  const pathRef = useRef(path)
+  useEffect(() => { pathRef.current = path }, [path])
+  useFollowFiles(isDiskPath(path) ? [path] : [], (changed) => {
+    loadFileViewerText(changed).then((text) => {
+      if (changed !== pathRef.current || text === diskTextRef.current) return
+      onFollowed?.(text, changed)
+      if (!dirtyRef.current) apply(text)
+    }).catch(() => {})
+  })
+
   const persistNow = useCallback(async (next: T, text: string) => {
     await write(text)
     savedRef.current = { value: next, text }
+    diskTextRef.current = text
     setDirty(false)
     if (readBackAfterSave) {
       const stored = await loadFileViewerText(path).catch(() => text)
@@ -96,6 +118,7 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
         const parsed = codec.parse(stored)
         setValueState(parsed)
         savedRef.current = { value: parsed, text: stored }
+        diskTextRef.current = stored
       }
     }
     onSaved?.(text)

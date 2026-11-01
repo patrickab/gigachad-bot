@@ -210,7 +210,10 @@ function RootFileView({ path, onClose }: { path: string; onClose: () => void }) 
 function TextFileView({ path, onClose }: { path: string; onClose: () => void }) {
   const neovim = useNeovimSetting()
   const write = useCallback((text: string) => writeRootFile(path, text), [path])
-  const { value: content, loadError, reload, saveFromNeovim } = useRootFileDocument({ path, codec: TEXT_CODEC, write, blankWhenMissing: false })
+  // While Neovim runs it holds the text, so a change on disk is merged into its buffer
+  const { value: content, loadError, reload, saveFromNeovim } = useRootFileDocument({
+    path, codec: TEXT_CODEC, write, blankWhenMissing: false, onFollowed: (text, changed) => { neovimSession.setContent(text, changed) },
+  })
   useEffect(() => { reload() }, [reload])
   const neovimSession = useNeovimTerminal(neovim.enabled && content !== null ? { key: path, path, filename: baseName(path), content } : null, saveFromNeovim, onClose)
 

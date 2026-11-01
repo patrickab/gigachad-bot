@@ -85,13 +85,35 @@ describe("useNeovimTerminal frames", () => {
 
     expect(result.current.openFile("/p/chapter.tex")).toBe(true)
     expect(result.current.renameFile("/p/main.tex", "/p/paper.tex")).toBe(true)
-    expect(result.current.setContent("new", "/p/main.tex")).toBe(false)
     expect(result.current.insertLines("x")).toBe(false)
     socket.open()
 
     expect(socket.frames.map((frame) => frame.type)).toEqual(["open", "open_file", "renamed"])
     expect(socket.frames[0]).toMatchObject({ path: "/p/main.tex", filename: "main.tex", content: "text" })
     expect(socket.frames[2]).toEqual({ type: "renamed", from: "/p/main.tex", path: "/p/paper.tex" })
+  })
+
+  it("sends the latest text of each path pushed while the session opens once it is open, then sends at once", async () => {
+    const { result, socket } = await connect()
+
+    expect(result.current.setContent("first", "/p/main.tex")).toBe(true)
+    expect(result.current.setContent("second", "/p/main.tex")).toBe(true)
+    expect(result.current.setContent("chapter", "/p/chapter.tex")).toBe(true)
+    expect(socket.frames).toEqual([])
+    socket.open()
+    expect(result.current.setContent("third", "/p/main.tex")).toBe(true)
+
+    expect(socket.frames.slice(1)).toEqual([
+      { type: "set_content", content: "second", path: "/p/main.tex" },
+      { type: "set_content", content: "chapter", path: "/p/chapter.tex" },
+      { type: "set_content", content: "third", path: "/p/main.tex" },
+    ])
+  })
+
+  it("takes no text without a session", () => {
+    const { result } = renderHook(() => useNeovimTerminal(null, vi.fn(), vi.fn()))
+
+    expect(result.current.setContent("text", "/p/main.tex")).toBe(false)
   })
 
   it("renames the buffer of the previous path when the path of the document changes under the same key", async () => {

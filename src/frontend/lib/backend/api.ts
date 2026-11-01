@@ -677,11 +677,6 @@ export function chooseTexRoot(path: string, root: string): Promise<TexProject> {
   return post<TexProject>("/latex/root", { path, root })
 }
 
-/** A token that changes whenever a file under *folder* changes, build output aside. */
-export async function folderStamp(folder: string): Promise<string> {
-  return (await request<{ stamp: string }>(`/fileroots/stamp${toQuery({ folder })}`)).stamp
-}
-
 /** Create file *name* in LaTeX project *folder*, a `.tex` starts with its `% !TEX root` line. Resolves to its path. */
 export async function createTexProjectFile(folder: string, name: string): Promise<string> {
   return (await post<{ path: string }>("/latex/file", { folder, name })).path

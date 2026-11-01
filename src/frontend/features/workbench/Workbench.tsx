@@ -1,19 +1,19 @@
 "use client"
 
-import { useEffect, useEffectEvent, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, type NeovimSelection } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
 import { TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
-import { OmpModelSelector, OmpReasoningSelector, useOmpStreaming, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpChatPanel } from "@/features/omp/OmpChatPanel"
 import { fileLead, projectLead } from "@/features/omp/fileLead"
 import { useFileChat } from "@/features/omp/useFileChat"
 import type { OmpView } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 import { quoteSelection } from "./quote"
-import { useAgentSync } from "./useAgentSync"
+import { useFollowBuffers } from "./useFollowBuffers"
 import { useWorkbenchEditor } from "./useWorkbenchEditor"
 import { WorkbenchViewSwitch, useWorkbenchView, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
@@ -57,12 +57,6 @@ export interface WorkbenchProps {
   status?: ReactNode
   /** A `:w` stored `text` as the file at `path`. */
   onSaved?: (text: string, path: string) => void
-  /** An agent edit or another device's save of the open file at `path` reached Neovim as `text`. */
-  onPulled?: (text: string, path: string) => void
-  /** Called once an omp run's last edits are in Neovim. */
-  onRunEnd?: () => void
-  /** The chat's agent started or stopped running. */
-  onStreamingChange?: (streaming: boolean) => void
   /** Fence language of the lines `<leader>a` quotes into the chat. */
   quoteLanguage: string
 }
@@ -71,24 +65,21 @@ export interface WorkbenchProps {
 const DRAWER_WIDTH_PX = 360
 /** Neovim sits on a page like the PDF's (`.pdf-page`), its size set by the pane layout. */
 const EDITOR_PAGE = "rounded-2xl px-3 pt-3 shadow-[var(--shadow-md)]"
-/** The view that shows no session, so no agent runs in it. */
-const NO_VIEW: OmpView = { kind: "settings" }
 
 const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
 
 /**
  * One file, or the files of one LaTeX project, as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
  *
- * - While omp runs, its edits on disk flow into every open file's Neovim buffer as they arrive, each one updates the synced text and reaches `onPulled`
+ * - Every open file follows its file on disk, whoever writes it (omp, another agent, a terminal, another device): a change is read and handed to Neovim, the backend merges it into unsaved edits
  * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
  * - The chat's session is linked to the project folder, else to the file. A new one starts in `cwd` and its first message names the project (`Project: <folder>, root: <root>`) or the file (`File: <path>`)
- * - Another device's save of an open file reaches Neovim, merged into unsaved edits by the backend
  * - A pasted image goes next to the shown file and its reference lands below the cursor
  * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots
  */
 export function Workbench({
   path, cwd, project, ompView, onViewChange, onPathChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
-  renderPane, status, onSaved, onPulled, onRunEnd, onStreamingChange, quoteLanguage,
+  renderPane, status, onSaved, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
   const chat = useFileChat(
@@ -99,9 +90,6 @@ export function Workbench({
     project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd),
   )
   const { view } = chat
-  const streaming = useOmpStreaming(view ?? NO_VIEW)
-  const reportStreaming = useEffectEvent((running: boolean) => onStreamingChange?.(running))
-  useEffect(() => reportStreaming(streaming), [streaming])
 
   const [insertion, setInsertion] = useState<ComposerInsertion | null>(null)
   const insertionCount = useRef(0)
@@ -112,7 +100,7 @@ export function Workbench({
 
   const editor = useWorkbenchEditor({ path, enabled: neovim.enabled, onPathChange, onSaved, onClose, onSelection: quoteIntoChat })
   const { content, loadError, notice } = editor
-  useAgentSync({ synced: editor.synced, streaming, setContent: editor.setContent, onPulled, onRunEnd })
+  useFollowBuffers({ synced: editor.synced, paths: editor.openPaths, setContent: editor.setContent })
 
   const [workbenchView, setWorkbenchView] = useWorkbenchView()
   const splitRef = useRef<HTMLDivElement>(null)

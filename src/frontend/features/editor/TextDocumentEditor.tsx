@@ -68,6 +68,8 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   // from a hand-edited `.c4`, so its saves read back what it stored.
   const { value: content, loadedPath, loadError, dirty, reload: loadFromServer, setValue: handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
     path, codec: TEXT_CODEC, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
+    // While Neovim runs it holds the text, so a change on disk is merged into its buffer
+    onFollowed: (text, changed) => { neovimSession.setContent(text, changed) },
   })
   const [view, setView] = useEditorView(path, content, loadedPath)
 

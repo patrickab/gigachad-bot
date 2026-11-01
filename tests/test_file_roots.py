@@ -16,7 +16,6 @@ from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError, write_text
 from lib.document_service import add_extraction
 from lib.file_roots import FileRoots
-from lib.file_walk import folder_stamp
 from lib.host_access import list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import library_images_prefix, library_markdown
@@ -439,37 +438,3 @@ def test_listings_hide_latex_build_output_but_keep_unrelated_aux_files(tmp_path)
     shown = ["imgs", "lonely.aux", "main.tex", "refs.bib"]
     assert [child["name"] for child in paper["children"]] == shown
     assert sorted(file["name"] for file in roots.list_files()) == sorted(shown[1:] + ["plot.png"])
-
-
-def test_the_folder_stamp_ignores_build_output_and_changes_with_sources(tmp_path):
-    make_files(tmp_path, ["main.tex", "imgs/plot.png", ".git/HEAD", "node_modules/a/index.js"])
-    before = folder_stamp(tmp_path)
-
-    make_files(tmp_path, [
-        ".latex-build/main.pdf", ".latex-build/main.log", "main.aux", "main.log", "main.view.pdf", ".git/index", "node_modules/a/other.js",
-    ])
-    assert folder_stamp(tmp_path) == before
-
-    (tmp_path / "main.tex").write_text("more\n", encoding="utf-8")
-    edited = folder_stamp(tmp_path)
-    assert edited != before
-
-    make_files(tmp_path, ["sections/new.tex"])
-    added = folder_stamp(tmp_path)
-    assert added not in (before, edited)
-
-    make_files(tmp_path, ["data.aux"])
-    assert folder_stamp(tmp_path) != added
-
-
-def test_the_stamp_route_needs_a_folder_inside_the_mounts(tmp_path):
-    vault = tmp_path / "vault"
-    make_files(vault, ["paper/main.tex"])
-    client = route_client(file_roots_route.router, overrides={file_roots_route.get_file_roots: mounted_roots(vault)})
-
-    def stamp(folder: Path):
-        return client.get("/api/fileroots/stamp", params={"folder": str(folder)})
-
-    assert stamp(vault / "paper").status_code == 200
-    for refused in (vault / "gone", tmp_path):
-        assert stamp(refused).status_code == 400

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 
 const api = vi.hoisted(() => ({
@@ -7,13 +7,22 @@ const api = vi.hoisted(() => ({
   fetchRootFileDiff: vi.fn<typeof import("@/lib/backend/api").fetchRootFileDiff>(),
   fetchRootDiffContent: vi.fn<typeof import("@/lib/backend/api").fetchRootDiffContent>(),
   writeRootFile: vi.fn(),
+  loadFileViewerText: vi.fn<typeof import("@/lib/backend/api").loadFileViewerText>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
-const neovim = vi.hoisted(() => ({ enabled: false }))
+const neovim = vi.hoisted(() => ({ enabled: false, setContent: vi.fn() }))
 vi.mock("@/contexts/SettingsContext", () => ({ useNeovimSetting: () => neovim }))
 vi.mock("@/features/editor/NeovimEditor", () => ({
   NeovimEditor: () => <div>neovim</div>,
-  useNeovimTerminal: () => ({ terminal: null, status: "ready", restart: () => {} }),
+  useNeovimTerminal: () => ({ terminal: null, status: "ready", restart: () => {}, setContent: neovim.setContent }),
+}))
+// The follow primitive is faked: a test reports a change of a file by calling what the editor registered.
+const follow = vi.hoisted(() => ({ files: [] as readonly string[], onChange: (() => {}) as (path: string) => void }))
+vi.mock("@/hooks/useFollowFiles", () => ({
+  useFollowFiles: (files: readonly string[], onChange: (path: string) => void) => {
+    follow.files = files
+    follow.onChange = onChange
+  },
 }))
 
 const PATCH = ["diff --git a/a.txt b/a.txt", "--- a/a.txt", "+++ b/a.txt", "@@ -1,2 +1,2 @@", " keep", "-old", "+new"].join("\n")
@@ -36,6 +45,8 @@ async function openComment(view: ReturnType<typeof render>, text = "new") {
 
 beforeEach(() => {
   neovim.enabled = false
+  neovim.setContent.mockReset()
+  follow.files = []
   Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => ({ right: 100, bottom: 100 }) })
   api.fetchRootDiffFiles.mockReset().mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "1", added: 1, removed: 1 }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }] })
   api.fetchRootFileDiff.mockReset().mockImplementation(async (_root, path) => path === "a.txt" ? { supported: true, status: "modified", patch: PATCH } : { supported: false })
@@ -99,6 +110,22 @@ describe("DiffViewer", () => {
     expect(api.fetchRootDiffContent).toHaveBeenCalledWith("/repo", "dir/b.png")
     expect(second.getByRole("button", { name: "Opening…" })).toBeDisabled()
     expect(within(view.getByLabelText("Diff for a.txt")).getByRole("button", { name: "Edit diff" })).toBeDisabled()
+  })
+
+  it("merges a change of the edited file on disk into its Neovim buffer, not text it already has", async () => {
+    neovim.enabled = true
+    api.fetchRootDiffContent.mockResolvedValue({ base_content: "old", content: "new" })
+    const view = render(<DiffViewer root="/repo" />)
+    fireEvent.click(within(await view.findByLabelText("Diff for a.txt")).getByRole("button", { name: "Edit diff" }))
+    await waitFor(() => expect(follow.files).toEqual(["/repo/a.txt"]))
+
+    api.loadFileViewerText.mockResolvedValue("new")
+    await act(async () => { follow.onChange("/repo/a.txt") })
+    expect(neovim.setContent).not.toHaveBeenCalled()
+
+    api.loadFileViewerText.mockResolvedValue("newer")
+    await act(async () => { follow.onChange("/repo/a.txt") })
+    expect(neovim.setContent).toHaveBeenCalledWith("newer", "/repo/a.txt")
   })
 
   it("merges folder chains without files into one sidebar row, branching folders stay separate", async () => {

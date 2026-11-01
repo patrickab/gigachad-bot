@@ -97,9 +97,11 @@ describe("useWorkbenchEditor", () => {
 
   it("switches Neovim's buffer when the path changes and loads each file once", async () => {
     const { result, rerender, session, synced } = await openEditor()
+    expect(result.current.openPaths).toEqual([MAIN])
     rerender({ path: CHAPTER })
     await waitFor(() => expect(editor.ops.openFile).toHaveBeenCalledExactlyOnceWith(CHAPTER))
     expect(synced().get(CHAPTER)).toBe(textOf(CHAPTER))
+    expect(result.current.openPaths).toEqual([MAIN, CHAPTER])
     expect(result.current.shownText).toBe(textOf(CHAPTER))
     // The session goes on with the first file as its document, a buffer switch never changes it
     expect(session().document).toMatchObject({ key: MAIN, path: MAIN })

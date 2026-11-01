@@ -171,11 +171,6 @@ function useComposerFor(view: OmpView) {
   }
 }
 
-/** Whether the agent of the session `view` shows is running. False while the frame shows another view. */
-export function useOmpStreaming(view: OmpView): boolean {
-  return useComposerFor(view).state?.streaming ?? false
-}
-
 /**
  * gigachad's composer for an omp tab. omp-web's own one stays hidden in the frame and submits what this one sends.
  *

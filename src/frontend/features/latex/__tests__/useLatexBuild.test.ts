@@ -5,18 +5,19 @@ import type { LatexBuild } from "@/lib/domain/latex"
 const api = vi.hoisted(() => ({
   ApiError: class ApiError extends Error { status = 500 },
   buildLatex: vi.fn<(path: string) => Promise<LatexBuild>>(),
-  folderStamp: vi.fn<(folder: string) => Promise<string>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
-// The tests tick the folder watch by hand, the hook's own timing is `usePolling`'s business
-const watch = vi.hoisted(() => ({
-  tick: null as (() => Promise<unknown> | void) | null,
-  options: null as { intervalMs: number | null; active?: boolean } | null,
+// The tests report folder changes by hand, the watch itself is `useFollowFiles`' business
+const follow = vi.hoisted(() => ({
+  files: null as readonly string[] | null,
+  folders: null as readonly string[] | null,
+  changed: null as ((path: string) => void) | null,
 }))
-vi.mock("@/hooks/usePolling", () => ({
-  usePolling: (load: () => Promise<unknown> | void, options: { intervalMs: number | null; active?: boolean }) => {
-    watch.tick = load
-    watch.options = options
+vi.mock("@/hooks/useFollowFiles", () => ({
+  useFollowFiles: (files: readonly string[], onChange: (path: string) => void, folders: readonly string[] = []) => {
+    follow.files = files
+    follow.folders = folders
+    follow.changed = onChange
   },
 }))
 
@@ -26,28 +27,28 @@ const FOLDER = "/data/workbench/latex/proj/paper"
 const OLD = `${FOLDER}/paper.tex`
 const NEW = `${FOLDER}/thesis.tex`
 const built = (pdf: string) => ({ ok: true, pdf_path: pdf, duration_ms: 1, errors: [], log_tail: "" }) as unknown as LatexBuild
-const options = (streaming = false) => ({ folder: FOLDER, streaming })
-/** One look at the folder. */
-const tick = () => act(async () => { await watch.tick?.() })
+const options = { folder: FOLDER }
+/** The watch reports that `path` changed. */
+const changed = (path: string) => act(async () => { follow.changed?.(path) })
 
 afterEach(() => {
   vi.clearAllMocks()
-  watch.tick = null
-  watch.options = null
+  follow.files = null
+  follow.folders = null
+  follow.changed = null
 })
 
 describe("useLatexBuild", () => {
-  it("builds nothing and watches nothing without a root", async () => {
-    const { result } = renderHook(() => useLatexBuild(null, options()))
+  it("builds and follows nothing without a root", async () => {
+    const { result } = renderHook(() => useLatexBuild(null, options))
     await act(() => result.current.trigger())
     expect(api.buildLatex).not.toHaveBeenCalled()
-    expect(watch.options?.active).toBe(false)
+    expect(follow.folders).toEqual([])
   })
 
   it("starts clean for another root so the old root's PDF never shows", async () => {
-    api.folderStamp.mockResolvedValue("s1")
     api.buildLatex.mockResolvedValueOnce(built("/pdf/paper.pdf"))
-    const { result, rerender } = renderHook(({ root }) => useLatexBuild(root, options()), { initialProps: { root: OLD as string | null } })
+    const { result, rerender } = renderHook(({ root }) => useLatexBuild(root, options), { initialProps: { root: OLD as string | null } })
     await act(() => result.current.trigger())
     expect(result.current.pdfPath).toBe("/pdf/paper.pdf")
 
@@ -63,10 +64,9 @@ describe("useLatexBuild", () => {
   })
 
   it("drops the answer of a build of the old root that finishes after the root changed", async () => {
-    api.folderStamp.mockResolvedValue("s1")
     const slow = Promise.withResolvers<LatexBuild>()
     api.buildLatex.mockReturnValueOnce(slow.promise)
-    const { result, rerender } = renderHook(({ root }) => useLatexBuild(root, options()), { initialProps: { root: OLD } })
+    const { result, rerender } = renderHook(({ root }) => useLatexBuild(root, options), { initialProps: { root: OLD } })
     let finished: Promise<void> = Promise.resolve()
     act(() => { finished = result.current.trigger() })
     rerender({ root: NEW })
@@ -78,46 +78,32 @@ describe("useLatexBuild", () => {
     expect(result.current.building).toBe(false)
   })
 
-  it("rebuilds the root when the folder's stamp changes and leaves it alone while the stamp holds", async () => {
-    api.folderStamp.mockResolvedValue("s1")
+  it("follows the project folder and builds the root once for a change inside it", async () => {
     api.buildLatex.mockResolvedValue(built("/pdf/paper.pdf"))
-    const { result } = renderHook(() => useLatexBuild(OLD, options()))
-    await act(() => result.current.trigger())
-    await tick()
-    expect(api.buildLatex).toHaveBeenCalledTimes(1)
+    renderHook(() => useLatexBuild(OLD, options))
+    expect(follow.folders).toEqual([FOLDER])
+    expect(follow.files).toEqual([])
 
-    api.folderStamp.mockResolvedValue("s2")
-    await tick()
-    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(2))
+    await changed(`${FOLDER}/refs.bib`)
+    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(1))
     expect(api.buildLatex).toHaveBeenLastCalledWith(OLD)
 
-    await tick()
-    expect(api.buildLatex).toHaveBeenCalledTimes(2)
-  })
-
-  it("does not build twice for a change a build already saw", async () => {
-    api.folderStamp.mockResolvedValue("s1")
-    api.buildLatex.mockResolvedValue(built("/pdf/paper.pdf"))
-    const { result } = renderHook(() => useLatexBuild(OLD, options()))
-    await act(() => result.current.trigger())
-
-    // A save changes the folder and triggers its own build, the next look at the folder finds nothing new
-    api.folderStamp.mockResolvedValue("s2")
-    await act(() => result.current.trigger())
-    await tick()
-    expect(api.buildLatex).toHaveBeenCalledTimes(2)
-  })
-
-  it("keeps watching when the stamp cannot be read", async () => {
-    api.folderStamp.mockResolvedValue("s1")
-    api.buildLatex.mockResolvedValue(built("/pdf/paper.pdf"))
-    const { result } = renderHook(() => useLatexBuild(OLD, options()))
-    await act(() => result.current.trigger())
-
-    api.folderStamp.mockRejectedValueOnce(new Error("offline"))
-    await tick()
-    api.folderStamp.mockResolvedValue("s2")
-    await tick()
+    await changed(`${FOLDER}/imgs/plot.png`)
     await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(2))
+  })
+
+  it("collapses changes that arrive while a build runs into one follow-up build", async () => {
+    const slow = Promise.withResolvers<LatexBuild>()
+    api.buildLatex.mockReturnValueOnce(slow.promise).mockResolvedValue(built("/pdf/paper.pdf"))
+    renderHook(() => useLatexBuild(OLD, options))
+
+    await changed(`${FOLDER}/a.tex`)
+    await changed(`${FOLDER}/b.tex`)
+    await changed(`${FOLDER}/c.tex`)
+    expect(api.buildLatex).toHaveBeenCalledTimes(1)
+    await act(async () => { slow.resolve(built("/pdf/paper.pdf")) })
+    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(api.buildLatex).toHaveBeenCalledTimes(2)
   })
 })

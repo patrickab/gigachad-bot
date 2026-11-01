@@ -7,8 +7,6 @@ LaTeX build output (`latex.is_build_output`) is never listed.
 
 from __future__ import annotations
 
-import hashlib
-import itertools
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,7 +25,6 @@ _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 # Compiled `.gitignore` files by path with the stat stamp they were read at, so a listing recompiles only edited ones.
 _compiled_gitignores: dict[str, tuple[tuple[int, ...], GitIgnoreSpec | None]] = {}
 _MAX_COMPILED_GITIGNORES = 1024
-_STAMP_FILE_CAP = 5000
 
 
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
@@ -116,15 +113,3 @@ def build_tree(directory: Path | str, inherited: _IgnoreLayers = ()) -> list[dic
         elif entry.is_file():
             children.append({"name": entry.name, "path": entry.path, "type": "file"})
     return children
-
-
-def folder_stamp(folder: Path) -> str:
-    """A hash of the paths, modification times and sizes of the first 5000 listed files under *folder*."""
-    stamped = []
-    for entry in itertools.islice(walk_files(folder), _STAMP_FILE_CAP):
-        try:
-            info = entry.stat()
-        except OSError:
-            continue
-        stamped.append((os.path.relpath(entry.path, folder), info.st_mtime_ns, info.st_size))
-    return hashlib.blake2b(repr(sorted(stamped)).encode("utf-8"), digest_size=8).hexdigest()

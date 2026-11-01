@@ -18,7 +18,6 @@ from backend.routes.schemas import FileContent, RootFile
 from lib import git_worktree
 from lib.disk_files import DiskFiles
 from lib.file_roots import FileRoots
-from lib.file_walk import folder_stamp
 from lib.git import GitError
 from lib.host_access import list_directories
 
@@ -109,17 +108,6 @@ def write_file(body: FileContent, files: DiskFiles = Depends(get_disk_files)) ->
     with http_errors(((OSError, ValueError), 400, None)):
         files.write(body.path, body.content)
     return {"ok": True}
-
-
-class FolderStamp(BaseModel):
-    stamp: str
-
-
-@router.get("/stamp", response_model=FolderStamp)
-def stamp_folder(folder: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FolderStamp:
-    """A token that changes when a listed file under *folder* is added, removed or edited."""
-    with http_errors(((OSError, ValueError), 400, None)):
-        return FolderStamp(stamp=folder_stamp(roots.resolve_folder(folder)))
 
 
 @router.get("/rendered", response_model=FileContent)

@@ -7,12 +7,17 @@ import type { LatexBuild, TexProject } from "@/lib/domain/latex"
 const api = vi.hoisted(() => ({
   ApiError: class ApiError extends Error { status = 500 },
   buildLatex: vi.fn<(path: string) => Promise<LatexBuild>>(),
-  folderStamp: vi.fn<(folder: string) => Promise<string>>(async () => "stamp"),
   loadTexProject: vi.fn<(path: string) => Promise<TexProject>>(),
   chooseTexRoot: vi.fn<(path: string, root: string) => Promise<TexProject>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
-vi.mock("@/hooks/usePolling", () => ({ usePolling: () => {} }))
+const follow = vi.hoisted(() => ({ folders: [] as readonly string[], changed: null as ((path: string) => void) | null }))
+vi.mock("@/hooks/useFollowFiles", () => ({
+  useFollowFiles: (_files: readonly string[], onChange: (path: string) => void, folders: readonly string[] = []) => {
+    follow.folders = folders
+    follow.changed = onChange
+  },
+}))
 const workbench = vi.hoisted(() => ({ props: null as WorkbenchProps | null }))
 vi.mock("@/features/workbench/Workbench", () => ({
   Workbench: (props: WorkbenchProps) => {
@@ -43,22 +48,29 @@ afterEach(() => {
 })
 
 describe("LatexWorkbench", () => {
-  it("builds the project's root, not the open file, and again on an agent edit, after a save of any open file and when a run ends", async () => {
+  it("builds the project's root, not the open file, and again for every change in the project folder", async () => {
     api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
     api.buildLatex.mockResolvedValue(built)
     render(workbenchOf(CHAPTER))
     await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(1))
     expect(api.buildLatex).toHaveBeenLastCalledWith(ROOT)
+    expect(follow.folders).toEqual([FOLDER])
 
-    act(() => workbench.props?.onPulled?.("\\section{Agent edit}", CHAPTER))
+    act(() => follow.changed?.(`${FOLDER}/refs.bib`))
     await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(2))
+    expect(api.buildLatex).toHaveBeenLastCalledWith(ROOT)
+  })
+
+  it("reads the project again after a save of the shown file, a save of another file leaves it", async () => {
+    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
+    api.buildLatex.mockResolvedValue(built)
+    render(workbenchOf(CHAPTER))
+    await waitFor(() => expect(api.loadTexProject).toHaveBeenCalledTimes(1))
 
     act(() => workbench.props?.onSaved?.("\\bibliography{refs}", `${FOLDER}/refs.bib`))
-    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(3))
-
-    act(() => workbench.props?.onRunEnd?.())
-    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(4))
-    expect(api.buildLatex).toHaveBeenLastCalledWith(ROOT)
+    expect(api.loadTexProject).toHaveBeenCalledTimes(1)
+    act(() => workbench.props?.onSaved?.("% !TEX root = ../main.tex", CHAPTER))
+    await waitFor(() => expect(api.loadTexProject).toHaveBeenCalledTimes(2))
   })
 
   it("asks again for the project of another file without remounting the workbench", async () => {

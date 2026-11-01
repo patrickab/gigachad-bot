@@ -118,7 +118,7 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  * - `openFile(path)` shows the buffer of another file, loading it from disk when it is not open yet. The buffer shown before
  *   stays loaded with its unsaved edits, nothing is saved. Called while the session connects it waits for the socket and returns true, false without a session
  * - `setContent(text, path)` hands text that is already on disk to the buffer of `path`, hidden or
- *   shown, false while the session is not open
+ *   shown. While the session is opening the latest text per path waits for the open frame and the call returns true, false without a session
  *   - An unmodified buffer is replaced (one undo step) and stays unmodified
  *   - A modified buffer gets the text merged into its unsaved edits, the agent's lines win where both changed, and stays modified
  * - `renameFile(from, to)` renames the buffer of `from` (kept while connecting too), keeping its text and unsaved edits. A changed `document.path` under the same `key` renames the buffer of the previous path
@@ -135,7 +135,14 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   const quit = useEffectEvent(onQuit)
   const sendFrameRef = useRef<SendFrame | null>(null)
   const shownRef = useRef<{ key: string; path: string } | null>(null)
-  const setContent = useCallback((text: string, path: string) => sendFrameRef.current?.({ type: "set_content", content: text, path }, false) ?? false, [])
+  // The text `setContent` took while the session was opening, by path. Null when no session is opening
+  const pendingContentRef = useRef<Map<string, string> | null>(null)
+  const setContent = useCallback((text: string, path: string) => {
+    if (sendFrameRef.current?.({ type: "set_content", content: text, path }, false)) return true
+    if (!pendingContentRef.current) return false
+    pendingContentRef.current.set(path, text)
+    return true
+  }, [])
   const openFile = useCallback((path: string) => sendFrameRef.current?.({ type: "open_file", path }, true) ?? false, [])
   const renameFile = useCallback((from: string, to: string) => sendFrameRef.current?.({ type: "renamed", from, path: to }, true) ?? false, [])
   const insertLines = useCallback((text: string) => sendFrameRef.current?.({ type: "insert_lines", text }, false) ?? false, [])
@@ -154,6 +161,8 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
     if (documentKey === null || !opened) return
     let disposed = false
     let dispose = () => {}
+    const pendingContent = new Map<string, string>()
+    pendingContentRef.current = pendingContent
 
     void (async () => {
       const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/addon-webgl")])
@@ -221,6 +230,9 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         sentSize = `${xterm.rows}x${xterm.cols}`
         send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap }))
         queued.splice(0).forEach(send)
+        for (const [path, content] of pendingContent) send(JSON.stringify({ type: "set_content", content, path }))
+        pendingContent.clear()
+        pendingContentRef.current = null
         if (backgroundIsLight !== null) sendBackground(backgroundIsLight)
       }
       socket.onmessage = async (event: MessageEvent<ArrayBuffer | string>) => {
@@ -305,6 +317,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
 
     return () => {
       disposed = true
+      pendingContentRef.current = null
       dispose()
       setTerminal(null)
     }
