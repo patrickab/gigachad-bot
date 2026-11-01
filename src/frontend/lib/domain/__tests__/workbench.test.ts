@@ -28,15 +28,17 @@ describe("opensInWorkbench", () => {
 })
 
 describe("relocatedWorkbenchPath", () => {
-  it("renames the project folder of a workbench file", () => {
+  it("renames the project folder of a workbench file, folder entry or nested file", () => {
     expect(relocatedWorkbenchPath("/data/workbench/latex/old/thesis/thesis.tex", "old", "new")).toBe("/data/workbench/latex/new/thesis/thesis.tex")
     expect(relocatedWorkbenchPath("/data/workbench/markdown/old/plan/plan.md", "old", "new")).toBe("/data/workbench/markdown/new/plan/plan.md")
+    expect(relocatedWorkbenchPath("/data/workbench/latex/old/thesis", "old", "new")).toBe("/data/workbench/latex/new/thesis")
+    expect(relocatedWorkbenchPath("/data/workbench/latex/old/thesis/imgs/plot.png", "old", "new")).toBe("/data/workbench/latex/new/thesis/imgs/plot.png")
   })
 
   it("leaves other projects, other kinds and other shapes alone", () => {
     expect(relocatedWorkbenchPath("/data/workbench/latex/other/thesis/thesis.tex", "old", "new")).toBe("/data/workbench/latex/other/thesis/thesis.tex")
     expect(relocatedWorkbenchPath("/data/workbench/pdf/old/thesis/thesis.tex", "old", "new")).toBe("/data/workbench/pdf/old/thesis/thesis.tex")
-    expect(relocatedWorkbenchPath("/data/workbench/latex/old/thesis.tex", "old", "new")).toBe("/data/workbench/latex/old/thesis.tex")
+    expect(relocatedWorkbenchPath("/data/workbench/latex/old", "old", "new")).toBe("/data/workbench/latex/old")
     expect(relocatedWorkbenchPath("project/old/document/plan.md", "old", "new")).toBe("project/old/document/plan.md")
   })
 })

@@ -9,7 +9,7 @@ import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { Workbench, type WorkbenchPane, type WorkbenchProps } from "./Workbench"
 
-interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderPane" | "status" | "onSaved" | "onPulled" | "onRunEnd" | "quoteLanguage"> {
+interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderPane" | "status" | "project" | "onSaved" | "onPulled" | "onRunEnd" | "onStreamingChange" | "quoteLanguage"> {
   /** The project the file belongs to, which may give it a display name. */
   projectSlug: string | null
   /** A clicked `#file:<path>` link in the preview. */

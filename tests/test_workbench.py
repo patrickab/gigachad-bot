@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import os
 
@@ -5,15 +6,23 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes import workbench as workbench_route
-from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, get_project_store, get_relocate
+from backend.routes.deps import (
+    get_asset_store,
+    get_disk_files,
+    get_document_store,
+    get_file_roots,
+    get_project_store,
+    get_relocate,
+)
 import config
 from lib import latex, workbench
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
+from lib.disk_files import DiskFiles
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
 from tests.conftest import mounted_roots, request_identity, route_client
-from tests.fakes import MemoryAssetStore, MemoryDataStore, StoredAsset
+from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope, StoredAsset
 
 
 class Docs(MemoryDataStore):
@@ -47,7 +56,12 @@ def projects(docs):
     return projects
 
 
-def workbench_client(projects, docs, roots, relocate=None, host_access=True, assets=None):
+@pytest.fixture
+def scope():
+    return RecordingScope()
+
+
+def workbench_client(projects, docs, roots, relocate=None, host_access=True, assets=None, scope=None):
     """A workbench route client for *projects* and *docs* that reaches *roots*."""
 
     def relocate_to_disk(old: str, new: str) -> None:
@@ -63,13 +77,14 @@ def workbench_client(projects, docs, roots, relocate=None, host_access=True, ass
         get_document_store: docs,
         get_relocate: relocate or relocate_to_disk,
         get_asset_store: assets or MemoryAssetStore(),
+        get_disk_files: DiskFiles(roots, scope or RecordingScope()),
     }
     return route_client(workbench_route.router, overrides=overrides)
 
 
 @pytest.fixture
-def client(root, vault, docs, projects):
-    return workbench_client(projects, docs, mounted_roots(vault, root))
+def client(root, vault, docs, projects, scope):
+    return workbench_client(projects, docs, mounted_roots(vault, root), scope=scope)
 
 
 class MirroringAssets(MemoryAssetStore):
@@ -113,8 +128,8 @@ def test_a_mounted_pdf_is_read_in_place_and_new_pdfs_are_refused(client, vault, 
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "x.pdf"}).status_code == 400
 
 
-@pytest.mark.parametrize(("path", "kind"), [("a.tex", "latex"), ("/x/B.TEX", "latex"), ("n.md", "markdown"), ("c.Md", "markdown"),
-                                           ("a.pdf", "pdf"), ("tex", None), ("a.md.txt", None)])
+@pytest.mark.parametrize(("path", "kind"), [("/x/B.TEX", "latex"), ("refs.bib", "latex"), ("n.md", "markdown"),
+                                           ("a.pdf", "pdf"), ("tex", None), ("a.bibtex", None)])
 def test_kind_comes_from_the_suffix_ignoring_case(path, kind):
     assert workbench.kind_of(path) == kind
 
@@ -391,3 +406,229 @@ def test_logins_without_host_access_are_refused(root, vault, docs, projects, met
     assert getattr(client, method)(url, **request_args).status_code == 403
     assert docs.read_bytes(key)[0] == b"stored" and not docs.exists(WORKBENCH_SESSIONS)
     assert not root.exists()
+
+
+def test_supporting_latex_files_prepare_in_place_but_are_not_created(client, vault, root):
+    bibliography = vault / "refs.bib"
+    bibliography.write_text("@book{a}", encoding="utf-8")
+
+    prepared = client.post("/api/workbench/prepare", json={"path": str(bibliography)}).json()
+
+    assert prepared == {"path": str(bibliography), "cwd": str(root / "latex"), "kind": "latex"}
+    assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "refs.bib"}).status_code == 400
+
+
+def listed_latex(root, projects, stem, slug="thesis", name=None):
+    """A project's LaTeX file `<root>/latex/<slug>/<stem>/<stem>.tex`, listed in project *slug* (shown as *name*)."""
+    source = root / "latex" / slug / stem / f"{stem}.tex"
+    source.parent.mkdir(parents=True)
+    source.write_text(latex.NEW_DOCUMENT, encoding="utf-8")
+    projects.add_file(slug, str(source))
+    if name:
+        projects.set_file_name(slug, str(source), name)
+    return source
+
+
+def promote(client, path, slug="thesis"):
+    return client.post("/api/workbench/promote", json={"slug": slug, "path": str(path)})
+
+
+def test_promoting_replaces_the_entry_by_its_folder_in_place_for_good(client, root, projects, docs):
+    projects.add_file("thesis", "/vault/a.md")
+    paper = listed_latex(root, projects, "paper")
+    other = listed_latex(root, projects, "other")
+
+    promoted = promote(client, paper)
+
+    assert promoted.json() == {"folder": str(paper.parent)}
+    assert projects.list_named_files("thesis") == [("/vault/a.md", "a.md"), (str(other), "other.tex"), (str(paper.parent), "paper")]
+    assert paper.is_file()
+    assert promote(client, paper).status_code == 404
+
+
+@pytest.mark.parametrize(("shown", "promoted"), [("Paper.tex", "Paper"), ("Draft 2", "Draft 2")])
+def test_promoting_drops_a_tex_suffix_from_the_display_name_only(client, root, projects, shown, promoted):
+    paper = listed_latex(root, projects, "paper", name=shown)
+
+    promote(client, paper)
+
+    assert projects.list_named_files("thesis") == [(str(paper.parent), promoted)]
+
+
+def test_promoting_refuses_what_is_not_a_listed_project_document_in_its_own_folder(client, root, vault, projects):
+    projects.create_project("Other")
+    unlisted = root / "latex" / "thesis" / "paper" / "paper.tex"
+    unlisted.parent.mkdir(parents=True)
+    unlisted.write_text("x", encoding="utf-8")
+    mounted = vault / "paper.tex"
+    mounted.write_text("x", encoding="utf-8")
+    foreign = listed_latex(root, projects, "foreign", slug="other")
+    markdown = root / "markdown" / "thesis" / "plan" / "plan.md"
+    markdown.parent.mkdir(parents=True)
+    markdown.write_text("x", encoding="utf-8")
+    projects.add_file("thesis", str(mounted))
+    projects.add_file("thesis", str(markdown))
+    projects.add_file("thesis", str(foreign))
+
+    assert promote(client, unlisted).status_code == 404
+    assert promote(client, root / "latex" / "thesis" / "paper", slug="missing").status_code == 404
+    for path in (mounted, markdown, foreign):
+        assert promote(client, path).status_code == 400, path
+    assert len(projects.list_files("thesis")) == 3
+
+
+def test_promoting_a_file_whose_folder_is_already_listed_conflicts(client, root, projects):
+    paper = listed_latex(root, projects, "paper")
+    projects.add_file("thesis", str(paper.parent))
+
+    assert promote(client, paper).status_code == 409
+    assert str(paper) in projects.list_files("thesis")
+
+
+def tex_project(root):
+    """The folder `<root>/latex/thesis/paper` with a root, a chapter pointing at it and a bibliography."""
+    folder = root / "latex" / "thesis" / "paper"
+    (folder / "sections").mkdir(parents=True)
+    (folder / "paper.tex").write_text(latex.NEW_DOCUMENT, encoding="utf-8")
+    (folder / "sections" / "intro.tex").write_text("% !TEX root = ../paper.tex\nIntro\n", encoding="utf-8")
+    (folder / "refs.bib").write_text("@book{a}", encoding="utf-8")
+    return folder
+
+
+def store_links(docs, links):
+    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode(), expected=None)
+
+
+def stored_links(docs):
+    return json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0])
+
+
+def session_of(client, path):
+    return client.get("/api/workbench/session", params={"path": str(path)}).json()
+
+
+def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_one_once(client, root, docs):
+    folder = tex_project(root)
+    store_links(docs, {
+        str(folder / "sections" / "intro.tex"): {"active": "c2", "sessions": ["c1", "c2"], "moved": ["c1"]},
+        "/elsewhere.md": "keep",
+        str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
+        str(folder / "paper.tex"): {"active": "p1", "sessions": ["c1", "p1", "p2"], "moved": ["p2", "c1"]},
+        str(folder / "notes.md"): "markdown stays",
+    })
+
+    adopted = session_of(client, folder)
+
+    assert adopted == {"session_id": "p1", "session_ids": ["c1", "c2", "b1", "p1", "p2"], "moved": ["c1", "p2"]}
+    assert stored_links(docs) == {
+        "/elsewhere.md": "keep",
+        str(folder / "notes.md"): "markdown stays",
+        str(folder): {"active": "p1", "sessions": ["c1", "c2", "b1", "p1", "p2"], "moved": ["c1", "p2"]},
+    }
+    assert session_of(client, folder) == adopted
+
+
+def test_a_folder_without_its_root_among_the_links_takes_the_first_files_active_session(client, root, docs):
+    folder = tex_project(root)
+    store_links(docs, {
+        str(folder / "sections" / "intro.tex"): {"active": "c1", "sessions": ["c1"]},
+        str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
+    })
+
+    assert session_of(client, folder) == {"session_id": "c1", "session_ids": ["c1", "b1"], "moved": []}
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+
+
+class FixedClock:
+    """Stands in for `datetime` in the image route: it is always the same second."""
+
+    @staticmethod
+    def now():
+        return datetime(2026, 1, 2, 3, 4, 5)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    monkeypatch.setattr(workbench_route, "datetime", FixedClock)
+    return "img-20260102-030405.png"
+
+
+def paste(client, path, content=PNG):
+    return client.post("/api/workbench/image", params={"path": str(path)}, files={"file": ("clip.png", content, "image/png")})
+
+
+def test_a_pasted_image_goes_into_imgs_of_the_project_folder_whatever_file_it_is_pasted_in(client, root, scope, clock):
+    folder = tex_project(root)
+
+    stored = paste(client, folder / "sections" / "intro.tex")
+
+    image = folder / "imgs" / clock
+    assert stored.json() == {"path": str(image), "reference": rf"\includegraphics[width=\linewidth]{{imgs/{clock}}}", "changed": []}
+    assert image.read_bytes() == PNG
+    assert scope.changes == [{"kind": "document", "key": str(image), "operation": "write"}]
+
+
+def test_pasting_into_a_root_without_graphicx_adds_it_and_reports_the_root(client, root, scope, clock):
+    folder = tex_project(root)
+    source = folder / "paper.tex"
+    source.write_text("\\documentclass{article}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
+
+    stored = paste(client, folder / "sections" / "intro.tex").json()
+
+    image = folder / "imgs" / clock
+    assert stored["changed"] == [str(source)]
+    assert source.read_text(encoding="utf-8") == "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\end{document}\n"
+    assert scope.changes == [
+        {"kind": "document", "key": str(image), "operation": "write"},
+        {"kind": "document", "key": str(source), "operation": "write"},
+    ]
+
+
+def test_a_pasted_image_of_a_markdown_file_sits_next_to_it_with_a_markdown_reference(client, root, vault, clock):
+    plan = root / "markdown" / "thesis" / "plan" / "plan.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("", encoding="utf-8")
+
+    stored = paste(client, plan)
+
+    assert stored.json() == {"path": str(plan.parent / "imgs" / clock), "reference": f"![](imgs/{clock})", "changed": []}
+    assert (plan.parent / "imgs" / clock).read_bytes() == PNG
+
+
+def test_a_pasted_image_is_never_overwritten(client, root, scope, clock):
+    folder = tex_project(root)
+    (folder / "imgs").mkdir()
+    (folder / "imgs" / clock).write_bytes(b"mine")
+
+    assert paste(client, folder / "paper.tex").status_code == 409
+    assert (folder / "imgs" / clock).read_bytes() == b"mine" and scope.changes == []
+
+
+@pytest.mark.parametrize("content", [b"GIF89a" + b"\x00" * 24, b""])
+def test_only_png_images_are_stored(client, root, scope, clock, content):
+    folder = tex_project(root)
+
+    assert paste(client, folder / "paper.tex", content).status_code == 400
+    assert not (folder / "imgs").exists() and scope.changes == []
+
+
+def test_an_image_over_the_size_limit_is_refused(client, root, clock, monkeypatch):
+    folder = tex_project(root)
+    monkeypatch.setattr(workbench_route, "_MAX_IMAGE_BYTES", len(PNG))
+
+    assert paste(client, folder / "paper.tex", PNG + b"\x00").status_code == 413
+    assert paste(client, folder / "paper.tex").status_code == 200
+
+
+def test_images_are_pasted_into_existing_tex_and_markdown_files_inside_the_roots_only(client, root, vault, tmp_path, clock):
+    folder = tex_project(root)
+    outside = tmp_path / "outside.tex"
+    outside.write_text("x", encoding="utf-8")
+    pdf = vault / "slides.pdf"
+    pdf.write_bytes(b"%PDF-1")
+
+    assert paste(client, folder / "missing.tex").status_code == 404
+    assert paste(client, outside).status_code == 403
+    assert paste(client, pdf).status_code == 400

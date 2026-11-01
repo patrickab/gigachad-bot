@@ -32,3 +32,30 @@ export function kindOf(path: string): FileKind {
 
 /** Natural, case-insensitive order for paths and file names ("file2" before "file10"). */
 export const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
+
+/** `path` without trailing slashes, the root `/` stays. */
+export function trimSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, "") : path
+}
+
+/** Whether `path` is `root` or below it, `/a/foobar` is not inside `/a/foo`. */
+export function isInside(path: string, root: string): boolean {
+  const [inner, outer] = [trimSlash(path), trimSlash(root)]
+  return inner === outer || inner.startsWith(outer === "/" ? "/" : `${outer}/`)
+}
+
+/** `path` relative to the directory `base` when below it, else unchanged. */
+export function relativeIn(base: string, path: string): string {
+  const prefix = base.endsWith("/") ? base : `${base}/`
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path
+}
+
+/** `path` relative to the directory `folder`: `chapters/intro.tex`, or `../main.tex` when it lies above or beside the folder. */
+export function relativeTo(folder: string, path: string): string {
+  const from = folder.split("/").filter(Boolean)
+  const to = path.split("/").filter(Boolean)
+  let shared = 0
+  // The file's own name never counts as a shared folder
+  while (shared < from.length && shared < to.length - 1 && from[shared] === to[shared]) shared++
+  return [...from.slice(shared).map(() => ".."), ...to.slice(shared)].join("/")
+}

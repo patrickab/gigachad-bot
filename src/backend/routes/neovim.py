@@ -4,14 +4,20 @@
 bytes both ways, text frames carry JSON control messages:
 
 - client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "ask_keymap"?, "rows", "cols"}` first
-  (a string `base_content` opens a read-only left diff buffer against the editable document, `ask_keymap`
-  maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
-  `{"type": "saved", "id", "content" | "error"}`, `{"type": "set_content", "content"}` (the file changed on disk,
-  the buffer takes the text without moving the cursor, merged into unsaved edits, after a running `:w`),
-  `{"type": "renamed", "path", "filename"}` (the file was renamed, the session continues on the new name with its
-  unsaved edits) and `{"type": "background", "light"}` (the theme behind the terminal, Neovim's 'background' follows it)
-- server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "yank", "content"}`,
-  `{"type": "selection", "start_line", "end_line", "text"}` (1-based inclusive lines),
+  (the first document, a string `base_content` opens a read-only left diff buffer against the editable document,
+  `ask_keymap` maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
+  `{"type": "saved", "id", "content" | "error"}`, `{"type": "open_file", "path"}` (show that file's buffer, loading it from
+  disk into a private copy of its own when not open yet, other buffers stay loaded with their unsaved edits and nothing is
+  saved), `{"type": "set_content", "content", "path"}` (the file changed on disk, the buffer of *path* takes the text
+  without moving the cursor, merged into unsaved edits, after a running `:w`),
+  `{"type": "renamed", "from", "path"}` (the file of buffer *from* was renamed, the session continues on the new
+  name with its unsaved edits, nothing for a buffer that is not open), `{"type": "insert_lines", "text"}` (lines below the
+  cursor of the shown buffer, the cursor lands on the first one) and `{"type": "background", "light"}` (the theme behind
+  the terminal, Neovim's 'background' follows it)
+- server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
+  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
+  `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
+  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file and
   `{"type": "exit", "code"}` when `nvim` quits
 
 `nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
@@ -28,6 +34,7 @@ import contextlib
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, WebSocket
@@ -39,6 +46,9 @@ from backend.routes.deps import get_file_roots
 from config import CORS_ORIGINS
 from lib.file_roots import FileRoots
 from lib.neovim_session import NeovimSession, Selection, is_neovim_installed
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
 
 log = logging.getLogger(__name__)
 
@@ -98,19 +108,19 @@ def is_trusted_origin(origin: str | None) -> bool:
 
 
 class _BrowserSaves:
-    """Forward `:w` to the browser and wait for what it stored."""
+    """Forward `:w` to the browser and wait for what it stored, and tell it what happens in Neovim."""
 
     def __init__(self, websocket: WebSocket) -> None:
         self._websocket = websocket
         self._pending: dict[int, asyncio.Future[dict]] = {}
         self._next_id = 0
 
-    async def save(self, text: str) -> str:
+    async def save(self, path: str, text: str) -> str:
         self._next_id += 1
         save_id = self._next_id
         reply = self._pending[save_id] = asyncio.get_running_loop().create_future()
         try:
-            await self._websocket.send_json({"type": "save", "id": save_id, "content": text})
+            await self._websocket.send_json({"type": "save", "id": save_id, "path": path, "content": text})
             result = await asyncio.wait_for(reply, _SAVE_TIMEOUT_SECONDS)
         finally:
             self._pending.pop(save_id, None)
@@ -124,6 +134,12 @@ class _BrowserSaves:
     async def selection(self, selection: Selection) -> None:
         await self._websocket.send_json({"type": "selection", **selection})
 
+    async def switched(self, path: str) -> None:
+        await self._websocket.send_json({"type": "switched", "path": path})
+
+    async def open_failed(self, path: str, message: str) -> None:
+        await self._websocket.send_json({"type": "open_failed", "path": path, "message": message})
+
     def resolve(self, reply: dict) -> None:
         pending = self._pending.get(reply.get("id"))
         if pending is not None and not pending.done():
@@ -136,23 +152,32 @@ async def _relay_output(websocket: WebSocket, session: NeovimSession) -> None:
     await websocket.send_json({"type": "exit", "code": await session.wait()})
 
 
-async def _set_content(session: NeovimSession, content: str) -> None:
+async def _guarded(what: str, work: Coroutine[None, None, None]) -> None:
+    """Await *work*, logging instead of raising when Neovim cannot *what*."""
     try:
-        await session.set_text(content)
+        await work
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
-        log.warning("Neovim could not take the changed file: %s", exc)
+        log.warning("Neovim could not %s: %s", what, exc)
 
 
-async def _rename(session: NeovimSession, roots: FileRoots, path: str, filename: str) -> None:
+async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRoots, path: str) -> None:
     try:
-        await session.rename(filename, disk_file(roots, path))
+        await session.open_file(path, disk_file(roots, path))
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
-        log.warning("Neovim could not take the renamed file: %s", exc)
+        log.warning("Neovim could not open %s: %s", path, exc)
+        await saves.open_failed(path, str(exc))
 
 
 async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves, roots: FileRoots) -> None:
-    # `set_text` and `rename` wait for a running `:w`, whose answer arrives on this socket, so they run beside the relay
+    # `set_text`, `rename` and the others wait for a running `:w`, whose answer arrives on this socket, or for each other
+    # in Neovim, so they run beside the relay
     updates: set[asyncio.Task] = set()
+
+    def beside_relay(work: Coroutine[None, None, None]) -> None:
+        update = asyncio.create_task(work)
+        updates.add(update)
+        update.add_done_callback(updates.discard)
+
     try:
         while True:
             message = await websocket.receive()
@@ -162,23 +187,23 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
                 session.write_input(message["bytes"])
                 continue
             control = json.loads(message.get("text") or "{}")
-            if control.get("type") == "resize":
+            kind = control.get("type")
+            if kind == "resize":
                 session.resize(int(control["rows"]), int(control["cols"]))
-            elif control.get("type") == "saved":
+            elif kind == "saved":
                 saves.resolve(control)
-            elif control.get("type") == "set_content" and isinstance(control.get("content"), str):
-                update = asyncio.create_task(_set_content(session, control["content"]))
-                updates.add(update)
-                update.add_done_callback(updates.discard)
-            elif control.get("type") == "renamed" and isinstance(control.get("path"), str) and isinstance(control.get("filename"), str):
-                update = asyncio.create_task(_rename(session, roots, control["path"], control["filename"]))
-                updates.add(update)
-                update.add_done_callback(updates.discard)
-            elif control.get("type") == "background" and isinstance(control.get("light"), bool):
-                try:
-                    await session.set_background(control["light"])
-                except (RuntimeError, ConnectionError, TimeoutError) as exc:
-                    log.warning("Neovim could not take the theme: %s", exc)
+            elif kind == "set_content" and isinstance(control.get("content"), str) and isinstance(control.get("path"), str):
+                beside_relay(_guarded("take the changed file", session.set_text(control["content"], control["path"])))
+            elif kind == "open_file" and isinstance(control.get("path"), str):
+                beside_relay(_open_file(session, saves, roots, control["path"]))
+            elif kind == "insert_lines" and isinstance(control.get("text"), str):
+                beside_relay(_guarded("take the inserted lines", session.insert_lines(control["text"])))
+            elif kind == "renamed" and all(isinstance(control.get(key), str) for key in ("from", "path")):
+                path = control["path"]
+                rename = session.rename(control["from"], path, disk_file(roots, path))
+                beside_relay(_guarded("take the renamed file", rename))
+            elif kind == "background" and isinstance(control.get("light"), bool):
+                await _guarded("take the theme", session.set_background(control["light"]))
     finally:
         for update in updates:
             update.cancel()
@@ -197,6 +222,7 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
             saves.save,
             lambda text: asyncio.create_task(saves.yank(text)),
             (lambda selection: asyncio.create_task(saves.selection(selection))) if ask_keymap else None,
+            lambda path: asyncio.create_task(saves.switched(path)),
         )
     )
     try:
@@ -234,6 +260,7 @@ async def neovim_session(
         cols=opening.cols,
         cwd=working_directory(roots, opening.path),
         disk_path=disk_file(roots, opening.path),
+        path=opening.path,
     )
     try:
         await _run(websocket, session, roots, ask_keymap=opening.ask_keymap)

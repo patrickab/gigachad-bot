@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { onFileChange } from "@/lib/backend/fileEvents"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { isNewFileIn } from "@/lib/domain/files"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { opensInWorkbench } from "@/lib/domain/workbench"
@@ -46,7 +48,7 @@ interface WorkspaceDocumentsOptions {
   moveHistory: (path: string, scope: string) => Promise<void>
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
-  /** Opens `.md` and `.tex` files in the workbench, absent where it is unavailable. */
+  /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
   onWorkbenchSelect?: (path: string, scope: string) => void
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
@@ -80,6 +82,12 @@ export function useWorkspaceDocuments({
     void loadProjectDocuments().then(setDocuments).catch(() => {})
   }), [isActive, loadProjectDocuments])
 
+  // A file created inside a folder entry (a pasted image, a file made on another device) shows up in its tree.
+  const folderEntries = useMemo(() => Object.values(documents).flat().filter((doc) => doc.children), [documents])
+  const isNewInFolders = useEffectEvent((path: string) => isActive && isNewFileIn(folderEntries, path))
+  const reloadDocuments = useEffectEvent(() => { void loadProjectDocuments().then(setDocuments).catch(() => {}) })
+  useEffect(() => onFileChange((path) => isNewInFolders(path), () => reloadDocuments()), [])
+
   const refresh = async () => {
     const [loose, entries] = await Promise.all([listNotes(), loadProjectDocuments()])
     setNotes(loose)
@@ -93,7 +101,7 @@ export function useWorkspaceDocuments({
     open(path)
   }
 
-  /** Open project file `path`: a `.md` or `.tex` in the workbench where available, notes and the rest in the document editor. */
+  /** Open project file `path`: a workbench file (`.tex .bib .sty .cls`, `.md`) in the workbench where available, notes and the rest in the document editor. */
   const selectDocument = (path: string, scope: string) => {
     if (onWorkbenchSelect && opensInWorkbench(path)) onWorkbenchSelect(path, scope)
     else onDocumentSelect?.(path, scope)
@@ -132,6 +140,18 @@ export function useWorkspaceDocuments({
     await refresh()
     onDocumentsChanged?.()
     onCanvasDeleted?.(path)
+  }
+
+  /** Turn project `scope`'s workbench `.tex` at `path` into its LaTeX project folder, which the list then shows as a folder. */
+  const promote = async (path: string, scope: string) => {
+    setFileError("")
+    try {
+      await promoteToTexProject(scope, path)
+    } catch (cause) {
+      setFileError(errorMessage(cause, "Could not make a LaTeX project"))
+    }
+    await refresh()
+    onDocumentsChanged?.()
   }
 
   /** Pick files from this device and store them as documents of project `scope`. */
@@ -194,7 +214,7 @@ export function useWorkspaceDocuments({
   }
 
   return {
-    documents, notes, refresh, createAndOpen, selectDocument, createFile, canCreateLatex: !!onWorkbenchSelect, move, moveToFolder, remove, importFiles,
+    documents, notes, refresh, createAndOpen, selectDocument, createFile, canCreateLatex: !!onWorkbenchSelect, move, moveToFolder, promote, remove, importFiles,
     uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
   }
 }

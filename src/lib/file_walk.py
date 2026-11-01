@@ -2,15 +2,20 @@
 
 `.gitignore` files count from the listed directory downward with git's precedence: the last matching pattern wins
 and deeper files override shallower ones. Ignored folders are never entered and directory symlinks never followed.
+LaTeX build output (`latex.is_build_output`) is never listed.
 """
 
 from __future__ import annotations
 
+import hashlib
+import itertools
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pathspec import GitIgnoreSpec
+
+from lib.latex import is_build_output
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -22,6 +27,7 @@ _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 # Compiled `.gitignore` files by path with the stat stamp they were read at, so a listing recompiles only edited ones.
 _compiled_gitignores: dict[str, tuple[tuple[int, ...], GitIgnoreSpec | None]] = {}
 _MAX_COMPILED_GITIGNORES = 1024
+_STAMP_FILE_CAP = 5000
 
 
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
@@ -66,7 +72,7 @@ def _is_ignored(path: str, is_dir: bool, layers: _IgnoreLayers) -> bool:
 
 
 def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[list[tuple[os.DirEntry, bool]], _IgnoreLayers]:
-    """Entries of *directory* as ``(entry, is_dir)`` minus skipped and git-ignored ones, plus the layers for its children.
+    """Entries of *directory* as ``(entry, is_dir)`` minus skipped, git-ignored and LaTeX build output ones, plus the layers for its children.
 
     An ignored folder is dropped whole, as in git, so nothing inside it can be re-included.
     """
@@ -80,6 +86,8 @@ def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[l
         is_dir = entry.is_dir(follow_symlinks=False)
         # A linked worktree's `.git` is a file pointing at the clone, skipped like the folder.
         if (is_dir and entry.name in _SKIP_DIRS) or entry.name == ".git" or _is_ignored(entry.path, is_dir, layers):
+            continue
+        if is_build_output(Path(entry.path)):
             continue
         visible.append((entry, is_dir))
     return visible, layers
@@ -108,3 +116,15 @@ def build_tree(directory: Path | str, inherited: _IgnoreLayers = ()) -> list[dic
         elif entry.is_file():
             children.append({"name": entry.name, "path": entry.path, "type": "file"})
     return children
+
+
+def folder_stamp(folder: Path) -> str:
+    """A hash of the paths, modification times and sizes of the first 5000 listed files under *folder*."""
+    stamped = []
+    for entry in itertools.islice(walk_files(folder), _STAMP_FILE_CAP):
+        try:
+            info = entry.stat()
+        except OSError:
+            continue
+        stamped.append((os.path.relpath(entry.path, folder), info.st_mtime_ns, info.st_size))
+    return hashlib.blake2b(repr(sorted(stamped)).encode("utf-8"), digest_size=8).hexdigest()

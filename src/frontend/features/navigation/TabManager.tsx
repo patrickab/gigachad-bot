@@ -7,7 +7,7 @@ import { TabContext, showingItem, type Tab, type TabActions, type TabContextValu
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
-import { TabStripContext, nextTab, relocatedTab, renamedTab, tabAfterClosing, tabLabel, type TabStripValue } from "./tabs"
+import { TabStripContext, nextTab, relocatedTab, renamedTab, tabAfterClosing, tabLabel, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -95,6 +95,13 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
       }))
     },
     showItem: (item) => {
+      // Another file of an open LaTeX project switches that tab's buffer instead of taking the current tab.
+      const project = texProjectTab(tabs, item, activeTab)
+      if (project) {
+        updateTab(project.id, (tab) => texBufferShown(tab, item.path))
+        setActiveTab(project.id)
+        return
+      }
       updateTab(activeTab, (tab) => ({
         ...showingItem(item),
         // Reopening the same project's architecture keeps the system it shows.

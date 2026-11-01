@@ -95,4 +95,16 @@ describe("useFileChat", () => {
     rerender({ view: { kind: "new", cwd: CWD } })
     expect(result.current.lead).toBe("File: proj/plan/plan.md")
   })
+
+  it("follows a renamed file's key and names the file by default", async () => {
+    api.loadFileSessions.mockResolvedValueOnce(sessions("first")).mockResolvedValueOnce(sessions(null))
+    const { result, rerender } = renderHook(({ key }) => useFileChat(key, CWD, undefined, vi.fn()), { initialProps: { key: PATH } })
+    await waitFor(() => expect(result.current.view).toEqual({ kind: "session", sessionId: "first" }))
+
+    const renamed = "/data/workbench/markdown/proj/plan/plan-2.md"
+    rerender({ key: renamed })
+    expect(result.current.view).toBeNull()
+    await waitFor(() => expect(result.current.lead).toBe("File: proj/plan/plan-2.md"))
+    expect(api.loadFileSessions).toHaveBeenLastCalledWith(renamed)
+  })
 })

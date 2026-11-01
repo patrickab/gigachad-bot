@@ -52,6 +52,8 @@ const api = vi.hoisted(() => ({
   fetchFactoryRepos: vi.fn<typeof import("@/lib/backend/api").fetchFactoryRepos>(async () => []),
   exportLearnSession: vi.fn<typeof import("@/lib/backend/api").exportLearnSession>(),
   registerFactoryRepo: vi.fn<typeof import("@/lib/backend/api").registerFactoryRepo>(),
+  createTexProjectFile: vi.fn<typeof import("@/lib/backend/api").createTexProjectFile>(),
+  promoteToTexProject: vi.fn<typeof import("@/lib/backend/api").promoteToTexProject>(),
 }))
 const login = vi.hoisted(() => ({ hostAccess: false }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -330,6 +332,83 @@ describe("Project navigation", () => {
     expect(tabs.find((tab) => tab.id === document.id)?.workspaceItem?.path).toBe("project/proj/document/ideas.md")
     expect(tabs.find((tab) => tab.id === other.id)).toBe(other)
   })
+
+  it("switches an open LaTeX project's tab to another of its files, and opens files outside in the current tab", () => {
+    const manager = createRef<TabManagerHandle>()
+    render(<TabManager ref={manager}><TabList /></TabManager>)
+    localStorage.setItem("sidebar_tabs_expanded", "true")
+    const project = {
+      ...nextTab(), appMode: "workbench" as const,
+      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
+    }
+    act(() => manager.current!.openTab(project))
+    act(() => manager.current!.switchToTab(manager.current!.getTabs()[0].id))
+    const count = manager.current!.getTabs().length
+
+    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: null, rootFile: true }))
+    expect(manager.current!.getTabs()).toHaveLength(count)
+    expect(manager.current!.getTabs().find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/refs.bib")
+
+    act(() => manager.current!.switchToTab(manager.current!.getTabs()[0].id))
+    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/elsewhere/other.tex", projectSlug: null, rootFile: true }))
+    expect(manager.current!.getTabs()).toHaveLength(count)
+    expect(manager.current!.getTabs().find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/refs.bib")
+    expect(manager.current!.getTabs()[0].workspaceItem?.path).toBe("/repo/elsewhere/other.tex")
+  })
+
+  it("offers a new file in mounts and promoted folders that directly hold a .tex, and opens what it creates", async () => {
+    const folder = "/data/workbench/latex/proj/paper"
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [{
+        path: folder, name: "paper", mime: "inode/directory", children: [
+          { path: `${folder}/main.tex`, name: "main.tex", type: "file" },
+          { path: `${folder}/chapters`, name: "chapters", type: "folder", children: [{ path: `${folder}/chapters/one.TEX`, name: "one.TEX", type: "file" }] },
+          { path: `${folder}/imgs`, name: "imgs", type: "folder", children: [] },
+        ],
+      }]
+      : [])
+    api.fileRootTree.mockResolvedValue({ enabled: true, tree: [
+      { path: "/paper", name: "paper", type: "root", children: [{ path: "/paper/main.tex", name: "main.tex", type: "file" }] },
+      { path: "/source", name: "source", type: "root", children: [] },
+    ] })
+    api.createTexProjectFile.mockResolvedValue(`${folder}/chapters/two.tex`)
+    const onFileSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onFileSelect={onFileSelect} />)
+    const code = within(view.getByLabelText("Code"))
+    expect(await code.findByRole("button", { name: "New file in paper" })).toBeInTheDocument()
+    expect(code.queryByRole("button", { name: "New file in source" })).not.toBeInTheDocument()
+    const project = openedProject(view)
+
+    fireEvent.click(await project.findByRole("button", { name: "paper" }))
+    expect(project.getByRole("button", { name: "New file in paper" })).toBeInTheDocument()
+    fireEvent.click(project.getByRole("button", { name: "chapters" }))
+    expect(project.queryByRole("button", { name: "New file in imgs" })).not.toBeInTheDocument()
+    fireEvent.click(project.getByRole("button", { name: "New file in chapters" }))
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "two" } })
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(onFileSelect).toHaveBeenLastCalledWith(`${folder}/chapters/two.tex`))
+    expect(api.createTexProjectFile).toHaveBeenCalledWith(`${folder}/chapters`, "two.tex")
+  })
+
+  it("offers a LaTeX project only on a project's workbench .tex, and promotes it", async () => {
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [
+        { path: "/data/workbench/latex/proj/paper/paper.tex", name: "paper.tex", mime: "text/x-tex" },
+        { path: "/data/workbench/latex/proj/paper/refs.bib", name: "refs.bib", mime: "text/plain" },
+        { path: "/data/workbench/markdown/proj/plan/plan.md", name: "plan.md", mime: "text/markdown" },
+        { path: "project/proj/document/notes.md", name: "notes.md", mime: "text/markdown" },
+      ]
+      : [])
+    api.promoteToTexProject.mockResolvedValue("/data/workbench/latex/proj/paper")
+    const view = render(<Sidebar appMode="chat" />)
+    await openedProject(view).findByText("paper.tex")
+
+    const promote = view.getAllByRole("button", { name: "Make LaTeX project" })
+    expect(promote).toHaveLength(1)
+    fireEvent.click(promote[0])
+    await waitFor(() => expect(api.promoteToTexProject).toHaveBeenCalledWith("proj", "/data/workbench/latex/proj/paper/paper.tex"))
+  })
+
   it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)

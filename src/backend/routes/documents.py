@@ -26,7 +26,7 @@ from backend.routes.deps import (
     get_references,
     get_relocate,
 )
-from backend.routes.schemas import FileListResponse, FileMeta, file_meta
+from backend.routes.schemas import FileListResponse, FileMeta, file_meta, folder_meta
 from lib import document_service
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
@@ -109,7 +109,12 @@ def _meta_list(files: list[tuple[str, str]]) -> list[FileMeta]:
     """The API description of each `(path, display name)` pair."""
     # ponytail: canvas-pasted images stay registered (so /fileviewer can serve them)
     # but never surface as documents (they'd flood the sidebar and the canvas add menu).
-    return [file_meta(p, name=name) for p, name in files if not Path(p).name.startswith("pasted-")]
+    return [_listed(path, name) for path, name in files if not Path(path).name.startswith("pasted-")]
+
+
+def _listed(path: str, name: str) -> FileMeta:
+    """The description of one listed document, a folder on disk (a LaTeX project folder) with its tree."""
+    return folder_meta(path, name) if Path(path).is_absolute() and Path(path).is_dir() else file_meta(path, name=name)
 
 
 def _follow_moved_reference(store: ProjectStore, roots: FileRoots, slug: str, path: str) -> str:

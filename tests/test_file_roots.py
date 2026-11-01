@@ -1,4 +1,3 @@
-from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,17 +9,19 @@ from backend.routes import file_attach as file_attach_route
 from backend.routes import file_git as file_git_route
 from backend.routes import file_roots as file_roots_route
 from backend.routes import fileviewer as fileviewer_route
+from backend.routes.deps import get_user_scope
 from lib.attachment_materialize import sync_library_pdf
 from lib.attachments import attach_library_pdf
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError, write_text
 from lib.document_service import add_extraction
 from lib.file_roots import FileRoots
+from lib.file_walk import folder_stamp
 from lib.host_access import list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import library_images_prefix, library_markdown
 from tests.conftest import git, mounted_roots, route_client
-from tests.fakes import MemoryAssetStore, MemoryDataStore
+from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope
 
 
 def test_list_directories_lists_only_subdirectories_case_insensitively_with_hidden(tmp_path):
@@ -288,7 +289,7 @@ def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path
         overrides={
             fileviewer_route.get_file_roots: mounted_roots(mounted, host_access=host_access),
             fileviewer_route.get_document_store: None,
-            file_roots_route.get_user_scope: _RecordingScope(),
+            get_user_scope: RecordingScope(),
         },
     )
 
@@ -306,28 +307,14 @@ def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path
         assert read_status(secret) == 403, secret
 
 
-class _RecordingScope:
-    """`UserScope` stand-in that keeps every recorded change."""
-
-    def __init__(self) -> None:
-        self.changes: list[dict] = []
-
-    @contextmanager
-    def connection(self):
-        yield SimpleNamespace(transaction=nullcontext)
-
-    def record(self, connection, **change) -> None:
-        self.changes.append(change)
-
-
 def test_writing_a_file_records_a_document_change_keyed_by_its_resolved_path(tmp_path):
     (tmp_path / "docs").mkdir()
     note = tmp_path / "docs" / "notes.md"
     note.write_text("v1")
-    scope = _RecordingScope()
+    scope = RecordingScope()
     client = route_client(
         file_roots_route.router,
-        overrides={file_roots_route.get_file_roots: mounted_roots(tmp_path), file_roots_route.get_user_scope: scope},
+        overrides={file_roots_route.get_file_roots: mounted_roots(tmp_path), get_user_scope: scope},
     )
 
     saved = client.post("/api/fileroots/file", json={"path": str(tmp_path / "docs" / ".." / "docs" / "notes.md"), "content": "v2"})
@@ -432,3 +419,57 @@ def test_extraction_markdown_joins_the_project_files_and_keeps_an_edited_copy():
 
     assert projects.list_files("thesis") == [key]
     assert docs.read_bytes(key)[0] == b"# my edit"
+
+
+def make_files(base, names):
+    for name in names:
+        (base / name).parent.mkdir(parents=True, exist_ok=True)
+        (base / name).write_text("")
+
+
+def test_listings_hide_latex_build_output_but_keep_unrelated_aux_files(tmp_path):
+    make_files(tmp_path, [
+        "paper/main.tex", "paper/refs.bib", "paper/main.aux", "paper/main.log", "paper/main.synctex.gz", "paper/main.view.pdf",
+        "paper/.latex-build/main.pdf", "paper/lonely.aux", "paper/imgs/plot.png",
+    ])
+    roots = mounted_roots(tmp_path)
+    [root] = roots.tree()
+    [paper] = root["children"]
+
+    shown = ["imgs", "lonely.aux", "main.tex", "refs.bib"]
+    assert [child["name"] for child in paper["children"]] == shown
+    assert sorted(file["name"] for file in roots.list_files()) == sorted(shown[1:] + ["plot.png"])
+
+
+def test_the_folder_stamp_ignores_build_output_and_changes_with_sources(tmp_path):
+    make_files(tmp_path, ["main.tex", "imgs/plot.png", ".git/HEAD", "node_modules/a/index.js"])
+    before = folder_stamp(tmp_path)
+
+    make_files(tmp_path, [
+        ".latex-build/main.pdf", ".latex-build/main.log", "main.aux", "main.log", "main.view.pdf", ".git/index", "node_modules/a/other.js",
+    ])
+    assert folder_stamp(tmp_path) == before
+
+    (tmp_path / "main.tex").write_text("more\n", encoding="utf-8")
+    edited = folder_stamp(tmp_path)
+    assert edited != before
+
+    make_files(tmp_path, ["sections/new.tex"])
+    added = folder_stamp(tmp_path)
+    assert added not in (before, edited)
+
+    make_files(tmp_path, ["data.aux"])
+    assert folder_stamp(tmp_path) != added
+
+
+def test_the_stamp_route_needs_a_folder_inside_the_mounts(tmp_path):
+    vault = tmp_path / "vault"
+    make_files(vault, ["paper/main.tex"])
+    client = route_client(file_roots_route.router, overrides={file_roots_route.get_file_roots: mounted_roots(vault)})
+
+    def stamp(folder: Path):
+        return client.get("/api/fileroots/stamp", params={"folder": str(folder)})
+
+    assert stamp(vault / "paper").status_code == 200
+    for refused in (vault / "gone", tmp_path):
+        assert stamp(refused).status_code == 400

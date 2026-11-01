@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from pathlib import Path
 import shutil
 
@@ -81,7 +82,7 @@ async def test_write_persists_through_save_and_failed_save_keeps_buffer_modified
     saved: asyncio.Queue[str] = asyncio.Queue()
     rejections = iter([False, True, False])
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         if next(rejections):
             raise RuntimeError("stale revision")
@@ -112,7 +113,7 @@ async def test_write_persists_through_save_and_failed_save_keeps_buffer_modified
 async def test_base_content_opens_readonly_left_diff_and_only_working_buffer_saves(neovim_home):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         return text
 
@@ -155,7 +156,7 @@ async def test_base_content_opens_readonly_left_diff_and_only_working_buffer_sav
 
 @requires_nvim
 async def test_empty_base_content_still_opens_diff_and_no_base_means_single_window(neovim_home):
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         return text
 
     async def window_count(base_content: str | None) -> int:
@@ -215,7 +216,7 @@ async def _shows(session: NeovimSession, text: str) -> None:
 async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
     yanked: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         return text
 
     session = NeovimSession.spawn("notes.md", "alpha beta\ngamma\n", rows=24, cols=80, cwd=neovim_home)
@@ -236,7 +237,7 @@ async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
 
 @requires_nvim
 async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_buffer_unmodified(neovim_home):
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         return text
 
     session = NeovimSession.spawn(
@@ -248,7 +249,7 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
         session.write_input(b"10Gl\x1b")
         await _evaluates_to(session, "line('.')", 10)
 
-        await session.set_text("line 1\nline TWO\n" + "".join(f"line {number}\n" for number in range(3, 21)) + "last\n")
+        await session.set_text("line 1\nline TWO\n" + "".join(f"line {number}\n" for number in range(3, 21)) + "last\n", "main.tex")
 
         assert await session._rpc.request("nvim_eval", "[line('.'), col('.'), &modified]") == [10, 2, 0]
         text = await session._rpc.request("nvim_eval", "join(getline(1, '$'), '|')")
@@ -262,7 +263,7 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
 async def test_set_text_merges_into_a_modified_buffer_which_stays_modified(neovim_home):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         return text
 
@@ -274,12 +275,11 @@ async def test_set_text_merges_into_a_modified_buffer_which_stays_modified(neovi
         await _evaluates_to(session, "&modified", 1)
 
         disk = "zero\none\nTWO\nthree\nfour\nfive\n"
-        await session.set_text(disk)
+        await session.set_text(disk, "notes.md")
 
         state = await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), line('.'), &modified]")
         # The unrelated remote edits land, the unsaved one stays, the cursor follows its line down.
         assert state == ["zero|one|TWO|three|four|fivex", 6, 1]
-        assert session.base == disk
 
         session.write_input(b":w\r")
         assert await asyncio.wait_for(saved.get(), 10) == "zero\none\nTWO\nthree\nfour\nfivex\n"
@@ -292,7 +292,7 @@ async def test_set_text_merges_into_a_modified_buffer_which_stays_modified(neovi
 async def test_write_after_the_file_changed_on_disk_saves_the_merged_text(neovim_home, tmp_path):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         return text
 
@@ -309,7 +309,6 @@ async def test_write_after_the_file_changed_on_disk_saves_the_merged_text(neovim
         assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\n"
         # `save` returned without suspending, so its reply reached Neovim before this request.
         assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["A|b|c|x", 0]
-        assert session.base == "A\nb\nc\nx\n"
         await _shows(session, "Saved, merged with the agent's edits")
 
         # Disk now matches the base, so the next save sends the buffer as it is.
@@ -326,7 +325,7 @@ async def test_write_after_the_file_changed_on_disk_saves_the_merged_text(neovim
 async def test_rename_keeps_the_unsaved_text_and_the_next_write_merges_with_the_renamed_file(neovim_home, tmp_path):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         return text
 
@@ -340,7 +339,7 @@ async def test_rename_keeps_the_unsaved_text_and_the_next_write_merges_with_the_
         await _evaluates_to(session, "&modified", 1)
 
         old.rename(new)
-        await session.rename("ideas.md", new)
+        await session.rename("notes.md", "ideas.md", new)
 
         state = await session._rpc.request("nvim_eval", "[expand('%:t'), join(getline(1, '$'), '|'), &modified]")
         assert state == ["ideas.md", "a|b|c|x", 1]
@@ -350,7 +349,7 @@ async def test_rename_keeps_the_unsaved_text_and_the_next_write_merges_with_the_
         await _shows(session, "Saved, merged with the agent's edits")
 
         # Back to the first name: the buffer left under it by the rename must not refuse it
-        await session.rename("notes.md", old)
+        await session.rename("ideas.md", "notes.md", old)
         assert await session._rpc.request("nvim_eval", "expand('%:t')") == "notes.md"
     finally:
         await session.close()
@@ -363,7 +362,7 @@ async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_t
     answer = asyncio.Event()
     file = tmp_path / "notes.md"
 
-    async def save(text: str) -> str:  # the browser's round trip, it stores the text once answered
+    async def save(path: str, text: str) -> str:  # the browser's round trip, it stores the text once answered
         await saved.put(text)
         await answer.wait()
         file.write_text(text)
@@ -378,7 +377,7 @@ async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_t
         assert await asyncio.wait_for(saved.get(), 10) == "a\nb\nc\nx\n"
 
         # The agent's edit of the old text arrives while the save is pending.
-        agent_edit = asyncio.create_task(session.set_text("A\nb\nc\n"))
+        agent_edit = asyncio.create_task(session.set_text("A\nb\nc\n", "notes.md"))
         await asyncio.sleep(0.2)
         assert not agent_edit.done()
         answer.set()
@@ -386,7 +385,6 @@ async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_t
 
         # Both edits are in the buffer, which differs from the stored text and so stays modified.
         assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["A|b|c|x", 1]
-        assert session.base == "a\nb\nc\nx\n"
 
         session.write_input(b":w\r")
         assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\n"
@@ -405,7 +403,7 @@ async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_t
 async def test_write_fails_without_writing_when_the_changed_file_cannot_be_merged(neovim_home, tmp_path, disk, error):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         await saved.put(text)
         return text
 
@@ -427,7 +425,6 @@ async def test_write_fails_without_writing_when_the_changed_file_cannot_be_merge
         assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["a|b|c|x", 1]
         assert saved.empty()
         assert file.read_bytes() == disk
-        assert session.base == "a\nb\nc\n"
     finally:
         await session.close()
         await drain
@@ -445,7 +442,7 @@ def test_only_readable_absolute_documents_have_a_disk_file(tmp_path):
 
 @requires_nvim
 async def test_background_asked_before_startup_wins_over_detection_and_follows_later_changes(neovim_home):
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         return text
 
     session = NeovimSession.spawn("main.tex", "text\n", rows=24, cols=80, cwd=neovim_home)
@@ -466,7 +463,7 @@ async def test_background_asked_before_startup_wins_over_detection_and_follows_l
 async def test_visual_ask_keymap_reports_the_selected_lines_only_when_requested(neovim_home):
     selections: asyncio.Queue[dict] = asyncio.Queue()
 
-    async def save(text: str) -> str:
+    async def save(path: str, text: str) -> str:
         return text
 
     session = NeovimSession.spawn("main.tex", "a\nb\nc\nd\n", rows=24, cols=80, cwd=neovim_home)
@@ -474,8 +471,170 @@ async def test_visual_ask_keymap_reports_the_selected_lines_only_when_requested(
     try:
         await asyncio.wait_for(session.connect(save, lambda text: None, selections.put_nowait), 15)
         session.write_input(b"3GVk\\a")
-        assert await asyncio.wait_for(selections.get(), 10) == {"start_line": 2, "end_line": 3, "text": "b\nc"}
+        assert await asyncio.wait_for(selections.get(), 10) == {"path": "main.tex", "start_line": 2, "end_line": 3, "text": "b\nc"}
         assert await session._rpc.request("nvim_eval", "mode()") == "n"
     finally:
         await session.close()
         await drain
+
+
+def _two_files(tmp_path: Path) -> tuple[Path, Path]:
+    """Two files with the same basename in different folders."""
+    first, second = tmp_path / "intro" / "main.tex", tmp_path / "appendix" / "main.tex"
+    for file, text in ((first, "intro\n"), (second, "appendix\n")):
+        file.parent.mkdir()
+        file.write_text(text)
+    return first, second
+
+
+@contextlib.asynccontextmanager
+async def _editing(first: Path, home: Path, save, on_switched=None):
+    """A connected session on *first* (path = its absolute path), closed afterwards."""
+    session = NeovimSession.spawn(first.name, first.read_text(), rows=24, cols=80, cwd=home, disk_path=first, path=str(first))
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None, None, on_switched), 15)
+        yield session
+    finally:
+        await session.close()
+        await drain
+
+
+async def _store(path: str, text: str) -> str:
+    return text
+
+
+async def _buffer_state(session: NeovimSession, path: Path) -> dict:
+    return await session._lua("return _G.gigachad_buffer_state(...)", str(path))
+
+
+@requires_nvim
+async def test_each_document_saves_to_its_own_path_and_equal_basenames_do_not_collide(neovim_home, tmp_path):
+    saved: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+    async def save(path: str, text: str) -> str:
+        await saved.put((path, text))
+        return text
+
+    (neovim_home / "init.lua").write_text("vim.o.hidden = false")  # a config that would refuse to leave a modified buffer
+    first, second = _two_files(tmp_path)
+    async with _editing(first, neovim_home, save) as session:
+        session.write_input(b"Goone\x1b")
+        await _evaluates_to(session, "&modified", 1)
+
+        await session.open_file(str(second), second)
+        assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix", 0]
+        session.write_input(b"Gotwo\x1b:w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == (str(second), "appendix\ntwo\n")
+
+        # Switching saved nothing: back on the first document its edit is still unsaved, and `:w` stores it under its own path
+        assert saved.empty()
+        await session.open_file(str(first), first)
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), &modified]") == [["intro", "one"], 1]
+        session.write_input(b":w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == (str(first), "intro\none\n")
+
+
+@requires_nvim
+async def test_set_text_reaches_a_hidden_buffer_and_merges_its_unsaved_edits(neovim_home, tmp_path):
+    first, second = _two_files(tmp_path)
+    first.write_text("a\nb\nc\n")
+    async with _editing(first, neovim_home, _store) as session:
+        session.write_input(b"Gox\x1b")
+        await _evaluates_to(session, "&modified", 1)
+        await session.open_file(str(second), second)
+
+        await session.set_text("A\nb\nc\n", str(first))
+
+        state = await _buffer_state(session, first)
+        assert (state["text"], state["modified"]) == ("A\nb\nc\nx\n", True)
+        assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix", 0]
+
+        # An unmodified hidden buffer takes the text and stays unmodified, one that is not open is ignored
+        await session.open_file(str(first), first)
+        await session.set_text("APPENDIX\n", str(second))
+        await session.set_text("lost\n", str(tmp_path / "elsewhere.tex"))
+
+        state = await _buffer_state(session, second)
+        assert (state["text"], state["modified"]) == ("APPENDIX\n", False)
+
+
+@requires_nvim
+async def test_rename_renames_the_buffer_of_the_old_path_only(neovim_home, tmp_path):
+    saved: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+    async def save(path: str, text: str) -> str:
+        await saved.put((path, text))
+        return text
+
+    first, second = _two_files(tmp_path)
+    renamed = second.with_name("appendix.tex")
+    async with _editing(first, neovim_home, save) as session:
+        await session.open_file(str(second), second)
+        second.rename(renamed)
+        await session.rename(str(second), str(renamed), renamed)
+
+        loaded = "map(getbufinfo({'bufloaded': 1}), {_, buffer -> fnamemodify(buffer.name, ':t')})"
+        assert await session._rpc.request("nvim_eval", loaded) == ["main.tex", "appendix.tex"]
+
+        # Nothing happens for a document that is not open, and the renamed buffer saves under its new path
+        await session.rename(str(tmp_path / "elsewhere.tex"), str(tmp_path / "other.tex"), None)
+        session.write_input(b"Gox\x1b:w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == (str(renamed), "appendix\nx\n")
+
+
+@requires_nvim
+async def test_insert_lines_land_below_the_cursor_with_the_cursor_on_the_first_inserted_line(neovim_home, tmp_path):
+    file = tmp_path / "main.tex"
+    file.write_text("a\nb\nc\n")
+    async with _editing(file, neovim_home, _store) as session:
+        session.write_input(b"2G")
+        await _evaluates_to(session, "line('.')", 2)
+
+        await session.insert_lines("x\ny\n")
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.'), &modified]") == [["a", "b", "x", "y", "c"], 3, 1]
+
+        await session.insert_lines("z")
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.')]") == [["a", "b", "x", "z", "y", "c"], 4]
+
+
+@requires_nvim
+async def test_switched_reports_buffer_changes_made_in_neovim_but_not_by_open_file(neovim_home, tmp_path):
+    switched: asyncio.Queue[str] = asyncio.Queue()
+    first, second = _two_files(tmp_path)
+    async with _editing(first, neovim_home, _store, switched.put_nowait) as session:
+        await session.open_file(str(second), second)
+        await session.open_file(str(second), second)
+        assert switched.empty()
+
+        session.write_input(b":bnext\r")
+        assert await asyncio.wait_for(switched.get(), 10) == str(first)
+        session.write_input(b":bprevious\r")
+        assert await asyncio.wait_for(switched.get(), 10) == str(second)
+
+
+@requires_nvim
+@pytest.mark.parametrize(("disk", "error"), [(None, "not a readable file"), (b"\xff\xfe\n", "not UTF-8 text")])
+async def test_open_file_fails_for_a_file_it_cannot_read_and_stays_on_the_shown_one(neovim_home, tmp_path, disk, error):
+    first, second = _two_files(tmp_path)
+    if disk is not None:
+        second.write_bytes(disk)
+    async with _editing(first, neovim_home, _store) as session:
+        with pytest.raises(RuntimeError, match=error):
+            await session.open_file(str(second), None if disk is None else second)
+
+        assert await session._rpc.request("nvim_eval", "getline(1)") == "intro"
+
+
+@requires_nvim
+async def test_open_file_loads_a_deleted_buffer_again_from_disk(neovim_home, tmp_path):
+    first, second = _two_files(tmp_path)
+    async with _editing(first, neovim_home, _store) as session:
+        await session.open_file(str(second), second)
+        session.write_input(b":bdelete\r")
+
+        await _evaluates_to(session, "getline(1)", "intro")
+        second.write_text("appendix, edited\n")
+        await session.open_file(str(second), second)
+
+        assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix, edited", 0]

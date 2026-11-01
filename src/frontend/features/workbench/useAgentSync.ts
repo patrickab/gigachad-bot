@@ -1,32 +1,31 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useRef, type RefObject } from "react"
+import { useEffect, useEffectEvent, useRef, type RefObject } from "react"
 import { usePolling } from "@/hooks/usePolling"
 import { loadFileViewerText } from "@/lib/backend/api"
-import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
+import { onFileChange } from "@/lib/backend/fileEvents"
 
-/** Time between reads of the file while the agent runs. */
+/** Time between reads of the open files while the agent runs. */
 const POLL_MS = 500
 
 /**
- * Mirror edits of the file at `path` from outside Neovim into it: the agent's while it runs, then once more when the run ends, and other devices' saves.
+ * Mirror edits of the open files from outside Neovim into it: the agent's while it runs, then once more when the run ends, and other devices' saves.
  *
- * - While `streaming`, the file on disk is read every 500 ms and pushed through `setContent` when it differs from `syncedRef`
- * - `syncedRef` holds the text Neovim and the disk last agreed on, the owner updates it on every save
+ * - `synced` maps every file open in Neovim to the text Neovim and the disk last agreed on, the owner updates it on every save and every accepted push
+ * - While `streaming`, every open file on disk is read every 500 ms and pushed through `setContent` when it differs from its synced text
  * - Every pushed text goes to `onPulled`, so the owner can follow the agent's edits as they arrive
- * - A run ending reads the file one last time, then calls `onRunEnd`
- * - A `document` change event for `path` (a save on another device) reads the file and pushes it the same way, the backend merges it into unsaved edits
+ * - A run ending reads every open file one last time, then calls `onRunEnd`
+ * - A `document` change event for an open file (a save on another device) reads it and pushes it the same way, the backend merges it into unsaved edits
  * - A push that Neovim could not take yet (`setContent` false) is retried by the next read
  */
-export function useAgentSync({ path, streaming, setContent, syncedRef, onPulled, onRunEnd }: {
-  path: string
+export function useAgentSync({ synced, streaming, setContent, onPulled, onRunEnd }: {
+  synced: RefObject<ReadonlyMap<string, string>>
   streaming: boolean
-  setContent: (text: string) => boolean
-  syncedRef: RefObject<string | null>
-  onPulled?: (text: string) => void
+  setContent: (text: string, path: string) => boolean
+  onPulled?: (text: string, path: string) => void
   onRunEnd?: () => void
 }): void {
-  const pull = useCallback(async () => {
+  const pull = async (path: string) => {
     let text: string
     try {
       text = await loadFileViewerText(path)
@@ -34,20 +33,20 @@ export function useAgentSync({ path, streaming, setContent, syncedRef, onPulled,
       // The next read retries, a missing file mid-write is normal
       return
     }
-    if (text === syncedRef.current || !setContent(text)) return
-    syncedRef.current = text
-    onPulled?.(text)
-  }, [path, setContent, syncedRef, onPulled])
+    // A file closed or renamed while it was read is not pushed
+    if (!synced.current.has(path) || text === synced.current.get(path) || !setContent(text, path)) return
+    onPulled?.(text, path)
+  }
 
-  usePolling(pull, { intervalMs: POLL_MS, active: streaming })
+  const pullAll = () => Promise.all([...synced.current.keys()].map(pull))
 
-  const pullOnRemoteChange = useEffectEvent((event: ChangeEvent) => {
-    if (event.resource_kind === "document" && event.resource_key === path) void pull()
-  })
-  useEffect(() => subscribeToChanges((event) => pullOnRemoteChange(event)), [])
+  usePolling(pullAll, { intervalMs: POLL_MS, active: streaming })
+
+  const pullIfOpen = useEffectEvent((path: string) => { void pull(path) })
+  useEffect(() => onFileChange((path) => synced.current.has(path), (path) => pullIfOpen(path)), [synced])
 
   const finishRun = useEffectEvent(async () => {
-    await pull()
+    await pullAll()
     onRunEnd?.()
   })
   const wasStreaming = useRef(streaming)

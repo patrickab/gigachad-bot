@@ -1,13 +1,18 @@
 """Msgpack-RPC with a running Neovim, plus the Lua that bridges its `:w`, yanks and selections back to the caller.
 
-- `SETUP_LUA` routes the document buffer's `:w` to a `save` request instead of the disk, and echoes
+- `SETUP_LUA` tracks the first document's buffer, `_G.gigachad_open` any further one (a private copy each). Documents
+  are told apart by an id, the document's path. Every tracked buffer stays loaded (`bufhidden=hide`) when another is shown
+- Each tracked buffer's `:w` becomes a `save` request carrying the id instead of writing the disk, and echoes
   `Saved, merged with the agent's edits` when the answer says edits made elsewhere changed the text
+- A `BufEnter` autocmd sends a `switched` notification with the id when the window shows another tracked buffer, except for
+  the switch `_G.gigachad_open` and `_G.gigachad_show` made. A `BufDelete` autocmd forgets the buffer
 - A `TextYankPost` autocmd sends a `yank` notification with the yanked text
-- With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the selected lines
-- `_G.gigachad_buffer_state` reports the buffer text, modified flag and change tick
+- With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the id and the selected lines
+- `_G.gigachad_buffer_state` reports a buffer's text, modified flag and change tick
 - `_G.gigachad_set_text` rewrites only the changed hunks, for edits made to the file elsewhere, keeping the modified flag
   (or setting it when the text differs from the stored file)
-- `_G.gigachad_rename` gives the buffer the file's new name, keeping its text, cursor and modified flag
+- `_G.gigachad_rename` gives the buffer the file's new name and id, keeping its text, cursor and modified flag
+- `_G.gigachad_insert_lines` inserts lines below the cursor of the shown document
 """
 
 from __future__ import annotations
@@ -23,16 +28,31 @@ if TYPE_CHECKING:
 
 _READ_CHUNK = 65536
 
-# Receives (channel, working path, optional baseline path, ask_keymap). Mirrors Neovim's write rules:
-# empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
+# Receives (channel, first document's private path, its id, optional baseline path, ask_keymap). Mirrors Neovim's write
+# rules: empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
 SETUP_LUA = r"""
-local channel, path, base_path, ask_keymap = ...
+local channel, first_path, first_id, base_path, ask_keymap = ...
 if base_path == vim.NIL then base_path = nil end
-local buffer = vim.fn.bufadd(path)
-vim.fn.bufload(buffer)
-vim.api.nvim_win_set_buf(0, buffer)
 
-local function buffer_text()
+-- Buffers of the documents by id, and back
+local tracked = {}
+local ids = {}
+local current_id = nil
+
+local function buffer_of(id)
+  local buffer = tracked[id]
+  if buffer == nil or not vim.api.nvim_buf_is_loaded(buffer) then error("No open buffer for " .. id, 0) end
+  return buffer
+end
+
+local function untrack(id)
+  local buffer = tracked[id]
+  tracked[id] = nil
+  if buffer ~= nil then ids[buffer] = nil end
+  if current_id == id then current_id = nil end
+end
+
+local function buffer_text(buffer)
   local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
   if #lines == 1 and lines[1] == "" then return "" end
   local text = table.concat(lines, "\n")
@@ -40,7 +60,7 @@ local function buffer_text()
   return text
 end
 
-local function stored_lines(text)
+local function stored_lines(buffer, text)
   local lines = vim.split(text, "\n", { plain = true })
   if #lines > 1 and lines[#lines] == "" then table.remove(lines) else vim.bo[buffer].eol = false end
   return lines
@@ -48,26 +68,26 @@ end
 
 local diff_lines = (vim.text and vim.text.diff) or vim.diff
 local remote_edit_namespace = vim.api.nvim_create_namespace("gigachad_remote_edit")
-local remote_edit_generation = 0
+local remote_edit_generations = {}
 local REMOTE_EDIT_HIGHLIGHT_MS = 1500
 
-local function highlight_remote_edit(first, count)
-  remote_edit_generation = remote_edit_generation + 1
-  local generation = remote_edit_generation
+local function highlight_remote_edit(buffer, first, count)
+  local generation = (remote_edit_generations[buffer] or 0) + 1
+  remote_edit_generations[buffer] = generation
   for line = first, first + count - 1 do
     vim.api.nvim_buf_set_extmark(buffer, remote_edit_namespace, line, 0, { line_hl_group = "DiffText" })
   end
   vim.defer_fn(function()
-    if generation == remote_edit_generation and vim.api.nvim_buf_is_valid(buffer) then
+    if generation == remote_edit_generations[buffer] and vim.api.nvim_buf_is_valid(buffer) then
       vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
     end
   end, REMOTE_EDIT_HIGHLIGHT_MS)
 end
 
 -- Rewrites only the changed line ranges, bottom-up, so cursor, view and marks stay on their text.
-local function apply_text(text)
+local function apply_text(buffer, text)
   local old_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
-  local new_lines = stored_lines(text)
+  local new_lines = stored_lines(buffer, text)
   local hunks = diff_lines(table.concat(old_lines, "\n") .. "\n", table.concat(new_lines, "\n") .. "\n", { result_type = "indices" })
   vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
   for index = #hunks, 1, -1 do
@@ -75,47 +95,145 @@ local function apply_text(text)
     local first = count_old > 0 and start_old - 1 or start_old
     local replacement = vim.list_slice(new_lines, start_new, start_new + count_new - 1)
     vim.api.nvim_buf_set_lines(buffer, first, first + count_old, false, replacement)
-    highlight_remote_edit(first, count_new)
+    highlight_remote_edit(buffer, first, count_new)
   end
 end
 
 -- The text `:w` would store, whether it has unsaved edits, and the change tick `gigachad_set_text` checks.
-function _G.gigachad_buffer_state()
-  return { text = buffer_text(), modified = vim.bo[buffer].modified, tick = vim.api.nvim_buf_get_changedtick(buffer) }
+function _G.gigachad_buffer_state(id)
+  local buffer = buffer_of(id)
+  return { text = buffer_text(buffer), modified = vim.bo[buffer].modified, tick = vim.api.nvim_buf_get_changedtick(buffer) }
 end
 
 -- Shows `text` as one undo step, false without a change when the buffer moved past `tick`.
 -- An unmodified buffer stays unmodified (the text is on disk) unless `dirty`, a modified one keeps its unsaved state.
-function _G.gigachad_set_text(text, tick, dirty)
+function _G.gigachad_set_text(id, text, tick, dirty)
+  local buffer = buffer_of(id)
   if tick ~= vim.api.nvim_buf_get_changedtick(buffer) then return false end
   local modified = vim.bo[buffer].modified or dirty == true
-  if text ~= buffer_text() then apply_text(text) end
+  if text ~= buffer_text(buffer) then apply_text(buffer, text) end
   vim.bo[buffer].modified = modified
   return true
 end
 
 -- Renames the buffer for a file that was renamed, `:w` and the saved message follow the new name.
-function _G.gigachad_rename(new_path)
+function _G.gigachad_rename(id, new_id, new_path)
+  local buffer = buffer_of(id)
   local modified = vim.bo[buffer].modified
   -- A buffer left under that name by an earlier rename would refuse it (E95)
-  local stale = vim.fn.bufnr(new_path)
-  if stale ~= -1 and stale ~= buffer then vim.api.nvim_buf_delete(stale, { force = true }) end
-  vim.api.nvim_buf_set_name(buffer, new_path)
-  vim.bo[buffer].modified = modified
-  path = new_path
+  local named
+  for _, other in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(other) == new_path then named = other end
+  end
+  if named ~= buffer then
+    if named ~= nil then vim.api.nvim_buf_delete(named, { force = true }) end
+    vim.api.nvim_buf_set_name(buffer, new_path)
+    vim.bo[buffer].modified = modified
+  end
+  tracked[id] = nil
+  tracked[new_id] = buffer
+  ids[buffer] = new_id
+  if current_id == id then current_id = new_id end
+end
+
+-- The window the documents show in: the current one, else the first window showing a document.
+local function work_window()
+  local current = vim.api.nvim_get_current_win()
+  if ids[vim.api.nvim_win_get_buf(current)] ~= nil then return current end
+  for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if ids[vim.api.nvim_win_get_buf(window)] ~= nil then return window end
+  end
+  return current
+end
+
+-- Makes the work window show the document, which stays loaded behind other documents.
+local function display(id)
+  local buffer = tracked[id]
+  local window = work_window()
+  current_id = id
+  vim.api.nvim_set_current_win(window)
+  vim.api.nvim_win_set_buf(window, buffer)
+  vim.bo[buffer].bufhidden = "hide"
+end
+
+-- Inserts the lines of `text` below the cursor of the shown document, the cursor lands on the first one.
+function _G.gigachad_insert_lines(text)
+  local window = work_window()
+  local lines = vim.split(text, "\n", { plain = true })
+  if #lines > 1 and lines[#lines] == "" then table.remove(lines) end
+  local row = vim.api.nvim_win_get_cursor(window)[1]
+  vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(window), row, row, false, lines)
+  vim.api.nvim_win_set_cursor(window, { row + 1, 0 })
 end
 
 -- `save` answers { text = stored text, merged = whether edits made elsewhere changed the buffer's text }.
-vim.api.nvim_create_autocmd("BufWriteCmd", {
-  buffer = buffer,
-  callback = function()
-    local text = buffer_text()
-    local ok, stored = pcall(vim.rpcrequest, channel, "save", text)
-    if not ok then error("Save failed: " .. tostring(stored), 0) end
-    if stored.text ~= buffer_text() then apply_text(stored.text) end
-    vim.bo[buffer].modified = false
-    local message = stored.merged and "Saved, merged with the agent's edits" or "Saved " .. vim.fn.fnamemodify(path, ":t")
-    vim.api.nvim_echo({ { message } }, false, {})
+local function track(private_path, id)
+  if tracked[id] ~= nil then untrack(id) end
+  local buffer = vim.fn.bufadd(private_path)
+  vim.bo[buffer].buflisted = true -- `bufadd` leaves it unlisted, `:bnext` would skip it
+  tracked[id] = buffer
+  ids[buffer] = id
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = buffer,
+    callback = function()
+      local text = buffer_text(buffer)
+      local ok, stored = pcall(vim.rpcrequest, channel, "save", ids[buffer], text)
+      if not ok then error("Save failed: " .. tostring(stored), 0) end
+      if stored.text ~= buffer_text(buffer) then apply_text(buffer, stored.text) end
+      vim.bo[buffer].modified = false
+      local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buffer), ":t")
+      local message = stored.merged and "Saved, merged with the agent's edits" or "Saved " .. name
+      vim.api.nvim_echo({ { message } }, false, {})
+    end,
+  })
+  if ask_keymap == true then
+    vim.keymap.set("x", "<leader>a", function()
+      local first, last = vim.fn.line("v"), vim.fn.line(".")
+      if first > last then first, last = last, first end
+      vim.cmd("normal! \27")
+      local lines = vim.api.nvim_buf_get_lines(buffer, first - 1, last, false)
+      local selection = { path = ids[buffer], start_line = first, end_line = last, text = table.concat(lines, "\n") }
+      vim.rpcnotify(channel, "selection", selection)
+    end, { buffer = buffer })
+  end
+end
+
+-- Opens a private copy as a new document and shows it.
+function _G.gigachad_open(private_path, id)
+  track(private_path, id)
+  display(id)
+end
+
+-- Shows an open document, false when its buffer is gone (unloaded or deleted) and the document has to be opened again.
+function _G.gigachad_show(id)
+  local buffer = tracked[id]
+  if buffer == nil then return false end
+  if not vim.api.nvim_buf_is_loaded(buffer) then
+    untrack(id)
+    vim.api.nvim_buf_delete(buffer, { force = true })
+    return false
+  end
+  display(id)
+  return true
+end
+
+track(first_path, first_id)
+display(first_id)
+
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function(event)
+    local id = ids[event.buf]
+    if id == nil or id == current_id then return end
+    current_id = id
+    vim.rpcnotify(channel, "switched", id)
+  end,
+})
+
+vim.api.nvim_create_autocmd("BufDelete", {
+  callback = function(event)
+    local id = ids[event.buf]
+    if id == nil then return end
+    untrack(id)
   end,
 })
 
@@ -128,18 +246,8 @@ vim.api.nvim_create_autocmd("TextYankPost", {
   end,
 })
 
-if ask_keymap == true then
-  vim.keymap.set("x", "<leader>a", function()
-    local first, last = vim.fn.line("v"), vim.fn.line(".")
-    if first > last then first, last = last, first end
-    vim.cmd("normal! \27")
-    local lines = vim.api.nvim_buf_get_lines(buffer, first - 1, last, false)
-    vim.rpcnotify(channel, "selection", { start_line = first, end_line = last, text = table.concat(lines, "\n") })
-  end, { buffer = buffer })
-end
-
 if base_path then
-  local work_window = vim.api.nvim_get_current_win()
+  local document_window = vim.api.nvim_get_current_win()
   vim.cmd("leftabove vertical split " .. vim.fn.fnameescape(base_path))
   local base_buffer = vim.api.nvim_get_current_buf()
   vim.bo[base_buffer].readonly = true
@@ -149,7 +257,7 @@ if base_path then
     callback = function() error("Baseline is read-only", 0) end,
   })
   vim.cmd("diffthis")
-  vim.api.nvim_set_current_win(work_window)
+  vim.api.nvim_set_current_win(document_window)
   vim.cmd("diffthis")
 end
 """

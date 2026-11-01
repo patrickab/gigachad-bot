@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isInside, projectMount, sessionForest, sessionsInside, unlinkedWorkspaces } from "@/features/omp/sessions"
+import { projectMount, sessionForest, sessionsInside, unlinkedWorkspaces } from "@/features/omp/sessions"
 import type { OmpOverview, OmpSession } from "@/lib/domain/types"
 
 function session(id: string, cwd: string, extra: Partial<OmpSession> = {}): OmpSession {
@@ -8,15 +8,6 @@ function session(id: string, cwd: string, extra: Partial<OmpSession> = {}): OmpS
     first_message: id, parent_session_id: null, project_root: null, worktree_branch: null, ...extra,
   }
 }
-
-describe("isInside", () => {
-  it("matches the directory and below it, never a sibling sharing its prefix", () => {
-    expect(isInside("/a/foo", "/a/foo")).toBe(true)
-    expect(isInside("/a/foo/src", "/a/foo/")).toBe(true)
-    expect(isInside("/a/foobar", "/a/foo")).toBe(false)
-    expect(isInside("/a", "/a/foo")).toBe(false)
-  })
-})
 
 describe("project code sessions", () => {
   const mounts = ["/home/me/git/other", "/home/me/git/gigachad-bot/"]

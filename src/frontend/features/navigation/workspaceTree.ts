@@ -1,4 +1,4 @@
-import { Archive, FilePlus, GitCompare, Upload } from "lucide-react"
+import { Archive, FilePlus, FolderPlus, GitCompare, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
@@ -18,11 +18,23 @@ import { isStoredProjectFile, NEW_FILE_KINDS, type useWorkspaceDocuments } from 
 type CodeMounts = ReturnType<typeof useCodeMounts>
 type Renames = Pick<ReturnType<typeof useInlineRename>, "renameOf"> & Pick<ReturnType<typeof useFileRename>, "renameFile">
 
+/** What the rows of a folder on disk do, shared by mounted folders and a project's promoted LaTeX folders. */
+type FolderRowContext =
+  & Renames
+  & {
+    activeDocumentPath?: string | null
+    onFileSelect?: (path: string) => void
+    /** Move the project file `path` dropped on a directory into `folder`. */
+    moveToFolder: (path: string, folder: string) => Promise<void>
+    /** Create `name` in the LaTeX project folder `folder` and open it. */
+    createLatexFile: (folder: string, name: string) => Promise<void>
+  }
+
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
-  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "canCreateLatex" | "remove" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
+  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "canCreateLatex" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
   & Pick<ReturnType<typeof useProjectActions>, "renameProjectTo" | "removeProject" | "changeArchive">
-  & Renames
+  & FolderRowContext
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
   & {
     projects: ProjectListItem[]
@@ -41,16 +53,12 @@ type ProjectTreeContext =
 /** Everything the Code tree shows and does: the omp-web parts are session folders and extra actions of directory rows. */
 type CodeTreeContext =
   & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "folder" | "archived" | "setArchived" | "removeMount">
-  & Renames
+  & FolderRowContext
   & {
     omp: Pick<CodeMounts["omp"], "directoryCode" | "directoryActions" | "archivedSessions">
     projects: ProjectListItem[]
     pending: (key: string) => boolean
-    activeDocumentPath?: string | null
-    onFileSelect?: (path: string) => void
     onDiffSelect?: (path: string) => void
-    /** Move the project file `path` dropped on a directory into `folder`. */
-    moveToFolder: (path: string, folder: string) => Promise<void>
   }
 
 /** Registered path of a file-root node: its mount when set, else its own path. */
@@ -61,6 +69,12 @@ const PROJECT_FILE_DRAG_KIND = "project-file"
 
 /** Whether the sidebar can rename the project file `path`: a stored file or one on disk, not a library PDF. */
 const isRenamableFile = (path: string) => isStoredProjectFile(path) || path.startsWith("/")
+
+/** Whether `path` is the `.tex` of a project's workbench folder `<root>/workbench/latex/<slug>/<stem>/<stem>.tex`, which can become a LaTeX project folder. */
+function isPromotableLatex(path: string, slug: string): boolean {
+  const [workbench, kind, owner, stem, file] = path.split("/").slice(-5)
+  return workbench === "workbench" && kind === "latex" && owner === slug && file === `${stem}.tex`
+}
 
 /** Project roots followed by the shared "general" root. */
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
@@ -142,15 +156,26 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
       onMoveHere: (path: string) => move(path, scope),
       accepts: [PROJECT_FILE_DRAG_KIND],
-      children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
+      children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => doc.children ? {
+        // A promoted LaTeX project: its folder on disk, shown and edited like a mounted folder.
+        id: doc.path, label: doc.name, type: "folder",
+        onDelete: () => remove(doc, scope),
+        create: createFileAction(context, doc.path, doc.name),
+        onMoveHere: (path) => context.moveToFolder(path, doc.path),
+        accepts: [PROJECT_FILE_DRAG_KIND],
+        children: rootFileItems(context, doc.children),
+      } : {
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
         draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
         onSelect: () => context.selectDocument(doc.path, scope),
         onDelete: () => remove(doc, scope),
+        actions: isPromotableLatex(doc.path, scope)
+          ? [{ label: "Make LaTeX project", icon: FolderPlus, onClick: () => context.promote(doc.path, scope) }]
+          : undefined,
         rename: isRenamableFile(doc.path)
           ? context.renameOf(`file:${scope}:${doc.path}`, (name) => context.renameFile({ path: doc.path, name: doc.name, scope }, name), true)
           : undefined,
-      })),
+      }),
     }] : []),
   ]
 }
@@ -194,6 +219,7 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
           ...omp.directoryActions(mount, node.name),
         ],
         onDelete: () => context.removeMount(mount, node.name),
+        create: holdsTex(node.children) ? createFileAction(context, node.path, node.name) : undefined,
         onMoveHere: (path) => context.moveToFolder(path, node.path),
         accepts: [PROJECT_FILE_DRAG_KIND],
         children: [...generatedRows([context.folder(mount), code]), ...rootFileItems(context, node.children ?? [])],
@@ -201,7 +227,16 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
     })
 }
 
-function rootFileItems(context: CodeTreeContext, nodes: FileTreeNode[]): FileTreeItem<string>[] {
+/** Whether a folder directly holds a `.tex` file, so it takes new LaTeX project files. */
+const holdsTex = (children?: FileTreeNode[] | null) => !!children?.some((child) => child.type === "file" && /\.tex$/i.test(child.name))
+
+/** The `+` of the LaTeX project folder `folder`: a new file in it. */
+function createFileAction(context: FolderRowContext, folder: string, name: string): NonNullable<FileTreeItem<string>["create"]> {
+  return { label: `New file in ${name}`, placeholder: "File name", onSubmit: (file) => context.createLatexFile(folder, file) }
+}
+
+/** Rows of the files and folders of a folder on disk. */
+function rootFileItems(context: FolderRowContext, nodes: FileTreeNode[]): FileTreeItem<string>[] {
   return nodes.map((node) => ({
     id: node.path,
     label: node.name,
@@ -211,6 +246,7 @@ function rootFileItems(context: CodeTreeContext, nodes: FileTreeNode[]): FileTre
     multiSelect: true,
     isActive: node.path === context.activeDocumentPath,
     onSelect: node.type === "file" ? () => context.onFileSelect?.(node.path) : undefined,
+    create: node.type !== "file" && holdsTex(node.children) ? createFileAction(context, node.path, node.name) : undefined,
     rename: node.type === "file"
       ? context.renameOf(`code:${node.path}`, (name) => context.renameFile({ path: node.path, name: node.name, scope: "" }, name), true)
       : undefined,

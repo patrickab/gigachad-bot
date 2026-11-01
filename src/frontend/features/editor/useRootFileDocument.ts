@@ -27,7 +27,8 @@ interface RootFileDocumentOptions<T> {
   onSaved?: (text: string) => void
 }
 
-function loadFailureOf(error: unknown): FileLoadFailure {
+/** Why a failed read of a file could not load it. */
+export function loadFailureOf(error: unknown): FileLoadFailure {
   if (!(error instanceof ApiError)) return "failed"
   if (error.status === 403) return "forbidden"
   if (error.status === 404) return "missing"

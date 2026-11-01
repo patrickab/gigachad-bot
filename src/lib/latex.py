@@ -1,7 +1,10 @@
-"""LaTeX builds with `latexmk`.
+r"""LaTeX builds with `latexmk` and tex projects.
 
 - `build` compiles one file into `<directory>/.latex-build`, one build at a time per file, without shell escape
 - `discard_build` deletes the outputs of a file that was renamed or replaced, so a build never shows or reuses another file's PDF
+- `project_of` finds the root document of any file of a tex project, `set_root` writes the `% !TEX root` comment that picks it
+- `is_build_output` tells the files that are not sources
+- `ensure_package` loads a package a pasted reference needs (`graphicx` for `\includegraphics`)
 - `NEW_DOCUMENT` is the content of a new `.tex` file
 """
 
@@ -18,9 +21,13 @@ import signal
 import time
 
 BUILD_DIRECTORY = ".latex-build"
+_AUX_SUFFIXES = (
+    ".aux", ".log", ".synctex.gz", ".fls", ".fdb_latexmk", ".out", ".toc", ".bbl", ".blg", ".bcf", ".run.xml",
+)
 # A first section, an empty body builds no PDF ("No pages of output")
 NEW_DOCUMENT = """\
 \\documentclass[11pt]{article}
+\\usepackage{graphicx}
 
 \\begin{document}
 
@@ -32,6 +39,10 @@ NEW_DOCUMENT = """\
 _BUILD_TIMEOUT_SECONDS = 120
 _LOG_TAIL_LINES = 40
 _MAGIC_COMMENT_LINES = 5
+_ANCESTOR_LEVELS = 2
+_ROOT_COMMENT = re.compile(r"^\s*%\s*!TEX\s+root\s*=\s*(?P<root>\S.*?)\s*$", re.IGNORECASE)
+_COMMENT = re.compile(r"(?<!\\)%.*")
+_PACKAGE_LOAD = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{(?P<names>[^}]*)\}")
 _ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-pdfxe", "lualatex": "-pdflua"}
 _ENGINE_COMMENT = re.compile(r"^\s*%\s*!TEX\s+program\s*=\s*(\w+)", re.IGNORECASE)
 _FILE_LINE_ERROR = re.compile(r"^(?P<file>[^\s:][^:\n]*\.\w+):(?P<line>\d+): (?P<message>.+)$")
@@ -48,10 +59,20 @@ class LatexUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class LatexIssue:
-    """One TeX error, `line` is None when the log does not name a line of the built file."""
+    """One TeX error, `line` is None when the log does not name a line of a project file, `file` None when it does not name the file."""
 
     line: int | None
     message: str
+    file: str | None = None
+
+
+@dataclass(frozen=True)
+class TexProject:
+    """A tex project: its *folder*, its *root* document (None when unknown) and, without one, the root documents to choose from."""
+
+    folder: Path
+    root: Path | None
+    candidates: list[Path]
 
 
 @dataclass(frozen=True)
@@ -77,16 +98,17 @@ def engine_flag(source: str) -> str:
     return "-pdf"
 
 
-def parse_errors(output: str, document_name: str) -> list[LatexIssue]:
+def parse_errors(output: str, source: Path) -> list[LatexIssue]:
     """TeX errors from latexmk or `.log` text: `file:line: message` lines, else `! message` lines with their `l.N` line.
 
-    Errors in other files than *document_name* carry the file and line in the message and no line.
+    A `file:line` error names the absolute path of its file when that lies in the folder of the built *source*,
+    else (a package) the file and line move into the message and the line is None.
     """
     lines = output.splitlines()
     errors: list[LatexIssue] = []
     for index, text in enumerate(lines):
         if match := _FILE_LINE_ERROR.match(text):
-            issue = _issue_in(match["file"], int(match["line"]), match["message"], document_name)
+            issue = _issue_in(match["file"], int(match["line"]), match["message"], source)
         elif match := _BARE_ERROR.match(text):
             issue = LatexIssue(_context_line(lines[index + 1 : index + 1 + _BARE_ERROR_LOOKAHEAD]), match["message"])
         else:
@@ -96,10 +118,11 @@ def parse_errors(output: str, document_name: str) -> list[LatexIssue]:
     return errors
 
 
-def _issue_in(file: str, line: int, message: str, document_name: str) -> LatexIssue:
-    if Path(file).name == document_name:
-        return LatexIssue(line, message)
-    return LatexIssue(None, f"{Path(file).name}:{line}: {message}")
+def _issue_in(file: str, line: int, message: str, source: Path) -> LatexIssue:
+    path = Path(os.path.normpath(source.parent / file))
+    if path.is_relative_to(source.parent):
+        return LatexIssue(line, message, str(path))
+    return LatexIssue(None, f"{path.name}:{line}: {message}")
 
 
 def _context_line(following: list[str]) -> int | None:
@@ -176,7 +199,7 @@ async def build(source: Path) -> LatexBuild:
     else:
         log = output_directory / f"{source.stem}.log"
         errors = [] if code == 0 else (
-            parse_errors(await asyncio.to_thread(_read_log, log), source.name) or parse_errors(output, source.name)
+            parse_errors(await asyncio.to_thread(_read_log, log), source) or parse_errors(output, source)
             or [LatexIssue(None, f"latexmk exited with code {code}")]
         )
     return LatexBuild(
@@ -217,6 +240,124 @@ def discard_build(source: Path) -> None:
             output.unlink()
 
 
+def is_build_output(path: Path) -> bool:
+    """Whether *path* is LaTeX build output: inside `.latex-build/`, a `*.view.pdf`, or an aux file of a sibling `.tex`."""
+    if BUILD_DIRECTORY in path.parts or path.name.endswith(".view.pdf"):
+        return True
+    suffix = next((suffix for suffix in _AUX_SUFFIXES if path.name.endswith(suffix)), None)
+    return suffix is not None and path.with_name(f"{path.name.removesuffix(suffix)}.tex").is_file()
+
+
 def _read_head(source: Path) -> str:
     with source.open(encoding="utf-8", errors="replace") as file:
         return "".join(file.readline() for _ in range(_MAGIC_COMMENT_LINES))
+
+
+def ensure_package(root: Path, package: str) -> bool:
+    r"""Add `\usepackage{package}` on its own line before the `\begin{document}` line of *root* unless it loads it already. Returns whether it wrote.
+
+    Loads are looked up in *root* alone (`\usepackage`/`\RequirePackage`, comments ignored, options and lists across lines): a package
+    that only an `\input` preamble or a `.sty` loads is added again. The file keeps its line endings; an unreadable, non-UTF-8 or
+    unwritable root answers False. The read-modify-write is not locked against a concurrent save.
+    """
+    try:
+        text = root.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    lines = text.splitlines(keepends=True)
+    code = "".join(_COMMENT.sub("", line) for line in lines)
+    for loaded in _PACKAGE_LOAD.finditer(code):
+        if package in (name.strip() for name in loaded.group("names").split(",")):
+            return False
+    begun = next((index for index, line in enumerate(lines) if r"\begin{document}" in _COMMENT.sub("", line)), None)
+    if begun is None:
+        return False
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines.insert(begun, f"\\usepackage{{{package}}}{newline}")
+    try:
+        root.write_bytes("".join(lines).encode("utf-8"))
+    except OSError:
+        return False
+    return True
+
+
+def is_root_document(path: Path) -> bool:
+    r"""Whether the `.tex` file *path* has a `\documentclass` before its `\begin{document}`, comments ignored."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as file:
+            for line in file:
+                code = _COMMENT.sub("", line)
+                declared, begun = code.find(r"\documentclass"), code.find(r"\begin{document}")
+                if declared >= 0 and (begun < 0 or declared < begun):
+                    return True
+                if begun >= 0:
+                    return False
+    except OSError:
+        pass
+    return False
+
+
+def _roots_in(folder: Path) -> list[Path]:
+    """The `.tex` files of *folder* that are root documents, by name."""
+    return [
+        path for path in sorted(folder.glob("*.tex")) if not path.name.startswith(".") and path.is_file() and is_root_document(path)
+    ]
+
+
+def _default_root(folder: Path) -> Path | None:
+    """`main.tex` of *folder*, else its only root document."""
+    main = folder / "main.tex"
+    if main.is_file():
+        return main
+    roots = _roots_in(folder)
+    return roots[0] if len(roots) == 1 else None
+
+
+def _magic_root(path: Path, ceiling: Path) -> Path | None:
+    """The existing `.tex` file *path* names in a `% !TEX root = ...` line of its first lines, when inside *ceiling*."""
+    try:
+        head = _read_head(path)
+    except OSError:
+        return None
+    for line in head.splitlines():
+        if match := _ROOT_COMMENT.match(line):
+            target = Path(os.path.normpath(path.parent / match["root"]))
+            return target if target.is_relative_to(ceiling) and target.suffix == ".tex" and target.is_file() else None
+    return None
+
+
+def project_of(path: Path, *, ceiling: Path) -> TexProject:
+    """The tex project of *path*, reading only inside *ceiling*.
+
+    A `.tex` file's root is the one its `% !TEX root` comment names, else itself when it is a root document, else the
+    default root of its folder (`main.tex`, else its only root document). Without a root, `candidates` lists the root
+    documents of its folder and the two folders above, never above *ceiling*. Other files take the default root of the
+    nearest of those folders that has one and have no candidates.
+    """
+    if not path.parent.is_relative_to(ceiling):
+        return TexProject(path.parent, None, [])
+    levels = [path.parent, *path.parent.parents][: _ANCESTOR_LEVELS + 1]
+    folders = [folder for folder in levels if folder.is_relative_to(ceiling)]
+    candidates: list[Path] = []
+    if path.suffix == ".tex":
+        root = _magic_root(path, ceiling) or (path if is_root_document(path) else None) or _default_root(path.parent)
+        if root is None:
+            candidates = [candidate for folder in folders for candidate in _roots_in(folder)]
+    else:
+        root = next((found for folder in folders if (found := _default_root(folder))), None)
+    return TexProject(root.parent if root else path.parent, root, candidates)
+
+
+def set_root(path: Path, root: Path) -> None:
+    """Make `% !TEX root = <root relative to the folder>` the first line of the `.tex` file *path*, replacing its current one."""
+    lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
+    head = [line for line in lines[:_MAGIC_COMMENT_LINES] if not _ROOT_COMMENT.match(line)]
+    line = f"% !TEX root = {Path(os.path.relpath(root, path.parent)).as_posix()}\n"
+    path.write_bytes("".join([line, *head, *lines[_MAGIC_COMMENT_LINES:]]).encode("utf-8"))
+
+
+def new_file_content(path: Path, root: Path | None) -> str:
+    """What a new file at *path* starts with: a `.tex` file points at its *root*, or is a new document without one."""
+    if path.suffix != ".tex":
+        return ""
+    return NEW_DOCUMENT if root is None else f"% !TEX root = {Path(os.path.relpath(root, path.parent)).as_posix()}\n\n"

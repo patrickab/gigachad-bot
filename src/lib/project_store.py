@@ -330,10 +330,15 @@ class ProjectStore:
     def remove_file(self, slug: str, path: str) -> None:
         self._mutate_files(slug, lambda files: {f: name for f, name in files.items() if f != path})
 
-    def replace_file(self, slug: str, old: str, new: str) -> None:
-        """Point the reference *old* at *new*, in place and keeping its display name, merging when *new* is already referenced."""
+    def replace_file(self, slug: str, old: str, new: str, *, name: str | None = None) -> None:
+        """Point the reference *old* at *new*, in place and keeping its display name (or showing it as *name*), merging when *new* is already referenced."""
+        def shown(path: str, current: str | None) -> str | None:
+            if path != old or name is None:
+                return current
+            return None if name == PurePosixPath(new).name else name
+
         self._mutate_files(slug, lambda files: {
-            new if f == old else f: name for f, name in files.items() if f != old or old == new or new not in files
+            new if f == old else f: shown(f, current) for f, current in files.items() if f != old or old == new or new not in files
         })
 
     def set_file_name(self, slug: str, path: str, name: str) -> None:

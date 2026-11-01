@@ -18,7 +18,7 @@ import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { onFileMove } from "@/lib/backend/fileEvents"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -111,10 +111,8 @@ export function AppShell() {
     tabManagerRef.current?.relocateDocument(oldPath, newPath)
   }, [])
 
-  // A rename on another device moves the files this device shows, its own renames call `handleDocumentRenamed`.
-  useEffect(() => subscribeToChanges((event) => {
-    if (event.resource_kind === "document" && event.moved_to) handleDocumentRenamed(event.resource_key, event.moved_to)
-  }), [handleDocumentRenamed])
+  // A file moved by this device or another one moves the tabs that show it
+  useEffect(() => onFileMove(({ from, to }) => handleDocumentRenamed(from, to)), [handleDocumentRenamed])
 
   useEventListener("document", "keydown", (event) => {
     if (!event.altKey || event.key !== "d") return

@@ -380,3 +380,24 @@ def test_relocating_within_one_directory_records_where_the_key_went_and_across_d
     moved_to = {row["resource_key"]: row["moved_to"] for row in latest_changes(postgres_pool, user, 0)}
     assert moved_to["project/old/document/a.md"] == "project/old/document/b.md"
     assert moved_to["project/old/document/c.md"] is None
+
+
+def test_rename_carries_folder_entries_and_the_sessions_keyed_by_them(stores, workbench_root):
+    docs, projects, _, _ = stores
+    projects.create_project("Old")
+    paper, _ = workbench_folders(workbench_root)
+    folder = paper.parent
+    (folder / "refs.bib").write_text("@book{a}", encoding="utf-8")
+    projects.add_file("old", str(folder))
+    projects.set_file_name("old", str(folder), "Thesis")
+    put(docs, WORKBENCH_SESSIONS, {str(folder): {"active": "s1", "sessions": ["s1"]}, str(folder / "refs.bib"): "s2"})
+
+    projects.update_project("old", "New")
+
+    moved = workbench_root / "latex" / "new" / "paper"
+    assert (moved / "paper.tex").is_file() and (moved / "refs.bib").is_file() and not folder.exists()
+    assert projects.list_named_files("new") == [(str(moved), "Thesis")]
+    assert get(docs, WORKBENCH_SESSIONS) == {
+        str(moved): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]},
+        str(moved / "refs.bib"): {"active": "s2", "sessions": ["s2"], "moved": ["s2"]},
+    }

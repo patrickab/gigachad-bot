@@ -1,40 +1,51 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
-import { NeovimEditor, useNeovimTerminal, type NeovimSelection } from "@/features/editor/NeovimEditor"
+import { NeovimEditor, type NeovimSelection } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
-import { TEXT_CODEC, useRootFileDocument } from "@/features/editor/useRootFileDocument"
 import { TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { OmpModelSelector, OmpReasoningSelector, useOmpStreaming, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpChatPanel } from "@/features/omp/OmpChatPanel"
+import { fileLead, projectLead } from "@/features/omp/fileLead"
 import { useFileChat } from "@/features/omp/useFileChat"
-import { writeRootFile } from "@/lib/backend/api"
 import type { OmpView } from "@/lib/domain/types"
-import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { quoteSelection } from "./quote"
 import { useAgentSync } from "./useAgentSync"
+import { useWorkbenchEditor } from "./useWorkbenchEditor"
 import { WorkbenchViewSwitch, useWorkbenchView, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
 /** What the rendered pane draws from: where it sits, the synced text, and why it could not load. */
 export interface WorkbenchPane {
   layout: PaneLayout
-  /** The text Neovim and the disk last agreed on: the loaded file, then every save and every agent edit. Null while loading or after a failed load. */
+  /** The text Neovim and the disk last agreed on for the shown file: the loaded file, then every save and every agent edit. Null while loading or after a failed load. */
   text: string | null
   /** Why the file could not load, null otherwise. */
   loadError: string | null
 }
 
+/** The LaTeX project a workbench's files belong to. */
+interface WorkbenchProject {
+  /** The project folder, the key of the project's chat. */
+  folder: string
+  /** The root file, null when none was found. */
+  root: string | null
+}
+
 export interface WorkbenchProps {
-  /** Absolute disk path of the file. */
+  /** Absolute disk path of the shown file. The first path starts Neovim, a later one switches its buffer, so one workbench can walk the files of a project. */
   path: string
   /** The directory a new chat session starts in. */
   cwd: string
+  /** The project every file of the workbench belongs to: its folder's chat is shared by them all. Without one the chat belongs to the shown file. */
+  project?: WorkbenchProject
   /** The chat session this tab's item shows, undefined before the first one. */
   ompView: OmpView | undefined
   onViewChange: (view: OmpView) => void
+  /** Neovim shows another file than `path` (`:bnext`), `path` should follow. Also asks to go back to the shown file when another one could not open. */
+  onPathChange: (path: string) => void
   drawerOpen: boolean
   onDrawerOpenChange: (open: boolean) => void
   /** `:q` in Neovim. */
@@ -44,12 +55,14 @@ export interface WorkbenchProps {
   renderPane: (pane: WorkbenchPane) => ReactNode
   /** Shown in the `workbenchStatus` top-bar slot after the view switch. */
   status?: ReactNode
-  /** A `:w` stored `text`. */
-  onSaved?: (text: string) => void
-  /** An agent edit or another device's save of the file reached Neovim as `text`. */
-  onPulled?: (text: string) => void
+  /** A `:w` stored `text` as the file at `path`. */
+  onSaved?: (text: string, path: string) => void
+  /** An agent edit or another device's save of the open file at `path` reached Neovim as `text`. */
+  onPulled?: (text: string, path: string) => void
   /** Called once an omp run's last edits are in Neovim. */
   onRunEnd?: () => void
+  /** The chat's agent started or stopped running. */
+  onStreamingChange?: (streaming: boolean) => void
   /** Fence language of the lines `<leader>a` quotes into the chat. */
   quoteLanguage: string
 }
@@ -64,64 +77,42 @@ const NO_VIEW: OmpView = { kind: "settings" }
 const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
 
 /**
- * One file as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
+ * One file, or the files of one LaTeX project, as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
  *
- * - While omp runs, its edits on disk flow into Neovim as they arrive, each one updates the synced text and reaches `onPulled`
+ * - While omp runs, its edits on disk flow into every open file's Neovim buffer as they arrive, each one updates the synced text and reaches `onPulled`
  * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
- * - The chat's session is linked to the file, a new one starts in `cwd` and its first message names the file (`File: <path>`)
- * - Another device's save of the file reaches Neovim, merged into unsaved edits by the backend
+ * - The chat's session is linked to the project folder, else to the file. A new one starts in `cwd` and its first message names the project (`Project: <folder>, root: <root>`) or the file (`File: <path>`)
+ * - Another device's save of an open file reaches Neovim, merged into unsaved edits by the backend
+ * - A pasted image goes next to the shown file and its reference lands below the cursor
  * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots
  */
 export function Workbench({
-  path, cwd, ompView, onViewChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
-  renderPane, status, onSaved, onPulled, onRunEnd, quoteLanguage,
+  path, cwd, project, ompView, onViewChange, onPathChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
+  renderPane, status, onSaved, onPulled, onRunEnd, onStreamingChange, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  // A rename changes `path` under the running editor: its session goes on and learns the new name, it never restarts
-  const [sessionKey] = useState(path)
-  const chat = useFileChat(path, cwd, ompView, onViewChange)
+  const chat = useFileChat(
+    project?.folder ?? path,
+    cwd,
+    ompView,
+    onViewChange,
+    project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd),
+  )
   const { view } = chat
   const streaming = useOmpStreaming(view ?? NO_VIEW)
-
-  const write = useCallback((text: string) => writeRootFile(path, text), [path])
-  const { value: content, loadError, reload, saveFromNeovim } = useRootFileDocument({ path, codec: TEXT_CODEC, write, blankWhenMissing: false })
-  useEffect(() => { reload() }, [reload])
-  // The text Neovim and the disk last agreed on: what was loaded, then what each save or push stored.
-  // The ref serves the agent sync, the state the rendered pane
-  const syncedRef = useRef<string | null>(null)
-  const [syncedText, setSyncedText] = useState<string | null>(null)
-  useEffect(() => {
-    if (content !== null && syncedRef.current === null) syncedRef.current = content
-  }, [content])
-
-  const save = async (text: string) => {
-    const stored = await saveFromNeovim(text)
-    syncedRef.current = stored
-    setSyncedText(stored)
-    onSaved?.(stored)
-    return stored
-  }
+  const reportStreaming = useEffectEvent((running: boolean) => onStreamingChange?.(running))
+  useEffect(() => reportStreaming(streaming), [streaming])
 
   const [insertion, setInsertion] = useState<ComposerInsertion | null>(null)
   const insertionCount = useRef(0)
   const quoteIntoChat = (selection: NeovimSelection) => {
     onDrawerOpenChange(true)
-    setInsertion({ id: ++insertionCount.current, text: quoteSelection(path, selection, quoteLanguage) })
+    setInsertion({ id: ++insertionCount.current, text: quoteSelection(selection, quoteLanguage) })
   }
 
-  const editor = useNeovimTerminal(
-    neovim.enabled && content !== null ? { key: sessionKey, path, filename: baseName(path), content } : null,
-    save,
-    onClose,
-    { askKeymap: true, onSelection: quoteIntoChat },
-  )
-  const { setContent: pushToNeovim } = editor
-  const setContent = useCallback((text: string) => {
-    const taken = pushToNeovim(text)
-    if (taken) setSyncedText(text)
-    return taken
-  }, [pushToNeovim])
-  useAgentSync({ path, streaming, setContent, syncedRef, onPulled, onRunEnd })
+  const editor = useWorkbenchEditor({ path, enabled: neovim.enabled, onPathChange, onSaved, onClose, onSelection: quoteIntoChat })
+  const { content, loadError, notice } = editor
+  useAgentSync({ synced: editor.synced, streaming, setContent: editor.setContent, onPulled, onRunEnd })
 
   const [workbenchView, setWorkbenchView] = useWorkbenchView()
   const splitRef = useRef<HTMLDivElement>(null)
@@ -143,7 +134,7 @@ export function Workbench({
             </div>
           </div>
           <div className={cn("min-w-0 flex-1", workbenchView === "editor" && "hidden")}>
-            {renderPane({ layout, text: syncedText ?? content, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
+            {renderPane({ layout, text: editor.shownText, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
           </div>
         </div>
       </div>
@@ -167,6 +158,7 @@ export function Workbench({
         <TopBarPill>
           <WorkbenchViewSwitch view={workbenchView} onChange={setWorkbenchView} />
           {status}
+          {notice && <span role="alert" className="truncate px-1 text-[11px] text-danger">{notice}</span>}
         </TopBarPill>
       </InTopBar>
     </div>

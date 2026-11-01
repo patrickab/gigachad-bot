@@ -1,8 +1,12 @@
+import type { FileTreeNode } from "@/lib/domain/files"
+
 export interface ProjectDocument {
   path: string
   /** The name the project shows the file under: its display name, else its file name. */
   name: string
   mime: string
+  /** A folder entry (`mime` "inode/directory", a promoted LaTeX project): its file tree, null for a file. */
+  children?: FileTreeNode[] | null
 }
 
 export type KanbanColumnId = "backlog" | "doing" | "done"

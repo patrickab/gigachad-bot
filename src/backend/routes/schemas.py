@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from lib.document_library import document_meta
+from lib.file_walk import build_tree
 
 
 class ChatSnapshot(BaseModel):
@@ -21,14 +22,22 @@ class ChatSnapshot(BaseModel):
 
 
 class FileMeta(BaseModel):
+    """A listed document. A folder entry (`mime` is `inode/directory`) carries `children`, its file tree."""
+
     path: str
     name: str
     mime: str
+    children: list[dict[str, Any]] | None = None
 
 
 def file_meta(path: str | Path, **override: str) -> FileMeta:
     """The API description of *path*, with any `path`/`name`/`mime` field replaced by *override*."""
     return FileMeta(**{**document_meta(path), **override})
+
+
+def folder_meta(path: str | Path, name: str) -> FileMeta:
+    """The API description of the folder entry *path* shown as *name*, with the tree of its files."""
+    return FileMeta(**{**document_meta(path), "name": name, "mime": "inode/directory", "children": build_tree(path)})
 
 
 class FileListResponse(BaseModel):

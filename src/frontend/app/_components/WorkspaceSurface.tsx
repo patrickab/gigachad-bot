@@ -74,6 +74,8 @@ interface Surface {
  * - Preparing shows a quiet loading note, a failure its reason and a retry
  * - A Markdown preview's `#file:` link opens its target in this tab, in the workbench or the document editor
  * - A rename gives the item its new path and keeps the editor mounted under the path the item was opened with (`sessionKey`)
+ * - A LaTeX item's path may change under the same `sessionKey` too: another file of its project is a buffer switch in the same editor, the item keeps its `texFolder`
+ * - A LaTeX item learns its project folder (`texFolder`) from the file's project, so the sidebar can route clicks on the project's files to this tab
  */
 function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
   item: WorkspaceItem
@@ -92,11 +94,13 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
   }, item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
   if (!prepared) return <div className="pt-11"><LoadingPlaceholder /></div>
+  const sessionKey = item.sessionKey ?? prepared.path
   const props = {
     path: prepared.path,
     cwd: prepared.cwd,
     ompView: item.omp,
     onViewChange: (omp: OmpView) => onItemChange({ ...item, omp }),
+    onPathChange: (path: string) => onItemChange({ ...item, path, sessionKey }),
     drawerOpen,
     onDrawerOpenChange,
     onClose,
@@ -104,9 +108,8 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
     modelProps,
   }
   const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
-  const sessionKey = item.sessionKey ?? prepared.path
   return workbenchKindOf(prepared.path) === "latex"
-    ? <LatexWorkbench key={sessionKey} {...props} />
+    ? <LatexWorkbench key={sessionKey} {...props} texFolder={item.texFolder} onTexFolder={(texFolder) => onItemChange({ ...item, texFolder })} />
     : <MarkdownWorkbench key={sessionKey} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />
 }
 

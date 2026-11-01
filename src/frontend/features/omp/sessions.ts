@@ -1,5 +1,5 @@
 import type { OmpOverview, OmpSession, OmpView } from "@/lib/domain/types"
-import { PATH_COLLATOR, baseName } from "@/lib/paths"
+import { PATH_COLLATOR, baseName, isInside, trimSlash } from "@/lib/paths"
 
 /** Sidebar and tab title of a session: its name, else its first prompt. */
 export function sessionTitle(session: Pick<OmpSession, "name" | "first_message">): string {
@@ -12,16 +12,6 @@ export function viewTitle(view: OmpView, overview: OmpOverview | null): string {
   if (view.kind === "new") return "New session"
   const session = overview?.sessions.find((candidate) => candidate.id === view.sessionId)
   return session ? sessionTitle(session) : "Session"
-}
-
-function trimSlash(path: string): string {
-  return path.length > 1 ? path.replace(/\/+$/, "") : path
-}
-
-/** Whether `path` is `root` or below it, `/a/foobar` is not inside `/a/foo`. */
-export function isInside(path: string, root: string): boolean {
-  const [inner, outer] = [trimSlash(path), trimSlash(root)]
-  return inner === outer || inner.startsWith(outer === "/" ? "/" : `${outer}/`)
 }
 
 /** Directory a session belongs to: its main repository for a worktree cwd, else the cwd. */

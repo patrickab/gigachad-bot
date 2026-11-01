@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react"
 import { Factory } from "lucide-react"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
@@ -10,8 +10,8 @@ import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
 import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
 import { fileRootTree, removeFileRoot } from "@/lib/backend/api"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
-import type { FileTreeNode } from "@/lib/domain/files"
+import { onFileChange, onFileMove } from "@/lib/backend/fileEvents"
+import { isNewFileIn, type FileTreeNode } from "@/lib/domain/files"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
 import { useWorktrees } from "./useWorktrees"
@@ -56,9 +56,14 @@ export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions)
   useStartupRead("Sidebar file mounts", readRootTree, (result) => setRootTreeData(result.tree), isActive)
 
   // A file renamed on another device keeps its place in the tree under its new name
-  useEffect(() => subscribeToChanges((event) => {
-    if (isActive && event.resource_kind === "document" && event.moved_to && event.resource_key.startsWith("/")) void loadRootTree().catch(() => {})
+  useEffect(() => onFileMove(({ from }) => {
+    if (isActive && from.startsWith("/")) void loadRootTree().catch(() => {})
   }), [isActive, loadRootTree])
+
+  // A file created in a mount (a pasted image, a new LaTeX project file) shows up in the tree.
+  const isNewInMounts = useEffectEvent((path: string) => isActive && isNewFileIn(rootTreeData, path))
+  const reloadTree = useEffectEvent(() => { void loadRootTree().catch(() => {}) })
+  useEffect(() => onFileChange((path) => isNewInMounts(path), () => reloadTree()), [])
 
   useEffect(() => {
     if (isActive) reloadWorktrees()

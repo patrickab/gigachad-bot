@@ -26,20 +26,27 @@ function prepareOnce(path: string): Promise<PreparedWorkbench> {
   return request
 }
 
+/** A prepared workbench item and the session it was prepared for. */
+interface Prepared extends PreparedWorkbench {
+  session: string
+}
+
 /**
  * Get the workbench item at `path` ready before it mounts: a stored document moves to disk, its new path goes to `onMoved`.
  *
  * - `prepared` is null until the backend answers, then holds the disk path and the chat's directory
  * - The path `onMoved` hands back counts as prepared, so the item's new path does not prepare again
  * - A renamed file stays prepared: its item keeps the path it was opened under as `sessionKey`, and `prepared.path` is its current path
+ * - Another file of the same session (`sessionKey`, a LaTeX project's buffer switch) stays prepared too, whatever path the session was prepared under
  * - `error` says why preparing `path` failed, `retry` asks again. Another path clears it
  */
 export function usePreparedWorkbench(path: string, onMoved: (path: string) => void, sessionKey?: string) {
-  const [prepared, setPrepared] = useState<PreparedWorkbench | null>(null)
+  const [prepared, setPrepared] = useState<Prepared | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [requestedPath, setRequestedPath] = useState(path)
   const [attempt, setAttempt] = useState(0)
-  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey) ? { ...prepared, path } : null
+  const session = sessionKey ?? path
+  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey || prepared.session === session) ? { path, cwd: prepared.cwd } : null
   const ready = current !== null
   const reportMoved = useEffectEvent(onMoved)
 
@@ -55,7 +62,7 @@ export function usePreparedWorkbench(path: string, onMoved: (path: string) => vo
     prepareOnce(path).then(
       (result) => {
         if (cancelled) return
-        setPrepared(result)
+        setPrepared({ ...result, session })
         if (result.path === path) return
         // The stored key is gone, a new document of that name must prepare on its own.
         preparing.delete(path)
@@ -64,7 +71,7 @@ export function usePreparedWorkbench(path: string, onMoved: (path: string) => vo
       (cause: unknown) => { if (!cancelled) setFailure(errorMessage(cause, "Could not open this file in the workbench")) },
     )
     return () => { cancelled = true }
-  }, [path, ready, attempt])
+  }, [path, session, ready, attempt])
 
   const retry = () => {
     setFailure(null)

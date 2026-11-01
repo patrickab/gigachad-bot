@@ -11,7 +11,7 @@ import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/
 import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument"
 import { deviceHeaders } from "./deviceId"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
-import type { LatexBuild } from "@/lib/domain/latex"
+import type { LatexBuild, StoredImage, TexProject } from "@/lib/domain/latex"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
@@ -662,6 +662,36 @@ export async function informFileSession(path: string, sessionId: string): Promis
 /** Compile the `.tex` file at *path*. A TeX error resolves with `ok: false`, a missing TeX install rejects with ApiError 503. */
 export function buildLatex(path: string): Promise<LatexBuild> {
   return post<LatexBuild>("/latex/build", { path })
+}
+
+/** The LaTeX project of the file at absolute *path*: its folder, root `.tex` and, when no root was found, the candidates. */
+export function loadTexProject(path: string): Promise<TexProject> {
+  return request<TexProject>(`/latex/project${toQuery({ path })}`)
+}
+
+/** Make *root* the root of the `.tex` at *path* by writing its `% !TEX root` line. Resolves to the project. */
+export function chooseTexRoot(path: string, root: string): Promise<TexProject> {
+  return post<TexProject>("/latex/root", { path, root })
+}
+
+/** A token that changes whenever a file under *folder* changes, build output aside. */
+export async function folderStamp(folder: string): Promise<string> {
+  return (await request<{ stamp: string }>(`/fileroots/stamp${toQuery({ folder })}`)).stamp
+}
+
+/** Create file *name* in LaTeX project *folder*, a `.tex` starts with its `% !TEX root` line. Resolves to its path. */
+export async function createTexProjectFile(folder: string, name: string): Promise<string> {
+  return (await post<{ path: string }>("/latex/file", { folder, name })).path
+}
+
+/** Turn project *slug*'s workbench `.tex` at *path* into its LaTeX project folder entry. Resolves to the folder. */
+export async function promoteToTexProject(slug: string, path: string): Promise<string> {
+  return (await post<{ folder: string }>("/workbench/promote", { slug, path })).folder
+}
+
+/** Store a pasted PNG next to the workbench file at absolute *path* (in `imgs/`), resolving to it and the line to insert. */
+export function storeWorkbenchImage(path: string, image: Blob): Promise<StoredImage> {
+  return request<StoredImage>(`/workbench/image${toQuery({ path })}`, { method: "POST", body: fileForm(image, "image.png") })
 }
 
 /** Every learn session with the project it is grouped under. Host-access logins only. */

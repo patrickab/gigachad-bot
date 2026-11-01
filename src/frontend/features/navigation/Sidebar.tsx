@@ -13,7 +13,7 @@ import { useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabConte
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
-import { addFileRoot, cloneFileRoot } from "@/lib/backend/api"
+import { addFileRoot, cloneFileRoot, createTexProjectFile } from "@/lib/backend/api"
 import { cn } from "@/lib/utils"
 import { ArchiveSelector } from "./ArchiveSelector"
 import { useBranches } from "./BranchContext"
@@ -30,13 +30,16 @@ import { useProjectActions } from "./useProjectActions"
 import { useWorkspaceDocuments } from "./useWorkspaceDocuments"
 import { codeItems, directoryEntries, projectItems } from "./workspaceTree"
 
+/** `name` as a LaTeX project file name: `.tex` appended unless it names its own extension. */
+const texFileName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}.tex`)
+
 interface SidebarProps {
   onFileSelect?: (path: string) => void
   onDiffSelect?: (path: string) => void
   onRootsChanged?: () => void
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
-  /** Opens `.md` and `.tex` files in the workbench, absent where it is unavailable. */
+  /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
   onWorkbenchSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
@@ -91,24 +94,29 @@ export function Sidebar(props: SidebarProps) {
       props.onDocumentsChanged?.()
     },
   })
+  const folderRows = {
+    moveToFolder: async (path: string, folder: string) => {
+      await documents.moveToFolder(path, folder)
+      await code.reloadRootTree()
+    },
+    createLatexFile: async (folder: string, name: string) => {
+      const path = await createTexProjectFile(folder, texFileName(name))
+      await Promise.all([documents.refresh(), code.reloadRootTree()])
+      props.onFileSelect?.(path)
+    },
+  }
 
   const learn = useLearnSidebar({ open: props.onItemOpen ?? (() => {}), projects, sidebar: { collapsed, toggle: toggleCollapsed } })
 
   const projectTree = projectItems({
-    ...props, ...branches, ...documents, ...projectActions, ...fileRename, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
+    ...props, ...branches, ...documents, ...projectActions, ...fileRename, ...folderRows, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
   })
   // Host logins see each project's learn sessions in its group.
   const items = code.hostAccess ? projectTree.map((root) => {
     const project = projects.find((candidate) => candidate.slug === root.id)
     return project ? learn.withProjectLearn(root, project) : root
   }) : projectTree
-  const codeContext = {
-    ...props, ...code, ...fileRename, renameOf, projects, pending,
-    moveToFolder: async (path: string, folder: string) => {
-      await documents.moveToFolder(path, folder)
-      await code.reloadRootTree()
-    },
-  }
+  const codeContext = { ...props, ...code, ...fileRename, ...folderRows, renameOf, projects, pending }
 
   return <motion.aside
     initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.25, ease: "easeInOut" }}

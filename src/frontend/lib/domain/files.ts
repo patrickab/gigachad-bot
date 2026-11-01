@@ -1,3 +1,5 @@
+import { isInside, relativeIn } from "@/lib/paths"
+
 export interface RootFile {
   path: string
   name: string
@@ -10,6 +12,28 @@ export interface FileTreeNode {
   /** Root nodes: the registered mount, `path` differs when one of its worktrees is shown. */
   mount?: string
   children?: FileTreeNode[]
+}
+
+/** A folder with its listed tree, a mount root or a project's folder entry. */
+interface ListedFolder {
+  path: string
+  children?: FileTreeNode[] | null
+}
+
+/** Whether the listed `nodes` hold the node reached by `names` from them, walking one segment per level. */
+function isListed(nodes: FileTreeNode[] | null | undefined, names: string[], depth = 0): boolean {
+  const node = nodes?.find((candidate) => candidate.name === names[depth])
+  if (!node) return false
+  return depth === names.length - 1 || isListed(node.children, names, depth + 1)
+}
+
+/**
+ * Whether `path` lies below one of `folders` without being in their listed trees yet: a file created since they were listed.
+ * A file the tree hides on purpose (ignored, build output) counts as new every time.
+ */
+export function isNewFileIn(folders: ListedFolder[], path: string): boolean {
+  const holders = folders.filter((folder) => folder.children && path !== folder.path && isInside(path, folder.path))
+  return holders.length > 0 && !holders.some((folder) => isListed(folder.children, relativeIn(folder.path, path).split("/").filter(Boolean)))
 }
 
 /** Subdirectories of `path` on the backend host; `parent` is null at the filesystem root. */

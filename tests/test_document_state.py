@@ -9,6 +9,7 @@ root is a policy violation.
 """
 
 import json
+from types import SimpleNamespace
 
 from fastapi import HTTPException
 import pytest
@@ -422,3 +423,45 @@ def test_another_users_document_is_invisible_and_answers_404(alice, bob):
         bob.docs.read_bytes(meta.path)
     assert alice.docs.read_bytes(meta.path)[0] == b"mine"
 
+
+def folder_entry(tmp_path):
+    """A mounted LaTeX project folder with a root, a bibliography and build output, returning the mount and the folder."""
+    mount = tmp_path.resolve() / "mount"
+    folder = mount / "paper"
+    (folder / ".latex-build").mkdir(parents=True)
+    for name in ("main.tex", "refs.bib", "main.aux", ".latex-build/main.pdf"):
+        (folder / name).write_text(name, encoding="utf-8")
+    return mount, folder
+
+
+def list_project(alice, slug, roots):
+    return route.list_documents(slug, alice.projects, SimpleNamespace(source_paths=lambda: []), roots).documents
+
+
+def test_a_folder_entry_lists_its_tree_and_its_files_rename_like_mounted_ones(alice, tmp_path):
+    mount, folder = folder_entry(tmp_path)
+    slug = alice.projects.create_project("Thesis")["slug"]
+    alice.projects.add_file(slug, str(folder))
+    alice.docs.write_bytes(WORKBENCH_SESSIONS, json.dumps({str(folder / "refs.bib"): "s1"}).encode())
+
+    [entry] = list_project(alice, slug, mounted_roots(mount))
+    renamed = rename(alice, str(folder / "refs.bib"), "", "literature.bib", mounted_roots(mount))
+
+    assert entry.path == str(folder)
+    assert [child["name"] for child in entry.children] == ["main.tex", "refs.bib"]
+    assert renamed.path == str(folder / "literature.bib") and (folder / "literature.bib").is_file()
+    assert alice.projects.list_named_files(slug) == [(str(folder), "paper")]
+    assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {
+        str(folder / "literature.bib"): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]},
+    }
+
+
+def test_deleting_a_folder_entry_unlists_it_and_leaves_the_folder_on_disk(alice, tmp_path):
+    mount, folder = folder_entry(tmp_path)
+    slug = alice.projects.create_project("Thesis")["slug"]
+    alice.projects.add_file(slug, str(folder))
+
+    route.remove_document(slug, str(folder), alice.projects, References(alice.docs, alice.assets))
+
+    assert list_project(alice, slug, mounted_roots(mount)) == []
+    assert sorted(path.name for path in folder.iterdir()) == [".latex-build", "main.aux", "main.tex", "refs.bib"]

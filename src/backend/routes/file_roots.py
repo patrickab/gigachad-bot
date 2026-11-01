@@ -13,11 +13,12 @@ from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
-from backend.routes.deps import get_file_roots, get_user_scope
+from backend.routes.deps import get_disk_files, get_file_roots
 from backend.routes.schemas import FileContent, RootFile
 from lib import git_worktree
-from lib.changes import UserScope
+from lib.disk_files import DiskFiles
 from lib.file_roots import FileRoots
+from lib.file_walk import folder_stamp
 from lib.git import GitError
 from lib.host_access import list_directories
 
@@ -103,19 +104,22 @@ def browse_directories(path: str = Query(default="~")) -> DirectoryListing:
 
 
 @router.post("/file")
-def write_file(
-    body: FileContent, roots: FileRoots = Depends(get_file_roots), scope: UserScope = Depends(get_user_scope),
-) -> dict[str, bool]:
-    """Overwrite a file-root file, then record a `document` change keyed by its resolved path for the user's other devices.
-
-    Disk files carry no version, so the change row's version is None.
-    """
+def write_file(body: FileContent, files: DiskFiles = Depends(get_disk_files)) -> dict[str, bool]:
+    """Overwrite a file-root file and record the change for the user's other devices."""
     with http_errors(((OSError, ValueError), 400, None)):
-        roots.write(body.path, body.content)
-        path = roots.resolve(body.path)
-    with scope.connection() as connection, connection.transaction():
-        scope.record(connection, kind="document", key=str(path), operation="write")
+        files.write(body.path, body.content)
     return {"ok": True}
+
+
+class FolderStamp(BaseModel):
+    stamp: str
+
+
+@router.get("/stamp", response_model=FolderStamp)
+def stamp_folder(folder: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FolderStamp:
+    """A token that changes when a listed file under *folder* is added, removed or edited."""
+    with http_errors(((OSError, ValueError), 400, None)):
+        return FolderStamp(stamp=folder_stamp(roots.resolve_folder(folder)))
 
 
 @router.get("/rendered", response_model=FileContent)

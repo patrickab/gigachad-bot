@@ -13,13 +13,16 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
+from lib.naming import segment
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 Kind = Literal["latex", "markdown", "pdf"]
 KINDS: tuple[Kind, ...] = get_args(Kind)
 OMP_DIRECTORY = ".omp"
-_SUFFIXES: dict[str, Kind] = {".tex": "latex", ".md": "markdown", ".pdf": "pdf"}
+# `.tex` first, it is the suffix of a new latex document. The others are the supporting files of a LaTeX project.
+_SUFFIXES: dict[str, Kind] = {".tex": "latex", ".bib": "latex", ".sty": "latex", ".cls": "latex", ".md": "markdown", ".pdf": "pdf"}
 _PROMPTS = Path(__file__).parent / "omp"
 
 log = logging.getLogger(__name__)
@@ -40,16 +43,9 @@ def kind_directory(root: Path, kind: Kind) -> Path:
     return root / kind
 
 
-def _segment(value: str, label: str) -> str:
-    invalid = any(ord(character) < 32 for character in value)
-    if not value or invalid or Path(value).name != value or value.startswith("."):
-        raise ValueError(f"Invalid {label}: {value!r}")
-    return value
-
-
 def document_folder(root: Path, kind: Kind, slug: str, stem: str) -> Path:
     """The folder of document *stem* of project *slug*, ValueError for an empty, nested or hidden segment or a control character."""
-    return kind_directory(root, kind) / _segment(slug, "project slug") / _segment(stem, "document name")
+    return kind_directory(root, kind) / segment(slug) / segment(stem)
 
 
 @contextmanager
@@ -91,7 +87,7 @@ def mirror_omp(root: Path) -> None:
 
 def project_directories(root: Path, slug: str) -> list[Path]:
     """The existing document directories of project *slug*, one per kind at most."""
-    _segment(slug, "project slug")
+    segment(slug)
     return [directory for kind in KINDS if (directory := kind_directory(root, kind) / slug).is_dir()]
 
 
@@ -120,7 +116,7 @@ def move_project_directories(root: Path, old: str, new: str) -> list[tuple[Path,
     - Any other existing destination raises FileExistsError
     - A failed move puts back the ones already done, then raises
     """
-    _segment(new, "project slug")
+    segment(new)
     done: list[tuple[Path, Path]] = []
     try:
         for source in project_directories(root, old):

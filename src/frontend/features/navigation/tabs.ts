@@ -1,8 +1,8 @@
 import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
+import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { relocatedWorkbenchPath, workbenchKindOf } from "@/lib/domain/workbench"
-import { baseName } from "@/lib/paths"
+import { baseName, isInside } from "@/lib/paths"
 
 /** The display name project `slug` gives its file `path`, if any. */
 type ShownName = (slug: string | null, path: string) => string | undefined
@@ -48,6 +48,21 @@ export function renamedTab(tab: Tab, oldPath: string, newPath: string): Tab {
   if (!item || item.path !== oldPath || !FILE_ITEM_KINDS.includes(item.kind)) return tab
   const sessionKey = item.kind === "workbench" ? { sessionKey: item.sessionKey ?? oldPath } : {}
   return { ...tab, workspaceItem: { ...item, path: newPath, ...sessionKey } }
+}
+
+/** The tab to show LaTeX file `item` in as another buffer: a workbench tab whose project folder holds it, the active one first. */
+export function texProjectTab(tabs: Tab[], item: WorkspaceItem, activeId: string): Tab | undefined {
+  if (item.kind !== "workbench" || workbenchKindOf(item.path) !== "latex") return undefined
+  const holdsItem = ({ workspaceItem }: Tab) =>
+    workspaceItem?.kind === "workbench" && !!workspaceItem.texFolder && isInside(item.path, workspaceItem.texFolder)
+  return tabs.find((tab) => tab.id === activeId && holdsItem(tab)) ?? tabs.find(holdsItem)
+}
+
+/** `tab` showing the file at `path` as another buffer of its workbench item: the editor session, chat and project folder carry on. */
+export function texBufferShown(tab: Tab, path: string): Tab {
+  const item = tab.workspaceItem
+  if (!item) return tab
+  return { ...tab, ...showingItem({ ...item, path, sessionKey: item.sessionKey ?? item.path }) }
 }
 
 /** Id of the tab that takes over when `id` closes: the one before it, else the new first tab. */
