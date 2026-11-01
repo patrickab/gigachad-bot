@@ -5,12 +5,13 @@ import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
-import { onFileChange } from "@/lib/backend/fileEvents"
+import { announceFileRemoval, onFileChange, onFileRemoval } from "@/lib/backend/fileEvents"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { isNewFileIn } from "@/lib/domain/files"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { opensInWorkbench } from "@/lib/domain/workbench"
+import { isInside } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 
 /** Key of a project's catalog entry, which lists its files. */
@@ -30,6 +31,12 @@ function pickFiles(): Promise<File[]> {
 
 /** Whether `path` is a file stored in a project (not a canvas or a file on disk), the kind that can move into a folder. */
 export const isStoredProjectFile = (path: string) => /^project\/[^/]+\/document\//.test(path) && !path.endsWith(".canvas")
+
+/** `documents` without the entries at or inside the deleted `path`, the same array when none is. */
+function withoutRemoved(documents: ProjectDocument[], path: string): ProjectDocument[] {
+  const kept = documents.filter((doc) => !isInside(doc.path, path))
+  return kept.length === documents.length ? documents : kept
+}
 
 /** Kinds the files folder's `+` creates. */
 export const NEW_FILE_KINDS = ["Markdown", "LaTeX"] as const
@@ -87,6 +94,17 @@ export function useWorkspaceDocuments({
   const isNewInFolders = useEffectEvent((path: string) => isActive && isNewFileIn(folderEntries, path))
   const reloadDocuments = useEffectEvent(() => { void loadProjectDocuments().then(setDocuments).catch(() => {}) })
   useEffect(() => onFileChange((path) => isNewInFolders(path), () => reloadDocuments()), [])
+
+  // A file or folder deleted here or on another device leaves the lists of every tab's sidebar at once, the lists reload when it lay in a folder entry.
+  const dropRemoved = useEffectEvent((path: string) => {
+    setNotes((current) => withoutRemoved(current, path))
+    setDocuments((current) => {
+      const next = Object.fromEntries(Object.entries(current).map(([slug, docs]) => [slug, withoutRemoved(docs, path)]))
+      return Object.keys(next).every((slug) => next[slug] === current[slug]) ? current : next
+    })
+    if (isActive && folderEntries.some((entry) => isInside(path, entry.path))) reloadDocuments()
+  })
+  useEffect(() => onFileRemoval((path) => dropRemoved(path)), [])
 
   const refresh = async () => {
     const [loose, entries] = await Promise.all([listNotes(), loadProjectDocuments()])
@@ -170,7 +188,7 @@ export function useWorkspaceDocuments({
 
   const remove = ({ path, name }: ProjectDocument, scope: string) => {
     schedule(`document:${scope}:${path}`, name, async () => {
-      await removeDocument(scope, path)
+      for (const removed of await removeDocument(scope, path)) announceFileRemoval(removed)
       await refresh()
       onDocumentsChanged?.()
       onCanvasDeleted?.(path)

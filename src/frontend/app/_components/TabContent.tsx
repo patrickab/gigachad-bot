@@ -87,7 +87,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   return (
     <div className="relative flex h-full overflow-hidden">
       <Sidebar
-        onFileSelect={(path) => onOpenItem({ kind: opensWorkbench && opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: null, rootFile: true })}
+        onFileSelect={(path, scope) => onOpenItem({ kind: opensWorkbench && opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: scope, rootFile: true })}
         onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}

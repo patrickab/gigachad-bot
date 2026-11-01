@@ -67,7 +67,7 @@ function connect(): FakeSocket {
   return socket
 }
 
-const changed = (path: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: path, version: null, device_id: "other" })
+const changed = (path: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: path, version: null, operation: "write", device_id: "other" })
 
 beforeEach(() => {
   vi.useFakeTimers()

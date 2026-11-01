@@ -28,13 +28,14 @@ import { useDeleteChat } from "./useDeleteChat"
 import { useFileRename } from "./useFileRename"
 import { useProjectActions } from "./useProjectActions"
 import { useWorkspaceDocuments } from "./useWorkspaceDocuments"
-import { codeItems, directoryEntries, projectItems } from "./workspaceTree"
+import { codeItems, directoryEntries, owningProject, projectItems } from "./workspaceTree"
 
 /** `name` as a LaTeX project file name: `.tex` appended unless it names its own extension. */
 const texFileName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}.tex`)
 
 interface SidebarProps {
-  onFileSelect?: (path: string) => void
+  /** Open the file `path` of a folder on disk, `scope` is the project it belongs to, null for none. */
+  onFileSelect?: (path: string, scope: string | null) => void
   onDiffSelect?: (path: string) => void
   onRootsChanged?: () => void
   onDocumentsChanged?: () => void
@@ -94,7 +95,9 @@ export function Sidebar(props: SidebarProps) {
       props.onDocumentsChanged?.()
     },
   })
+  const selectFile = (path: string) => props.onFileSelect?.(path, owningProject(path, documents.documents, projects, code.mounts))
   const folderRows = {
+    onFileSelect: selectFile,
     moveToFolder: async (path: string, folder: string) => {
       await documents.moveToFolder(path, folder)
       await code.reloadRootTree()
@@ -102,7 +105,7 @@ export function Sidebar(props: SidebarProps) {
     createLatexFile: async (folder: string, name: string) => {
       const path = await createTexProjectFile(folder, texFileName(name))
       await Promise.all([documents.refresh(), code.reloadRootTree()])
-      props.onFileSelect?.(path)
+      selectFile(path)
     },
   }
 

@@ -7,7 +7,8 @@ import { projectMount } from "@/features/omp/sessions"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { FileTreeNode } from "@/lib/domain/files"
 import type { BranchMeta } from "@/lib/domain/histories"
-import type { ProjectListItem } from "@/lib/domain/projects"
+import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
+import { isInside } from "@/lib/paths"
 import type { ArchiveEntry } from "./ArchiveSelector"
 import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
@@ -74,6 +75,16 @@ const isRenamableFile = (path: string) => isStoredProjectFile(path) || path.star
 function isPromotableLatex(path: string, slug: string): boolean {
   const [workbench, kind, owner, folder, file] = path.split("/").slice(-5)
   return workbench === "workbench" && kind === "latex" && owner === slug && Boolean(folder) && file?.toLowerCase().endsWith(".tex") === true
+}
+
+/** Slug of the project the file `path` belongs to: the one listing it (as an entry or inside a folder entry), else the one whose linked folder holds it, null when none does. */
+export function owningProject(path: string, documents: Record<string, ProjectDocument[]>, projects: ProjectListItem[], mounts: readonly string[]): string | null {
+  const lister = projects.find((project) => documents[project.slug]?.some((doc) => isInside(path, doc.path)))
+  if (lister) return lister.slug
+  return projects.find((project) => {
+    const folder = project.linked_root ?? projectMount(project.slug, mounts)
+    return folder !== null && isInside(path, folder)
+  })?.slug ?? null
 }
 
 /** Project roots followed by the shared "general" root. */

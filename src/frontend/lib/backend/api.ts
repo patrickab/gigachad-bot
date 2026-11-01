@@ -406,8 +406,9 @@ export async function addDocument(slug: string, path: string): Promise<ProjectDo
   return post<ProjectDocument>(`/documents/add${toQuery({ slug })}`, { path })
 }
 
-export async function removeDocument(slug: string, path: string): Promise<void> {
-  await del(`/documents${toQuery({ slug, path })}`)
+/** Delete `path` from project `slug`; resolves with the keys and absolute paths that are gone (a mounted file only unlinked stays out). */
+export async function removeDocument(slug: string, path: string): Promise<string[]> {
+  return (await del<{ removed: string[] }>(`/documents${toQuery({ slug, path })}`)).removed
 }
 
 export async function moveDocument(path: string, fromSlug: string, toSlug: string): Promise<ProjectDocument> {

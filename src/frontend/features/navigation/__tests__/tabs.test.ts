@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { WorkspaceItem } from "@/contexts/TabContext"
-import { nextTab, relocatedTab, renamedTab, texBufferShown, texProjectTab } from "../tabs"
+import { nextTab, relocatedTab, renamedTab, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
@@ -58,6 +58,44 @@ describe("renamedTab", () => {
   it("drops the session key when the project folder moves", () => {
     const renamed = renamedTab(tabWith({ kind: "workbench", path: OLD, projectSlug: "proj" }), OLD, NEW)
     expect(relocatedTab(renamed, "proj", "next").workspaceItem?.sessionKey).toBeUndefined()
+  })
+})
+
+describe("tabsAfterRemoval", () => {
+  const FOLDER = "/data/workbench/latex/proj/paper"
+  const workbench = tabWith({ kind: "workbench", path: `${FOLDER}/paper.tex`, projectSlug: "proj", texFolder: FOLDER })
+  const image = tabWith({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj", rootFile: true })
+  const note = tabWith({ kind: "document", path: "project/proj/document/notes.md", projectSlug: "proj" })
+  const lookAlike = tabWith({ kind: "document", path: `${FOLDER}-copy/figure.png`, projectSlug: "proj", rootFile: true })
+  const fresh = () => nextTab()
+
+  it("closes the tabs showing a deleted folder's files and its workbench, even one showing another buffer of it", () => {
+    const elsewhere = { ...workbench, workspaceItem: { ...workbench.workspaceItem!, path: "/data/workbench/latex/proj/other/refs.bib", texFolder: FOLDER } }
+    const result = tabsAfterRemoval([note, workbench, image, elsewhere, lookAlike], FOLDER, note.id, fresh)
+    expect(result.tabs).toEqual([note, lookAlike])
+    expect(result.activeId).toBe(note.id)
+  })
+
+  it("closes the tab showing a deleted file and only that one", () => {
+    const result = tabsAfterRemoval([note, workbench, image], `${FOLDER}/imgs/figure.png`, image.id, fresh)
+    expect(result.tabs).toEqual([note, workbench])
+    expect(result.activeId).toBe(workbench.id)
+  })
+
+  it("shows the nearest remaining tab before a closed active one, else the first", () => {
+    expect(tabsAfterRemoval([note, workbench, image, lookAlike], FOLDER, image.id, fresh).activeId).toBe(note.id)
+    expect(tabsAfterRemoval([workbench, image, note], FOLDER, workbench.id, fresh).activeId).toBe(note.id)
+  })
+
+  it("replaces the last tab with a fresh one and leaves untouched tabs identical", () => {
+    const only = tabsAfterRemoval([workbench, image], FOLDER, workbench.id, fresh)
+    expect(only.tabs).toHaveLength(1)
+    expect(only.tabs[0]).toMatchObject({ appMode: "chat", workspaceItem: null })
+    expect(only.activeId).toBe(only.tabs[0].id)
+
+    const tabs = [note, lookAlike, { ...nextTab() }]
+    expect(tabsAfterRemoval(tabs, FOLDER, note.id, fresh)).toEqual({ tabs, activeId: note.id })
+    expect(tabsAfterRemoval(tabs, FOLDER, note.id, fresh).tabs).toBe(tabs)
   })
 })
 

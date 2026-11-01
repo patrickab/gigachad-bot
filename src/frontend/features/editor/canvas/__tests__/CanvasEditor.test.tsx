@@ -61,7 +61,7 @@ const api = vi.hoisted(() => ({
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn<typeof import("@/lib/backend/api").writeDocument>(async () => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
   renameDocument: vi.fn(async (_slug: string, path: string, name: string) => ({ path, name: `${name}.md`, mime: "text/markdown" })),
-  removeDocument: vi.fn<typeof import("@/lib/backend/api").removeDocument>(async () => undefined),
+  removeDocument: vi.fn<typeof import("@/lib/backend/api").removeDocument>(async () => []),
   ApiError: class ApiError extends Error {
     status: number
     constructor(message: string, status: number) {

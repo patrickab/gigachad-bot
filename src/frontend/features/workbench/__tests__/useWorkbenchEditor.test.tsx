@@ -52,7 +52,7 @@ const MAIN = "/home/me/thesis/main.tex"
 const CHAPTER = "/home/me/thesis/chapters/intro.tex"
 const RENAMED = "/home/me/thesis/chapters/opening.tex"
 const textOf = (path: string) => `text of ${path}`
-const moved = (from: string, to: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: from, moved_to: to, version: null, device_id: "other" })
+const moved = (from: string, to: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: from, moved_to: to, version: null, operation: "move", device_id: "other" })
 
 const callbacks = () => ({ onPathChange: vi.fn(), onSaved: vi.fn(), onClose: vi.fn(), onSelection: vi.fn() })
 

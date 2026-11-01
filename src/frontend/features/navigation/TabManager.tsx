@@ -1,13 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { isEditableTarget } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { TabContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
-import { TabStripContext, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
+import { onFileRemoval } from "@/lib/backend/fileEvents"
+import { TabStripContext, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabsAfterRemoval, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -73,6 +74,9 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   const [modes, setModes] = useState<Record<string, TabMode>>({})
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
+  // What the state holds, kept ahead of it by removals so several in one tick each see the previous one's result.
+  const shown = useRef({ tabs, activeTab })
+  useEffect(() => { shown.current = { tabs, activeTab } }, [tabs, activeTab])
 
   const updateTab = useCallback((id: string, patch: (tab: Tab) => Partial<Tab>) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch(t) } : t)))
@@ -136,6 +140,16 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   useEffect(() => {
     onTabsChangeRef.current?.(tabs)
   }, [tabs])
+
+  // A file or folder deleted by this device or another one closes the tabs showing it, the last tab becomes a fresh chat.
+  const closeRemoved = useEffectEvent((path: string) => {
+    const next = tabsAfterRemoval(shown.current.tabs, path, shown.current.activeTab, () => nextTab(defaultConfig))
+    if (next.tabs === shown.current.tabs) return
+    shown.current = { tabs: next.tabs, activeTab: next.activeId }
+    setTabs(next.tabs)
+    setActiveTab(next.activeId)
+  })
+  useEffect(() => onFileRemoval((path) => closeRemoved(path)), [])
 
   useEffect(() => {
     const selected = tabs.find((tab) => tab.id === activeTab)

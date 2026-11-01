@@ -8,6 +8,8 @@ export interface ChangeEvent {
   resource_kind: "document" | "asset" | "vault_root"
   resource_key: string
   version: number | null
+  /** What happened to the resource; a `delete` means it is gone, a `move` that its key changed. */
+  operation: "write" | "move" | "delete"
   device_id: string | null
   /** On the vacated key of a renamed resource: the key it now lives under. */
   moved_to?: string | null

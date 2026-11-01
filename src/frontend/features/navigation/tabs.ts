@@ -71,6 +71,29 @@ export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceIte
   return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
+/** Whether `tab` shows the deleted `path` (a file or a folder): its file item lies inside it, or it is a workbench of a LaTeX project folder inside it. */
+export function showsRemoved(tab: Tab, path: string): boolean {
+  const item = tab.workspaceItem
+  if (!item || !FILE_ITEM_KINDS.includes(item.kind)) return false
+  return isInside(item.path, path) || (item.kind === "workbench" && !!item.texFolder && isInside(item.texFolder, path))
+}
+
+/**
+ * `tabs` without the ones showing the deleted `path`, and the tab to show: `activeId` while it stays, else the nearest remaining tab before it, else the first.
+ * Every tab gone leaves `fresh` alone.
+ */
+export function tabsAfterRemoval(tabs: Tab[], path: string, activeId: string, fresh: () => Tab): { tabs: Tab[]; activeId: string } {
+  const remaining = tabs.filter((tab) => !showsRemoved(tab, path))
+  if (remaining.length === tabs.length) return { tabs, activeId }
+  if (remaining.length === 0) {
+    const replacement = fresh()
+    return { tabs: [replacement], activeId: replacement.id }
+  }
+  if (remaining.some((tab) => tab.id === activeId)) return { tabs: remaining, activeId }
+  const before = tabs.slice(0, tabs.findIndex((tab) => tab.id === activeId)).findLast((tab) => remaining.includes(tab))
+  return { tabs: remaining, activeId: (before ?? remaining[0]).id }
+}
+
 /** Id of the tab that takes over when `id` closes: the one before it, else the new first tab. */
 export function tabAfterClosing(tabs: Tab[], id: string): string {
   const remaining = tabs.filter((tab) => tab.id !== id)

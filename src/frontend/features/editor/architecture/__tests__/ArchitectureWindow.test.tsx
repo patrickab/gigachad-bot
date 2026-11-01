@@ -25,7 +25,7 @@ vi.mock("@/lib/backend/syncStream", () => ({
   },
 }))
 /** Another device edited one of the project's architecture files. */
-const remoteChange = () => act(() => feed.listener!({ seq: 1, resource_kind: "document", resource_key: "graph/proj/backend/backend.c4", version: 2, device_id: "other-device" }))
+const remoteChange = () => act(() => feed.listener!({ seq: 1, resource_kind: "document", resource_key: "graph/proj/backend/backend.c4", version: 2, operation: "write", device_id: "other-device" }))
 
 function deferred<T>() {
   let resolve!: (value: T) => void

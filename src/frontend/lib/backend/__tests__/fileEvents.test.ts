@@ -9,10 +9,10 @@ vi.mock("../syncStream", () => ({
   },
 }))
 
-import { announceFileChange, announceFileMove, onFileChange, onFileMove } from "../fileEvents"
+import { announceFileChange, announceFileMove, announceFileRemoval, onFileChange, onFileMove, onFileRemoval } from "../fileEvents"
 
-const emit = (key: string, movedTo?: string) => {
-  const event: ChangeEvent = { seq: 1, resource_kind: "document", resource_key: key, moved_to: movedTo, version: null, device_id: "other" }
+const emit = (key: string, movedTo?: string, operation: ChangeEvent["operation"] = movedTo ? "move" : "write") => {
+  const event: ChangeEvent = { seq: 1, resource_kind: "document", resource_key: key, moved_to: movedTo, version: null, operation, device_id: "other" }
   for (const listener of feed.listeners) listener(event)
 }
 
@@ -30,6 +30,24 @@ describe("onFileMove", () => {
 
     unsubscribe()
     announceFileMove({ from: "/f.tex", to: "/g.tex" })
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(feed.listeners.size).toBe(0)
+  })
+})
+
+describe("onFileRemoval", () => {
+  it("hears this device's announcement and another device's delete event, not its writes or moves, until it unsubscribes", () => {
+    const listener = vi.fn()
+    const unsubscribe = onFileRemoval(listener)
+
+    announceFileRemoval("/a")
+    emit("/b", undefined, "delete")
+    emit("/c")
+    emit("/d", "/e")
+    expect(listener.mock.calls).toEqual([["/a"], ["/b"]])
+
+    unsubscribe()
+    announceFileRemoval("/f")
     expect(listener).toHaveBeenCalledTimes(2)
     expect(feed.listeners.size).toBe(0)
   })

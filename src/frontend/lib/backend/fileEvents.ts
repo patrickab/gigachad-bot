@@ -12,6 +12,7 @@ type FileMoveListener = (move: FileMove) => void
 
 const localMoveListeners = new Set<FileMoveListener>()
 const localChangeListeners = new Set<(path: string) => void>()
+const localRemovalListeners = new Set<(path: string) => void>()
 
 /** Tell every `onFileMove` listener that this device renamed a file, before any tab follows the new path. */
 export function announceFileMove(move: FileMove): void {
@@ -47,6 +48,23 @@ export function onFileChange(match: string | ((path: string) => boolean), listen
   })
   return () => {
     localChangeListeners.delete(local)
+    stopRemote()
+  }
+}
+
+/** Tell every `onFileRemoval` listener that this device deleted `path` (a file or a folder). Its own change events never come back. */
+export function announceFileRemoval(path: string): void {
+  for (const listener of localRemovalListeners) listener(path)
+}
+
+/** Call `listener` with the path (a file or a folder) of everything deleted by this device (`announceFileRemoval`) or by another one (a `delete` change event). Returns the unsubscribe. */
+export function onFileRemoval(listener: (path: string) => void): () => void {
+  localRemovalListeners.add(listener)
+  const stopRemote = subscribeToChanges((event) => {
+    if (event.resource_kind === "document" && event.operation === "delete") listener(event.resource_key)
+  })
+  return () => {
+    localRemovalListeners.delete(listener)
     stopRemote()
   }
 }

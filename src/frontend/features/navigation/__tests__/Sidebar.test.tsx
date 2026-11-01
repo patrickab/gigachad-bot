@@ -422,7 +422,7 @@ describe("Project navigation", () => {
     fireEvent.click(project.getByRole("button", { name: "New file in chapters" }))
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "two" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onFileSelect).toHaveBeenLastCalledWith(`${folder}/chapters/two.tex`))
+    await waitFor(() => expect(onFileSelect).toHaveBeenLastCalledWith(`${folder}/chapters/two.tex`, "proj"))
     expect(api.createTexProjectFile).toHaveBeenCalledWith(`${folder}/chapters`, "two.tex")
   })
 
