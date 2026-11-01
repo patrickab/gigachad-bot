@@ -1,0 +1,25 @@
+# Committed files that carry no context for a repomix pack. Gitignored files are skipped already.
+
+# Lockfiles: versions pinned for installs, read on demand only
+uv.lock
+**/package-lock.json
+
+# Generated context docs, packing them would summarize the summary
+.docs/system-overview.md
+.docs/architecture.md
+.docs/module-map.md
+
+# Licenses and editor settings
+LICENSE
+LICENSE-EXCEPTION
+**/*-LICENSE
+.vscode/
+
+# Binary assets: fonts, icons, copied browser workers
+**/*.woff2
+**/*.png
+src/frontend/public/
+
+# Logs and runtime output, should one ever be committed
+**/*.log
+logs/
