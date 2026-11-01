@@ -9,11 +9,11 @@ import pytest
 from tests.conftest import git
 from tests.shell import REPOSITORY, environment_with, fake_command, run_script
 
-REF = "integration_patrick_ab"
+REF = "refactor/314-ui-customization-seams"
 # npm leaves the stamps the launcher's install and build checks read, node packs an empty chat-ui and serves nothing.
 # The installed tsc is the auto-update's overlay check: it fails in a checkout holding `break-check`.
 FAKE_NPM = (
-    'mkdir -p node_modules\nif [[ $1 == run ]]; then mkdir -p .next && touch .next/BUILD_ID; fi\n'
+    'mkdir -p node_modules\nif [[ $1 == run ]]; then mkdir -p dist && touch dist/index.html; fi\n'
     'if [[ $1 == ci ]]; then mkdir -p node_modules/.bin && printf \'#!/bin/sh\\n! test -e break-check\\n\' >node_modules/.bin/tsc'
     ' && chmod +x node_modules/.bin/tsc; fi\n'
 )
@@ -83,6 +83,7 @@ def test_bootstrap_applies_overlay_preserves_checkout_and_rejects_unrelated_dire
         binaries,
         GIGACHAD_OMP_WEB_REPO=str(checkout),
         GIGACHAD_OMP_WEB_DIR=str(worktree),
+        GIGACHAD_OMP_WEB_HOST="0",
         GIGACHAD_OMP_WEB_REF=REF,
         GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
         GIT_CONFIG_COUNT="1",
@@ -97,8 +98,9 @@ def test_bootstrap_applies_overlay_preserves_checkout_and_rejects_unrelated_dire
     assert initial.returncode == 0, initial.stdout + initial.stderr
     assert git(checkout, "branch", "--show-current") == REF
     assert git(worktree, "rev-parse", "HEAD") == git(source, "rev-parse", "HEAD")
-    assert "CustomRoot" in (worktree / "app" / "layout.tsx").read_text()
-    assert "withCustom(nextConfig)" in (worktree / "next.config.ts").read_text()
+    assert "<CustomRoot />" in (worktree / "app" / "client.tsx").read_text()
+    assert "customOverrides(root)" in (worktree / "scripts" / "build-client.ts").read_text()
+    assert "framedHeaders(SECURITY_HEADERS)" in (worktree / "server" / "http.ts").read_text()
     assert (worktree / "custom" / "root.tsx").read_bytes() == (root / "ompweb-overlay" / "root.tsx").read_bytes()
 
     local_file = checkout / "local-file"
@@ -106,7 +108,7 @@ def test_bootstrap_applies_overlay_preserves_checkout_and_rejects_unrelated_dire
     repeated = launch()
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert local_file.read_text() == "preserve local changes"
-    assert "CustomRoot" in (worktree / "app" / "layout.tsx").read_text()
+    assert "<CustomRoot />" in (worktree / "app" / "client.tsx").read_text()
 
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -179,6 +181,7 @@ def test_auto_update_rebases_branch_onto_upstream_main_or_keeps_it(tmp_path, cha
         fake_binaries(tmp_path),
         GIGACHAD_OMP_WEB_REPO=str(checkout),
         GIGACHAD_OMP_WEB_DIR=str(served),
+        GIGACHAD_OMP_WEB_HOST="0",
         GIGACHAD_OMP_WEB_REF=REF,
         GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
         **IDENTITY,

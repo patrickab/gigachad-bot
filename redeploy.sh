@@ -23,6 +23,7 @@ prod="${GIGACHAD_PROD_DIR:-$HOME/git/gigachad-bot-prod}"
 port=8002
 
 omp_web_unit=gigachad-bot-omp-web.service
+omp_web_host_unit=gigachad-bot-omp-web-host.service
 omp_web_gate_unit=gigachad-bot-omp-web-gate.service
 omp_web_remote=https://github.com/kahme247/ompweb.git
 omp_web_url=http://127.0.0.1:30177
@@ -124,13 +125,13 @@ fi
 printf "%s is up on 127.0.0.1:%s at %s\n" "$unit" "$port" "$(git rev-parse --short HEAD)"
 
 # omp-web
-if ! systemctl --user cat "$omp_web_unit" "$omp_web_gate_unit" >/dev/null 2>&1; then
+if ! systemctl --user cat "$omp_web_unit" "$omp_web_host_unit" "$omp_web_gate_unit" >/dev/null 2>&1; then
     printf "omp-web units are not installed: run %s/deploy/install-systemd-service.sh\n" "$prod" >&2
     exit 1
 fi
 omp_web_repo="$(prod_setting GIGACHAD_OMP_WEB_REPO "$HOME/git/ompweb_original")"
 omp_web_dir="$(prod_setting GIGACHAD_OMP_WEB_DIR "$HOME/.local/share/gigachad-bot/ompweb-upstream")"
-omp_web_ref="$(prod_setting GIGACHAD_OMP_WEB_REF integration_patrick_ab)"
+omp_web_ref="$(prod_setting GIGACHAD_OMP_WEB_REF refactor/314-ui-customization-seams)"
 if [[ ! -d $omp_web_repo/.git ]]; then
     printf "No omp-web checkout at %s: git clone %s %s\n" "$omp_web_repo" "$omp_web_remote" "$omp_web_repo" >&2
     exit 1
@@ -174,6 +175,11 @@ if [[ $omp_web_old != "$omp_web_new" ]] || $omp_web_behind || ! git diff --quiet
     fi
 fi
 printf "%s is up on %s at %s\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)"
+
+# The daemon outlives the server restarts above (the new server adopts its runs) and is never restarted here: a protocol
+# mismatch makes it exit and its unit's Restart=always brings it back from the served checkout. Starting is a no-op when active.
+systemctl --user start "$omp_web_host_unit"
+printf "%s is running (from %s)\n" "$omp_web_host_unit" "$omp_web_dir"
 
 systemctl --user restart "$omp_web_gate_unit"
 if ! wait_until 30 1 omp_web_gate_up; then

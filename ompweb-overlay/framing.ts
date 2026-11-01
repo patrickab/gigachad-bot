@@ -1,6 +1,3 @@
-import type { NextConfig } from "next";
-import type { Header as HeaderRule } from "next/dist/lib/load-custom-routes";
-
 const FRAME_ANCESTORS_ENV = "OMP_WEB_FRAME_ANCESTORS";
 const ORIGIN_PATTERN = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i;
 
@@ -12,29 +9,20 @@ export function frameAncestorOrigins(rawValue = process.env[FRAME_ANCESTORS_ENV]
   return origins;
 }
 
-/** Let `origins` frame a rule's pages: CSP `frame-ancestors` lists them, `X-Frame-Options: DENY` goes. */
-function allowFramingBy(origins: string[], rule: HeaderRule): HeaderRule {
-  const headers = rule.headers
-    .filter((header) => !(header.key === "X-Frame-Options" && header.value === "DENY"))
-    .map((header) => header.key === "Content-Security-Policy"
-      ? { ...header, value: header.value.replace("frame-ancestors 'none'", `frame-ancestors 'self' ${origins.join(" ")}`) }
-      : header);
-  return { ...rule, headers };
-}
+// Read once at server start, so an invalid value stops the server instead of failing every response.
+const configuredOrigins = frameAncestorOrigins();
 
 /**
  * Let the origins in `OMP_WEB_FRAME_ANCESTORS` embed the app in a frame (gigachad-bot's shell).
  *
  * - Unset or empty: upstream's headers unchanged (`DENY`, `frame-ancestors 'none'`)
- * - Only rules carrying `DENY` / `frame-ancestors 'none'` change, `/api/files` keeps `SAMEORIGIN`
+ * - Set: CSP `frame-ancestors` lists them and `X-Frame-Options: DENY` goes
  */
-export function withFraming(config: NextConfig, origins = frameAncestorOrigins()): NextConfig {
-  const upstreamHeaders = config.headers;
-  if (!upstreamHeaders || origins.length === 0) return config;
-  return {
-    ...config,
-    async headers() {
-      return (await upstreamHeaders()).map((rule) => allowFramingBy(origins, rule));
-    },
-  };
+export function framedHeaders(headers: Record<string, string>, origins = configuredOrigins): Record<string, string> {
+  if (origins.length === 0) return headers;
+  const framed = { ...headers };
+  delete framed["X-Frame-Options"];
+  const policy = framed["Content-Security-Policy"];
+  if (policy) framed["Content-Security-Policy"] = policy.replace("frame-ancestors 'none'", `frame-ancestors 'self' ${origins.join(" ")}`);
+  return framed;
 }

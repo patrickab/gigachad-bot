@@ -1,0 +1,21 @@
+[Unit]
+Description=gigachad-bot omp-web host daemon (runs this machine's omp sessions)
+Wants=network-online.target gigachad-bot-omp-web.service
+After=network-online.target gigachad-bot-omp-web.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-omp-web.sh host
+# The daemon exits until the server has written host.json (first start) and when the server replaces its token.
+Restart=always
+RestartSec=10s
+TimeoutStopSec=30s
+# No NoNewPrivileges, PrivateTmp or UMask: the daemon spawns the user's omp agents, which need the real /tmp,
+# sudo and normal file modes like a login shell
+
+[Install]
+WantedBy=default.target

@@ -225,7 +225,7 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 ## omp tabs (omp-web)
 
 - Serve unmodified upstream `kahme247/ompweb` plus the private overlay `ompweb-overlay/` (embed mode, bridge, composer, Q&A cards, Markdown, embed-only theme). Never vendor its components/hooks/CSS or change its server/session/protocol logic to suit the shell.
-- Let `run-omp-web.sh` serve a detached worktree at `GIGACHAD_OMP_WEB_REF`, with the overlay as `custom/` and the two-line `seams.patch` that loads it. Overrides wrap upstream modules by relative path, overlay CSS is scoped to `html.cf-embed`. It reuses existing listeners, so updates require restart. Allow the frontend's frame origin.
+- Let `run-omp-web.sh` serve a detached worktree at `GIGACHAD_OMP_WEB_REF`, with the overlay as `custom/` and the small `seams.patch` that loads it (mount, `Bun.build` overrides plugin, frame headers). Overrides wrap upstream modules by relative path, overlay CSS is scoped to `html.cf-embed`. It reuses existing listeners, so updates require restart. Allow the frontend's frame origin. The `ompweb host` daemon runs from the same checkout and holds the omp runs across server restarts.
 
 | Owner | Contract |
 | --- | --- |

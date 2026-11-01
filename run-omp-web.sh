@@ -3,15 +3,18 @@
 #
 #   source    upstream kahme247/ompweb (GIGACHAD_OMP_WEB_REPO, ref GIGACHAD_OMP_WEB_REF), never modified there
 #   checkout  a dedicated detached worktree (GIGACHAD_OMP_WEB_DIR) owned by this script: every start resets it to
-#             the ref, so its `next build` never touches the source checkout's `npm run dev`
+#             the ref, so its build never touches the source checkout's dev server
 #   overlay   ompweb-overlay/ becomes the worktree's custom/ (embed mode, postMessage bridge, module overrides),
-#             ompweb-overlay/seams.patch adds the two upstream lines that load it (app/layout.tsx, next.config.ts)
+#             ompweb-overlay/seams.patch adds the three upstream seams that load it (app/client.tsx, scripts/build-client.ts,
+#             server/http.ts)
 #   chat-ui   @gigachad/chat-ui is packed from src/frontend/packages/chat-ui and installed without touching the
 #             worktree's manifest or lock
 #   framing   omp-web refuses frames unless OMP_WEB_FRAME_ANCESTORS lists the frontend origin (custom/framing.ts),
-#             `next build` bakes the headers in, so a changed value rebuilds
+#             the server reads it at start
 #   update    before serving, the ref branch is rebased locally onto origin/main when it lacks it (auto_update below),
 #             GIGACHAD_AUTO_UPDATE=0 opts out
+#   host      `ompweb host`, the daemon that runs this machine's omp sessions, is started beside the server and survives its
+#             restarts, log: <GIGACHAD_OMP_WEB_DIR>.host.log, GIGACHAD_OMP_WEB_HOST=0 opts out
 #
 # Idempotent: an omp-web already answering on the port is reused rather than
 # restarted (one instance per machine, it owns the omp session processes), with
@@ -23,7 +26,7 @@ source "$root_dir/deploy/lib.sh"
 bind="${GIGACHAD_OMP_WEB_BIND:-127.0.0.1:30177}"
 repo="${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb_original}"
 dir="${GIGACHAD_OMP_WEB_DIR:-$HOME/.local/share/gigachad-bot/ompweb-upstream}"
-ref="${GIGACHAD_OMP_WEB_REF:-integration_patrick_ab}"
+ref="${GIGACHAD_OMP_WEB_REF:-refactor/314-ui-customization-seams}"
 frame_ancestors="${GIGACHAD_OMP_WEB_FRAME_ANCESTORS:-http://127.0.0.1:2999 http://localhost:2999}"
 overlay="$root_dir/ompweb-overlay"
 
@@ -31,6 +34,17 @@ overlay="$root_dir/ompweb-overlay"
 allows_framing() {
     local first_origin="${frame_ancestors%% *}"
     curl -sIL "http://$bind/" | grep -i '^content-security-policy:' | grep -qF "$first_origin"
+}
+
+# omp-web runs this machine's omp sessions through its host daemon, `ompweb host`: without one "This machine" is offline and no
+# session can start. The daemon outlives omp-web restarts (a restarted server adopts its runs), so one per served checkout,
+# kept by a lock and reused when alive. The loop stands in for upstream's `ompweb-host` unit (Restart=always, 10 s): the daemon
+# exits until a first-start server has written host.json, and when the server replaces its token.
+ensure_host_daemon() {
+    [[ ${GIGACHAD_OMP_WEB_HOST:-1} != 0 && -f "$dir/bin/omp-web.js" ]] || return 0
+    PATH="$root_dir/.venv/bin:$PATH" setsid flock -n "$dir.host.lock" \
+        bash -c 'while :; do node "$1/bin/omp-web.js" host; sleep 10; done' _ "$dir" \
+        </dev/null >>"$dir.host.log" 2>&1 &
 }
 
 note() {
@@ -148,6 +162,7 @@ if port_open "$bind"; then
     if [[ -d "$dir/custom" && -n "$(rsync -rnic --delete "$overlay/" "$dir/custom/")" ]]; then
         printf 'omp-web on %s serves another overlay than %s: stop it (when idle) and rerun to rebuild\n' "$bind" "$overlay" >&2
     fi
+    ensure_host_daemon
     exit 0
 fi
 if ! command -v omp >/dev/null 2>&1; then
@@ -210,29 +225,18 @@ if [[ "$(cat node_modules/.gigachad-chat-ui.sha256 2>/dev/null)" != "$chat_ui_di
     printf '%s' "$chat_ui_digest" >node_modules/.gigachad-chat-ui.sha256
 fi
 
-build_stamp=.next/gigachad-build
-built_inputs="$(cat "$build_stamp" 2>/dev/null || true)"
-# Webpack's persistent cache misses module-replacement changes and a repacked chat-ui (it takes a node_modules package as
-# immutable per version), it then builds them stale.
-if [[ -f .next/BUILD_ID ]] && { [[ -n "$(find next.config.ts custom/next.config.ts custom/overrides -newer .next/BUILD_ID -print -quit)" ]] \
-    || [[ "${built_inputs##* }" != "$chat_ui_digest" ]]; }; then
-    rm -rf .next/cache
-fi
+# Bun bundles the client into dist/ (scripts/build-client.ts) with no build cache. The frame origins are read at server start,
+# so only the packed chat-ui and the sources decide a rebuild.
+build_stamp=dist/gigachad-build
 export OMP_WEB_FRAME_ANCESTORS="$frame_ancestors"
-build_inputs="$frame_ancestors $chat_ui_digest"
-if [[ ! -f .next/BUILD_ID ]] \
-    || [[ -n "$(find . \( -path ./.next -o -path ./node_modules -o -path ./.git \) -prune -o -type f -newer .next/BUILD_ID -print -quit)" ]] \
-    || [[ "$built_inputs" != "$build_inputs" ]]; then
-    printf 'Building omp-web (~2 min)\n'
-    npm run build 2>&1 | tee node_modules/.gigachad-build.log
-    # Next only warns when an override lacks an export upstream modules import, the page would then crash at runtime.
-    if grep -q 'Attempted import error' node_modules/.gigachad-build.log; then
-        printf 'error: an overlay module misses an export, see %s/node_modules/.gigachad-build.log\n' "$dir" >&2
-        rm -f .next/BUILD_ID
-        exit 1
-    fi
-    printf '%s' "$build_inputs" >"$build_stamp"
+if [[ ! -f dist/index.html ]] \
+    || [[ -n "$(find . \( -path ./dist -o -path ./build -o -path ./node_modules -o -path ./.git \) -prune -o -type f -newer dist/index.html -print -quit)" ]] \
+    || [[ "$(cat "$build_stamp" 2>/dev/null || true)" != "$chat_ui_digest" ]]; then
+    printf 'Building omp-web\n'
+    npm run build
+    printf '%s' "$chat_ui_digest" >"$build_stamp"
 fi
 
+ensure_host_daemon
 printf 'Starting omp-web on %s\n' "$bind"
 exec node bin/omp-web.js --port "${bind##*:}" --hostname "${bind%%:*}" --no-open

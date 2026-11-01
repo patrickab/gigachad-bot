@@ -29,6 +29,7 @@ readonly units=(
     gigachad-bot.service
     gigachad-bot-omp.service
     gigachad-bot-omp-web.service
+    gigachad-bot-omp-web-host.service
     gigachad-bot-omp-web-gate.service
     gigachad-bot-factory.service
     gigachad-bot-litellm-proxy.service

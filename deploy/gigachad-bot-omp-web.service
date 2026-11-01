@@ -8,6 +8,8 @@ Type=exec
 WorkingDirectory=%h/git/gigachad-bot-prod
 Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+# The host daemon has its own unit (gigachad-bot-omp-web-host.service): a restart here leaves it and its runs alone
+Environment=GIGACHAD_OMP_WEB_HOST=0
 ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-omp-web.sh server
 Restart=on-failure
 RestartSec=5s

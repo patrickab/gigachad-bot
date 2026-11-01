@@ -1,38 +1,62 @@
-diff --git i/app/layout.tsx w/app/layout.tsx
-index 332597e..37b4d4b 100644
---- i/app/layout.tsx
-+++ w/app/layout.tsx
-@@ -7,6 +7,7 @@ import { IosFocusZoomGuard } from "@/components/IosFocusZoomGuard";
- import { SIDEBAR_HISTORY_BRIDGE_SCRIPT } from "@/lib/sidebar-history-bridge";
- import { getInstallName } from "@/lib/install-name";
- import "./globals.css";
+diff --git i/app/client.tsx w/app/client.tsx
+index a988daa..f547aa4 100644
+--- i/app/client.tsx
++++ w/app/client.tsx
+@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
+ import { IosFocusZoomGuard } from "@/components/IosFocusZoomGuard";
+ import { LoginForm } from "@/components/LoginForm";
+ import { RouteLoadingFallback } from "@/components/RouteLoadingFallback";
 +import { CustomRoot } from "@/custom/root";
  
- const geist = Geist({
-   subsets: ["latin"],
-@@ -111,6 +112,7 @@ export default function RootLayout({
-       <body translate="no" className="notranslate" style={{ height: "100%", maxHeight: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-         <IosFocusZoomGuard />
-         {children}
-+        <CustomRoot />
-       </body>
-     </html>
-   );
-diff --git i/next.config.ts w/next.config.ts
-index 021b63d..a0bd316 100644
---- i/next.config.ts
-+++ w/next.config.ts
-@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
- import { dirname, join } from "path";
- import { fileURLToPath } from "url";
- import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
-+import { withCustom } from "./custom/next.config";
+ // createRoot (not hydrateRoot) replaces the static skeleton or sign-in form that app/index.html puts in #root; a
+ // password typed into the static form carries over.
+@@ -14,6 +15,7 @@ createRoot(document.getElementById("root")!).render(
+   <StrictMode>
+     <AppErrorBoundary>
+       <IosFocusZoomGuard />
++      <CustomRoot />
+       {location.pathname === "/login" ? (
+         <LoginForm initialPassword={typedPassword} />
+       ) : (
+diff --git i/scripts/build-client.ts w/scripts/build-client.ts
+index 8caf3c9..a2417cc 100644
+--- i/scripts/build-client.ts
++++ w/scripts/build-client.ts
+@@ -5,6 +5,7 @@ import path from "node:path";
+ import type { BunPlugin } from "bun";
+ import { bundledPackageDirs } from "./licenses";
+ import tailwind from "./tailwind-plugin";
++import { customOverrides } from "../custom/overrides-plugin";
+ import { clientEnv } from "../server/client-env";
+ import { stylesheetFirst } from "../server/http";
  
- // The WASM SWC build used on wasm-first targets (e.g. aarch64-linux-android)
- // does not transpile ESM to CJS, so this file loads as ESM there and
-@@ -135,4 +136,4 @@ const nextConfig = (phase: string): NextConfig => {
-   };
- };
+@@ -39,7 +40,7 @@ const result = await Bun.build({
+   sourcemap: "none",
+   publicPath: "/",
+   naming: { entry: "[name].[ext]", chunk: "assets/[name]-[hash].[ext]", asset: "assets/[name]-[hash].[ext]" },
+-  plugins: [tailwind, emitFonts],
++  plugins: [tailwind, emitFonts, customOverrides(root)],
+   define: {
+     "process.env.NODE_ENV": JSON.stringify("production"),
+     ...Object.fromEntries(Object.entries(clientEnv(root)).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)])),
+diff --git i/server/http.ts w/server/http.ts
+index 1267540..20cac0b 100644
+--- i/server/http.ts
++++ w/server/http.ts
+@@ -1,6 +1,7 @@
+ import { realpathSync, statSync, type Stats } from "node:fs";
+ import path from "node:path";
+ import { getInstallName } from "@/lib/install-name";
++import { framedHeaders } from "../custom/framing";
  
--export default nextConfig;
-+export default withCustom(nextConfig);
+ const SECURITY_HEADERS = {
+   "X-Content-Type-Options": "nosniff",
+@@ -41,7 +42,7 @@ function acceptsGzip(header: string | null): boolean {
+ export function finalizeResponse(request: Request, response: Response): Response {
+   const { pathname } = new URL(request.url);
+   const headers = new Headers(response.headers);
+-  for (const [name, value] of Object.entries(pathname.startsWith("/api/files/") ? FILE_RESPONSE_HEADERS : SECURITY_HEADERS)) {
++  for (const [name, value] of Object.entries(pathname.startsWith("/api/files/") ? FILE_RESPONSE_HEADERS : framedHeaders(SECURITY_HEADERS))) {
+     headers.set(name, value);
+   }
+   if (pathname === "/" || pathname === "/login") headers.set("Cache-Control", INDEX_CACHE);

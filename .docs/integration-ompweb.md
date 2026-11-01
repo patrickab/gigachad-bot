@@ -7,21 +7,22 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
 ```
 ~/git/gigachad-bot/                      gigachad-bot checkout (master), run.sh serves it, the only gigachad-bot checkout
   ompweb-overlay/                        private overlay, becomes custom/ in the served omp-web
-    root.tsx, framing.ts, next.config.ts   entry (CustomRoot), frame-ancestors CSP, module overrides
+    root.tsx                             entry (CustomRoot), mounted by app/client.tsx
+    framing.ts                           frame-ancestors CSP from OMP_WEB_FRAME_ANCESTORS, applied by server/http.ts
+    overrides-plugin.ts                  Bun.build plugin: overrides/<path> replaces upstream <path>, used by scripts/build-client.ts
     components/                          EmbedBridge, EmbedMode, QaTurn, LiveTail, turn-summary, EmbeddedMarkdown
     embed/                               postMessage channel, completions, open-file, insets, modal
     overrides/<upstream path>            replaces that upstream module, wraps it by relative import
     theme/                               embed-only CSS (html.cf-embed), palette/tokens mapping
-    seams.patch                          the 2 upstream lines that load the overlay (keep at 2)
+    seams.patch                          the upstream lines that load the overlay (app/client.tsx, scripts/build-client.ts, server/http.ts)
     *.test.mjs                           overlay tests (node:test + jiti, run inside an omp-web checkout)
   src/frontend/features/omp/             shell adapter: frame, protocol, composer, tabs (only place that knows omp-web)
   src/frontend/packages/chat-ui/         @gigachad/chat-ui: protocol.ts, palette, Q&A cards, markdown, code/diagram renderers
   src/lib/omp_web.py                     backend adapter (only place that builds omp-web URLs)
-  run-omp-web.sh                         builds and serves omp-web (auto-rebase onto origin/main, reset to ref + seams.patch + overlay + chat-ui)
+  run-omp-web.sh                         builds and serves omp-web (auto-rebase onto origin/main, reset to ref + seams.patch + overlay + chat-ui), starts the host daemon
 
-~/git/ompweb_original/                   upstream clone kahme247/ompweb (main), never edited for gigachad
-~/git/worktrees/ompweb_original/<topic>/ upstream topic worktrees (seams, fixes meant as upstream PRs)
-  integration_patrick_ab                 integration branch: upstream main + our pending upstream PRs, the ref we serve, rebased onto origin/main by run-omp-web.sh
+~/git/ompweb_original/                   upstream clone kahme247/ompweb (main), remote `fork` = patrickab/ompweb-fork
+~/git/worktrees/ompweb_original/refactor-314/  branch refactor/314-ui-customization-seams: PR #332, upstream main + our seams, the ref we serve
 ~/.local/share/gigachad-bot/ompweb-upstream/   served build checkout (D), owned by run-omp-web.sh, never edit by hand
 ```
 
@@ -32,10 +33,11 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
 | Look/behaviour of omp tabs only when embedded | `ompweb-overlay/` (override, component, embed CSS) | gigachad-bot commit, next omp-web restart |
 | Anything both chat and omp tabs render, the postMessage protocol | `src/frontend/packages/chat-ui/` | same gigachad-bot commit (the launcher packs it) |
 | Shell side of omp tabs (top bar, composer, tabs, frame layout) | `src/frontend/features/omp/` | gigachad-bot commit, frontend hot-reloads |
-| omp-web lacks a seam (hardcoded value, unexported setup, bug) | upstream topic branch, PR to kahme247/ompweb, then into `integration_patrick_ab` | ref the launcher serves |
+| omp-web lacks a seam (hardcoded value, unexported setup, bug) | commit on `refactor/314-ui-customization-seams` (PR #332), pushed to the fork | ref the launcher serves |
+| Loading the overlay into upstream (mount, bundler plugin, headers) | `ompweb-overlay/seams.patch`, as few lines as possible | gigachad-bot commit |
 | omp-web server API, sessions, RPC | never | n/a |
 
-Upstream changes must be refactors without behaviour change or features/fixes valuable to every omp-web user (issue #314 is the umbrella for seams). Follow upstream `CONTRIBUTING.md`: `tsc`, `npm run lint` (zero new warnings), `npm test`, i18n strings in all three locales, focused PRs.
+Upstream changes must be refactors without behaviour change or features/fixes valuable to every omp-web user (issue #314 is the umbrella for seams). Follow upstream `CONTRIBUTING.md`: `npm run typecheck`, `npm run lint` (zero new warnings), `npm test`, i18n strings in all three locales, focused PRs. gigachad-specific glue (frame origins, the overrides plugin, the overlay mount) stays in `seams.patch`, it does not belong in the PR.
 
 ## Workflows
 
@@ -50,54 +52,56 @@ Upstream changes must be refactors without behaviour change or features/fixes va
 
 ```bash
 task=<task>; G=~/git/gigachad-bot; C=~/.local/share/gigachad-bot/ompweb-check-$task
-git -C ~/git/ompweb_original worktree add --detach "$C" integration_patrick_ab   # once
-cd "$C" && npm ci && git apply "$G/ompweb-overlay/seams.patch"                    # once
+git -C ~/git/ompweb_original worktree add --detach "$C" refactor/314-ui-customization-seams   # once
+cd "$C" && npm ci && git apply "$G/ompweb-overlay/seams.patch"                                 # once
 # every check:
 rsync -a --delete "$G/ompweb-overlay/" "$C/custom/"
 T=$(cd "$G/src/frontend" && node packages/chat-ui/pack.mjs --out "$C/node_modules/.gigachad-chat-ui") \
   && npm install --no-save --no-audit --no-fund --ignore-scripts "$T"
 node_modules/.bin/tsc --noEmit && npx eslint custom && node --experimental-strip-types --test custom/*.test.mjs
+npm run build   # optional: the real client bundle with the overrides, about a second
 # done: git -C ~/git/ompweb_original worktree remove --force "$C"
 ```
 
-An override typechecks against the upstream module it wraps, so an upstream change that breaks it fails `tsc` here.
+An override typechecks against the upstream module it wraps, so an upstream change that breaks it fails `tsc` here. A missing export fails `npm run build`.
 
 ### Automatic upstream rebase
 
 Every real start of `run-omp-web.sh` (`run.sh`, and in production `gigachad-bot-omp-web.service` via `deploy/run-production-omp-web.sh server`) first updates the ref branch, so omp-web serves the newest upstream `main` the overlay passes on. An omp-web already listening is reused untouched: the update applies at its next start. `redeploy.sh` also restarts the unit when `origin/main` moved past the branch, unless the last update already failed for that same branch tip and `origin/main`, or an omp session runs. `GIGACHAD_AUTO_UPDATE=0` opts out.
 
 1. `git fetch origin` in `GIGACHAD_OMP_WEB_REPO` (60 s limit, no prompts). Branch already contains `origin/main` → nothing to do, silently.
-2. A worktree holding the branch (e.g. `~/git/worktrees/ompweb_original/integration_patrick_ab`) with tracked changes → keep, it gets moved only when clean.
-3. Rebase a copy in a temporary detached worktree `<GIGACHAD_OMP_WEB_DIR>.update.XXXXXX` (no autostash, autosquash or update-refs: topic branches stay). Conflict → `rebase --abort`.
+2. A worktree holding the branch (e.g. `~/git/worktrees/ompweb_original/refactor-314`) with tracked changes → keep, it gets moved only when clean.
+3. Rebase a copy in a temporary detached worktree `<GIGACHAD_OMP_WEB_DIR>.update.XXXXXX` (no autostash, autosquash or update-refs: other branches stay). Conflict → `rebase --abort`.
 4. Overlay checks on the result, as in the private check checkout: `seams.patch` applies, overlay as `custom/`, `npm ci`, chat-ui packed, `tsc --noEmit`, `node --experimental-strip-types --test custom/*.test.mjs`. Output: `<GIGACHAD_OMP_WEB_DIR>.auto-update.log`.
-5. Pass → the branch moves to the result (`reset --keep` in its worktree, else a compare-and-swap `update-ref`), the temporary worktree is removed. Never pushed.
+5. Pass → the branch moves to the result (`reset --keep` in its worktree, else a compare-and-swap `update-ref`), the temporary worktree is removed. Never pushed: the local PR branch is then ahead of the fork, push it with `--force-with-lease` when the PR should follow.
 
-Any failure (offline, no `origin/main`, conflict, failed check, dirty or moved worktree) keeps the branch exactly as it was, prints one `omp-web auto-update: kept …` line with the reason to stderr and serves the last working version. A failed rebase or check is remembered in `<GIGACHAD_OMP_WEB_DIR>.auto-update-failed` per (branch tip, `origin/main`, overlay and chat-ui sources): later starts print the same reason without retrying until one of them changes. To resolve a conflict, rebase `integration_patrick_ab` by hand in its worktree; a failing check means the overlay needs adapting to upstream (fix it in `ompweb-overlay/`, the next start retries). A lock (`<GIGACHAD_OMP_WEB_DIR>.auto-update.lock`) keeps concurrent launchers from updating at once.
+Any failure (offline, no `origin/main`, conflict, failed check, dirty or moved worktree) keeps the branch exactly as it was, prints one `omp-web auto-update: kept …` line with the reason to stderr and serves the last working version. A failed rebase or check is remembered in `<GIGACHAD_OMP_WEB_DIR>.auto-update-failed` per (branch tip, `origin/main`, overlay and chat-ui sources): later starts print the same reason without retrying until one of them changes. To resolve a conflict, rebase the branch by hand in its worktree; a failing check means the overlay needs adapting to upstream (fix it in `ompweb-overlay/`, the next start retries). A lock (`<GIGACHAD_OMP_WEB_DIR>.auto-update.lock`) keeps concurrent launchers from updating at once.
 
 ### Upstream change (seam or fix)
 
-1. Topic worktree off upstream `main` (PRs target main): `git -C ~/git/ompweb_original worktree add -b <topic> ~/git/worktrees/ompweb_original/<topic> main`
-2. Change, add/adjust upstream tests, run upstream checks. Baseline: `npm test` passes ~1700, lint has ~10 pre-existing warnings.
-3. The integrator cherry-picks the commit into `integration_patrick_ab`. Only commits there reach the served omp-web: `run-omp-web.sh` resets D to the ref, uncommitted edits in any worktree are invisible to it (and block its automatic rebase until committed or stashed).
-4. PR to kahme247/ompweb only with the user's approval. Never push without it.
+1. Commit on `refactor/314-ui-customization-seams` in `~/git/worktrees/ompweb_original/refactor-314`. A change unrelated to #314 gets its own topic branch off `main` and its own PR, and is served only once merged.
+2. Add/adjust upstream tests, run upstream checks (`npm run typecheck`, `npm run lint`, `npm test`). Compare failures against `origin/main`: a few environment-dependent tests fail there too.
+3. Only commits reach the served omp-web: `run-omp-web.sh` resets D to the ref, uncommitted edits in any worktree are invisible to it (and block its automatic rebase until committed or stashed).
+4. Push to the fork (`git push --force-with-lease fork refactor/314-ui-customization-seams`, it updates PR #332) only with the user's approval.
 
 ## Shared resources and concurrency
 
 | Resource | Owner | Rule |
 |---|---|---|
 | Frontend 2999 + backend 8001 (`run.sh`, tmux `gigachad-bot`) | user | Never start a second copy, never restart without the user. Serves `~/git/gigachad-bot` |
-| omp-web 30177 (served checkout D) | integrator | One instance per machine, it owns the omp session processes. Others never stop or rebuild it |
-| `integration_patrick_ab` branch | integrator | Agents commit to topic branches, the integrator cherry-picks |
+| omp-web 30177 (served checkout D) | integrator | One instance per machine. Others never stop or rebuild it |
+| omp-web host daemon (`ompweb host`) | integrator | Owns the omp session processes. Restarting it ends runs |
+| `refactor/314-ui-customization-seams` branch (PR #332) | integrator | Agents propose commits, the integrator commits and pushes |
 | `master` (gigachad-bot) | user | The one branch `run.sh` serves. Commit only on the user's request |
 | omp sessions | user | Never send prompts or click Edit/Fork in existing sessions. Live tests only in a throwaway session the user approved (e.g. new session in `/tmp`) |
 
-Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `features/omp/`, `chat-ui` components, one upstream seam per topic. Serialize: `protocol.ts` (one owner at a time), `seams.patch`, `run-omp-web.sh`, the overlay `next.config.ts` override list.
+Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `features/omp/`, `chat-ui` components, one upstream seam per commit. Serialize: `protocol.ts` (one owner at a time), `seams.patch`, `run-omp-web.sh`, `overrides-plugin.ts`.
 
 ## Restart and live smoke (integrator)
 
-1. Cherry-pick upstream commits into `integration_patrick_ab` and push it to the fork (`git push fork integration_patrick_ab`, it tracks `fork/integration_patrick_ab`): production moves its own copy of the branch from there (`.docs/deployment.md`, "Update omp-web"). gigachad-bot changes are already in `~/git/gigachad-bot`. Upstream `main` needs no manual rebase: the restart does it (above).
-2. Check omp-web is idle: `curl -s http://127.0.0.1:30177/api/sessions` → `runningSessionIds` empty.
-3. Restart: restarting `run.sh` rebuilds omp-web, it stops the omp-web it started on exit. Without it: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from `~/git/gigachad-bot`. Build takes ~2 min.
+1. Commit upstream seams on the PR branch and push it to the fork: production moves its own copy of the branch from there (`.docs/deployment.md`, "Update omp-web"). gigachad-bot changes are already in `~/git/gigachad-bot`. Upstream `main` needs no manual rebase: the restart does it (above).
+2. Check omp-web is idle: `curl -s http://127.0.0.1:30177/api/sessions` → `runningSessionIds` empty. A server restart keeps runs (the daemon holds them, the new server adopts them), the check is a safety margin.
+3. Restart: restarting `run.sh` rebuilds omp-web, it stops the omp-web it started on exit. Without it: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from `~/git/gigachad-bot`. The build takes seconds, `npm ci` after a lockfile change a few more.
 4. Smoke at `http://localhost:2999` (not `127.0.0.1`: Next dev never hydrates there): open an omp session, switch omp tabs, check the changed surface. Send prompts only in an approved throwaway session.
 
 ## Pitfalls
@@ -107,4 +111,6 @@ Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `featu
 - Moving or deleting frontend files under a running `next dev` can leave a stale module graph (500, "Element type is invalid"). Restarting `run.sh` fixes it, ask the user.
 - The served checkout D only changes on a restart. A built overlay change is invisible until then.
 - `custom/` in D is overwritten on every start, edit `ompweb-overlay/` only.
+- Overrides apply to the production bundle (`npm run build`) only, upstream's `npm run dev` does not load `overrides-plugin.ts`.
 - Overlay CSS that targets omp-web markup (`[role=log]`, `.chat-input-shell`, `.activity-row*`) silently stops matching after an upstream rename: prefer an upstream class hook or CSS variable seam.
+- Upstream (since #342) runs this machine's omp sessions through a local daemon, `ompweb host`; without it "This machine" is offline and no session starts. It always runs from the served checkout D, so it ships the commit of the controlled ref: `run-omp-web.sh` starts one beside the server in development (under a lock, one per checkout), `gigachad-bot-omp-web-host.service` in production (`run-production-omp-web.sh host`, Restart=always). A server restart or redeploy leaves it and its runs alone, the new server adopts them. The daemon keeps the environment of the start that created it. Never run `ompweb systemd install` or `npx @kahme247/ompweb host` here: they use the installed or published package.

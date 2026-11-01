@@ -223,17 +223,22 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 ```
 
 - Serve a ref containing the upstream seams the overlay uses. Until PR #332
-  (issue #314) is merged that is the branch `integration_patrick_ab` (upstream
-  `main` plus #332's commits), which a fresh clone lacks. The integrator pushes it
-  to `patrickab/ompweb-fork` after every cherry-pick
-  (`.docs/integration-ompweb.md`). Create it tracking the fork, then use
-  `origin/main` once #332 is merged:
+  (issue #314) is merged that is its branch `refactor/314-ui-customization-seams`
+  (upstream `main` plus the PR's commits) on `patrickab/ompweb-fork`, which a
+  fresh clone lacks. Create it tracking the fork, then use `origin/main` once
+  #332 is merged:
 
 ```bash
 git -C "$HOME/git/ompweb_original" remote add fork git@github.com:patrickab/ompweb-fork.git
 git -C "$HOME/git/ompweb_original" fetch fork
-git -C "$HOME/git/ompweb_original" branch --track integration_patrick_ab fork/integration_patrick_ab
+git -C "$HOME/git/ompweb_original" branch --track refactor/314-ui-customization-seams fork/refactor/314-ui-customization-seams
 ```
+
+- A host provisioned with the former `integration_patrick_ab` branch: create the branch
+  above, then `git -C "$HOME/git/ompweb_original" branch -D integration_patrick_ab`
+  (the fork no longer has it). An env file that sets `GIGACHAD_OMP_WEB_REF` needs the new name.
+- Run `"$PROD/deploy/install-systemd-service.sh"` once after this change: it adds
+  `gigachad-bot-omp-web-host.service`, which `redeploy.sh` then starts.
 
 - `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
   applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
@@ -248,7 +253,7 @@ git -C "$HOME/git/ompweb_original" branch --track integration_patrick_ab fork/in
   branch worktree or offline start keeps the branch and prints one
   `omp-web auto-update:` line why; the start goes on. Details:
   `.docs/integration-ompweb.md`, "Automatic upstream rebase".
-- Install/build initially and rebuild on source changes.
+- Install/build initially and rebuild on source changes (`npm run build`, Bun, seconds).
 - Restart after updates: an existing listener is reused, its update applies at
   its next start.
 
@@ -256,7 +261,7 @@ git -C "$HOME/git/ompweb_original" branch --track integration_patrick_ab fork/in
 | --- | --- |
 | `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb_original`, upstream checkout |
 | `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb-upstream`, served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `integration_patrick_ab`, a remote-tracking ref (`origin/main`) is fetched by `redeploy.sh` |
+| `GIGACHAD_OMP_WEB_REF` | `refactor/314-ui-customization-seams`, a remote-tracking ref (`origin/main`) is fetched by `redeploy.sh` |
 | `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` |
 | `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
 | `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177`, upstream for backend/gate |
@@ -265,6 +270,7 @@ git -C "$HOME/git/ompweb_original" branch --track integration_patrick_ab fork/in
 | `GIGACHAD_OMP_WEB_AUTH` | Optional trusted upstream auth header |
 | `GIGACHAD_OMP_WEB` | `1`, set `0` to skip development startup |
 | `GIGACHAD_AUTO_UPDATE` | `1`, set `0` to serve the ref as is (no fetch, no rebase) |
+| `GIGACHAD_OMP_WEB_HOST` | `1`, set `0` to not start the `ompweb host` daemon from `run-omp-web.sh` (development: log `<GIGACHAD_OMP_WEB_DIR>.host.log`, production units set it, their own unit runs the daemon) |
 
 #### Production: units and the Tailnet gate
 
@@ -285,12 +291,15 @@ GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
 
 ```bash
 "$PROD/deploy/install-systemd-service.sh"
-systemctl --user start gigachad-bot-omp-web.service gigachad-bot-omp-web-gate.service
+systemctl --user start gigachad-bot-omp-web.service gigachad-bot-omp-web-host.service gigachad-bot-omp-web-gate.service
 "$PROD/deploy/tailscale-serve.sh" 30179 8443
 systemctl --user restart gigachad-bot.service
 ```
 
-- Run both units through `deploy/run-production-omp-web.sh` with `server` or `gate`.
+- Run the units through `deploy/run-production-omp-web.sh` with `server`, `host` or `gate`.
+- The host daemon (`ompweb host`, `gigachad-bot-omp-web-host.service`) runs from the checkout the server serves
+  (`GIGACHAD_OMP_WEB_DIR`, the controlled `GIGACHAD_OMP_WEB_REF`), never from an npm install or the upstream default.
+  The server unit sets `GIGACHAD_OMP_WEB_HOST=0` so the unit owns the daemon.
 - Keep normal `/tmp`, sudo, and file modes available to agents. The server
   deliberately lacks sandboxing flags.
 - Refuse non-host logins at the gate.
@@ -306,14 +315,15 @@ systemctl --user restart gigachad-bot.service
 
 Manual update:
 
-1. Ensure no session is running before restart, which ends agent processes.
-   `curl -s http://127.0.0.1:30177/api/sessions` must show no `runningSessionIds`.
+1. Before restarting the server unit, prefer an idle omp-web:
+   `curl -s http://127.0.0.1:30177/api/sessions` shows no `runningSessionIds`. Runs survive a server
+   restart (`gigachad-bot-omp-web-host.service` holds them), never restart the host unit during one.
 2. Update Gigachad, whose overlay the restart applies. The restart fetches
-   `origin` and rebases `integration_patrick_ab` onto `origin/main` itself
+   `origin` and rebases `refactor/314-ui-customization-seams` onto `origin/main` itself
    (fetch by hand for a remote-tracking ref such as `origin/main`). It never
    fetches the fork: when the overlay needs new seam commits, move the branch
    first (it is not checked out, the served worktree is detached):
-   `git fetch fork && git branch -f integration_patrick_ab fork/integration_patrick_ab`
+   `git fetch fork && git branch -f refactor/314-ui-customization-seams fork/refactor/314-ui-customization-seams`
    in `~/git/ompweb_original`. SSH agent forwarding (`ssh -A`) gives the host
    GitHub access. A ref without the seams fails the overlay checks, and omp-web
    keeps serving the last working version.
