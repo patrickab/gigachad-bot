@@ -7,8 +7,8 @@ bytes both ways, text frames carry JSON control messages:
   (a string `base_content` opens a read-only left diff buffer against the editable document, `ask_keymap`
   maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
   `{"type": "saved", "id", "content" | "error"}`, `{"type": "set_content", "content"}` (the file changed on disk,
-  the buffer takes the text without moving the cursor) and `{"type": "background", "light"}` (the theme behind the
-  terminal, Neovim's 'background' follows it)
+  the buffer takes the text without moving the cursor, merged into unsaved edits, after a running `:w`) and
+  `{"type": "background", "light"}` (the theme behind the terminal, Neovim's 'background' follows it)
 - server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "yank", "content"}`,
   `{"type": "selection", "start_line", "end_line", "text"}` (1-based inclusive lines),
   `{"type": "exit", "code"}` when `nvim` quits
@@ -16,7 +16,8 @@ bytes both ways, text frames carry JSON control messages:
 `nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
 
 The browser persists `:w` through the document's own API, so every save keeps that
-API's validation and side effects. Disconnecting discards unsaved edits.
+API's validation and side effects. A file-root file changed on disk since Neovim last
+agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved edits.
 """
 
 from __future__ import annotations
@@ -66,6 +67,16 @@ def working_directory(roots: FileRoots, path: str) -> Path:
         with contextlib.suppress(ValueError):
             return roots.root_of(path)
     return Path.home()
+
+
+def disk_file(roots: FileRoots, path: str) -> Path | None:
+    """The readable file behind an absolute document *path*, None for logical keys and refused paths."""
+    if not Path(path).is_absolute():
+        return None
+    try:
+        return roots.resolve(path)
+    except (OSError, ValueError):
+        return None
 
 
 class SaveFailed(RuntimeError):
@@ -124,29 +135,41 @@ async def _relay_output(websocket: WebSocket, session: NeovimSession) -> None:
     await websocket.send_json({"type": "exit", "code": await session.wait()})
 
 
+async def _set_content(session: NeovimSession, content: str) -> None:
+    try:
+        await session.set_text(content)
+    except (RuntimeError, ConnectionError, TimeoutError) as exc:
+        log.warning("Neovim could not take the changed file: %s", exc)
+
+
 async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves) -> None:
-    while True:
-        message = await websocket.receive()
-        if message["type"] == "websocket.disconnect":
-            return
-        if message.get("bytes") is not None:
-            session.write_input(message["bytes"])
-            continue
-        control = json.loads(message.get("text") or "{}")
-        if control.get("type") == "resize":
-            session.resize(int(control["rows"]), int(control["cols"]))
-        elif control.get("type") == "saved":
-            saves.resolve(control)
-        elif control.get("type") == "set_content" and isinstance(control.get("content"), str):
-            try:
-                await session.set_text(control["content"])
-            except (RuntimeError, ConnectionError, TimeoutError) as exc:
-                log.warning("Neovim could not take the changed file: %s", exc)
-        elif control.get("type") == "background" and isinstance(control.get("light"), bool):
-            try:
-                await session.set_background(control["light"])
-            except (RuntimeError, ConnectionError, TimeoutError) as exc:
-                log.warning("Neovim could not take the theme: %s", exc)
+    # `set_text` waits for a running `:w`, whose answer arrives on this socket, so it runs beside the relay
+    updates: set[asyncio.Task] = set()
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            if message.get("bytes") is not None:
+                session.write_input(message["bytes"])
+                continue
+            control = json.loads(message.get("text") or "{}")
+            if control.get("type") == "resize":
+                session.resize(int(control["rows"]), int(control["cols"]))
+            elif control.get("type") == "saved":
+                saves.resolve(control)
+            elif control.get("type") == "set_content" and isinstance(control.get("content"), str):
+                update = asyncio.create_task(_set_content(session, control["content"]))
+                updates.add(update)
+                update.add_done_callback(updates.discard)
+            elif control.get("type") == "background" and isinstance(control.get("light"), bool):
+                try:
+                    await session.set_background(control["light"])
+                except (RuntimeError, ConnectionError, TimeoutError) as exc:
+                    log.warning("Neovim could not take the theme: %s", exc)
+    finally:
+        for update in updates:
+            update.cancel()
 
 
 async def _run(websocket: WebSocket, session: NeovimSession, *, ask_keymap: bool) -> None:
@@ -198,6 +221,7 @@ async def neovim_session(
         rows=opening.rows,
         cols=opening.cols,
         cwd=working_directory(roots, opening.path),
+        disk_path=disk_file(roots, opening.path),
     )
     try:
         await _run(websocket, session, ask_keymap=opening.ask_keymap)

@@ -184,6 +184,33 @@ async def _drain(session: NeovimSession) -> None:
         pass
 
 
+async def _until(condition, seconds: float = 10) -> None:
+    """Poll the async *condition* until it holds, failing instead of hanging after *seconds*."""
+
+    async def poll() -> None:
+        while not await condition():
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(poll(), seconds)
+
+
+async def _evaluates_to(session: NeovimSession, expression: str, expected: object) -> None:
+    async def holds() -> bool:
+        return await session._rpc.request("nvim_eval", expression) == expected
+
+    await _until(holds)
+
+
+async def _shows(session: NeovimSession, text: str) -> None:
+    """Wait until the last screen line (the message area) contains *text*."""
+
+    async def holds() -> bool:
+        line = await session._rpc.request("nvim_eval", "join(map(range(1, &columns), {_, c -> screenstring(&lines, c)}), '')")
+        return text in line
+
+    await _until(holds)
+
+
 @requires_nvim
 async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
     yanked: asyncio.Queue[str] = asyncio.Queue()
@@ -219,8 +246,7 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
     try:
         await asyncio.wait_for(session.connect(save, lambda text: None), 15)
         session.write_input(b"10Gl\x1b")
-        while await session._rpc.request("nvim_eval", "line('.')") != 10:
-            await asyncio.sleep(0.05)
+        await _evaluates_to(session, "line('.')", 10)
 
         await session.set_text("line 1\nline TWO\n" + "".join(f"line {number}\n" for number in range(3, 21)) + "last\n")
 
@@ -230,6 +256,156 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
     finally:
         await session.close()
         await drain
+
+
+@requires_nvim
+async def test_set_text_merges_into_a_modified_buffer_which_stays_modified(neovim_home):
+    saved: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        await saved.put(text)
+        return text
+
+    session = NeovimSession.spawn("notes.md", "one\ntwo\nthree\nfour\nfive\n", rows=24, cols=80, cwd=neovim_home)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        session.write_input(b"5GAx\x1b")
+        await _evaluates_to(session, "&modified", 1)
+
+        disk = "zero\none\nTWO\nthree\nfour\nfive\n"
+        await session.set_text(disk)
+
+        state = await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), line('.'), &modified]")
+        # The unrelated remote edits land, the unsaved one stays, the cursor follows its line down.
+        assert state == ["zero|one|TWO|three|four|fivex", 6, 1]
+        assert session.base == disk
+
+        session.write_input(b":w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == "zero\none\nTWO\nthree\nfour\nfivex\n"
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
+async def test_write_after_the_file_changed_on_disk_saves_the_merged_text(neovim_home, tmp_path):
+    saved: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        await saved.put(text)
+        return text
+
+    file = tmp_path / "notes.md"
+    file.write_text("a\nb\nc\n")
+    session = NeovimSession.spawn("notes.md", "a\nb\nc\n", rows=24, cols=80, cwd=neovim_home, disk_path=file)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        file.write_text("A\nb\nc\n")
+
+        session.write_input(b"Gox\x1b:w\r")
+
+        assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\n"
+        # `save` returned without suspending, so its reply reached Neovim before this request.
+        assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["A|b|c|x", 0]
+        assert session.base == "A\nb\nc\nx\n"
+        await _shows(session, "Saved, merged with the agent's edits")
+
+        # Disk now matches the base, so the next save sends the buffer as it is.
+        file.write_text("A\nb\nc\nx\n")
+        session.write_input(b"Goy\x1b:w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\ny\n"
+        await _shows(session, "Saved notes.md")
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
+async def test_set_text_during_a_write_waits_for_it_and_merges_into_the_stored_text(neovim_home, tmp_path):
+    saved: asyncio.Queue[str] = asyncio.Queue()
+    answer = asyncio.Event()
+    file = tmp_path / "notes.md"
+
+    async def save(text: str) -> str:  # the browser's round trip, it stores the text once answered
+        await saved.put(text)
+        await answer.wait()
+        file.write_text(text)
+        return text
+
+    file.write_text("a\nb\nc\n")
+    session = NeovimSession.spawn("notes.md", "a\nb\nc\n", rows=24, cols=80, cwd=neovim_home, disk_path=file)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        session.write_input(b"Gox\x1b:w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == "a\nb\nc\nx\n"
+
+        # The agent's edit of the old text arrives while the save is pending.
+        agent_edit = asyncio.create_task(session.set_text("A\nb\nc\n"))
+        await asyncio.sleep(0.2)
+        assert not agent_edit.done()
+        answer.set()
+        await asyncio.wait_for(agent_edit, 10)
+
+        # Both edits are in the buffer, which differs from the stored text and so stays modified.
+        assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["A|b|c|x", 1]
+        assert session.base == "a\nb\nc\nx\n"
+
+        session.write_input(b":w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == "A\nb\nc\nx\n"
+        await _evaluates_to(session, "&modified", 0)
+        assert file.read_text() == "A\nb\nc\nx\n"
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
+@pytest.mark.parametrize(
+    ("disk", "error"),
+    [(b"\xff\xfeA\nb\nc\n", "not UTF-8 text"), (b"A\x00\nb\nc\n", "could not merge with the changed file")],
+)
+async def test_write_fails_without_writing_when_the_changed_file_cannot_be_merged(neovim_home, tmp_path, disk, error):
+    saved: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        await saved.put(text)
+        return text
+
+    file = tmp_path / "notes.md"
+    file.write_text("a\nb\nc\n")
+    session = NeovimSession.spawn("notes.md", "a\nb\nc\n", rows=24, cols=80, cwd=neovim_home, disk_path=file)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        file.write_bytes(disk)
+        session.write_input(b"Gox\x1b:w\r")
+
+        async def failed() -> bool:
+            session.write_input(b"\r")  # dismisses the hit-enter prompt of the error, which holds off requests
+            return "Save failed" in await session._rpc.request("nvim_eval", "v:errmsg")
+
+        await _until(failed)
+        assert error in await session._rpc.request("nvim_eval", "v:errmsg")
+        assert await session._rpc.request("nvim_eval", "[join(getline(1, '$'), '|'), &modified]") == ["a|b|c|x", 1]
+        assert saved.empty()
+        assert file.read_bytes() == disk
+        assert session.base == "a\nb\nc\n"
+    finally:
+        await session.close()
+        await drain
+
+
+def test_only_readable_absolute_documents_have_a_disk_file(tmp_path):
+    (tmp_path / "notes.md").write_text("x")
+    roots = mounted_roots(tmp_path)
+
+    assert neovim_route.disk_file(roots, str(tmp_path / "notes.md")) == (tmp_path / "notes.md").resolve()
+    assert neovim_route.disk_file(roots, str(tmp_path / "missing.md")) is None
+    assert neovim_route.disk_file(roots, str(tmp_path.parent / "outside.md")) is None
+    assert neovim_route.disk_file(roots, "project/demo/document/notes.md") is None
 
 
 @requires_nvim
@@ -249,7 +425,6 @@ async def test_background_asked_before_startup_wins_over_detection_and_follows_l
     finally:
         await session.close()
         await drain
-
 
 
 @requires_nvim

@@ -97,7 +97,9 @@ interface NeovimOptions {
  * - `:w` calls `save(text)`, whose resolved text replaces the buffer if it differs
  * - Yanks (`y`) are copied to the browser clipboard
  * - `:q` with exit code 0 calls `onQuit`
- * - `setContent(text)` replaces the buffer with text that is already on disk (unmodified, one undo step), false while the session is not open
+ * - `setContent(text)` hands text that is already on disk to the backend session, false while the session is not open
+ *   - An unmodified buffer is replaced (one undo step) and stays unmodified
+ *   - A modified buffer gets the text merged into its unsaved edits, the agent's lines win where both changed, and stays modified
  * - Unmounting or a new `document.key` discards unsaved edits
  */
 export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string) => Promise<string>, onQuit: () => void, { askKeymap = false, onSelection }: NeovimOptions = {}) {

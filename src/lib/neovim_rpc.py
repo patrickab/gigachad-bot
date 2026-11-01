@@ -1,9 +1,12 @@
 """Msgpack-RPC with a running Neovim, plus the Lua that bridges its `:w`, yanks and selections back to the caller.
 
-- `SETUP_LUA` routes the document buffer's `:w` to a `save` request instead of the disk
+- `SETUP_LUA` routes the document buffer's `:w` to a `save` request instead of the disk, and echoes
+  `Saved, merged with the agent's edits` when the answer says edits made elsewhere changed the text
 - A `TextYankPost` autocmd sends a `yank` notification with the yanked text
 - With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the selected lines
-- `_G.gigachad_set_text` replaces the buffer text with minimal hunks, for edits made to the file elsewhere
+- `_G.gigachad_buffer_state` reports the buffer text, modified flag and change tick
+- `_G.gigachad_set_text` rewrites only the changed hunks, for edits made to the file elsewhere, keeping the modified flag
+  (or setting it when the text differs from the stored file)
 """
 
 from __future__ import annotations
@@ -42,10 +45,6 @@ local function stored_lines(text)
   return lines
 end
 
-local function show_stored(text)
-  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, stored_lines(text))
-end
-
 local diff_lines = (vim.text and vim.text.diff) or vim.diff
 local remote_edit_namespace = vim.api.nvim_create_namespace("gigachad_remote_edit")
 local remote_edit_generation = 0
@@ -64,9 +63,8 @@ local function highlight_remote_edit(first, count)
   end, REMOTE_EDIT_HIGHLIGHT_MS)
 end
 
--- Replaces the buffer text with `text` (already on disk) as one undo step that leaves cursor, view and marks in place.
-function _G.gigachad_set_text(text)
-  if text == buffer_text() then return end
+-- Rewrites only the changed line ranges, bottom-up, so cursor, view and marks stay on their text.
+local function apply_text(text)
   local old_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
   local new_lines = stored_lines(text)
   local hunks = diff_lines(table.concat(old_lines, "\n") .. "\n", table.concat(new_lines, "\n") .. "\n", { result_type = "indices" })
@@ -78,18 +76,34 @@ function _G.gigachad_set_text(text)
     vim.api.nvim_buf_set_lines(buffer, first, first + count_old, false, replacement)
     highlight_remote_edit(first, count_new)
   end
-  vim.bo[buffer].modified = false
 end
 
+-- The text `:w` would store, whether it has unsaved edits, and the change tick `gigachad_set_text` checks.
+function _G.gigachad_buffer_state()
+  return { text = buffer_text(), modified = vim.bo[buffer].modified, tick = vim.api.nvim_buf_get_changedtick(buffer) }
+end
+
+-- Shows `text` as one undo step, false without a change when the buffer moved past `tick`.
+-- An unmodified buffer stays unmodified (the text is on disk) unless `dirty`, a modified one keeps its unsaved state.
+function _G.gigachad_set_text(text, tick, dirty)
+  if tick ~= vim.api.nvim_buf_get_changedtick(buffer) then return false end
+  local modified = vim.bo[buffer].modified or dirty == true
+  if text ~= buffer_text() then apply_text(text) end
+  vim.bo[buffer].modified = modified
+  return true
+end
+
+-- `save` answers { text = stored text, merged = whether edits made elsewhere changed the buffer's text }.
 vim.api.nvim_create_autocmd("BufWriteCmd", {
   buffer = buffer,
   callback = function()
     local text = buffer_text()
     local ok, stored = pcall(vim.rpcrequest, channel, "save", text)
     if not ok then error("Save failed: " .. tostring(stored), 0) end
-    if stored ~= text then show_stored(stored) end
+    if stored.text ~= buffer_text() then apply_text(stored.text) end
     vim.bo[buffer].modified = false
-    vim.api.nvim_echo({ { "Saved " .. vim.fn.fnamemodify(path, ":t") } }, false, {})
+    local message = stored.merged and "Saved, merged with the agent's edits" or "Saved " .. vim.fn.fnamemodify(path, ":t")
+    vim.api.nvim_echo({ { message } }, false, {})
   end,
 })
 
