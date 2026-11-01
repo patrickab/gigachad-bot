@@ -1,22 +1,21 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react"
-import { ErrorText } from "@/components/ui/ErrorText"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, useNeovimTerminal, type NeovimSelection } from "@/features/editor/NeovimEditor"
-import { FilePanel, LOAD_MESSAGES } from "@/features/editor/FilePanel"
+import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
 import { TEXT_CODEC, useRootFileDocument } from "@/features/editor/useRootFileDocument"
 import { TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { OmpModelSelector, OmpReasoningSelector, useOmpStreaming, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
-import { OmpSurface } from "@/features/omp/OmpSurface"
+import { OmpChatPanel } from "@/features/omp/OmpChatPanel"
+import { useFileChat } from "@/features/omp/useFileChat"
 import { writeRootFile } from "@/lib/backend/api"
 import type { OmpView } from "@/lib/domain/types"
 import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
-import { fileLead, quoteSelection } from "./quote"
+import { quoteSelection } from "./quote"
 import { useAgentSync } from "./useAgentSync"
-import { useWorkbenchChat } from "./useWorkbenchChat"
 import { ShowPaneButton, WorkbenchSplit, useHiddenPane, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
 /** What the rendered pane draws from: where it sits, the synced text, and whether the agent is editing. */
@@ -80,7 +79,8 @@ export function Workbench({
   renderLabel, renderPane, status, onSaved, onRunEnd, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  const { view, adopt, error: chatError } = useWorkbenchChat(path, cwd, ompView, onViewChange)
+  const chat = useFileChat(path, cwd, ompView, onViewChange)
+  const { view } = chat
   const streaming = useOmpStreaming(view ?? NO_VIEW)
 
   const write = useCallback((text: string) => writeRootFile(path, text), [path])
@@ -149,26 +149,16 @@ export function Workbench({
         </div>
       </div>
       {drawerOpen && (
-        <FilePanel label="Chat" bare onClose={() => onDrawerOpenChange(false)} width={DRAWER_WIDTH_PX}>
-          {view && <ErrorText className="px-4 pt-2">{chatError}</ErrorText>}
-          <div className="relative min-h-0 flex-1">
-            {view ? (
-              <OmpSurface
-                view={view}
-                onViewChange={adopt}
-                shellCommands={shellCommands}
-                topInset={0}
-                adoptTitle={false}
-                backdrop="surface"
-                insertion={insertion}
-                onInserted={() => setInsertion(null)}
-                newSessionLead={fileLead(path, cwd)}
-              />
-            ) : (
-              <div className={`${CENTERED_NOTE} h-full`}>{chatError ? <ErrorText>{chatError}</ErrorText> : "Loading…"}</div>
-            )}
-          </div>
-        </FilePanel>
+        <OmpChatPanel
+          chat={chat}
+          path={path}
+          cwd={cwd}
+          width={DRAWER_WIDTH_PX}
+          onClose={() => onDrawerOpenChange(false)}
+          shellCommands={shellCommands}
+          insertion={insertion}
+          onInserted={() => setInsertion(null)}
+        />
       )}
       <InTopBar name="workbenchAgent">
         {view && <>

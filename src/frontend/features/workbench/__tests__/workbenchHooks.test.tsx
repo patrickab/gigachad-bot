@@ -5,8 +5,6 @@ import type { ChangeEvent } from "@/lib/backend/syncStream"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
-  loadWorkbenchSession: vi.fn<(path: string) => Promise<string | null>>(),
-  saveWorkbenchSession: vi.fn<(path: string, sessionId: string) => Promise<void>>(async () => {}),
   prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string; cwd: string }>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
@@ -20,7 +18,6 @@ vi.mock("@/lib/backend/syncStream", () => ({
 
 import { useAgentSync } from "../useAgentSync"
 import { usePreparedWorkbench } from "../usePreparedWorkbench"
-import { useWorkbenchChat } from "../useWorkbenchChat"
 
 const PATH = "/data/workbench/markdown/proj/plan/plan.md"
 const CWD = "/data/workbench/markdown"
@@ -29,45 +26,6 @@ const change = (key: string): ChangeEvent => ({ seq: 1, resource_kind: "document
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-})
-
-describe("useWorkbenchChat", () => {
-  it("shows the session linked to the file, else a new one in cwd", async () => {
-    api.loadWorkbenchSession.mockResolvedValueOnce("linked")
-    const linked = renderHook(() => useWorkbenchChat(PATH, CWD, undefined, vi.fn()))
-    expect(linked.result.current.view).toBeNull()
-    await waitFor(() => expect(linked.result.current.view).toEqual({ kind: "session", sessionId: "linked" }))
-    expect(api.loadWorkbenchSession).toHaveBeenCalledWith(PATH)
-
-    api.loadWorkbenchSession.mockResolvedValueOnce(null)
-    const fresh = renderHook(() => useWorkbenchChat(PATH, CWD, undefined, vi.fn()))
-    await waitFor(() => expect(fresh.result.current.view).toEqual({ kind: "new", cwd: CWD }))
-  })
-
-  it("keeps the item's session without loading the link", () => {
-    const { result } = renderHook(() => useWorkbenchChat(PATH, CWD, { kind: "session", sessionId: "shown" }, vi.fn()))
-    expect(result.current.view).toEqual({ kind: "session", sessionId: "shown" })
-    expect(api.loadWorkbenchSession).not.toHaveBeenCalled()
-  })
-
-  it("links an adopted session once and hands it to the item", async () => {
-    api.loadWorkbenchSession.mockResolvedValueOnce(null)
-    const onViewChange = vi.fn()
-    const { result } = renderHook(() => useWorkbenchChat(PATH, CWD, undefined, onViewChange))
-    await waitFor(() => expect(result.current.view).not.toBeNull())
-
-    act(() => result.current.adopt({ kind: "session", sessionId: "started" }))
-    act(() => result.current.adopt({ kind: "session", sessionId: "started" }))
-    expect(api.saveWorkbenchSession).toHaveBeenCalledExactlyOnceWith(PATH, "started")
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "session", sessionId: "started" })
-  })
-
-  it("says why the link could not load", async () => {
-    api.loadWorkbenchSession.mockRejectedValueOnce(new Error("offline"))
-    const { result } = renderHook(() => useWorkbenchChat(PATH, CWD, undefined, vi.fn()))
-    await waitFor(() => expect(result.current.error).toBe("offline"))
-    expect(result.current.view).toBeNull()
-  })
 })
 
 /** A tab's workbench item as `WorkspaceSurface` holds it: the moved path replaces the item path, the workbench mounts once prepared. */

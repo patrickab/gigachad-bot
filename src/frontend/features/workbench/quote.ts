@@ -6,9 +6,3 @@ import { baseName } from "@/lib/paths"
 export function quoteSelection(path: string, selection: NeovimSelection, language: string): string {
   return `${baseName(path)}:${selection.start_line}-${selection.end_line}\n${fenceCode(language, selection.text)}\n\n`
 }
-
-/** The line that names the file at `path` to a new session in `cwd`: relative to `cwd` when inside it, else absolute. */
-export function fileLead(path: string, cwd: string): string {
-  const base = cwd.endsWith("/") ? cwd : `${cwd}/`
-  return `File: ${path.startsWith(base) ? path.slice(base.length) : path}`
-}

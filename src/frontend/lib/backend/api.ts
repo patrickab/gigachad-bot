@@ -623,14 +623,29 @@ export async function createWorkbenchDocument(slug: string, name: string): Promi
   return (await post<{ path: string }>("/workbench/create", { slug, name })).path
 }
 
-/** The omp session linked to the workbench file at absolute *path*, null when none is. */
-export async function loadWorkbenchSession(path: string): Promise<string | null> {
-  return (await request<{ session_id: string | null }>(`/workbench/session${toQuery({ path })}`)).session_id
+/** The omp sessions of one file's chat: `active` is null while a new session starts, `sessionIds` lists every session the file had, first linked first. */
+export interface FileSessions {
+  active: string | null
+  sessionIds: string[]
 }
 
-/** Link the omp session *sessionId* to the workbench file at absolute *path*. */
-export async function saveWorkbenchSession(path: string, sessionId: string): Promise<void> {
-  await put("/workbench/session", { path, session_id: sessionId })
+interface LinkedSessions {
+  session_id: string | null
+  session_ids: string[]
+}
+
+function toFileSessions(linked: LinkedSessions): FileSessions {
+  return { active: linked.session_id, sessionIds: linked.session_ids }
+}
+
+/** The omp sessions linked to the file at absolute *path*. */
+export async function loadFileSessions(path: string): Promise<FileSessions> {
+  return toFileSessions(await request<LinkedSessions>(`/workbench/session${toQuery({ path })}`))
+}
+
+/** Make *sessionId* the active session of the file at absolute *path*, null starts a new one. Resolves to the file's sessions. */
+export async function saveFileSession(path: string, sessionId: string | null): Promise<FileSessions> {
+  return toFileSessions(await put<LinkedSessions>("/workbench/session", { path, session_id: sessionId }))
 }
 
 /** Compile the `.tex` file at *path*. A TeX error resolves with `ok: false`, a missing TeX install rejects with ApiError 503. */

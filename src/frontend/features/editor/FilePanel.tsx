@@ -149,7 +149,7 @@ export function FilePanelToggle() {
  * Show `children` in the tab's file panel. The header holds the collapse toggle in the panel's top-left corner, then `label`, `actions` and a close button.
  *
  * - `width` px replaces the half-share open width
- * - `bare` keeps only the toggle, which then closes through `onClose`, for owners with their own reopen control (PDF chat)
+ * - `bare` keeps only the toggle and `actions`, the toggle then closes through `onClose`, for owners with their own reopen control (PDF chat, workbench chat)
  */
 export function FilePanel({ label, onClose, actions, width, bare = false, children }: {
   label: string
@@ -173,7 +173,7 @@ export function FilePanel({ label, onClose, actions, width, bare = false, childr
       {/* Insets mirror the left sidebar's header */}
       <div className="flex h-10 shrink-0 items-center gap-2 pl-4 pr-2 text-[11px] text-ink-subtle">
         <PanelToggleButton open onClick={bare ? onClose : toggleCollapsed} openLabel="Open file panel" closeLabel={bare ? `Close ${label.toLowerCase()}` : "Close file panel"} />
-        {!bare && <>
+        {bare ? actions : <>
           <span className="min-w-0 flex-1 truncate">{label}</span>
           {actions}
           <button type="button" aria-label="Close panel" onClick={onClose} className="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">

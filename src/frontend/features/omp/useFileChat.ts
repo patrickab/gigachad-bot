@@ -1,59 +1,76 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { loadWorkbenchSession, saveWorkbenchSession } from "@/lib/backend/api"
+import { loadFileSessions, saveFileSession, type FileSessions } from "@/lib/backend/api"
 import type { OmpView } from "@/lib/domain/types"
 import { errorMessage } from "@/lib/utils"
 
-/** The session linked to one file, once loaded. */
-interface Link {
+/** The sessions linked to one file, once loaded. */
+interface Linked extends FileSessions {
   path: string
-  sessionId: string | null
 }
 
+/** What `OmpChatPanel` and the chat's owner share about one file's chat. */
+export type FileChat = ReturnType<typeof useFileChat>
+
 /**
- * The omp view of one workbench file's chat: the session its tab item shows, else the one linked to the file, else a new session in `cwd`.
+ * The omp chat of one file: the session the owner's tab item shows, else the file's active session, else a new session in `cwd`.
  *
- * - The link lives in the backend, so every device reopens the same session for the file
- * - `view` is null while the link loads and the item shows nothing yet, `error` says why loading or saving the link failed
- * - `adopt` takes the session the frame reports: the item shows it from then on and the file links it
+ * - The links live in the backend, so every device reopens the same session and lists the same ones
+ * - `view` is null while the links load and the item shows nothing yet, `error` says why loading or saving them failed
+ * - `adopt` takes the session the frame reports: the item shows it from then on and the file links it as active
+ * - `reset` starts a new session, `select` reopens one of `sessionIds`, every earlier session stays listed
  */
-export function useWorkbenchChat(path: string, cwd: string, itemView: OmpView | undefined, onViewChange: (view: OmpView) => void) {
-  const [link, setLink] = useState<Link | null>(null)
+export function useFileChat(path: string, cwd: string, itemView: OmpView | undefined, onViewChange: (view: OmpView) => void) {
+  const [linked, setLinked] = useState<Linked | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // The session id the backend holds for `path`, so adopting it again writes nothing
-  const linkedRef = useRef<string | null>(null)
-  const needsLink = !itemView
+  // The active session the backend holds for `path`, so adopting it again writes nothing
+  const activeRef = useRef<string | null | undefined>(undefined)
 
   useEffect(() => {
-    if (!needsLink) return
     let cancelled = false
-    loadWorkbenchSession(path).then(
-      (sessionId) => {
+    loadFileSessions(path).then(
+      (sessions) => {
         if (cancelled) return
-        linkedRef.current = sessionId
-        setLink({ path, sessionId })
+        activeRef.current = sessions.active
+        setLinked({ path, ...sessions })
       },
       (cause: unknown) => { if (!cancelled) setError(errorMessage(cause, "Could not load the chat of this file")) },
     )
     return () => { cancelled = true }
-  }, [path, needsLink])
+  }, [path])
 
+  const current = linked?.path === path ? linked : null
   const view = useMemo<OmpView | null>(() => {
     if (itemView) return itemView
-    if (link?.path !== path) return null
-    return link.sessionId ? { kind: "session", sessionId: link.sessionId } : { kind: "new", cwd }
-  }, [itemView, link, path, cwd])
+    if (!current) return null
+    return current.active ? { kind: "session", sessionId: current.active } : { kind: "new", cwd }
+  }, [itemView, current, cwd])
+
+  const link = (sessionId: string | null) => {
+    if (sessionId === activeRef.current) return
+    activeRef.current = sessionId
+    saveFileSession(path, sessionId).then(
+      (sessions) => {
+        setLinked({ path, ...sessions })
+        setError(null)
+      },
+      (cause: unknown) => setError(errorMessage(cause, "Could not link this chat to the file")),
+    )
+  }
 
   const adopt = (next: OmpView) => {
-    if (next.kind === "session" && next.sessionId !== linkedRef.current) {
-      linkedRef.current = next.sessionId
-      saveWorkbenchSession(path, next.sessionId).then(
-        () => setError(null),
-        (cause: unknown) => setError(errorMessage(cause, "Could not link this chat to the file")),
-      )
-    }
+    if (next.kind === "session") link(next.sessionId)
     onViewChange(next)
   }
-  return { view, adopt, error }
+  const reset = () => {
+    link(null)
+    onViewChange({ kind: "new", cwd })
+  }
+  const select = (sessionId: string) => {
+    link(sessionId)
+    onViewChange({ kind: "session", sessionId })
+  }
+
+  return { view, adopt, reset, select, sessionIds: current?.sessionIds ?? [], error }
 }
