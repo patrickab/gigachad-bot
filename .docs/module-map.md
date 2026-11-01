@@ -134,7 +134,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, `NEW_DOCUMENT`
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner
 |   |   |-- workbench/                Workbench kinds, folders, omp prompt mirror, rename folder moves
-|   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `config.yml` (source of truth)
+|   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `pdf.md`, `config.yml` (source of truth)
 |   |   `-- prompts/                  Internal, non-user-facing prompts
 |   |       `-- non_user_prompts.py
 |   |-- c4/                           Separate stateless TypeScript LikeC4 service
@@ -180,7 +180,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- FileViewer.tsx
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
 |       |   |   |-- NeovimEditor.tsx
-|       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (MinerU-grounded chat)
+|       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (local MinerU-grounded chat, or the owner's `renderChat`)
 |       |   |   |-- architecture/     LikeC4 graph/source editing
 |       |   |   |   `-- ArchitectureWindow.tsx
 |       |   |   |-- canvas/           Canvas entities, collaboration, history and camera
@@ -204,11 +204,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
 |       |   |   |-- OmpProvider.tsx
-|       |   |   `-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
+|       |   |   |-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
+|       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file, menu, New session
+|       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
 |       |   |   |-- WorkbenchSplit.tsx Hidden pane, shared page box (`usePaneLayout`)
-|       |   |   |-- usePreparedWorkbench.ts, useWorkbenchChat.ts, useAgentSync.ts Prepare once per path, session link, agent/remote sync
+|       |   |   |-- usePreparedWorkbench.ts, useAgentSync.ts Prepare once per path, agent/remote sync (`onPulled`)
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, useLatexBuild, LatexPdfPane, LatexBuildStatus
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
@@ -370,7 +372,8 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Git diffs, review drafts or worktree switching | `src/lib/git_diff.py`, `git_worktree.py`; `src/frontend/features/editor/diff/`, `features/navigation/useWorktrees.tsx` | `src/backend/routes/file_git.py`; `tests/test_git_diff.py`, `tests/test_git_worktree.py`, diff `__tests__/` |
 | Neovim editing, terminal save bridge or agent-edit merge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `text_merge.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`, `tests/test_text_merge.py`; filesystem/identity policy stays with its existing owners |
 | Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, rename cascade in `project_rename.py`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
-| LaTeX build or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `components/content/PdfViewer.tsx` (`pageBox`); `tests/test_latex.py`, latex `__tests__/` |
+| LaTeX build or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
+| File chat sidebar (omp sessions per file) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
 | Learn mode | `src/lib/learnharness.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
