@@ -114,11 +114,12 @@ class FileRoots:
         return max(holding, key=lambda root: len(root.parts))
 
     def ceiling_of(self, path: Path) -> Path:
-        """`root_of` *path*, else its own folder when only host access reaches it."""
+        """`root_of` *path*, else the home folder when only host access reaches it (host access is limited to home), else ValueError."""
         try:
             return self.root_of(str(path))
         except ValueError:
-            return path if path.is_dir() else path.parent
+            self._root_for(str(path))
+            return Path.home()
 
     # ─── listing ───
 

@@ -52,15 +52,21 @@ def test_creating_outside_the_roots_raises_and_leaves_no_file_or_change(tmp_path
     assert scope.changes == []
 
 
-def test_the_ceiling_is_the_mounted_root_or_the_own_folder_of_a_host_only_path(tmp_path, vault):
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / "main.tex").write_text("x")
+def test_the_ceiling_is_the_mounted_root_else_home_for_a_host_only_path_else_refused(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    vault, elsewhere, outside = home / "vault", home / "elsewhere", tmp_path / "outside"
+    for directory in (vault, elsewhere, outside):
+        directory.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
     roots = mounted_roots(vault, host_access=True)
 
     assert roots.ceiling_of(vault / "deep" / "main.tex") == vault.resolve()
-    assert roots.ceiling_of(elsewhere / "main.tex") == elsewhere
-    assert roots.ceiling_of(elsewhere) == elsewhere
+    assert roots.ceiling_of(elsewhere / "imgs" / "a.png") == home
+    assert roots.ceiling_of(elsewhere) == home
+    with pytest.raises(ValueError, match="outside file roots"):
+        roots.ceiling_of(outside / "main.tex")
+    with pytest.raises(ValueError, match="outside file roots"):
+        mounted_roots(vault).ceiling_of(elsewhere / "main.tex")
 
 
 @pytest.mark.parametrize("name", ["", ".hidden", "..", "a/b", "a\\b", "a\x00b"])
