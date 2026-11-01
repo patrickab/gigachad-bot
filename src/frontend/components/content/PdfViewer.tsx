@@ -8,7 +8,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { PdfPageSlot } from "./pdf/PdfPageSlot"
 import { PdfZoomControls } from "./pdf/PdfZoomControls"
 import { useDevicePixelRatio } from "./pdf/pdfCanvas"
-import { PAGE_SIDE_GAP, readPageAspects, RENDER_WIDTH, scrollTopAfterWidthChange, type PdfDocument } from "./pdf/pdfLayout"
+import { PAGE_GAP, PAGE_SIDE_GAP, readPageAspects, RENDER_WIDTH, scrollTopAfterWidthChange, type PdfDocument } from "./pdf/pdfLayout"
 import { usePdfPageWindow } from "./pdf/usePdfPageWindow"
 import { usePdfZoom } from "./pdf/usePdfZoom"
 
@@ -28,12 +28,18 @@ if (typeof window !== "undefined") {
   }
 }
 
+/** Page layout set by the parent: page `width`, and the scroller's px above the first page and below the last. */
+export type PdfPageBox = { width: number; top: number; bottom: number }
+
 /** PDF viewer with zoom and page tracking.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
  * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
  * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
  * - Controls show only while the pointer is near them
+ * - `documentKey` names the document apart from its `url`: a new `url` under the same key reloads in place, keeping zoom and scroll position, while a new key starts over
+ * - `onPageRendered` fires each time a page finished drawing
+ * - `pageBox` sets the page width and the space around the pages, e.g. to line them up with a neighboring pane
  * - Only pages near the viewport hold a canvas, the rest are sized placeholders
  */
 export function PdfViewer({
@@ -45,6 +51,9 @@ export function PdfViewer({
   topInset = 0,
   renderPageOverlay,
   onScrollerChange,
+  documentKey,
+  onPageRendered,
+  pageBox,
 }: {
   url: string
   // when set, the parent controls width and the viewer sizes its own height to
@@ -56,7 +65,11 @@ export function PdfViewer({
   topInset?: number
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
   onScrollerChange?: (scroller: HTMLDivElement | null) => void
+  documentKey?: string
+  onPageRendered?: () => void
+  pageBox?: PdfPageBox
 }) {
+  const identity = documentKey ?? url
   const [numPages, setNumPages] = useState<number | null>(null)
   const [pageAspects, setPageAspects] = useState<number[] | null>(null) // height / width per page
   const documentRef = useRef<PdfDocument | null>(null)
@@ -70,10 +83,22 @@ export function PdfViewer({
   const pageRef = useRef(1)
   const onPageChangeRef = useRef(onPageChange)
   const onScrollerChangeRef = useRef(onScrollerChange)
+  const onPageRenderedRef = useRef(onPageRendered)
   useLayoutEffect(() => {
     onPageChangeRef.current = onPageChange
     onScrollerChangeRef.current = onScrollerChange
+    onPageRenderedRef.current = onPageRendered
   })
+  const notifyPageRendered = useCallback(() => onPageRenderedRef.current?.(), [])
+  // The pages' height, held as a blank spacer while a reload under the same `documentKey` loads, so the scroll position survives
+  const pagesRef = useRef<HTMLDivElement>(null)
+  const pagesHeightRef = useRef(0)
+  useLayoutEffect(() => {
+    if (documentKey !== undefined && pagesRef.current) pagesHeightRef.current = pagesRef.current.offsetHeight
+  })
+  const holdPagesHeight = useCallback((spacer: HTMLDivElement | null) => {
+    if (spacer) spacer.style.height = `${pagesHeightRef.current}px`
+  }, [])
   const setScroller = useCallback((scroller: HTMLDivElement | null) => {
     scrollRef.current = scroller
     onScrollerChangeRef.current?.(scroller)
@@ -148,14 +173,14 @@ export function PdfViewer({
   useLayoutEffect(() => {
     restoredPageUrlRef.current = null
     pageRef.current = 1
-  }, [url])
+  }, [identity])
 
   // Page is rendered at the available width (minus scrollbar gutter), capped at
   // RENDER_WIDTH. In fitWidth mode the box height is derived to show one page.
   let renderWidth = RENDER_WIDTH
   let boxHeight: number | undefined
   if (availWidth != null) {
-    renderWidth = Math.round(Math.min(RENDER_WIDTH, availWidth - scrollbarGutters - 2 * PAGE_SIDE_GAP))
+    renderWidth = Math.round(Math.min(pageBox?.width ?? RENDER_WIDTH, availWidth - scrollbarGutters - 2 * PAGE_SIDE_GAP))
     if (fitWidth && pageAspect != null) {
       boxHeight = Math.round(renderWidth * pageAspect)
     }
@@ -187,13 +212,13 @@ export function PdfViewer({
     const page = Math.min(numPages ?? 1, Math.max(1, initialPage))
     const firstPageEl = slotsRef.current.get(1)
     const pageEl = slotsRef.current.get(page)
-    if (!el || !ready || !firstPageEl || !pageEl || restoredPageUrlRef.current === url) return
+    if (!el || !ready || !firstPageEl || !pageEl || restoredPageUrlRef.current === identity) return
     // offsetTop is in the scroller's layout coordinate system, unlike client rects
     // after the canvas scales this attachment with CSS.
     el.scrollTop = pageEl.offsetTop - firstPageEl.offsetTop
     pageRef.current = page
-    restoredPageUrlRef.current = url
-  }, [ready, url, initialPage, numPages, renderWidth, zoom, pageAspects, slotsRef])
+    restoredPageUrlRef.current = identity
+  }, [ready, identity, initialPage, numPages, renderWidth, zoom, pageAspects, slotsRef])
 
   // Internal links (references within this PDF) jump to their page, which lands just below the floating bar.
   const goToPage = useCallback(({ pageNumber }: { pageNumber: number }) => {
@@ -240,7 +265,8 @@ export function PdfViewer({
       />
       <div
         ref={setScroller}
-        className="pdf-scroll flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges] focus:outline-none"
+        // A page box sets the page width exactly, a scrollbar gutter would narrow the pages
+        className={`pdf-scroll flex-1 min-h-0 overflow-auto focus:outline-none ${pageBox ? "[scrollbar-width:none]" : "[scrollbar-gutter:stable_both-edges]"}`}
         tabIndex={0}
         onScroll={() => {
           markScrolled()
@@ -248,14 +274,20 @@ export function PdfViewer({
         }}
         // overflow-anchor off: the width-change effect above owns the scroll
         // position; native scroll anchoring would apply a second correction
-        style={{ overflowAnchor: "none", paddingTop: topInset, ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
+        style={{
+          overflowAnchor: "none",
+          paddingTop: pageBox?.top ?? topInset,
+          paddingBottom: pageBox && Math.max(0, pageBox.bottom - PAGE_GAP),
+          ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined),
+        }}
       >
-        <Document file={url} onLoadSuccess={onDocumentLoadSuccess} onItemClick={goToPage} externalLinkTarget="_blank" externalLinkRel="noopener noreferrer">
+        {/* A new url gets a fresh Document: pages kept across the swap would render against the destroyed old one */}
+        <Document key={url} file={url} onLoadSuccess={onDocumentLoadSuccess} onItemClick={goToPage} externalLinkTarget="_blank" externalLinkRel="noopener noreferrer" loading={documentKey === undefined ? undefined : <div ref={holdPagesHeight} />}>
           {ready && pageAspects && (
-            <div style={{ width: pageWidth }} className="mx-auto">
+            <div ref={pagesRef} style={{ width: pageWidth }} className="mx-auto">
               {pageAspects.map((aspect, index) => (
                 <PdfPageSlot
-                  key={`${url}:${index}`}
+                  key={`${identity}:${index}`}
                   pageNumber={index + 1}
                   width={pageWidth}
                   height={Math.round(pageWidth * aspect)}
@@ -269,6 +301,7 @@ export function PdfViewer({
                   snap={!!fitWidth}
                   registerSlot={registerSlot}
                   renderPageOverlay={renderPageOverlay}
+                  onRendered={notifyPageRendered}
                 />
               ))}
             </div>

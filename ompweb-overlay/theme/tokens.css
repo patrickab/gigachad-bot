@@ -42,3 +42,12 @@
   --font-serif: var(--font-sans);
   --font-mono: "Symbols Nerd Font Mono", var(--font-jb-mono), "JetBrains Mono", ui-monospace, monospace;
 }
+
+/* Inside a shell side panel card (`insets` backdrop `surface`, embed/insets.ts): the page is the card's surface, panels and
+   tool rows step up to elevated so they still stand out */
+:root:root.cf-embed.cf-on-surface {
+  --bg: var(--cf-surface);
+  --bg-panel: var(--cf-elevated);
+  --tool-bg: var(--cf-elevated);
+  --user-bg: color-mix(in oklab, var(--cf-ink) 5%, var(--cf-elevated));
+}

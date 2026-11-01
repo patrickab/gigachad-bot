@@ -5,6 +5,8 @@ from pathlib import Path
 # ponytail: one shared workspace for now; user-specific roots can come later.
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
+# Project LaTeX documents without a linked repository: they need a real folder for latexmk and omp.
+LATEX = REMOTE_ROOT / "latex"
 
 # Browser origins allowed to call the API. Defaults to the pre-desktop wildcard; the Tauri
 # shell narrows it to its own webview origins, and server deployments can do the same.

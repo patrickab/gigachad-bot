@@ -287,6 +287,7 @@ Encode one payload as `?open=<base64url JSON>`:
 - Route `:w` through RPC to the browser's normal document API, including architecture validation. Replace the buffer with stored text if rewritten. Leave modified on failure. The temporary copy is not canonical storage.
 - Terminate/remove the copy on `:q`, document close, or disconnect. Unsaved edits are unrecoverable. Preserve the session across preview/fullscreen switches. Terminal focus owns all keys, including Escape.
 - Yanks reach the browser clipboard: a `TextYankPost` autocmd notifies over RPC, the socket sends `{"type":"yank"}`, the browser writes it best effort.
+- Theme the terminal from the app: xterm's background is the first opaque ancestor background (`--page`), its foreground is `--ink`, its cursor a 30% `--ink` blend. The browser sends `{"type":"background","light"}` on open and on every theme flip, and the backend sets Neovim's `'background'` over RPC once setup finished, so the user's colorscheme reloads its light or dark palette. The palettes themselves live in the user's Neovim config, not this repo.
 - Treat as host code execution. Match WebSocket origins to `GIGACHAD_CORS_ORIGINS`, or loopback for development `*`.
 
 ## Memory and deletion semantics

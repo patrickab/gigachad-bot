@@ -1,7 +1,9 @@
-"""Msgpack-RPC with a running Neovim, plus the Lua that bridges its `:w` and yanks back to the caller.
+"""Msgpack-RPC with a running Neovim, plus the Lua that bridges its `:w`, yanks and selections back to the caller.
 
 - `SETUP_LUA` routes the document buffer's `:w` to a `save` request instead of the disk
 - A `TextYankPost` autocmd sends a `yank` notification with the yanked text
+- With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the selected lines
+- `_G.gigachad_set_text` replaces the buffer text with minimal hunks, for edits made to the file elsewhere
 """
 
 from __future__ import annotations
@@ -17,10 +19,10 @@ if TYPE_CHECKING:
 
 _READ_CHUNK = 65536
 
-# Receives (channel, working path, optional baseline path). Mirrors Neovim's write rules:
+# Receives (channel, working path, optional baseline path, ask_keymap). Mirrors Neovim's write rules:
 # empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
 SETUP_LUA = r"""
-local channel, path, base_path = ...
+local channel, path, base_path, ask_keymap = ...
 if base_path == vim.NIL then base_path = nil end
 local buffer = vim.fn.bufadd(path)
 vim.fn.bufload(buffer)
@@ -34,10 +36,49 @@ local function buffer_text()
   return text
 end
 
-local function show_stored(text)
+local function stored_lines(text)
   local lines = vim.split(text, "\n", { plain = true })
   if #lines > 1 and lines[#lines] == "" then table.remove(lines) else vim.bo[buffer].eol = false end
-  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+  return lines
+end
+
+local function show_stored(text)
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, stored_lines(text))
+end
+
+local diff_lines = (vim.text and vim.text.diff) or vim.diff
+local remote_edit_namespace = vim.api.nvim_create_namespace("gigachad_remote_edit")
+local remote_edit_generation = 0
+local REMOTE_EDIT_HIGHLIGHT_MS = 1500
+
+local function highlight_remote_edit(first, count)
+  remote_edit_generation = remote_edit_generation + 1
+  local generation = remote_edit_generation
+  for line = first, first + count - 1 do
+    vim.api.nvim_buf_set_extmark(buffer, remote_edit_namespace, line, 0, { line_hl_group = "DiffText" })
+  end
+  vim.defer_fn(function()
+    if generation == remote_edit_generation and vim.api.nvim_buf_is_valid(buffer) then
+      vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
+    end
+  end, REMOTE_EDIT_HIGHLIGHT_MS)
+end
+
+-- Replaces the buffer text with `text` (already on disk) as one undo step that leaves cursor, view and marks in place.
+function _G.gigachad_set_text(text)
+  if text == buffer_text() then return end
+  local old_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+  local new_lines = stored_lines(text)
+  local hunks = diff_lines(table.concat(old_lines, "\n") .. "\n", table.concat(new_lines, "\n") .. "\n", { result_type = "indices" })
+  vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
+  for index = #hunks, 1, -1 do
+    local start_old, count_old, start_new, count_new = unpack(hunks[index])
+    local first = count_old > 0 and start_old - 1 or start_old
+    local replacement = vim.list_slice(new_lines, start_new, start_new + count_new - 1)
+    vim.api.nvim_buf_set_lines(buffer, first, first + count_old, false, replacement)
+    highlight_remote_edit(first, count_new)
+  end
+  vim.bo[buffer].modified = false
 end
 
 vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -60,6 +101,16 @@ vim.api.nvim_create_autocmd("TextYankPost", {
     vim.rpcnotify(channel, "yank", text)
   end,
 })
+
+if ask_keymap == true then
+  vim.keymap.set("x", "<leader>a", function()
+    local first, last = vim.fn.line("v"), vim.fn.line(".")
+    if first > last then first, last = last, first end
+    vim.cmd("normal! \27")
+    local lines = vim.api.nvim_buf_get_lines(buffer, first - 1, last, false)
+    vim.rpcnotify(channel, "selection", { start_line = first, end_line = last, text = table.concat(lines, "\n") })
+  end, { buffer = buffer })
+end
 
 if base_path then
   local work_window = vim.api.nvim_get_current_win()

@@ -35,6 +35,8 @@ interface SidebarProps {
   onRootsChanged?: () => void
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
+  /** Opens `.tex` project files in the LaTeX tab, absent where it is unavailable. */
+  onLatexSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
   onNewChat?: (slug: string | null) => void
@@ -121,7 +123,7 @@ export function Sidebar(props: SidebarProps) {
           onMoveToRoot={(path) => documents.move(path, "")}
         />
         <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>
-        <ErrorText className="px-2 py-1">{documents.uploadError}</ErrorText>
+        <ErrorText className="px-2 py-1">{documents.fileError}</ErrorText>
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
           headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}

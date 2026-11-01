@@ -5,7 +5,12 @@
  * - `--cf-composer-area`: height of what is left of omp-web's composer area (queue, status, /btw), which
  *   `theme/embed.css` floats above the shell composer, so the transcript pads past it too
  * - A session opens at its newest message, whatever settles in after upstream's first scroll
+ * - `html.cf-on-surface`: the shell's backdrop is a side panel card (`insets` backdrop `surface`)
  */
+
+import type { ShellMessage } from "@gigachad/chat-ui/protocol";
+
+type ShellInsets = Omit<Extract<ShellMessage, { type: "insets" }>, "type">;
 
 /** omp-web's composer area: the transcript column's sibling holding the hidden input box (`components/ChatWindow.tsx`). */
 const COMPOSER_AREA = ":has(> [role=log]) ~ div:has(.chat-input-shell)";
@@ -27,9 +32,11 @@ function setPixels(name: string, pixels: number) {
   document.documentElement.style.setProperty(name, `${Math.max(0, Math.round(pixels))}px`);
 }
 
-export function applyShellInsets({ top, bottom }: { top: number; bottom: number }) {
+/** Take the shell's chrome sizes, and its backdrop: `html.cf-on-surface` recolors the frame for a side panel card (`theme/tokens.css`). */
+export function applyShellInsets({ top, bottom, backdrop }: ShellInsets) {
   setPixels("--cf-inset-top", top);
   setPixels("--cf-inset-bottom", bottom);
+  document.documentElement.classList.toggle("cf-on-surface", backdrop === "surface");
   shellInsets = { top, bottom };
 }
 

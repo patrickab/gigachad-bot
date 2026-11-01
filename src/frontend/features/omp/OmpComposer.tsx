@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, type ComponentProps, type RefObject } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, type ComponentProps, type RefObject } from "react"
 import { Brain, File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { useTab } from "@/contexts/TabContext"
@@ -123,6 +123,24 @@ function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle |
   }), [onComposerEvent, view, inputRef])
 }
 
+/** Text for the draft of a composer, `id` tells one request from the next. */
+export interface ComposerInsertion {
+  id: number
+  text: string
+}
+
+/** Append `insertion` to the draft behind `inputRef` once the composer is enabled, focus it, then report it through `onInserted`. */
+function useComposerInsertion(insertion: ComposerInsertion | null, enabled: boolean, onInserted: (() => void) | undefined, inputRef: RefObject<ChatInputHandle | null>) {
+  const insertedIdRef = useRef<number | null>(null)
+  const reportInserted = useEffectEvent(() => onInserted?.())
+  useEffect(() => {
+    if (!insertion || !enabled || insertedIdRef.current === insertion.id) return
+    insertedIdRef.current = insertion.id
+    inputRef.current?.updateText((draft) => (draft ? `${draft}\n\n${insertion.text}` : insertion.text))
+    reportInserted()
+  }, [insertion, enabled, inputRef])
+}
+
 /** `view`'s pending extension `select` (e.g. `/files`) as the active tab's draft picker, answered through the frame. A path option shows its folder beside it. */
 function useSelectPicker(view: OmpView): DraftPicker | undefined {
   const { isActive } = useTab()
@@ -153,6 +171,11 @@ function useComposerFor(view: OmpView) {
   }
 }
 
+/** Whether the agent of the session `view` shows is running. False while the frame shows another view. */
+export function useOmpStreaming(view: OmpView): boolean {
+  return useComposerFor(view).state?.streaming ?? false
+}
+
 /**
  * gigachad's composer for an omp tab. omp-web's own one stays hidden in the frame and submits what this one sends.
  *
@@ -162,12 +185,21 @@ function useComposerFor(view: OmpView) {
  * - `shellCommands` (`/memorize`) share the `/` menu, the shell runs them instead of sending them
  * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
  * - A send while the agent runs is queued by omp (follow-up, or steer per omp-web Settings), the stop button shows with an empty draft
+ * - `insertion` is appended to the draft once, with focus, as soon as the composer is enabled. `onInserted` follows
  * - Disabled until the frame reports the composer of this tab's session
  */
-export function OmpComposer({ view, chatId, slug, shellCommands }: { view: OmpView; chatId: string; slug: string | null; shellCommands: ShellCommands }) {
+export function OmpComposer({ view, chatId, slug, shellCommands, insertion = null, onInserted }: {
+  view: OmpView
+  chatId: string
+  slug: string | null
+  shellCommands: ShellCommands
+  insertion?: ComposerInsertion | null
+  onInserted?: () => void
+}) {
   const { state, commands, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
   useComposerRestore(view, inputRef)
+  useComposerInsertion(insertion, state !== null, onInserted, inputRef)
   const picker = useSelectPicker(view)
   const sessionId = state?.sessionId ?? null
   const complete = useComposerCompletions(state?.sessionId, commands, shellCommands.names)

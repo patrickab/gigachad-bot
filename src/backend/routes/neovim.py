@@ -3,10 +3,15 @@
 `WS /api/neovim/session` runs one `nvim` per connection. Binary frames carry terminal
 bytes both ways, text frames carry JSON control messages:
 
-- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "rows", "cols"}` first
-  (a string `base_content` opens a read-only left diff buffer against the editable document),
-  then `{"type": "resize", "rows", "cols"}` and `{"type": "saved", "id", "content" | "error"}`
-- server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "exit", "code"}` when `nvim` quits
+- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "ask_keymap"?, "rows", "cols"}` first
+  (a string `base_content` opens a read-only left diff buffer against the editable document, `ask_keymap`
+  maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
+  `{"type": "saved", "id", "content" | "error"}`, `{"type": "set_content", "content"}` (the file changed on disk,
+  the buffer takes the text without moving the cursor) and `{"type": "background", "light"}` (the theme behind the
+  terminal, Neovim's 'background' follows it)
+- server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "yank", "content"}`,
+  `{"type": "selection", "start_line", "end_line", "text"}` (1-based inclusive lines),
+  `{"type": "exit", "code"}` when `nvim` quits
 
 `nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
 
@@ -31,7 +36,7 @@ from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
 from config import CORS_ORIGINS
 from lib.file_roots import FileRoots
-from lib.neovim_session import NeovimSession, is_neovim_installed
+from lib.neovim_session import NeovimSession, Selection, is_neovim_installed
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +55,7 @@ class OpenMessage(BaseModel):
     filename: str
     content: str
     base_content: str | None = None
+    ask_keymap: bool = False
     rows: int = Field(ge=1, le=1000)
     cols: int = Field(ge=1, le=1000)
 
@@ -103,6 +109,9 @@ class _BrowserSaves:
     async def yank(self, text: str) -> None:
         await self._websocket.send_json({"type": "yank", "content": text})
 
+    async def selection(self, selection: Selection) -> None:
+        await self._websocket.send_json({"type": "selection", **selection})
+
     def resolve(self, reply: dict) -> None:
         pending = self._pending.get(reply.get("id"))
         if pending is not None and not pending.done():
@@ -128,9 +137,19 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
             session.resize(int(control["rows"]), int(control["cols"]))
         elif control.get("type") == "saved":
             saves.resolve(control)
+        elif control.get("type") == "set_content" and isinstance(control.get("content"), str):
+            try:
+                await session.set_text(control["content"])
+            except (RuntimeError, ConnectionError, TimeoutError) as exc:
+                log.warning("Neovim could not take the changed file: %s", exc)
+        elif control.get("type") == "background" and isinstance(control.get("light"), bool):
+            try:
+                await session.set_background(control["light"])
+            except (RuntimeError, ConnectionError, TimeoutError) as exc:
+                log.warning("Neovim could not take the theme: %s", exc)
 
 
-async def _run(websocket: WebSocket, session: NeovimSession) -> None:
+async def _run(websocket: WebSocket, session: NeovimSession, *, ask_keymap: bool) -> None:
     """Relay until `nvim` exits, the browser leaves, or the save hook cannot be installed."""
     saves = _BrowserSaves(websocket)
     relays = [
@@ -138,7 +157,13 @@ async def _run(websocket: WebSocket, session: NeovimSession) -> None:
         asyncio.create_task(_relay_input(websocket, session, saves)),
     ]
     # Input flows while connecting, so a startup prompt from the user's config can be answered.
-    connecting = asyncio.create_task(session.connect(saves.save, lambda text: asyncio.create_task(saves.yank(text))))
+    connecting = asyncio.create_task(
+        session.connect(
+            saves.save,
+            lambda text: asyncio.create_task(saves.yank(text)),
+            (lambda selection: asyncio.create_task(saves.selection(selection))) if ask_keymap else None,
+        )
+    )
     try:
         done, _ = await asyncio.wait([*relays, connecting], return_when=asyncio.FIRST_COMPLETED)
         if connecting in done and connecting.exception() is not None:
@@ -175,7 +200,7 @@ async def neovim_session(
         cwd=working_directory(roots, opening.path),
     )
     try:
-        await _run(websocket, session)
+        await _run(websocket, session, ask_keymap=opening.ask_keymap)
     finally:
         await session.close()
         if websocket.client_state == WebSocketState.CONNECTED:

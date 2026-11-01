@@ -16,7 +16,9 @@ import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
+import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
 import { itemOf, useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { isLatexFile } from "@/features/latex/latexBuild"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
@@ -42,6 +44,10 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
   const { tab, isActive, setModeLabel, updateConfig } = useTab()
   const { projectSlug, config, appMode } = tab
   const { researchEnabled } = useEnabledTools()
+  // The LaTeX workspace needs Neovim for the source and host access for the build and omp
+  const neovimEnabled = useNeovimSetting().enabled
+  const hostAccess = useHostAccess()
+  const opensLatex = neovimEnabled && hostAccess
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const contentAreaRef = useContentAreaRef()
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
@@ -80,7 +86,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
   return (
     <div className="relative flex h-full overflow-hidden">
       <Sidebar
-        onFileSelect={(path) => onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })}
+        onFileSelect={(path) => onOpenItem({ kind: opensLatex && isLatexFile(path) ? "latex" : "document", path, projectSlug: null, rootFile: true })}
         onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}
@@ -89,7 +95,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
         onProjectRenamed={onProjectRenamed}
         onNewChat={onNewChat}
         onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
-        activeDocumentPath={appMode === "document" ? itemOf(tab, "document")?.path : null}
+        onLatexSelect={opensLatex ? (path, scope) => onOpenItem({ kind: "latex", path, projectSlug: scope || null, rootFile: true }) : undefined}
+        activeDocumentPath={appMode === "document" ? itemOf(tab, "document")?.path : appMode === "latex" ? itemOf(tab, "latex")?.path : null}
         onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
         onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
         onItemOpen={onOpenItem}

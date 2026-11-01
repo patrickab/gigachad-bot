@@ -33,6 +33,7 @@ from backend.routes.config import router as config_router
 from backend.routes.deps import get_client, shutdown_client
 from backend.routes.deploy import router as deploy_router
 from backend.routes.neovim import router as neovim_router
+from backend.routes.latex import router as latex_router
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
 from backend.routes.fileviewer import router as fileviewer_router
@@ -164,6 +165,7 @@ app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(neovim_router)
+app.include_router(latex_router)
 app.include_router(deploy_router)
 app.include_router(file_roots_router)
 app.include_router(file_attach_router)

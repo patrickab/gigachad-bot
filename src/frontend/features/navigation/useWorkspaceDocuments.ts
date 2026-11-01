@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { addRootFilesToProject, adoptProjectLatex, createArchitectureSource, createProjectLatex, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
@@ -28,6 +28,15 @@ function pickFiles(): Promise<File[]> {
 /** Whether `path` is a file stored in a project (not a canvas or a file on disk), the kind that can move into a folder. */
 export const isStoredProjectFile = (path: string) => /^project\/[^/]+\/document\//.test(path) && !path.endsWith(".canvas")
 
+/** Kinds the files folder's `+` creates. */
+export const NEW_FILE_KINDS = ["Markdown", "LaTeX"] as const
+export type NewFileKind = (typeof NEW_FILE_KINDS)[number]
+
+const isLatexPath = (path: string) => path.toLowerCase().endsWith(".tex")
+
+/** `name` as a Markdown file name: `.md` appended unless it names its own extension. */
+const markdownName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}.md`)
+
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
   /** A change reads both lists again while the tab is active. */
@@ -35,6 +44,8 @@ interface WorkspaceDocumentsOptions {
   moveHistory: (path: string, scope: string) => Promise<void>
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
+  /** Opens `.tex` project files in the LaTeX tab, absent where it is unavailable. */
+  onLatexSelect?: (path: string, scope: string) => void
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
   onArchitectureSelect?: (slug: string) => void
@@ -42,7 +53,7 @@ interface WorkspaceDocumentsOptions {
 
 /** Loose notes and project documents of the sidebar, with the actions that change them. */
 export function useWorkspaceDocuments({
-  projects, reloadKey, moveHistory, onDocumentsChanged, onDocumentSelect, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
+  projects, reloadKey, moveHistory, onDocumentsChanged, onDocumentSelect, onLatexSelect, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
 }: WorkspaceDocumentsOptions) {
   const isActive = useTabActive()
   const { schedule } = useUndoDelete()
@@ -50,7 +61,7 @@ export function useWorkspaceDocuments({
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   /** Project whose create-document panel is open. */
   const [createTarget, setCreateTarget] = useState<string | null>(null)
-  const [uploadError, setUploadError] = useState("")
+  const [fileError, setFileError] = useState("")
 
   const loadProjectDocuments = useCallback(async (signal?: AbortSignal) => {
     const entries = await Promise.all(projects.map(async (project) =>
@@ -78,6 +89,32 @@ export function useWorkspaceDocuments({
     const { path } = await writeDocument(scope, name)
     await refresh()
     open(path)
+  }
+
+  /** Open project file `path`: a `.tex` in the LaTeX tab where available, a stored one moved to disk first so it can build. */
+  const selectDocument = async (path: string, scope: string) => {
+    if (!onLatexSelect || !isLatexPath(path)) return onDocumentSelect?.(path, scope)
+    if (!isStoredProjectFile(path)) return onLatexSelect(path, scope)
+    setFileError("")
+    try {
+      const moved = await adoptProjectLatex(scope, path)
+      await refresh()
+      onDocumentsChanged?.()
+      onLatexSelect(moved, scope)
+    } catch (cause) {
+      setFileError(errorMessage(cause, "Could not move the LaTeX file to disk"))
+    }
+  }
+
+  /** Create a `kind` file `name` in project `scope` and open it. LaTeX lives on disk, Markdown in the project. */
+  const createFile = async (scope: string, name: string, kind: NewFileKind) => {
+    if (kind === "LaTeX" && onLatexSelect) {
+      const path = await createProjectLatex(scope, name)
+      await refresh()
+      onLatexSelect(path, scope)
+    } else {
+      await createAndOpen(scope, markdownName(name), (path) => onDocumentSelect?.(path, scope))
+    }
   }
 
   /** Move a canvas, stored project file or chat history `path` into `scope`; architecture sources stay. */
@@ -108,11 +145,11 @@ export function useWorkspaceDocuments({
   const uploadFiles = async (scope: string) => {
     const files = await pickFiles()
     if (files.length === 0) return
-    setUploadError("")
+    setFileError("")
     try {
       await Promise.all(files.map((file) => writeBinaryDocument(scope, file.name, file)))
     } catch (cause) {
-      setUploadError(errorMessage(cause, "Could not upload files"))
+      setFileError(errorMessage(cause, "Could not upload files"))
     }
     await refresh()
     onDocumentsChanged?.()
@@ -163,5 +200,8 @@ export function useWorkspaceDocuments({
     } catch { /* the panel stays open to retry */ }
   }
 
-  return { documents, notes, createAndOpen, move, moveToFolder, remove, importFiles, uploadFiles, uploadError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument }
+  return {
+    documents, notes, createAndOpen, selectDocument, createFile, canCreateLatex: !!onLatexSelect, move, moveToFolder, remove, importFiles,
+    uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
+  }
 }

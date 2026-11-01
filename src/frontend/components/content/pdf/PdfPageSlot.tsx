@@ -27,6 +27,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   snap,
   registerSlot,
   renderPageOverlay,
+  onRendered,
 }: {
   pageNumber: number
   width: number
@@ -41,6 +42,8 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   snap: boolean
   registerSlot: (pageNumber: number, slot: HTMLDivElement | null) => void
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
+  /** Called each time this page's live canvas finished drawing. */
+  onRendered?: () => void
 }) {
   const [regions, setRegions] = useState<PageRegions | null>(null)
   // masks over a blank canvas would show as light boxes
@@ -112,7 +115,8 @@ export const PdfPageSlot = memo(function PdfPageSlot({
     releaseCanvas(backupRef.current)
     publishPlaceholder(false)
     setDrawn(true)
-  }, [devicePixelRatio, publishPlaceholder])
+    onRendered?.()
+  }, [devicePixelRatio, publishPlaceholder, onRendered])
 
   // Images skip both color layers, link text skips the ink layer. Shares the operator list the canvas render fetches.
   const collectRegions = useCallback((page: PdfPage) => {

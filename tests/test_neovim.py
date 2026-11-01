@@ -205,3 +205,67 @@ async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
     finally:
         await session.close()
         await drain
+
+
+@requires_nvim
+async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_buffer_unmodified(neovim_home):
+    async def save(text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn(
+        "main.tex", "".join(f"line {number}\n" for number in range(1, 21)), rows=24, cols=80, cwd=neovim_home
+    )
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        session.write_input(b"10Gl\x1b")
+        while await session._rpc.request("nvim_eval", "line('.')") != 10:
+            await asyncio.sleep(0.05)
+
+        await session.set_text("line 1\nline TWO\n" + "".join(f"line {number}\n" for number in range(3, 21)) + "last\n")
+
+        assert await session._rpc.request("nvim_eval", "[line('.'), col('.'), &modified]") == [10, 2, 0]
+        text = await session._rpc.request("nvim_eval", "join(getline(1, '$'), '|')")
+        assert text.startswith("line 1|line TWO|line 3|") and text.endswith("|line 20|last")
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
+async def test_background_asked_before_startup_wins_over_detection_and_follows_later_changes(neovim_home):
+    async def save(text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn("main.tex", "text\n", rows=24, cols=80, cwd=neovim_home)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await session.set_background(True)
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+        assert await session._rpc.request("nvim_eval", "&background") == "light"
+
+        await session.set_background(False)
+        assert await session._rpc.request("nvim_eval", "&background") == "dark"
+    finally:
+        await session.close()
+        await drain
+
+
+
+@requires_nvim
+async def test_visual_ask_keymap_reports_the_selected_lines_only_when_requested(neovim_home):
+    selections: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn("main.tex", "a\nb\nc\nd\n", rows=24, cols=80, cwd=neovim_home)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None, selections.put_nowait), 15)
+        session.write_input(b"3GVk\\a")
+        assert await asyncio.wait_for(selections.get(), 10) == {"start_line": 2, "end_line": 3, "text": "b\nc"}
+        assert await session._rpc.request("nvim_eval", "mode()") == "n"
+    finally:
+        await session.close()
+        await drain

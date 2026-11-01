@@ -11,6 +11,7 @@ import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/
 import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument"
 import { deviceHeaders } from "./deviceId"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
+import type { LatexBuild } from "@/lib/domain/latex"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
@@ -604,6 +605,26 @@ export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystem
 /** An omp session's active branch as a chat history: user and assistant text, no thinking or tool calls. */
 export async function fetchOmpSessionHistory(sessionId: string): Promise<Pick<Message, "role" | "content">[]> {
   return request<Pick<Message, "role" | "content">[]>(`/omp/sessions/${encodeURIComponent(sessionId)}/history`)
+}
+
+/** Create the omp prompt files next to the `.tex` file at *path* when missing, resolves to the directory omp sessions run in. */
+export function prepareLatex(path: string): Promise<{ cwd: string }> {
+  return post<{ cwd: string }>("/latex/prepare", { path })
+}
+
+/** Compile the `.tex` file at *path*. A TeX error resolves with `ok: false`, a missing TeX install rejects with ApiError 503. */
+export function buildLatex(path: string): Promise<LatexBuild> {
+  return post<LatexBuild>("/latex/build", { path })
+}
+
+/** Create LaTeX document *name* of project *slug* on disk, listed in its files. Resolves to the new `.tex` path. */
+export async function createProjectLatex(slug: string, name: string): Promise<string> {
+  return (await post<{ path: string }>("/latex/create", { slug, name })).path
+}
+
+/** Move the stored `.tex` project file *path* of *slug* to disk so it can build. Resolves to its new path. */
+export async function adoptProjectLatex(slug: string, path: string): Promise<string> {
+  return (await post<{ path: string }>("/latex/adopt", { slug, path })).path
 }
 
 /** Every learn session with the project it is grouped under. Host-access logins only. */

@@ -11,13 +11,13 @@ import type { ArchiveEntry } from "./ArchiveSelector"
 import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
 import type { useProjectActions } from "./useProjectActions"
-import { isStoredProjectFile, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
+import { isStoredProjectFile, NEW_FILE_KINDS, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
 
 type CodeMounts = ReturnType<typeof useCodeMounts>
 
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
-  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "remove" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
+  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "canCreateLatex" | "remove" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
   & Pick<ReturnType<typeof useProjectActions>, "startRename" | "removeProject" | "changeArchive">
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
   & {
@@ -86,7 +86,7 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
 
 /** The chats, canvases and (for a project) files folders of `project`, or of the general scope when null. */
 function categoryItems(context: ProjectTreeContext, project: ProjectListItem | null): FileTreeItem<string>[] {
-  const { branchMeta, pending, appMode, move, createAndOpen, remove, onCanvasSelect, onDocumentSelect } = context
+  const { branchMeta, pending, appMode, move, createAndOpen, remove, onCanvasSelect } = context
   const scope = project?.slug ?? ""
   const owner = project?.name ?? "general"
   const prefix = project ? `project:${scope}` : "shared"
@@ -128,7 +128,8 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       actions: [{ label: `Upload files to ${owner}`, icon: Upload, onClick: () => void context.uploadFiles(scope) }],
       create: {
         label: `New file in ${owner}`, placeholder: "File name",
-        onSubmit: (name: string) => createAndOpen(scope, name, (path) => onDocumentSelect?.(path, scope)),
+        choice: context.canCreateLatex ? { label: "File type", options: [...NEW_FILE_KINDS], initial: "Markdown" } : undefined,
+        onSubmit: (name: string, kind?: string) => context.createFile(scope, name, kind === "LaTeX" ? "LaTeX" : "Markdown"),
       },
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
       onMoveHere: (path: string) => move(path, scope),
@@ -136,7 +137,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
         draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
-        onSelect: () => onDocumentSelect?.(doc.path, scope),
+        onSelect: () => void context.selectDocument(doc.path, scope),
         onDelete: () => remove(doc, scope),
       })),
     }] : []),

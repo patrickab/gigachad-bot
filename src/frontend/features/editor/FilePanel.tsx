@@ -187,7 +187,7 @@ export function FilePanel({ label, onClose, actions, width, bare = false, childr
   )
 }
 
-const LOAD_MESSAGES: Record<FileLoadFailure, string> = {
+export const LOAD_MESSAGES: Record<FileLoadFailure, string> = {
   forbidden: "This file is outside the folders gigachad-bot can read.",
   missing: "This file does not exist.",
   binary: "This is not a text file.",

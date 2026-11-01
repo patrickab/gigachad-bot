@@ -35,6 +35,11 @@
   --shadow-md: var(--gc-dark-shadow-md);
 }
 
+/* Inside a shell side panel card the page is already surface, cards step up to elevated like the shell's side chats */
+:root.cf-on-surface :is(.gc-turn, [data-markdown-root]) {
+  --surface: var(--cf-elevated);
+}
+
 /* The lightbox button around a markdown image, as upstream's `.markdown-body .image-clickable` */
 [data-markdown-root] .image-clickable {
   display: block;

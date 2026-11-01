@@ -18,6 +18,7 @@ import { FactorySurface } from "@/features/factory/FactorySurface"
 import { LearnModelSelector, LearnReasoningSelector } from "@/features/learn/LearnModel"
 import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
 import { LearnSurface } from "@/features/learn/LearnSurface"
+import { LatexSurface } from "@/features/latex/LatexSurface"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
@@ -64,6 +65,7 @@ interface Surface {
 export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
+  const [latexDrawerOpen, setLatexDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
 
@@ -173,6 +175,36 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         </>,
         runsUnderTopBar: !!ompView && ompView.kind !== "settings",
         body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
+      }
+    },
+    latex: () => {
+      const latexItem = itemOf(tab, "latex")
+      return {
+        left: <TopBarSlot name="latexAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+        right: <>
+          <TopBarSlot name="latexBuild">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+          <TopBarTransparent>
+            <ThemeToggle />
+            <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+              <X className="h-4 w-4" />
+            </button>
+          </TopBarTransparent>
+          {!latexDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setLatexDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
+        </>,
+        runsUnderTopBar: true,
+        body: latexItem ? (
+          <LatexSurface
+            key={latexItem.path}
+            path={latexItem.path}
+            ompView={latexItem.omp}
+            onViewChange={(omp) => setWorkspaceItem({ ...latexItem, omp })}
+            drawerOpen={latexDrawerOpen}
+            onDrawerOpenChange={setLatexDrawerOpen}
+            onClose={() => setAppMode("chat")}
+            shellCommands={ompShellCommands}
+            modelProps={modelProps}
+          />
+        ) : chatBody,
       }
     },
     factory: () => {

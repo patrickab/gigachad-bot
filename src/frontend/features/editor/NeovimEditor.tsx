@@ -1,10 +1,12 @@
 "use client"
 
-import { useEffect, useEffectEvent, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
 import { cn, errorMessage } from "@/lib/utils"
 import { neovimSessionUrl } from "@/lib/backend/urls"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useThemeName } from "@/hooks/useThemeName"
+import { readToken } from "@/lib/palette"
 
 const FONT_SIZE = 13
 // Local Nerd Fonts first, so icons from the user's config render as in a terminal. "Mono" keeps icons one cell wide.
@@ -20,12 +22,47 @@ const SYNC_END = "\x1b[?2026l"
 // One char per byte, so the ASCII marker can be found in raw PTY output
 const BYTE_DECODER = new TextDecoder("latin1")
 
+type Rgb = [red: number, green: number, blue: number]
+
+/** `color` as RGB, null when fully transparent. Canvas resolves any CSS color, xterm only takes opaque ones. */
+function toRgb(color: string): Rgb | null {
+  const context = window.document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  if (!context) return null
+  context.fillStyle = color
+  context.fillRect(0, 0, 1, 1)
+  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data
+  return alpha === 0 ? null : [red, green, blue]
+}
+
+const rgbCss = ([red, green, blue]: Rgb) => `rgb(${red}, ${green}, ${blue})`
+
+/** Share of ink in the cursor block over the background: clearly visible, softer than full ink. */
+const CURSOR_INK_SHARE = 0.3
+
+const mix = (base: Rgb, over: Rgb, share: number): Rgb => base.map((channel, index) => Math.round(channel + (over[index] - channel) * share)) as Rgb
+
+/** Terminal colors of the app theme: the background `element` sits on, and the ink on it. `isLight` is what Neovim gets as 'background'. */
+function terminalTheme(element: HTMLElement) {
+  let background: Rgb | null = null
+  for (let node: HTMLElement | null = element; node && !background; node = node.parentElement) background = toRgb(getComputedStyle(node).backgroundColor)
+  background ??= toRgb(readToken("paper")) ?? [0, 0, 0]
+  const ink = toRgb(readToken("ink")) ?? [255, 255, 255]
+  const [red, green, blue] = background
+  return {
+    // The character under the cursor block keeps the ink
+    theme: { background: rgbCss(background), foreground: rgbCss(ink), cursor: rgbCss(mix(background, ink, CURSOR_INK_SHARE)), cursorAccent: rgbCss(ink) },
+    isLight: 0.299 * red + 0.587 * green + 0.114 * blue > 128,
+  }
+}
+
 /** A running terminal whose host element survives React remounts (fullscreen, overlay). */
 export interface NeovimTerminal {
   attach: (parent: HTMLElement) => void
   detach: () => void
   fit: () => void
   focus: () => void
+  /** Repaint with the colors of the current app theme. */
+  restyle: () => void
 }
 
 export type NeovimStatus =
@@ -42,24 +79,43 @@ export interface NeovimDocument {
   base_content?: string
 }
 
+/** Lines picked in visual mode with the ask keymap, 1-based and inclusive, `text` is those full lines. */
+export interface NeovimSelection {
+  start_line: number
+  end_line: number
+  text: string
+}
+
+interface NeovimOptions {
+  /** Install visual-mode `<leader>a`, which reports the selected lines to `onSelection`. */
+  askKeymap?: boolean
+  onSelection?: (selection: NeovimSelection) => void
+}
+
 /** Run one backend Neovim session for `document`.
  *
  * - `:w` calls `save(text)`, whose resolved text replaces the buffer if it differs
  * - Yanks (`y`) are copied to the browser clipboard
  * - `:q` with exit code 0 calls `onQuit`
+ * - `setContent(text)` replaces the buffer with text that is already on disk (unmodified, one undo step), false while the session is not open
  * - Unmounting or a new `document.key` discards unsaved edits
  */
-export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string) => Promise<string>, onQuit: () => void) {
+export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string) => Promise<string>, onQuit: () => void, { askKeymap = false, onSelection }: NeovimOptions = {}) {
   const [terminal, setTerminal] = useState<NeovimTerminal | null>(null)
   const [status, setStatus] = useState<NeovimStatus>({ state: "running" })
   const [generation, setGeneration] = useState(0)
   const readDocument = useEffectEvent(() => document)
+  const readAskKeymap = useEffectEvent(() => askKeymap)
   const saveText = useEffectEvent(save)
   const quit = useEffectEvent(onQuit)
+  const reportSelection = useEffectEvent((selection: NeovimSelection) => onSelection?.(selection))
+  const sendContentRef = useRef<((text: string) => boolean) | null>(null)
+  const setContent = useCallback((text: string) => sendContentRef.current?.(text) ?? false, [])
 
   const documentKey = document?.key ?? null
   useEffect(() => {
     const opened = readDocument()
+    const withAskKeymap = readAskKeymap()
     if (documentKey === null || !opened) return
     let disposed = false
     let dispose = () => {}
@@ -69,7 +125,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       if (disposed) return
       const host = window.document.createElement("div")
       host.className = "h-full w-full font-mono"
-      const xterm = new Terminal({ fontSize: FONT_SIZE, cursorBlink: true, allowTransparency: true, theme: { background: "rgba(0, 0, 0, 0)" } })
+      const xterm = new Terminal({ fontSize: FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
       let isOpen = false
@@ -106,7 +162,8 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
 
       socket.onopen = () => {
         sentSize = `${xterm.rows}x${xterm.cols}`
-        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols }))
+        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap }))
+        if (backgroundIsLight !== null) sendBackground(backgroundIsLight)
       }
       socket.onmessage = async (event: MessageEvent<ArrayBuffer | string>) => {
         if (typeof event.data !== "string") {
@@ -121,6 +178,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         const message = JSON.parse(event.data)
         if (message.type === "exit") exitCode = message.code
         if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
+        if (message.type === "selection") { reportSelection({ start_line: message.start_line, end_line: message.end_line, text: message.text }); return }
         if (message.type !== "save") return
         try {
           send(JSON.stringify({ type: "saved", id: message.id, content: await saveText(message.content) }))
@@ -162,14 +220,31 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         sendSize(size.rows, size.cols)
       }
 
+      // Neovim's 'background' follows the theme behind the terminal, set by the backend over RPC. Its own startup
+      // query (OSC 11) races the slot's styling and misses a theme picked before reconnecting
+      let backgroundIsLight: boolean | null = null
+      const sendBackground = (light: boolean) => send(JSON.stringify({ type: "background", light }))
+      const applyTheme = (parent: HTMLElement) => {
+        const { theme, isLight } = terminalTheme(parent)
+        xterm.options.theme = theme
+        if (isLight !== backgroundIsLight) sendBackground(isLight)
+        backgroundIsLight = isLight
+      }
+
       setStatus({ state: "running" })
       setTerminal({
-        attach: (parent) => { parent.appendChild(host); fit() },
+        attach: (parent) => { parent.appendChild(host); applyTheme(parent); fit() },
         detach: () => host.remove(),
         fit,
+        restyle: () => { if (host.parentElement) applyTheme(host.parentElement) },
         focus: () => xterm.focus(),
       })
-      dispose = () => { if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
+      sendContentRef.current = (content) => {
+        if (socket.readyState !== WebSocket.OPEN) return false
+        send(JSON.stringify({ type: "set_content", content }))
+        return true
+      }
+      dispose = () => { sendContentRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
     })()
 
     return () => {
@@ -179,7 +254,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
     }
   }, [documentKey, generation])
 
-  return { terminal, status, restart: () => setGeneration((value) => value + 1) }
+  return { terminal, status, restart: () => setGeneration((value) => value + 1), setContent }
 }
 
 function stoppedMessage(exitCode: number | null, closeCode: number): string {
@@ -196,6 +271,7 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
   className?: string
 }) {
   const slotRef = useRef<HTMLDivElement>(null)
+  const theme = useThemeName()
 
   useEventListener(slotRef, "keydown", (event) => event.stopPropagation())
 
@@ -219,10 +295,12 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
     }
   }, [terminal])
 
+  useEffect(() => { terminal?.restyle() }, [terminal, theme])
+
   return (
-    <div ref={slotRef} data-neovim-terminal className={cn("relative min-h-0 flex-1 overflow-hidden px-2 pt-1", className)}>
+    <div ref={slotRef} data-neovim-terminal className={cn("relative min-h-0 flex-1 overflow-hidden bg-page px-2 pt-1", className)}>
       {status.state === "stopped" && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-paper text-xs text-ink-faint">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-page text-xs text-ink-faint">
           <span>{status.message}</span>
           <button onClick={onRestart} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
             Restart Neovim

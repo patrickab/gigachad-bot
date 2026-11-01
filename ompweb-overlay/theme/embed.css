@@ -4,6 +4,7 @@
    - Settings: Back and close go, the shell's tab closes Settings (Escape still returns to the chat, the shell reopens Settings)
    - Composer: the input box goes, gigachad-bot's composer drives it (`custom/overrides/components/ChatInput.tsx`). Its status
      bar ("Running …") and queue bar stay, restyled as one card above the shell composer
+   - New session: the brand, "What should we work on?" and the workspace picker go, the shell already picked the cwd
    - Hidden, not removed: the sidebar keeps its running-session stream and the Settings row the bridge clicks */
 
 html.cf-embed #workspace-sidebar,
@@ -14,7 +15,10 @@ html.cf-embed .right-panel-resize-handle,
 html.cf-embed .right-panel-backdrop,
 html.cf-embed .settings-header .settings-back,
 html.cf-embed .settings-close-btn,
-html.cf-embed .chat-input-shell {
+html.cf-embed .chat-input-shell,
+html.cf-embed .empty-chat-brand,
+html.cf-embed .empty-session-intro,
+html.cf-embed .new-session-workspace {
   display: none !important;
 }
 

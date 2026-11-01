@@ -14,7 +14,7 @@ import type { ComposerCommands, ComposerState } from "./composer"
 import { createFrameHints, isHintMessage } from "./clickHints"
 import { installClickHints } from "@gigachad/chat-ui/hints"
 import "@gigachad/chat-ui/hints.css"
-import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameMessage, type HintMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
+import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameBackdrop, type FrameMessage, type HintMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
@@ -49,8 +49,8 @@ export interface FrameAttachment {
   onOpenFile: (path: string) => void
 }
 
-/** Pixels of shell chrome over the frame's top and bottom edge. */
-export type FrameInsets = { top: number; bottom: number }
+/** Pixels of shell chrome over the frame's top and bottom edge, and the shell surface behind it (default paper). */
+export type FrameInsets = { top: number; bottom: number; backdrop?: FrameBackdrop }
 
 interface OmpContextValue {
   /** Last good omp-web overview, null until one loaded. */
@@ -197,7 +197,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const [composerCommands, setComposerCommands] = useState<ComposerCommands | null>(null)
-  const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0 })
+  const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0, backdrop: "paper" })
   /** A modal dialog is open in the frame. */
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingSelect, setPendingSelect] = useState<PendingSelect | null>(null)
@@ -306,7 +306,9 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [insets, post])
 
   const setFrameInsets = useCallback((next: FrameInsets) => {
-    setInsets((current) => (current.top === next.top && current.bottom === next.bottom ? current : next))
+    setInsets((current) => (current.top === next.top && current.bottom === next.bottom && current.backdrop === (next.backdrop ?? "paper")
+      ? current
+      : { ...next, backdrop: next.backdrop ?? "paper" }))
   }, [])
 
   const attachedView = attachment?.view
@@ -374,7 +376,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
           src={frameUrl(ompWebUrl, loadedView)}
           title="omp"
           allow="clipboard-read; clipboard-write"
-          className={`fixed border-0 bg-paper ${showsModal ? "z-[91]" : "z-0"}`}
+          className={`fixed border-0 ${insets.backdrop === "surface" ? "bg-surface" : "bg-paper"} ${insets.backdrop === "surface" && !showsModal ? "rounded-b-2xl" : ""} ${showsModal ? "z-[91]" : "z-0"}`}
           // Position and size come from useFrameOverSlot, React never writes them. Hidden by opacity, not visibility:
           // Chrome stops rendering a visibility-hidden cross-origin frame, and omp-web then never reports ready
           inert={!visible}

@@ -4,6 +4,9 @@
 - `:w` never writes the copy: a buffer-local `BufWriteCmd` sends the text over
   msgpack-RPC to the caller's `save`, which persists it and returns what was stored
 - A `TextYankPost` autocmd notifies the caller's `on_yank` with the yanked text, for the browser clipboard
+- With an `on_selection` callback, visual-mode `<leader>a` reports the selected lines
+- `set_text` replaces the buffer text with edits made to the file elsewhere, without moving the cursor
+- `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
 - Closing a session discards unsaved edits
 """
 
@@ -24,8 +27,11 @@ from lib.neovim_rpc import SETUP_LUA, NeovimRpc, NeovimRpcError
 
 SaveDocument = Callable[[str], Awaitable[str]]
 YankText = Callable[[str], None]
+Selection = dict[str, int | str]
+SelectLines = Callable[[Selection], None]
 
 _STARTUP_SECONDS = 15
+_RPC_SECONDS = 10
 _SHUTDOWN_SECONDS = 2
 _READ_CHUNK = 65536
 
@@ -76,6 +82,9 @@ class NeovimSession:
         self._document = document
         self._output: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._rpc: NeovimRpc | None = None
+        # 'background' the browser asked for, applied once setup finished, so the user's config cannot override it
+        self._background: str | None = None
+        self._ready = False
         self._loop = asyncio.get_running_loop()
         self._loop.add_reader(terminal_fd, self._read_terminal)
 
@@ -114,8 +123,11 @@ class NeovimSession:
             os.close(child_fd)
         return cls(process, terminal_fd, workdir, document, base)
 
-    async def connect(self, save: SaveDocument, on_yank: YankText) -> None:
-        """Route `:w` of the document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*."""
+    async def connect(self, save: SaveDocument, on_yank: YankText, on_selection: SelectLines | None = None) -> None:
+        """Route `:w` of the document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*.
+
+        Giving *on_selection* also installs the visual-mode `<leader>a` mapping, it receives `{"start_line", "end_line", "text"}`.
+        """
 
         async def handle_request(method: str, params: list) -> object:
             if method != "save":
@@ -125,6 +137,8 @@ class NeovimSession:
         def handle_notification(method: str, params: list) -> None:
             if method == "yank":
                 on_yank(params[0])
+            elif method == "selection" and on_selection is not None:
+                on_selection(params[0])
 
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
@@ -142,8 +156,27 @@ class NeovimSession:
                 raise TimeoutError("Neovim did not finish starting")
             await asyncio.sleep(0.02)  # config and plugins still loading, FileType handlers not registered yet
         base = str(self._base) if self._base is not None else None
-        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, [channel, str(self._document), base])
+        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, [channel, str(self._document), base, on_selection is not None])
         await asyncio.wait_for(setup, _STARTUP_SECONDS)
+        self._ready = True
+        if self._background is not None:
+            await self._apply_background()
+
+    async def set_text(self, content: str) -> None:
+        """Replace the buffer text with *content* (now on disk), keeping cursor and view and leaving it unmodified."""
+        if self._rpc is None:
+            raise RuntimeError("Neovim is not connected")
+        await asyncio.wait_for(self._rpc.request("nvim_exec_lua", "return _G.gigachad_set_text(...)", [content]), _RPC_SECONDS)
+
+    async def set_background(self, light: bool) -> None:
+        """Set 'background' to light or dark now, or once connected. Neovim reloads the colorscheme on a change."""
+        self._background = "light" if light else "dark"
+        if self._ready:
+            await self._apply_background()
+
+    async def _apply_background(self) -> None:
+        assert self._rpc is not None
+        await asyncio.wait_for(self._rpc.request("nvim_set_option_value", "background", self._background, {}), _RPC_SECONDS)
 
     async def read_output(self) -> bytes | None:
         """Next terminal output chunk, None once the terminal has closed."""

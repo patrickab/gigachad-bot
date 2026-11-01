@@ -6,15 +6,15 @@ import type { TabConfig } from "@/contexts/SettingsContext"
 import type { LearnView, OmpView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document" | "omp" | "factory" | "learn"
+export type AppSurface = "chat" | "canvas" | "document" | "omp" | "latex" | "factory" | "learn"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "factory" | "learn"
-  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
+  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "latex" | "factory" | "learn"
+  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `latex` item its `.tex` file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
   path: string
   projectSlug: string | null
   rootFile?: boolean
-  /** What an `omp` item shows in omp-web's frame. */
+  /** What an `omp` item shows in omp-web's frame, and the chat session of a `latex` item. */
   omp?: OmpView
   /** What a `learn` item shows in LearnHarness's frame. */
   learn?: LearnView
@@ -23,6 +23,7 @@ export interface WorkspaceItem {
 /** Surface that shows `item`. */
 function surfaceOf(item: WorkspaceItem): AppSurface {
   if (item.kind === "omp") return "omp"
+  if (item.kind === "latex") return "latex"
   if (item.kind === "factory") return "factory"
   if (item.kind === "learn") return "learn"
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"

@@ -9,6 +9,9 @@ export const EMBED_CHANNEL = "omp-embed"
 
 export type ThemeMode = "light" | "dark"
 
+/** The shell surface behind the frame: the page itself, or a side panel card. */
+export type FrameBackdrop = "paper" | "surface"
+
 /** Key combination the frame hands back to the shell instead of handling it, e.g. Alt+T for a new tab. `key` is `KeyboardEvent.key`. */
 export type KeyChord = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }
 
@@ -80,8 +83,13 @@ export type ShellMessage =
   | { type: "open-settings" }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "select-leaf"; sessionId: string; leafId: string | null }
-  /** Pixels of shell chrome laid over the frame's top (top bar) and bottom (composer). The transcript scrolls beneath them. Sent after `hello` and on every change. */
-  | { type: "insets"; top: number; bottom: number }
+  /**
+   * How the shell frames the frame, sent after `hello` and on every change.
+   *
+   * - `top` / `bottom`: pixels of shell chrome laid over it (top bar, composer), the transcript scrolls beneath them
+   * - `backdrop`: the shell surface behind it, `surface` inside a side panel card, else `paper`
+   */
+  | { type: "insets"; top: number; bottom: number; backdrop?: FrameBackdrop }
   /** Close the frame's open modal dialog (`modal`) like Escape inside it: the shell's backdrop was clicked or Escape pressed in the shell. */
   | { type: "close-modal" }
   /**

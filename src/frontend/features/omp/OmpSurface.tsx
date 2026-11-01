@@ -5,8 +5,9 @@ import { useTab } from "@/contexts/TabContext"
 import { useOpenFile } from "@/features/editor/FilePanel"
 import { useElementSize } from "@/hooks/useElementSize"
 import type { OmpView } from "@/lib/domain/types"
+import type { FrameBackdrop } from "@gigachad/chat-ui/protocol"
 import { useOmp } from "./OmpProvider"
-import { OmpComposer, type ShellCommands } from "./OmpComposer"
+import { OmpComposer, type ComposerInsertion, type ShellCommands } from "./OmpComposer"
 import { viewTitle } from "./sessions"
 
 /** Height of the shell's top bar (`TopBar`, h-11) the transcript scrolls beneath. */
@@ -17,8 +18,20 @@ const TOP_BAR_PX = 44
  *
  * - Sessions run under the top bar and gigachad's composer like a chat, the frame pads its transcript by these insets
  * - Settings keep the plain layout below the top bar (`WorkspaceSurface`)
+ * - A drawer inside another surface passes `topInset` 0 and `adoptTitle` false, so the tab keeps its own title
+ * - `backdrop` names the shell surface behind it, the frame and the composer's fade take its color
+ * - `insertion` goes into the composer draft once (`OmpComposer`)
  */
-export function OmpSurface({ view, onViewChange, shellCommands }: { view: OmpView; onViewChange: (view: OmpView) => void; shellCommands: ShellCommands }) {
+export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_BAR_PX, adoptTitle = true, backdrop = "paper", insertion, onInserted }: {
+  view: OmpView
+  onViewChange: (view: OmpView) => void
+  shellCommands: ShellCommands
+  topInset?: number
+  adoptTitle?: boolean
+  backdrop?: FrameBackdrop
+  insertion?: ComposerInsertion | null
+  onInserted?: () => void
+}) {
   const { tab, isActive, setTitle } = useTab()
   const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
   const openFile = useOpenFile()
@@ -32,8 +45,8 @@ export function OmpSurface({ view, onViewChange, shellCommands }: { view: OmpVie
   }, [isActive, slot, view, attachFrame, openFile])
 
   useEffect(() => {
-    setTitle(title)
-  }, [title, setTitle])
+    if (adoptTitle) setTitle(title)
+  }, [adoptTitle, title, setTitle])
 
   const hasComposer = view.kind !== "settings"
   const composerRef = useRef<HTMLDivElement>(null)
@@ -41,8 +54,8 @@ export function OmpSurface({ view, onViewChange, shellCommands }: { view: OmpVie
   useEffect(() => {
     if (!isActive) return
     if (hasComposer && composerHeight === 0) return // hidden tab measures 0, keep the last insets
-    setFrameInsets(hasComposer ? { top: TOP_BAR_PX, bottom: composerHeight } : { top: 0, bottom: 0 })
-  }, [isActive, hasComposer, composerHeight, setFrameInsets])
+    setFrameInsets(hasComposer ? { top: topInset, bottom: composerHeight, backdrop } : { top: 0, bottom: 0, backdrop })
+  }, [isActive, hasComposer, composerHeight, topInset, backdrop, setFrameInsets])
 
   return (
     <div className="relative h-full w-full">
@@ -58,9 +71,9 @@ export function OmpSurface({ view, onViewChange, shellCommands }: { view: OmpVie
       </div>
       {hasComposer && (
         <div ref={composerRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/40 via-30% to-transparent" />
+          <div className={`absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t ${backdrop === "surface" ? "from-surface via-surface/40" : "from-paper via-paper/40"} via-30% to-transparent`} />
           <div className="pointer-events-auto relative">
-            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} shellCommands={shellCommands} />
+            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} shellCommands={shellCommands} insertion={insertion} onInserted={onInserted} />
           </div>
         </div>
       )}

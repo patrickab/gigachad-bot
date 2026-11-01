@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { createPortal } from "react-dom"
 
 /** Named places in a tab's top bar that the surface underneath renders controls into. */
-export type TopBarSlotName = "wideToggle" | "pdf" | "drawing" | "view"
+export type TopBarSlotName = "wideToggle" | "pdf" | "drawing" | "view" | "latexAgent" | "latexBuild"
 
 type Slots = Record<TopBarSlotName, HTMLElement | null>
 
@@ -12,7 +12,7 @@ interface TopBarSlotRegistry {
   register: (name: TopBarSlotName, element: HTMLElement) => () => void
 }
 
-const NO_SLOTS: Slots = { wideToggle: null, pdf: null, drawing: null, view: null }
+const NO_SLOTS: Slots = { wideToggle: null, pdf: null, drawing: null, view: null, latexAgent: null, latexBuild: null }
 
 const TopBarSlotContext = createContext<TopBarSlotRegistry>({ slots: NO_SLOTS, register: () => () => {} })
 

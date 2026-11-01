@@ -33,6 +33,8 @@
    --paper:            var(--gc-dark-paper);
    --surface:          var(--gc-dark-surface);
    --surface-elevated: var(--gc-dark-surface-elevated);
+   /* Document pages (PDF, Neovim): a step above --paper, dark at --surface-elevated, light at the sidebar's --surface */
+   --page:             var(--gc-dark-surface-elevated);
    --overlay:          oklch(10.5% 0.005 70);
 
    --danger:      var(--gc-dark-danger);
@@ -81,6 +83,7 @@
     --paper:            var(--gc-light-paper);
     --surface:          var(--gc-light-surface);
     --surface-elevated: var(--gc-light-surface-elevated);
+    --page:             var(--gc-light-surface);
     --overlay:          oklch(96%   0.015 85);
   
     --danger:      var(--gc-light-danger);
@@ -118,6 +121,7 @@
   --color-paper:            var(--paper);
   --color-surface:          var(--surface);
   --color-surface-elevated: var(--surface-elevated);
+  --color-page:             var(--page);
   --color-overlay:          var(--overlay);
 
   /* Text */
@@ -684,8 +688,24 @@ code {
   background-size: 200% 100%;
 }
 
+/* Thin indeterminate progress bar: a third of the track sliding across it. Still, at the track's start, without motion. */
+@keyframes indeterminate-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+.indeterminate-bar {
+  width: 33.333%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .indeterminate-bar {
+    animation: indeterminate-slide 1.4s ease-in-out infinite;
+  }
+}
+
 /* PDF pages render on an opaque white canvas. Every theme clamps the page between
-   two theme colors, so it reads like the app: paper → --surface-elevated (two levels
+   two theme colors, so it reads like the app: paper → --page (a faint step
    above --paper), text → --ink-subtle (sidebar tree text color).
      dark  : invert the page (text → white, paper → black), a `lighten` tint lifts
              paper, a `darken` ink layer caps text.
@@ -708,7 +728,7 @@ code {
   background-color: #fff;
   clip-path: inset(0 round 1rem);
 }
-.pdf-page-tint { background-color: var(--surface-elevated); mix-blend-mode: darken; }
+.pdf-page-tint { background-color: var(--page); mix-blend-mode: darken; }
 .pdf-page-ink  { background-color: var(--ink-subtle);       mix-blend-mode: lighten; }
 /* Link text gets one blue in every mode: the thin URL text's apparent color. Bold citations reach full
    strength, thin URL glyphs blend with the paper, so the cap sits at the URL's core and catches both:
@@ -719,6 +739,9 @@ code {
 :root:not(.light) .pdf-light-paper .pdf-page-link { mix-blend-mode: lighten; }
 
 :root:not(.light) .pdf-page-surface { background-color: #000; }
+/* react-pdf paints the page white inline. The canvas falls short of it by a subpixel, so in dark the
+   uninverted white showed as a bright line along the right and bottom edges */
+:root:not(.light) .pdf-page-surface .react-pdf__Page { background-color: #000 !important; }
 /* .pdf-page-backup: the last bitmap, shown while the canvas re-rasterizes (PdfPageSlot) */
 :root:not(.light) :is(.react-pdf__Page__canvas, .pdf-page-backup) { filter: invert(1) hue-rotate(180deg); }
 :root:not(.light) .pdf-page-tint { mix-blend-mode: lighten; }

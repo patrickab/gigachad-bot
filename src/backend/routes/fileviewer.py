@@ -41,7 +41,8 @@ router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 _SINGLE_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
 
 
-def _resolve_allowed(path: str, roots: FileRoots) -> Path:
+def resolve_allowed(path: str, roots: FileRoots) -> Path:
+    """The live file-root file at *path*, 403 outside the allowed roots and 404 when no file lives there."""
     try:
         return lib_docs.resolve_known_path(path, roots=roots)
     except lib_docs.PathNotAllowed as exc:
@@ -72,7 +73,7 @@ def read_text_content(
             content, _ = read_text(docs, key)
         return FileContent(path=path, content=content)
 
-    resolved = _resolve_allowed(path, roots)
+    resolved = resolve_allowed(path, roots)
     # Strict decode: a lossy one would let the editor save replacement characters over a binary file.
     with http_errors(
         (UnicodeDecodeError, 415, "Not a UTF-8 text file"),
@@ -230,7 +231,7 @@ def _raw_source(path: str, roots: FileRoots, docs: DataStore, assets: AssetStore
         asset = assets.stat(key)
         if asset is not None:
             return _StoredAsset.of(assets, asset, mime_for(path))
-    return _HostFile(_resolve_allowed(path, roots))
+    return _HostFile(resolve_allowed(path, roots))
 
 
 @router.get("/raw")
