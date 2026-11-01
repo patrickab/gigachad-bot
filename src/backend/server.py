@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 import signal
 import sys
@@ -51,10 +52,15 @@ from backend.routes.omp import router as omp_router
 from backend.routes.learn import router as learn_router
 from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
+from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
 from lib.postgres_pool import close_postgres_pool
+from lib.workbench import mirror_omp
+import config
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
+
+log = logging.getLogger(__name__)
 
 if is_cors_unsafe_for_production():
     raise RuntimeError("GIGACHAD_CORS_ORIGINS must list exact browser origins in production, never `*`")
@@ -93,6 +99,10 @@ async def lifespan(app: FastAPI):
     get_client()
     upgrade(database_url())
     reset_cancel()
+    try:
+        mirror_omp(config.WORKBENCH)
+    except OSError:
+        log.exception("Could not mirror the workbench omp prompts into %s", config.WORKBENCH)
     from lib import extract_queue
 
     await extract_queue.start()
@@ -166,6 +176,7 @@ app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(neovim_router)
 app.include_router(latex_router)
+app.include_router(workbench_router)
 app.include_router(deploy_router)
 app.include_router(file_roots_router)
 app.include_router(file_attach_router)

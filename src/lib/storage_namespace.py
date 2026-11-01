@@ -25,6 +25,9 @@ PDFS = "PDFs"
 MINERU = "Mineru"
 SANDBOX = "sandbox"
 PDF_ANNOTATION = "pdf-annotation"
+WORKBENCH = "workbench"
+# Per-user omp session of each workbench file, `{absolute file path: session id}`.
+WORKBENCH_SESSIONS = f"{WORKBENCH}/sessions.json"
 PROJECT_JSON = "project.json"
 # The project catalog (names, slugs, archived flags), at the chat namespace root.
 META_JSON = "projects-meta.json"

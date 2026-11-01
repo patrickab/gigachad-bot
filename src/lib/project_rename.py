@@ -1,4 +1,7 @@
-"""Rewrite stored references in one transaction: rename a project, or relocate one stored document to a new key or disk path."""
+"""Rewrite stored references in one transaction: rename a project, or relocate one stored document to a new key or disk path.
+
+A project rename also moves the project's workbench folders (`lib.workbench`) and rewrites absolute paths into them.
+"""
 from __future__ import annotations
 
 import json
@@ -9,11 +12,15 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
+import config
+from lib import workbench
 from lib.changes import UserScope
 from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.json_io import dump_json
-from lib.storage_namespace import ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX
+from lib.storage_namespace import (
+    ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX, WORKBENCH,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -23,7 +30,7 @@ if TYPE_CHECKING:
 SLUG_FIELDS = {"project_slug", "projectSlug", "slug"}
 HISTORY_FIELDS = {"history_file", "historyFile", "parent_file", "filename"}
 # App namespaces whose documents may link into a project; others (e.g. `model/`) are never interpreted.
-CONTENT_NAMESPACES = {CHAT, PROJECT, NOTE, MEMORY, GRAPH, SANDBOX, PROMPT}
+CONTENT_NAMESPACES = {CHAT, PROJECT, NOTE, MEMORY, GRAPH, SANDBOX, PROMPT, WORKBENCH}
 JSON_SUFFIXES = (".json", ".canvas", ".snap")
 TEXT_SUFFIXES = (".md", ".txt", ".c4")
 
@@ -32,14 +39,18 @@ class ProjectReferences:
     """Map keys, JSON fields and app-relative links of project `old` to project `new`.
 
     - Owned namespaces: `chat/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`
-    - Prose, absolute disk paths and similarly named projects stay unchanged
+    - Absolute paths under a moved directory of `directories` (`(old, new)` pairs) follow it, also as JSON object keys
+    - Prose, other absolute disk paths and similarly named projects stay unchanged
     """
 
-    def __init__(self, old: str, new: str) -> None:
+    def __init__(self, old: str, new: str, directories: Iterable[tuple[str, str]] = ()) -> None:
         self.old, self.new = old, new
         self._namespaces = [f"{prefix}/" for prefix in (CHAT, PROJECT, GRAPH, f"{MEMORY}/project", f"{ATTACHMENT}/project")]
         sources = "|".join(re.escape(namespace + old) for namespace in self._namespaces)
         self._link = re.compile(rf"(?<![\w/.-])({sources})(?=/|[?#\s)\]\"']|$)")
+        self._directories = dict(directories)
+        moved = "|".join(re.escape(directory) for directory in self._directories)
+        self._path = re.compile(rf"(?<![\w/.-])({moved})(?=/|[?#\s)\]\"']|$)") if moved else None
 
     def key(self, value: str) -> str:
         for namespace in self._namespaces:
@@ -48,12 +59,16 @@ class ProjectReferences:
                 return namespace + self.new + value[len(old):]
         return value
 
+    def path(self, value: str) -> str:
+        """*value* with every absolute path under a moved directory pointing into its new location."""
+        return self._path.sub(lambda match: self._directories[match.group(1)], value) if self._path else value
+
     def text(self, value: str) -> str:
-        return self._link.sub(lambda match: self.key(match.group(1)), value)
+        return self.path(self._link.sub(lambda match: self.key(match.group(1)), value))
 
     def value(self, value: Any, field: str = "") -> Any:
         if isinstance(value, dict):
-            return {key: self.value(item, key) for key, item in value.items()}
+            return {self.path(key): self.value(item, key) for key, item in value.items()}
         if isinstance(value, list):
             return [self.value(item, field) for item in value]
         if not isinstance(value, str):
@@ -146,14 +161,33 @@ def renamed_documents(
 
 
 class PostgresProjectRenamer:
-    """Renames projects of one user in a single Postgres transaction over documents, assets and canvas mutations."""
+    """Renames projects of one user in a single Postgres transaction over documents, assets and canvas mutations.
 
-    def __init__(self, scope: UserScope) -> None:
+    Workbench folders under *workbench_root* (`config.WORKBENCH` by default) move first and move back when the transaction fails.
+    """
+
+    def __init__(self, scope: UserScope, workbench_root: Path | None = None) -> None:
         self._scope = scope
+        self._workbench_root = workbench_root
 
     def rename(self, slug: str, new_slug: str, name: str) -> None:
-        """Move a project's documents and assets to `new_slug` and rewrite references to them, in one transaction."""
-        refs = ProjectReferences(slug, new_slug)
+        """Move a project's workbench folders, documents and assets to `new_slug` and rewrite references to them, in one transaction.
+
+        - A folder that cannot move aborts the rename before the database changes, a taken one with StorageConflictError
+        """
+        root = self._workbench_root or config.WORKBENCH
+        refs = ProjectReferences(slug, new_slug, workbench.directory_moves(root, slug, new_slug))
+        try:
+            moves = workbench.move_project_directories(root, slug, new_slug)
+        except FileExistsError as exc:
+            raise StorageConflictError(str(exc)) from exc
+        try:
+            self._rename_rows(refs, name)
+        except BaseException:
+            workbench.restore_directories(moves)
+            raise
+
+    def _rename_rows(self, refs: ProjectReferences, name: str) -> None:
         user_id = self._scope.user_id
         try:
             with self._scope.connection() as connection, connection.transaction():

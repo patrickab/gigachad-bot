@@ -1,9 +1,11 @@
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 from psycopg.types.json import Jsonb
 import pytest
 
+import config
 from lib.architecture_workspace import ArchitectureStore, DirectoryFiles
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
@@ -13,7 +15,68 @@ from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
+from lib.storage_namespace import WORKBENCH_SESSIONS
 from tests.conftest import create_user
+
+
+@pytest.fixture(autouse=True)
+def workbench_root(tmp_path, monkeypatch):
+    """Keep renames away from the real workbench folders."""
+    root = tmp_path / "workbench"
+    monkeypatch.setattr(config, "WORKBENCH", root)
+    return root
+
+
+def workbench_folders(root):
+    """`<root>/latex/old/paper/paper.tex` and `<root>/markdown/old/plan/plan.md`, returning their paths."""
+    paper = root / "latex" / "old" / "paper" / "paper.tex"
+    plan = root / "markdown" / "old" / "plan" / "plan.md"
+    for source in (paper, plan):
+        source.parent.mkdir(parents=True)
+        source.write_text(source.name, encoding="utf-8")
+    return paper, plan
+
+
+def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root):
+    paper = f"{workbench_root}/latex/old/paper/paper.tex"
+    moved = f"{workbench_root}/latex/new/paper/paper.tex"
+    other = f"{workbench_root}/latex/older/a.tex"
+    refs = ProjectReferences("old", "new", [(f"{workbench_root}/latex/old", f"{workbench_root}/latex/new")])
+    rows = [
+        ("chat/old/project.json", json.dumps({"name": "Old", "files": [paper, {"path": other, "name": "A"}]}).encode(), False),
+        (WORKBENCH_SESSIONS, json.dumps({paper: "s1", other: "s2"}).encode(), False),
+        ("note/links.md", f"[p]({paper}) {other} x{paper}".encode(), False),
+    ]
+    changed = {target: content for _, target, content in renamed_documents(rows, refs, "New", [])}
+    assert json.loads(changed["chat/new/project.json"])["files"] == [moved, {"path": other, "name": "A"}]
+    assert json.loads(changed[WORKBENCH_SESSIONS]) == {moved: "s1", other: "s2"}
+    assert changed["note/links.md"].decode() == f"[p]({moved}) {other} x{paper}"
+
+
+def test_failed_database_step_moves_workbench_folders_back(workbench_root):
+    paper, plan = workbench_folders(workbench_root)
+
+    def connection():
+        raise RuntimeError("database down")
+
+    renamer = PostgresProjectRenamer(SimpleNamespace(user_id=uuid4(), connection=connection))
+    with pytest.raises(RuntimeError, match="database down"):
+        renamer.rename("old", "new", "New")
+    assert paper.read_text(encoding="utf-8") == "paper.tex" and plan.read_text(encoding="utf-8") == "plan.md"
+    assert not (workbench_root / "latex" / "new").exists() and not (workbench_root / "markdown" / "new").exists()
+
+
+def test_taken_workbench_folder_aborts_before_the_database(workbench_root):
+    paper, plan = workbench_folders(workbench_root)
+    (workbench_root / "markdown" / "new").mkdir()
+    (workbench_root / "markdown" / "new" / "kept.md").write_text("kept", encoding="utf-8")
+
+    def connection():
+        raise AssertionError("the database must stay untouched")
+
+    with pytest.raises(StorageConflictError):
+        PostgresProjectRenamer(SimpleNamespace(user_id=uuid4(), connection=connection)).rename("old", "new", "New")
+    assert paper.is_file() and plan.is_file() and not (workbench_root / "latex" / "new").exists()
 
 
 def test_references_move_owned_links_only():
@@ -194,6 +257,50 @@ def test_rename_never_crosses_user_namespace(stores, postgres_pool):
     assert other_projects.get_project("old")["name"] == "Old"
     assert other_docs.read_bytes("project/old/document/a.md")[0] == b"[old](project/old/document/a.md)"
     assert not other_docs.exists("project/new")
+
+
+def test_rename_moves_workbench_folders_and_rewrites_paths_into_them(stores, workbench_root):
+    docs, projects, _, _ = stores
+    projects.create_project("Old")
+    paper, plan = workbench_folders(workbench_root)
+    projects.add_file("old", str(paper))
+    projects.add_file("old", str(plan))
+    put(docs, WORKBENCH_SESSIONS, {str(paper): "s1", "/elsewhere.md": "s2"})
+    put(docs, "project/old/document/board.canvas", {"attachments": [{"id": "a", "path": str(plan)}]})
+
+    projects.update_project("old", "New")
+
+    moved_paper = workbench_root / "latex" / "new" / "paper" / "paper.tex"
+    moved_plan = workbench_root / "markdown" / "new" / "plan" / "plan.md"
+    assert moved_paper.is_file() and moved_plan.is_file() and not (workbench_root / "latex" / "old").exists()
+    assert sorted(projects.list_files("new")) == sorted([str(moved_paper), str(moved_plan)])
+    assert get(docs, WORKBENCH_SESSIONS) == {str(moved_paper): "s1", "/elsewhere.md": "s2"}
+    assert get(docs, "project/new/document/board.canvas")["attachments"][0]["path"] == str(moved_plan)
+
+
+def test_rename_replaces_an_empty_leftover_workbench_folder(stores, workbench_root):
+    _, projects, _, _ = stores
+    projects.create_project("Old")
+    paper, _ = workbench_folders(workbench_root)
+    projects.add_file("old", str(paper))
+    (workbench_root / "latex" / "new" / "stale").mkdir(parents=True)
+
+    projects.update_project("old", "New")
+
+    moved = workbench_root / "latex" / "new" / "paper" / "paper.tex"
+    assert moved.is_file() and not (workbench_root / "latex" / "new" / "stale").exists()
+    assert projects.list_files("new") == [str(moved)]
+
+
+def test_database_conflict_moves_workbench_folders_back(stores, workbench_root):
+    docs, projects, assets, _ = stores
+    projects.create_project("Old")
+    paper, _ = workbench_folders(workbench_root)
+    assets.write("upload", "attachment/project/old/chat/id/a.txt", b"source")
+    assets.write("upload", "attachment/project/new/chat/id/a.txt", b"destination")
+    with pytest.raises(StorageConflictError):
+        projects.update_project("old", "New")
+    assert paper.is_file() and not (workbench_root / "latex" / "new").exists()
 
 
 @pytest.mark.parametrize("new", ["project/other/document/report.pdf", "/mnt/docs/report.pdf"])

@@ -189,17 +189,24 @@ def rename(store: ProjectStore, docs: DataStore, scope: DocumentScope, key: str,
     return destination, name
 
 
-def move_to_folder(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, folder: Path) -> Path:
-    """Write the stored project file *key* into *folder* and relocate every reference to it there, returning the new file.
+def file_name(store: ProjectStore, docs: DataStore, key: str) -> str:
+    """The file name the stored project file *key* takes on disk: the name it is shown under.
 
-    - From then on it is a mounted file: projects, chats and canvases read it from disk, and it is never deleted
-    - The file takes the name the document is shown under, an existing file of that name raises DocumentNameConflict
     - Canvases live in the app, so they raise DocumentNotFound like any key that is not a stored project file
     """
     names = dict(store.list_all_named_files())
     if key not in names or not is_project_document(key) or key.endswith(".canvas") or not docs.is_file(key):
         raise DocumentNotFound(key)
-    target = folder / Path(names[key]).name
+    return Path(names[key]).name
+
+
+def move_to_folder(store: ProjectStore, docs: DataStore, relocate: Relocate, key: str, folder: Path) -> Path:
+    """Write the stored project file *key* into *folder* and relocate every reference to it there, returning the new file.
+
+    - From then on it is a mounted file: projects, chats and canvases read it from disk, and it is never deleted
+    - The file takes the name the document is shown under (`file_name`), an existing file of that name raises DocumentNameConflict
+    """
+    target = folder / file_name(store, docs, key)
     content, _ = docs.read_bytes(key)
     try:
         with target.open("xb") as file:
