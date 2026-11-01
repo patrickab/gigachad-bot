@@ -8,6 +8,7 @@ import { fenceCode } from "./selectionToMarkdown.ts"
 
 const MIN_MARKMAP_SCALE = 0.5
 const CANVAS_MARKMAP_PADDING = 24
+const MARKMAP_TOP_PADDING = 16
 
 /** The svg d3-zoom drives, with the transform d3 stores on it. */
 type D3ZoomSvg = SVGSVGElement & { __zoom?: { k: number; x: number; y: number } }
@@ -15,6 +16,17 @@ type D3ZoomSvg = SVGSVGElement & { __zoom?: { k: number; x: number; y: number } 
 /** Current d3-zoom transform of the map's svg, if it has one. */
 function zoomOf(svg: SVGSVGElement | null) {
   return (svg as D3ZoomSvg | null)?.__zoom
+}
+
+/** Fit the whole map into its frame, never smaller than `MIN_MARKMAP_SCALE`, then align its top edge with the frame's top. */
+async function fitInFrame(mm: Markmap, svg: SVGSVGElement) {
+  try {
+    await mm.fit()
+    const scale = zoomOf(svg)?.k ?? 1
+    if (scale < MIN_MARKMAP_SCALE) await mm.rescale(MIN_MARKMAP_SCALE / scale)
+    const camera = zoomOf(svg)
+    if (camera) mm.zoom.translateBy(mm.svg, 0, (MARKMAP_TOP_PADDING - (mm.state.rect.y1 * camera.k + camera.y)) / camera.k)
+  } catch {}
 }
 
 /**
@@ -38,6 +50,7 @@ export function MarkmapDiagram({ code, theme, viewportRef }: { code: string; the
   const [failed, setFailed] = useState(false)
   const [canvasViewportHeight, setCanvasViewportHeight] = useState<number | null>(null)
   const renderedRef = useRef<{ code: string; theme: ColorScheme } | null>(null)
+  const userMovedRef = useRef(false)
 
   useImperativeHandle(viewportRef, () => ({
     get element() {
@@ -67,6 +80,32 @@ export function MarkmapDiagram({ code, theme, viewportRef }: { code: string; the
     observer.observe(attachment)
     return () => observer.disconnect()
   }, [])
+
+  // The frame often settles after the first fit (a pane still measuring, a drawer opening).
+  // Keep the map centered through that until the user pans or zooms. Canvas attachments keep their camera.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || container.closest("[data-canvas-attachment]")) return
+    const markMoved = () => { userMovedRef.current = true }
+    let frame = 0
+    const refit = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const isVisible = container.clientWidth > 0 && container.clientHeight > 0
+        if (mmRef.current && svgRef.current && isVisible && renderedRef.current && !userMovedRef.current) void fitInFrame(mmRef.current, svgRef.current)
+      })
+    }
+    const observer = new ResizeObserver(refit)
+    observer.observe(container)
+    container.addEventListener("wheel", markMoved, { passive: true })
+    container.addEventListener("pointerdown", markMoved)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      container.removeEventListener("wheel", markMoved)
+      container.removeEventListener("pointerdown", markMoved)
+    }
+  }, [failed])
 
   useEffect(() => {
     let cancelled = false
@@ -107,11 +146,8 @@ export function MarkmapDiagram({ code, theme, viewportRef }: { code: string; the
         })
         await mmRef.current.setData(root)
         if (renderedRef.current?.code !== code) {
-          try {
-            await mmRef.current.fit()
-            const scale = zoomOf(svgRef.current)?.k ?? 1
-            if (scale < MIN_MARKMAP_SCALE) await mmRef.current.rescale(MIN_MARKMAP_SCALE / scale)
-          } catch {}
+          userMovedRef.current = false
+          await fitInFrame(mmRef.current, svgRef.current)
         }
         renderedRef.current = { code, theme }
 
