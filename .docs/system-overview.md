@@ -86,7 +86,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Markdown renders live from the saved text, including Mermaid and mind-map documents. A failed LaTeX build keeps the last good PDF, and the PDF swaps to each build without blanking.
 - Visual-mode `<leader>a` quotes the selected lines into the chat draft. Each chat keeps its own list of sessions, shared by all devices: the chevron beside the session title switches between them, `+` starts a new one. The first message of a new session names what the chat is about (`File: <path>` for Markdown, `Project: <folder>, root: <file>` for LaTeX), and after a rename or a move the next message of each earlier session names it again.
 - Agent edits appear in Neovim while the agent runs. Unsaved edits on other lines survive. On lines both changed, the agent's version wins, so save often. A save never overwrites an agent edit it has not seen: `:w` merges first and reports "Saved, merged with the agent's edits".
-- Edits from another device show up after it saves. Edits made outside the app (a shell) appear in Neovim on the next reload or agent run, and the PDF of a LaTeX project rebuilds for them within a few seconds.
+- Every text editor follows its file live: edits by an agent, a terminal or another device appear in Neovim (merged into unsaved edits) or reload a clean editor within a moment, and the PDF of a LaTeX project rebuilds for any change in its folder.
 - Workbench chats use a short Markdown or LaTeX prompt kept in this repository, without coding rules or `AGENTS.md`. Switch between editor only, split and preview only with the three-icon switch in the top bar (remembered per device).
 
 ## LaTeX projects
