@@ -15,6 +15,7 @@ from fastapi import HTTPException
 import pytest
 
 from backend.routes import documents as route
+import config
 from lib import attachment_materialize
 from lib.asset_store import AssetStore
 from lib.changes import UserScope, latest_changes
@@ -468,3 +469,83 @@ def test_deleting_a_folder_entry_unlists_it_and_leaves_the_folder_on_disk(alice,
 
     assert list_project(alice, slug, mounted_roots(mount)) == []
     assert sorted(path.name for path in folder.iterdir()) == [".latex-build", "main.aux", "main.tex", "refs.bib"]
+
+
+@pytest.fixture
+def workbench(tmp_path, monkeypatch):
+    root = tmp_path.resolve() / "workbench"
+    monkeypatch.setattr(config, "WORKBENCH", root)
+    return root
+
+
+def workbench_document(alice, workbench, slug, folder, name):
+    """A listed workbench file `<workbench>/latex/<slug>/<folder>/<name>` with `imgs/` and build output beside it."""
+    source = workbench / "latex" / slug / folder / name
+    (source.parent / "imgs").mkdir(parents=True)
+    (source.parent / ".latex-build").mkdir()
+    for path in (source, source.parent / "imgs" / "a.png", source.parent / ".latex-build" / "out.pdf"):
+        path.write_text("x", encoding="utf-8")
+    alice.projects.add_file(slug, str(source))
+    return source
+
+
+def remove(alice, slug, path):
+    route.remove_document(slug, str(path), alice.projects, References(alice.docs, alice.assets))
+
+
+def test_deleting_a_renamed_workbench_tex_removes_its_folder_and_chat_link(alice, workbench):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    renamed = workbench_document(alice, workbench, slug, "test2", "test.tex")
+    links = {str(renamed): "s1", str(renamed.parent / "other.tex"): "s2", "/elsewhere/a.md": "s3"}
+    alice.docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode())
+
+    remove(alice, slug, renamed)
+
+    assert not renamed.parent.exists() and not renamed.parent.parent.exists() and (workbench / "latex").is_dir()
+    assert alice.projects.list_files(slug) == []
+    assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/elsewhere/a.md": "s3"}
+
+
+def test_deleting_a_promoted_folder_entry_removes_the_workbench_folder(alice, workbench):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    source = workbench_document(alice, workbench, slug, "paper", "paper.tex")
+    alice.projects.replace_file(slug, str(source), str(source.parent))
+
+    remove(alice, slug, source.parent)
+
+    assert not source.parent.exists()
+
+
+def test_the_slug_folder_stays_while_another_document_is_in_it(alice, workbench):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    first = workbench_document(alice, workbench, slug, "one", "one.tex")
+    second = workbench_document(alice, workbench, slug, "two", "two.tex")
+
+    remove(alice, slug, first)
+    assert not first.parent.exists() and second.is_file()
+
+    remove(alice, slug, second)
+    assert not second.parent.parent.exists()
+
+
+def test_a_workbench_folder_another_project_references_stays(alice, workbench):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    other = alice.projects.create_project("Other")["slug"]
+    source = workbench_document(alice, workbench, slug, "paper", "paper.tex")
+    alice.projects.add_file(other, str(source))
+
+    remove(alice, slug, source)
+
+    assert source.is_file() and alice.projects.list_files(other) == [str(source)]
+
+
+def test_deleting_a_mounted_file_only_unlinks_it(alice, workbench, tmp_path):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    mounted = tmp_path / "mount" / "paper" / "paper.tex"
+    mounted.parent.mkdir(parents=True)
+    mounted.write_text("x", encoding="utf-8")
+    alice.projects.add_file(slug, str(mounted))
+
+    remove(alice, slug, mounted)
+
+    assert mounted.is_file() and alice.projects.list_files(slug) == []

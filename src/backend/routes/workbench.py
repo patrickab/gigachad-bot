@@ -179,6 +179,7 @@ def post_prepare(
 def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_store)) -> FilePath:
     """Create the document `name` of project `slug` in its workbench folder and list it in the project's files.
 
+    - A folder that exists already answers 409 even without a file of that name, a leftover is never adopted
     - A failure to list it removes the new file and the folders made for it
     """
     name = body.name.strip()
@@ -189,8 +190,10 @@ def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_sto
         store.require(body.slug)
         folder = document_folder(config.WORKBENCH, kind, body.slug, name.removesuffix(Path(name).suffix))
     source = folder / f"{folder.name}{suffix_of(kind)}"
+    conflict = "A document with that name already exists"
+    if folder.exists():
+        raise HTTPException(status_code=409, detail=conflict)
     with new_folder(folder):
-        conflict = "A document with that name already exists"
         with http_errors((FileExistsError, 409, conflict)), source.open("x", encoding="utf-8") as file:
             file.write(_CONTENT[kind])
         try:
@@ -203,7 +206,7 @@ def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_sto
 
 @router.post("/promote")
 def post_promote(body: Promotion, store: ProjectStore = Depends(get_project_store)) -> PromotedFolder:
-    """Replace the listed file `<slug>/<stem>/<stem>.tex` of a project by its folder, where it was in the list. There is no way back.
+    """Replace the listed `.tex` directly inside `<slug>/<folder>/` of a project by that folder, where it was in the list. There is no way back.
 
     - A file the project does not list answers 404, any other path 400, a folder that is listed already 409
     - A display name `X.tex` becomes `X`, other display names stay
@@ -214,9 +217,9 @@ def post_promote(body: Promotion, store: ProjectStore = Depends(get_project_stor
         raise HTTPException(status_code=404, detail="Document not found")
     source = Path(body.path)
     with http_errors((ValueError, 400, None)):
-        folder = document_folder(config.WORKBENCH, "latex", body.slug, source.stem)
+        folder = document_folder(config.WORKBENCH, "latex", body.slug, source.parent.name)
     if source.suffix.lower() != ".tex" or source != folder / source.name:
-        raise HTTPException(status_code=400, detail="Only a LaTeX document in its own workbench folder becomes a project")
+        raise HTTPException(status_code=400, detail="Only a LaTeX document in a workbench folder becomes a project")
     if str(folder) in named:
         raise HTTPException(status_code=409, detail="This folder is already listed")
     shown = named[body.path]

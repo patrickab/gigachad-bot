@@ -9,7 +9,8 @@ Holders of references, read from `documents.meta` so no body is scanned per dele
 
 Derived data, deleted once unused: library PDFs `PDFs/<name>`, PDF annotation canvases `pdf-annotation/<sha256>.canvas`
 (their mutation log and share rows follow by foreign key) and project documents `project/<slug>/document/...`. MinerU
-output is never deleted. An annotation canvas stays while any stored or referenced host PDF has its hash, or a host file
+output is never deleted. A workbench document folder `<WORKBENCH>/<kind>/<slug>/<folder>` is app-created, so releasing a
+path inside it deletes the whole folder and its `sessions.json` links once no project references anything inside it. An annotation canvas stays while any stored or referenced host PDF has its hash, or a host file
 recorded in its meta `hosts` (opened with it from the file tree) still does. Host files are only hashed, never written.
 
 `python -m lib.references --dry-run` lists, per user, what earlier deletes left behind.
@@ -21,15 +22,17 @@ import argparse
 from dataclasses import dataclass, field
 import hashlib
 import logging
+import shutil
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from psycopg_pool import ConnectionPool
 
+import config
 from lib.asset_store import Asset, AssetStore
 from lib.changes import UserScope
 from lib.chat_store import ChatStore
-from lib.data_store import DataStore, InvalidStorageKey, Meta, validate_key
+from lib.data_store import DataStore, InvalidStorageKey, Meta, StorageNotFoundError, validate_key
 from lib.db_schema import database_url
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
@@ -41,10 +44,12 @@ from lib.storage_namespace import (
     PDFS,
     PROJECT,
     PROJECT_JSON,
+    WORKBENCH_SESSIONS,
     chat_upload_prefix,
     library_pdf,
     pdf_annotations,
 )
+from lib.workbench import KINDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -102,6 +107,22 @@ def _is_pdf(name: str) -> bool:
 
 def _is_host(path: str) -> bool:
     return path.startswith("/")
+
+
+def _inside(path: Path, folder: Path) -> bool:
+    """Whether *path* is *folder* or lies inside it, compared by name."""
+    return path == folder or folder in path.parents
+
+
+def _workbench_folder(path: Path) -> Path | None:
+    """The document folder `<WORKBENCH>/<kind>/<slug>/<folder>` holding *path*, None for any path outside one."""
+    try:
+        parts = path.relative_to(config.WORKBENCH).parts
+    except ValueError:
+        return None
+    if len(parts) < 3 or parts[0] not in KINDS or any(part.startswith(".") or part == ".." for part in parts[1:3]):
+        return None
+    return config.WORKBENCH.joinpath(*parts[:3])
 
 
 def _under(key: str, prefix: str) -> bool:
@@ -204,7 +225,43 @@ class References:
             self._sweep(pending, gone, dry_run=False)
         except Exception:
             log.exception("Releasing the data of a deleted item failed")
+        try:
+            self._drop_workbench_folders(released.refs, gone)
+        except Exception:
+            log.exception("Deleting the workbench folder of a deleted document failed")
         return sorted(gone)
+
+    def _drop_workbench_folders(self, refs: Iterable[str], gone: set[str]) -> None:
+        """Delete the workbench document folder of each released host path, with its chat link, once no project references anything inside it."""
+        folders = {folder for ref in refs if _is_host(ref) and (folder := _workbench_folder(Path(ref))) is not None}
+        if not folders:
+            return
+        reachable = self._usage(gone).reachable
+        dropped = [folder for folder in sorted(folders) if not any(_inside(Path(key), folder) for key in reachable if _is_host(key))]
+        for folder in dropped:
+            if folder.is_symlink() or folder.is_file():
+                folder.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(folder, ignore_errors=True)
+            try:
+                folder.parent.rmdir()
+            except OSError:
+                pass  # the slug folder still holds other documents
+            gone.add(str(folder))
+        if dropped:
+            self._forget_links(dropped)
+
+    def _forget_links(self, folders: list[Path]) -> None:
+        """Remove the `sessions.json` links of the *folders* and of the files inside them."""
+        try:
+            links, revision = self._json.read_with_revision(WORKBENCH_SESSIONS)
+        except (StorageNotFoundError, ValueError):
+            return
+        if not isinstance(links, dict):
+            return
+        kept = {key: link for key, link in links.items() if not any(_inside(Path(key), folder) for folder in folders)}
+        if kept != links:
+            self._json.write(WORKBENCH_SESSIONS, kept, expected=revision)
 
     def orphans(self) -> list[str]:
         """Derived keys nothing uses any more, as a release of every one of them would delete them. Nothing is deleted."""

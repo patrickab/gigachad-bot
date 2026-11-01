@@ -338,6 +338,17 @@ def test_create_never_overwrites_an_existing_document(client, root):
     assert source.read_text(encoding="utf-8") == "mine"
 
 
+def test_create_into_an_existing_folder_conflicts_and_writes_nothing(client, root, projects):
+    leftover = root / "latex" / "thesis" / "paper"
+    (leftover / "imgs").mkdir(parents=True)
+    (leftover / "test.tex").write_text("old", encoding="utf-8")
+
+    assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "paper.tex"}).status_code == 409
+
+    assert sorted(path.name for path in leftover.iterdir()) == ["imgs", "test.tex"]
+    assert projects.list_files("thesis") == []
+
+
 def test_create_removes_the_file_when_listing_it_fails(client, root, projects, monkeypatch):
     def fail(slug: str, path: str) -> None:
         raise StorageConflictError(slug)
@@ -483,6 +494,16 @@ def test_promoting_a_file_whose_folder_is_already_listed_conflicts(client, root,
 
     assert promote(client, paper).status_code == 409
     assert str(paper) in projects.list_files("thesis")
+
+
+def test_promoting_a_renamed_tex_in_its_folder_succeeds(client, root, projects):
+    renamed = root / "latex" / "thesis" / "test2" / "test.tex"
+    renamed.parent.mkdir(parents=True)
+    renamed.write_text("x", encoding="utf-8")
+    projects.add_file("thesis", str(renamed))
+
+    assert promote(client, renamed).json() == {"folder": str(renamed.parent)}
+    assert projects.list_files("thesis") == [str(renamed.parent)]
 
 
 def tex_project(root):

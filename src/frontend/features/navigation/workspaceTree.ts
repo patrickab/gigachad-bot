@@ -70,10 +70,10 @@ const PROJECT_FILE_DRAG_KIND = "project-file"
 /** Whether the sidebar can rename the project file `path`: a stored file or one on disk, not a library PDF. */
 const isRenamableFile = (path: string) => isStoredProjectFile(path) || path.startsWith("/")
 
-/** Whether `path` is the `.tex` of a project's workbench folder `<root>/workbench/latex/<slug>/<stem>/<stem>.tex`, which can become a LaTeX project folder. */
+/** Whether `path` is a `.tex` directly inside a project's workbench folder `<root>/workbench/latex/<slug>/<folder>/`, which can become a LaTeX project folder. */
 function isPromotableLatex(path: string, slug: string): boolean {
-  const [workbench, kind, owner, stem, file] = path.split("/").slice(-5)
-  return workbench === "workbench" && kind === "latex" && owner === slug && file === `${stem}.tex`
+  const [workbench, kind, owner, folder, file] = path.split("/").slice(-5)
+  return workbench === "workbench" && kind === "latex" && owner === slug && Boolean(folder) && file?.toLowerCase().endsWith(".tex") === true
 }
 
 /** Project roots followed by the shared "general" root. */

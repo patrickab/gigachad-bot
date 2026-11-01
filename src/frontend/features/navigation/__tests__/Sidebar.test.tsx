@@ -404,10 +404,11 @@ describe("Project navigation", () => {
     expect(api.createTexProjectFile).toHaveBeenCalledWith(`${folder}/chapters`, "two.tex")
   })
 
-  it("offers a LaTeX project only on a project's workbench .tex, and promotes it", async () => {
+  it("offers a LaTeX project on a project's workbench .tex, also a renamed one, and promotes it", async () => {
     api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
       ? [
         { path: "/data/workbench/latex/proj/paper/paper.tex", name: "paper.tex", mime: "text/x-tex" },
+        { path: "/data/workbench/latex/proj/test2/test.tex", name: "test.tex", mime: "text/x-tex" },
         { path: "/data/workbench/latex/proj/paper/refs.bib", name: "refs.bib", mime: "text/plain" },
         { path: "/data/workbench/markdown/proj/plan/plan.md", name: "plan.md", mime: "text/markdown" },
         { path: "project/proj/document/notes.md", name: "notes.md", mime: "text/markdown" },
@@ -418,9 +419,9 @@ describe("Project navigation", () => {
     await openedProject(view).findByText("paper.tex")
 
     const promote = view.getAllByRole("button", { name: "Make LaTeX project" })
-    expect(promote).toHaveLength(1)
-    fireEvent.click(promote[0])
-    await waitFor(() => expect(api.promoteToTexProject).toHaveBeenCalledWith("proj", "/data/workbench/latex/proj/paper/paper.tex"))
+    expect(promote).toHaveLength(2)
+    fireEvent.click(promote[1])
+    await waitFor(() => expect(api.promoteToTexProject).toHaveBeenCalledWith("proj", "/data/workbench/latex/proj/test2/test.tex"))
   })
 
   it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
