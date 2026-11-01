@@ -1,3 +1,4 @@
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -287,6 +288,7 @@ def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path
         overrides={
             fileviewer_route.get_file_roots: mounted_roots(mounted, host_access=host_access),
             fileviewer_route.get_document_store: None,
+            file_roots_route.get_user_scope: _RecordingScope(),
         },
     )
 
@@ -302,6 +304,39 @@ def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path
     assert read_status(outside / "shadow") == 403
     for secret in secrets:
         assert read_status(secret) == 403, secret
+
+
+class _RecordingScope:
+    """`UserScope` stand-in that keeps every recorded change."""
+
+    def __init__(self) -> None:
+        self.changes: list[dict] = []
+
+    @contextmanager
+    def connection(self):
+        yield SimpleNamespace(transaction=nullcontext)
+
+    def record(self, connection, **change) -> None:
+        self.changes.append(change)
+
+
+def test_writing_a_file_records_a_document_change_keyed_by_its_resolved_path(tmp_path):
+    (tmp_path / "docs").mkdir()
+    note = tmp_path / "docs" / "notes.md"
+    note.write_text("v1")
+    scope = _RecordingScope()
+    client = route_client(
+        file_roots_route.router,
+        overrides={file_roots_route.get_file_roots: mounted_roots(tmp_path), file_roots_route.get_user_scope: scope},
+    )
+
+    saved = client.post("/api/fileroots/file", json={"path": str(tmp_path / "docs" / ".." / "docs" / "notes.md"), "content": "v2"})
+    refused = client.post("/api/fileroots/file", json={"path": str(tmp_path.parent / "outside.md"), "content": "x"})
+
+    assert saved.status_code == 200
+    assert refused.status_code == 400
+    assert note.read_text() == "v2"
+    assert scope.changes == [{"kind": "document", "key": str(note.resolve()), "operation": "write"}]
 
 
 def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
