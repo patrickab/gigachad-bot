@@ -17,7 +17,7 @@ function crosses(route: Point[], rect: RouteCard): boolean {
 
 describe("routeEdges", () => {
   beforeAll(async () => {
-    expect(await loadRouter(fileURLToPath(new URL("../../../public/libavoid.wasm", import.meta.url)))).toBe(true)
+    expect(await loadRouter(fileURLToPath(new URL("../../../node_modules/libavoid-js/dist/libavoid.wasm", import.meta.url)))).toBe(true)
   })
 
   it("routes around cards a connection does not join, including a card right between its ends", () => {
