@@ -370,6 +370,28 @@ describe("Project navigation", () => {
     expect(manager.current!.getTabs()[0].workspaceItem?.path).toBe("/repo/elsewhere/other.tex")
   })
 
+  it("opens an image from a LaTeX project tab in a new tab and leaves the workbench in place", () => {
+    const manager = createRef<TabManagerHandle>()
+    render(<TabManager ref={manager}><TabList /></TabManager>)
+    const project = {
+      ...nextTab(), appMode: "workbench" as const,
+      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
+    }
+    act(() => manager.current!.openTab(project))
+    const count = manager.current!.getTabs().length
+
+    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/imgs/plot.png", projectSlug: null, rootFile: true }))
+    const tabs = manager.current!.getTabs()
+    expect(tabs).toHaveLength(count + 1)
+    expect(tabs.find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/main.tex")
+    expect(tabs.at(-1)).toMatchObject({ appMode: "document", workspaceItem: { kind: "document", path: "/repo/paper/imgs/plot.png" } })
+    expect(tabs.at(-1)?.id).not.toBe(project.id)
+
+    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/notes.pdf", projectSlug: null, rootFile: true }))
+    expect(manager.current!.getTabs()).toHaveLength(count + 1)
+    expect(manager.current!.getTabs().at(-1)?.workspaceItem?.path).toBe("/repo/paper/notes.pdf")
+  })
+
   it("offers a new file in mounts and promoted folders that directly hold a .tex, and opens what it creates", async () => {
     const folder = "/data/workbench/latex/proj/paper"
     api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"

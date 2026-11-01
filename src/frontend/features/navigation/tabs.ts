@@ -2,7 +2,7 @@ import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { relocatedWorkbenchPath, workbenchKindOf } from "@/lib/domain/workbench"
-import { baseName, isInside } from "@/lib/paths"
+import { baseName, isInside, kindOf } from "@/lib/paths"
 
 /** The display name project `slug` gives its file `path`, if any. */
 type ShownName = (slug: string | null, path: string) => string | undefined
@@ -63,6 +63,12 @@ export function texBufferShown(tab: Tab, path: string): Tab {
   const item = tab.workspaceItem
   if (!item) return tab
   return { ...tab, ...showingItem({ ...item, path, sessionKey: item.sessionKey ?? item.path }) }
+}
+
+/** Whether `item` opens in a new tab, not in `active`: an image from a LaTeX workbench tab, so its Neovim session and unsaved buffers survive. */
+export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceItem): boolean {
+  const shown = active?.appMode === "workbench" ? active.workspaceItem : null
+  return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
 /** Id of the tab that takes over when `id` closes: the one before it, else the new first tab. */

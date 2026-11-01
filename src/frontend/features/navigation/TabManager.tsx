@@ -7,7 +7,7 @@ import { TabContext, showingItem, type Tab, type TabActions, type TabContextValu
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
-import { TabStripContext, nextTab, relocatedTab, renamedTab, tabAfterClosing, tabLabel, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
+import { TabStripContext, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -95,6 +95,13 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
       }))
     },
     showItem: (item) => {
+      // An image never replaces a LaTeX workbench: it opens in a new tab, so the editor session survives.
+      if (opensBesideWorkbench(tabs.find((tab) => tab.id === activeTab), item)) {
+        const opened = { ...nextTab(defaultConfig), ...showingItem(item) }
+        setTabs((prev) => [...prev, opened])
+        setActiveTab(opened.id)
+        return
+      }
       // Another file of an open LaTeX project switches that tab's buffer instead of taking the current tab.
       const project = texProjectTab(tabs, item, activeTab)
       if (project) {
@@ -124,7 +131,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     relocateDocument: (oldPath, newPath) => {
       setTabs((current) => current.map((tab) => renamedTab(tab, oldPath, newPath)))
     },
-  }), [tabs, activeTab, updateTab, setActiveTab])
+  }), [tabs, activeTab, updateTab, setActiveTab, defaultConfig])
 
   useEffect(() => {
     onTabsChangeRef.current?.(tabs)

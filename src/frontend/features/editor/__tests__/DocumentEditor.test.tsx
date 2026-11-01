@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
+import { fileViewerRawUrl } from "@/lib/backend/urls"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(),
@@ -136,5 +137,24 @@ describe("DocumentEditor tool artifacts", () => {
 
     expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("```mermaid")
     expect(screen.getByRole("button", { name: "Text" })).toHaveAttribute("aria-pressed", "false")
+  })
+})
+
+describe("DocumentEditor files without text", () => {
+  it("shows an image from its raw URL, not in the editor", () => {
+    api.loadFileViewerText.mockClear()
+    render(<DocumentEditor path="/repo/paper/imgs/plot.PNG" slug="" overlay onClose={vi.fn()} />)
+
+    expect(screen.getByRole("img", { name: "plot.PNG" })).toHaveAttribute("src", fileViewerRawUrl("/repo/paper/imgs/plot.PNG"))
+    expect(api.loadFileViewerText).not.toHaveBeenCalled()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
+  it("keeps the message for a binary file that is not an image", async () => {
+    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("Not text", 415))
+    render(<DocumentEditor path="/repo/paper/data.bin" slug="" onClose={vi.fn()} />)
+
+    expect(await screen.findByText("This is not a text file, so it cannot be opened in the editor.")).toBeInTheDocument()
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
   })
 })
