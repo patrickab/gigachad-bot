@@ -1,7 +1,5 @@
 Generated from 2bfaf7e on 2026-11-01
 
-Also reflects uncommitted working-tree changes: `features/workbench/`, `src/lib/workbench/`, `routes/workbench.py`, `text_merge.py` and the LaTeX cutover.
-
 # Module map
 
 Use this file to locate the owner of a change. Read [system overview](system-overview.md) for concepts and workflows, [architecture](architecture.md) for runtime contracts, persistence, security, and failure semantics. Follow [repository documentation guidance](../AGENTS.md#documentation) for optional operational runbooks.
@@ -48,7 +46,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- documents.py          Logical/project documents and library attachment APIs (over `lib/document_service.py`)
 |   |       |-- files.py              Chat uploads and extraction APIs (over `lib/attachments.py`)
 |   |       |-- fileviewer.py         Generic text/raw preview APIs
-|   |       |-- file_roots.py         Mounts, trees, host browsing, mounted-file read/write
+|   |       |-- file_roots.py         Mounts, trees, host browsing, mounted-file read/write, folder stamp (`GET /api/fileroots/stamp`)
 |   |       |-- file_attach.py        Attach mounted files to chats and projects as live references
 |   |       |-- file_git.py           Git diffs and worktrees of mounted roots
 |   |       |-- architecture.py       Project LikeC4 workspace APIs
@@ -59,9 +57,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- models.py             Models, providers, usage, defaults and prompts
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
-|   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/background/set_content frames
-|   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, file-to-session links
-|   |       |-- latex.py              LaTeX build (`POST /api/latex/build`)
+|   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/switched/open_failed/background frames, `open_file`/`insert_lines`/`set_content`/`renamed` input
+|   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, promote a `.tex` to a folder entry, pasted images, chat-key session links
+|   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- omp.py                omp-web API boundary
@@ -91,9 +89,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- model_provider_store.py   Provider catalog and model defaults
 |   |   |-- reasoning_levels.py       Reasoning-effort levels: live discovery, stored answers, send-time kwargs
 |   |   |-- prompt_store.py           User prompt storage (read lazily) and seed/block loading
-|   |   |-- file_roots.py             Mounted-file roots, path safety, read/write, tree
+|   |   |-- file_roots.py             Mounted-file roots, path safety, read/write/create, `ceiling_of`, tree
+|   |   |-- disk_files.py             `DiskFiles`: create/write/record files under the roots with their `document` change
 |   |   |-- file_roots_repository.py  Per-user root registry (`vault_roots`)
-|   |   |-- file_walk.py              `.gitignore`-aware directory walk and tree
+|   |   |-- file_walk.py              `.gitignore`-aware directory walk and tree, build output hidden, `folder_stamp`
 |   |   |-- host_access.py            Host-access reach: home dir minus credential stores
 |   |   |-- wiki_links.py             Obsidian wiki-link rewriting
 |   |   |-- git_diff.py               Diff listing, patches and file content
@@ -125,13 +124,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- llm_resilience.py         One retry for stale LiteLLM parameter rejections, `completion_text`
 |   |   |-- omp_cli.py                `run_omp`: one runner for the `omp` CLI
-|   |   |-- naming.py                 `slugify` for project slugs
+|   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
-|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, `base` tracking, merge on set_text and `:w`
-|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, save/yank/selection/hunk-apply Lua bridge
+|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`
+|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
-|   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, `NEW_DOCUMENT`
+|   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner
 |   |   |-- workbench/                Workbench kinds, folders, omp prompt mirror, rename folder moves
 |   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `pdf.md`, `config.yml` (source of truth)
@@ -197,7 +196,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |       `-- review.ts
 |       |   |-- navigation/           Sidebar, tabs, commands, mounts and worktrees
 |       |   |   |-- Sidebar.tsx       Composition of the hooks below
-|       |   |   |-- workspaceTree.ts  Pure Projects and Code tree builders
+|       |   |   |-- workspaceTree.ts  Pure Projects and Code tree builders, promoted LaTeX project folders, new-file action
 |       |   |   |-- useWorkspaceDocuments.ts, useCodeMounts.ts, useProjectActions.ts
 |       |   |   |-- TabManager.tsx    Tab state provider; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabList.tsx (sidebar Tabs section)
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
@@ -205,14 +204,17 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
 |       |   |   |-- OmpProvider.tsx
 |       |   |   |-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
-|       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file, menu, New session
+|       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file or LaTeX project folder, menu, New session (`fileLead.ts`: `File:`/`Project:` leads)
 |       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
 |       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`)
-|       |   |   |-- usePreparedWorkbench.ts, useAgentSync.ts Prepare once per path, agent/remote sync (`onPulled`)
+|       |   |   |-- usePreparedWorkbench.ts, useAgentSync.ts Prepare once per path, agent/remote sync of every open file (`onPulled`)
+|       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames, image paste
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
-|       |   |-- latex/                LaTeX kind: LatexWorkbench, useLatexBuild, LatexPdfPane, LatexBuildStatus
+|       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
+|       |   |   |-- useTexProject.ts, LatexRootPicker.tsx Project of the shown file (folder, root, candidates), root choice
+|       |   |   `-- useLatexBuild.ts  Root build queue and folder stamp poll
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
@@ -260,15 +262,16 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- config.ts
 |       |   |   |-- urls.ts
 |       |   |   |-- canvasStream.ts
+|       |   |   |-- fileEvents.ts         File move and file change events: this device's announcements and other devices' change events
 |       |   |   `-- syncStream.ts
 |       |   |-- domain/               Browser domain types and pure document/graph logic
 |       |   |   |-- types.ts              Chat core, models, omp
-|       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts
-|       |   |   |-- workbench.ts, latex.ts    Workbench kinds, notes guard, rename path rewrite, LaTeX build result
+|       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts    `files.ts` holds `isNewFileIn`, a folder entry of a project lists `children`
+|       |   |   |-- workbench.ts, latex.ts    Workbench kinds, notes guard, rename path rewrite, LaTeX build result and tex project
 |       |   |   |-- architecture.ts
 |       |   |   |-- canvasDocument.ts
 |       |   |   `-- edgeRouting.ts
-|       |   |-- paths.ts              File-kind/path helpers
+|       |   |-- paths.ts              File-kind and path helpers (`isInside`, `relativeIn`, `relativeTo`)
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
@@ -288,7 +291,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   `-- _blocks/                      Reusable prompt fragments
 |-- tests/                            Python route/service/store/security regressions
 |   |-- conftest.py                    Shared fixtures, Postgres store helpers, `route_client`
-|   |-- fakes.py                       Shared in-memory stores, sandbox and LLM client fakes
+|   |-- fakes.py                       Shared in-memory stores, `RecordingScope`, sandbox and LLM client fakes
 |   |-- shell.py                       Run repository shell scripts against fake commands
 |   |-- test_postgres_mode_end_to_end.py
 |   |-- test_data_store_conformance.py
@@ -368,12 +371,12 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Text/PDF/plot viewing or editing | `src/frontend/features/editor/DocumentEditor.tsx`, `FileViewer.tsx`, `features/editor/pdf/`, `src/frontend/components/content/` | `src/backend/routes/documents.py`, `src/lib/document_service.py`, `fileviewer.py` (PDF annotation canvas key); `tests/test_document_state.py`, `tests/test_postgres_mode_end_to_end.py`, editor/content `__tests__/` |
 | Collaborative canvas or canvas entity shape | `src/frontend/features/editor/canvas/`, `src/frontend/lib/domain/canvasDocument.ts` | `src/lib/canvas_store.py`, `routes/canvases.py`, `lib/backend/canvasStream.ts`; `tests/test_canvas_mutations.py`, canvas `__tests__/` |
 | Architecture syntax edits, diagram or layout | `src/c4/ops/`, `workspace.ts`, `payload.ts`, `layout.ts`; `src/frontend/features/editor/architecture/` | `src/lib/architecture_workspace.py`, `architecture_service.py`, `c4_service.py`, `src/backend/routes/architecture.py`; `src/c4/operations.test.ts`, `tests/test_architecture_workspace.py` |
-| Mount browsing or filesystem access policy | `src/lib/file_roots.py`, `host_access.py`, `file_walk.py`, `src/backend/routes/file_roots.py` | `features/navigation/FileMountPicker.tsx`, `components/ui/file-tree/`; `tests/test_file_roots.py` |
+| Mount browsing or filesystem access policy | `src/lib/file_roots.py`, `disk_files.py`, `host_access.py`, `file_walk.py`, `src/backend/routes/file_roots.py` | `features/navigation/FileMountPicker.tsx`, `components/ui/file-tree/`; `tests/test_file_roots.py`, `tests/test_disk_files.py` |
 | Git diffs, review drafts or worktree switching | `src/lib/git_diff.py`, `git_worktree.py`; `src/frontend/features/editor/diff/`, `features/navigation/useWorktrees.tsx` | `src/backend/routes/file_git.py`; `tests/test_git_diff.py`, `tests/test_git_worktree.py`, diff `__tests__/` |
 | Neovim editing, terminal save bridge or agent-edit merge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `text_merge.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`, `tests/test_text_merge.py`; filesystem/identity policy stays with its existing owners |
-| Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, rename cascade in `project_rename.py`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
-| LaTeX build or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
-| File chat sidebar (omp sessions per file) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
+| Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, buffer routing in `features/navigation/tabs.ts`, rename cascade in `project_rename.py`, `lib/backend/fileEvents.ts`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
+| LaTeX build, tex projects or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `file_walk.py` (build output, stamp), `routes/workbench.py` (promote, images), `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
+| File chat sidebar (omp sessions per file or LaTeX project folder) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `fileLead.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
 | Learn mode | `src/lib/learnharness.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |

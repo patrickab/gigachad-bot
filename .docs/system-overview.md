@@ -1,7 +1,5 @@
 Generated from 2bfaf7e on 2026-11-01
 
-Also reflects uncommitted working-tree changes: the workbench (Markdown/LaTeX editor, preview and chat), its backend and the Neovim merge.
-
 # System overview
 
 ## Purpose and concepts
@@ -18,7 +16,7 @@ GigaChad Bot is a self-hosted, local-first LLM workspace for conversations, rese
 | Architecture workspace | A project's merged LikeC4 model, editable as diagrams and `.c4` source |
 | OMP session | An external coding-agent conversation provided by omp-web, distinct from local model chat |
 | Factory task | An agent workflow running in its own git worktree, with review, gates, messages, and optional previews |
-| Workbench | One `.md` or `.tex` file as Neovim beside its rendered view (Markdown preview or built PDF) with an omp chat drawer. The file lives on disk and the agent edits it there |
+| Workbench | One `.md` file or one LaTeX project as Neovim beside its rendered view (Markdown preview or built PDF) with an omp chat drawer. The files live on disk and the agent edits them there |
 | Learn session | A LearnHarness teaching session (probe, plan, teach, recall) shown in learn mode, host-only |
 | Memory | Reviewed, document-backed facts supplied to later chats, globally or within a project; not vector search |
 
@@ -69,7 +67,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view. Tool artifacts (plots, mind maps, Mermaid diagram documents) open rendered and fill the pane, their text is the secondary view.
 - Add a mounted file to a project as a reference. Editing changes the original disk file; removing the project reference does not delete that source.
 - Upload files into a project's files folder and drag them to another project. Chats, canvases and other projects using the file follow it. Drag an uploaded file onto a Code folder to move it to disk, where it then behaves exactly like a mounted file. Uploaded and moved PDFs get MinerU extraction like mounted ones.
-- Rename a project file or a mounted file from the sidebar: click opens it, double-click renames it in place (Enter or leaving saves, Esc cancels). Projects and learn sessions rename the same way. The file itself is renamed and every reference follows (project lists, chat and canvas attachments, notes, the workbench chat link), open tabs on every device move with it, and an open Neovim session keeps its unsaved text. A name in use is refused under the row. A renamed LaTeX file rebuilds under its new name.
+- Rename a project file or a mounted file from the sidebar: click opens it, double-click renames it in place (Enter or leaving saves, Esc cancels). Projects and learn sessions rename the same way. The file itself is renamed and every reference follows (project lists, chat and canvas attachments, notes, the workbench chat link), open tabs on every device move with it, and an open Neovim session keeps its unsaved text. A name in use is refused under the row. A LaTeX project rebuilds after a rename.
 - Upload PDFs or attach mounted PDFs, view their pages, and use MinerU extraction to supply readable Markdown to chat. Image OCR can transcribe text and LaTeX with the configured vision model.
 - Annotate PDFs with pen and highlighter. Annotations belong to the PDF's content, so every copy shares them and a renamed file keeps them, while changed bytes start empty.
 - Ask about a PDF in a side chat. With host access it is an omp session per PDF (session menu, New session, kept like workbench chats) that reads the PDF itself. Other logins get an unsaved local chat grounded in the extracted text. Ask about a selected passage either way.
@@ -83,13 +81,22 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Workbench (Markdown and LaTeX)
 
-- With Neovim enabled and host access, `.md` and `.tex` project files and mounted files open in the workbench: Neovim left, rendered view middle, omp chat in a drawer. Without either, they open in the regular document editor. Notes always use the regular editor.
+- With Neovim enabled and host access, `.md` project files and mounted files, and `.tex`, `.bib`, `.sty` and `.cls` files, open in the workbench: Neovim left, rendered view middle, omp chat in a drawer. Without either, they open in the regular document editor. Notes always use the regular editor.
 - A stored project document moves to disk on first open (`GIGACHAD_BASE_DIR/workbench/<kind>/<project>/<name>/`) and stays a disk file from then on. Mounted files are edited in place. New LaTeX documents are created on disk directly.
-- Markdown renders live from the saved text, including Mermaid and mind-map documents. LaTeX rebuilds on open, on every `:w` and on every agent edit as it arrives. The PDF swaps to each build without blanking, a failed build keeps the last good PDF.
-- Visual-mode `<leader>a` quotes the selected lines into the chat draft. Each file keeps its own list of chat sessions, shared by all devices: the chevron beside the session title switches between them, `+` starts a new one. The first message of a new session names the file (`File: <path>`), and after a rename the next message of each earlier session names it again.
+- Markdown renders live from the saved text, including Mermaid and mind-map documents. A failed LaTeX build keeps the last good PDF, and the PDF swaps to each build without blanking.
+- Visual-mode `<leader>a` quotes the selected lines into the chat draft. Each chat keeps its own list of sessions, shared by all devices: the chevron beside the session title switches between them, `+` starts a new one. The first message of a new session names what the chat is about (`File: <path>` for Markdown, `Project: <folder>, root: <file>` for LaTeX), and after a rename or a move the next message of each earlier session names it again.
 - Agent edits appear in Neovim while the agent runs. Unsaved edits on other lines survive. On lines both changed, the agent's version wins, so save often. A save never overwrites an agent edit it has not seen: `:w` merges first and reports "Saved, merged with the agent's edits".
-- Edits from another device show up after it saves. Edits made outside the app (a shell) appear on the next reload or agent run.
+- Edits from another device show up after it saves. Edits made outside the app (a shell) appear in Neovim on the next reload or agent run, and the PDF of a LaTeX project rebuilds for them within a few seconds.
 - Workbench chats use a short Markdown or LaTeX prompt kept in this repository, without coding rules or `AGENTS.md`. Switch between editor only, split and preview only with the three-icon switch in the top bar (remembered per device).
+
+## LaTeX projects
+
+- A LaTeX project is a folder with a root `.tex` file, the one with `\documentclass`. Opening any file of it (`.tex`, `.bib`, `.sty`, `.cls`) while a tab shows that project switches the tab to the file instead of opening another: Neovim keeps every file as a buffer, and `:bnext` switches between them too. One chat belongs to the project folder, not to a file. Chats that older versions linked to single files join the folder's chat when it is first opened.
+- The PDF is the root's. The root of a file is the `.tex` its `% !TEX root = <relative path>` line in the first 5 lines names, else the file itself when it has `\documentclass`, else `main.tex` of its folder, else the only root document there. Without a root the PDF pane lists the root documents in the folder and the 2 above it, and choosing one writes the `% !TEX root` line into the open file. Without any it says "No root document".
+- The PDF rebuilds on open, on every `:w` of any open file, on every agent edit as it arrives, when an agent run ends and when any file of the folder changes, also one you have not opened. The folder is checked every 0.5 s while the agent runs and every 3 s otherwise, only in the tab you are looking at. Build output (`.latex-build/`, `*.view.pdf`, `.aux`, `.log` and the like beside a `.tex`) is hidden from the sidebar and ignored by that check. A build error names its file when it is not the open one.
+- Turn a project's workbench `.tex` into a project folder with the folder button on its row ("Make LaTeX project", one way). The folder then lists in the project like a mounted folder: files open and rename as there. Deleting its row only unlists it.
+- A Code folder that holds a `.tex`, and a project folder, shows a create action on its row: type a name (a name without extension gets `.tex`) and Enter. A new `.tex` starts with a `% !TEX root = <relative path>` line when the folder has a root, else with an empty article. New `.bib`, `.sty` and `.cls` files start empty.
+- Paste a PNG from the clipboard into Neovim to store it as `imgs/img-<timestamp>.png` in the project folder (next to the file for Markdown) and insert `\includegraphics[width=\linewidth]{imgs/img-<timestamp>.png}` (Markdown `![](imgs/img-<timestamp>.png)`) below the cursor. A root without `graphicx` gets `\usepackage{graphicx}`. Other images are not pasted, and text pastes stay unchanged.
 
 ## Canvas
 
