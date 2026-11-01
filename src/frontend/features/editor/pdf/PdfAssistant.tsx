@@ -72,13 +72,15 @@ function DocumentStatus({ pdfText }: { pdfText: PdfMarkdown }) {
  * Wrap a PDF viewer with an LLM assistant grounded in the PDF's MinerU Markdown.
  *
  * - `chatOpen` shows the chat in the tab's file panel, closing it calls `onChatOpenChange(false)`. Its history lives as long as this component
+ * - `renderChat` replaces that local chat with the owner's, e.g. an omp session panel, given the panel width and close action
  * - Selecting text opens a one-shot question card, closed by Escape or any click outside it
  */
-export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, children }: {
+export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderChat, children }: {
   path: string
   model: string
   chatOpen: boolean
   onChatOpenChange: (open: boolean) => void
+  renderChat?: (panel: { width: number; onClose: () => void }) => ReactNode
   children: ReactNode
 }) {
   const pdfText = usePdfMarkdown(path)
@@ -86,15 +88,16 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, children
   const chat = useAssistantChat(model, SYS_DOCUMENT(markdown))
   const { containerRef, selected, clear: clearSelection } = usePdfSelection()
   const [asking, setAsking] = useState<PdfSelection | null>(null)
+  const closeChat = () => onChatOpenChange(false)
 
   return (
     <div className="relative h-full">
-      {chatOpen && (
-        <FilePanel label="Chat" bare onClose={() => onChatOpenChange(false)} width={CHAT_PANEL_WIDTH_PX}>
+      {chatOpen && (renderChat ? renderChat({ width: CHAT_PANEL_WIDTH_PX, onClose: closeChat }) : (
+        <FilePanel label="Chat" bare onClose={closeChat} width={CHAT_PANEL_WIDTH_PX}>
           <DocumentStatus pdfText={pdfText} />
           <AssistantChat chat={chat} inputLabel="Ask about this PDF" disabled={pdfText.status !== "ready"} surfaceClassName="bg-surface-elevated" />
         </FilePanel>
-      )}
+      ))}
       {/* No scrollbar between the pages and the open chat, wheel and keys still scroll. Important: the global `* { scrollbar-width }` is unlayered */}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
         {children}

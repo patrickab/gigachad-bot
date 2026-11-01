@@ -2,6 +2,7 @@
 
 - `<root>/<kind>/.omp/` holds the kind's omp prompt and config, mirrored from `omp/` on every backend start
 - `<root>/<kind>/<slug>/<stem>/<stem>.<ext>` is a document of project `slug`
+- PDFs are only read, never moved: `pdf` sessions run in `<root>/pdf` and read the PDF where it is
 """
 
 from __future__ import annotations
@@ -15,10 +16,10 @@ from typing import TYPE_CHECKING, Literal, get_args
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-Kind = Literal["latex", "markdown"]
+Kind = Literal["latex", "markdown", "pdf"]
 KINDS: tuple[Kind, ...] = get_args(Kind)
 OMP_DIRECTORY = ".omp"
-_SUFFIXES: dict[str, Kind] = {".tex": "latex", ".md": "markdown"}
+_SUFFIXES: dict[str, Kind] = {".tex": "latex", ".md": "markdown", ".pdf": "pdf"}
 _PROMPTS = Path(__file__).parent / "omp"
 
 log = logging.getLogger(__name__)

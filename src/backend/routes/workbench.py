@@ -7,16 +7,17 @@ from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
-from backend.routes.deps import get_document_store, get_file_roots, get_project_store, get_relocate
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, get_project_store, get_relocate
 from backend.routes.fileviewer import resolve_allowed
 import config
 from lib import document_service, latex
+from lib.asset_store import AssetStore
 from lib.data_store import DataStore, InvalidStorageKey, StorageConflictError, StorageNotFoundError, validate_key
 from lib.document_service import DocumentNameConflict, DocumentNotFound, Relocate, under
 from lib.file_roots import FileRoots
 from lib.json_docs import JsonDocs
 from lib.project_store import ProjectStore
-from lib.storage_namespace import NOTE, WORKBENCH_SESSIONS
+from lib.storage_namespace import NOTE, PDFS, WORKBENCH_SESSIONS, library_pdf
 from lib.workbench import Kind, document_folder, kind_directory, kind_of, new_folder, suffix_of
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"], dependencies=[host_access_only("Workbench")])
@@ -79,6 +80,16 @@ def _prepared(path: Path | str, kind: Kind) -> PreparedFile:
     return PreparedFile(path=str(path), cwd=str(kind_directory(config.WORKBENCH, kind)), kind=kind)
 
 
+def _pdf_on_disk(key: str, assets: AssetStore) -> Path:
+    """The disk copy of the stored PDF `key`: its library mirror, written again when missing."""
+    name = PurePosixPath(key).name
+    mirrored = config.DOCUMENTS / PDFS / name
+    if mirrored.is_file():
+        return mirrored
+    with http_errors((StorageNotFoundError, 404, "This PDF has no library copy to read")):
+        return assets.mirror(assets.read(library_pdf(name)), config.DOCUMENTS)
+
+
 @router.post("/prepare")
 def post_prepare(
     body: FilePath,
@@ -86,9 +97,11 @@ def post_prepare(
     docs: DataStore = Depends(get_document_store),
     roots: FileRoots = Depends(get_file_roots),
     relocate: Relocate = Depends(get_relocate),
+    assets: AssetStore = Depends(get_asset_store),
 ) -> PreparedFile:
     """The disk file to open for `path`: an absolute file resolved in place, a stored project document moved into its workbench folder.
 
+    - A stored PDF is never moved, its library copy on disk is read where it is
     - Notes stay stored and open in the document editor, so their keys answer 400
     - A workbench folder the file roots cannot reach answers 403 and nothing moves
     """
@@ -100,8 +113,10 @@ def post_prepare(
     if under(key, NOTE):
         raise HTTPException(status_code=400, detail="Notes open in the document editor")
     with http_errors((DocumentNotFound, 404, "Document not found")):
-        name = document_service.file_name(store, docs, key)
+        name = PurePosixPath(key).name if under(key, PDFS) else document_service.file_name(store, docs, key)
     kind = _kind(name)
+    if kind == "pdf":
+        return _prepared(_pdf_on_disk(key, assets), kind)
     with http_errors((ValueError, 400, None)):
         folder = document_folder(config.WORKBENCH, kind, key.split("/")[1], Path(name).stem)
     if not roots.contains(folder / name):
@@ -121,6 +136,8 @@ def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_sto
     """
     name = body.name.strip()
     kind = _kind(name)
+    if kind == "pdf":
+        raise HTTPException(status_code=400, detail="New documents are .md or .tex")
     with http_errors((FileNotFoundError, 404, "Project not found"), (ValueError, 400, None)):
         store.require(body.slug)
         folder = document_folder(config.WORKBENCH, kind, body.slug, name.removesuffix(Path(name).suffix))

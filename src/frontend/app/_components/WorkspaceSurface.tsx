@@ -23,12 +23,14 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
+import { OmpFileChat } from "@/features/omp/OmpFileChat"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { TopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { useHostAccess } from "@/contexts/SettingsContext"
 import type { OmpView, Usage } from "@/lib/domain/types"
 import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
@@ -110,6 +112,8 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
 export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
+  // omp needs host access, other logins keep the PDF's local assistant
+  const hostAccess = useHostAccess()
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
@@ -180,7 +184,16 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         body: diffItem ? <DiffViewer key={diffItem.path} root={diffItem.path} />
           : !documentItem ? chatBody
           : isPdfDocument ? (
-            <PdfAssistant key={documentItem.path} path={documentItem.path} model={config.selectedModel} chatOpen={pdfChatOpen} onChatOpenChange={setPdfChatOpen}>
+            <PdfAssistant
+              key={documentItem.path}
+              path={documentItem.path}
+              model={config.selectedModel}
+              chatOpen={pdfChatOpen}
+              onChatOpenChange={setPdfChatOpen}
+              renderChat={hostAccess ? ({ width, onClose }) => (
+                <OmpFileChat path={documentItem.path} width={width} onClose={onClose} shellCommands={ompShellCommands} />
+              ) : undefined}
+            >
               <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} />
             </PdfAssistant>
           ) : (

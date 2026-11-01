@@ -5,7 +5,7 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes import workbench as workbench_route
-from backend.routes.deps import get_document_store, get_file_roots, get_project_store, get_relocate
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, get_project_store, get_relocate
 import config
 from lib import latex, workbench
 from lib.chat_store import ChatStore
@@ -13,7 +13,7 @@ from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
 from tests.conftest import mounted_roots, request_identity, route_client
-from tests.fakes import MemoryDataStore
+from tests.fakes import MemoryAssetStore, MemoryDataStore, StoredAsset
 
 
 class Docs(MemoryDataStore):
@@ -47,7 +47,7 @@ def projects(docs):
     return projects
 
 
-def workbench_client(projects, docs, roots, relocate=None, host_access=True):
+def workbench_client(projects, docs, roots, relocate=None, host_access=True, assets=None):
     """A workbench route client for *projects* and *docs* that reaches *roots*."""
 
     def relocate_to_disk(old: str, new: str) -> None:
@@ -62,6 +62,7 @@ def workbench_client(projects, docs, roots, relocate=None, host_access=True):
         get_project_store: projects,
         get_document_store: docs,
         get_relocate: relocate or relocate_to_disk,
+        get_asset_store: assets or MemoryAssetStore(),
     }
     return route_client(workbench_route.router, overrides=overrides)
 
@@ -71,8 +72,49 @@ def client(root, vault, docs, projects):
     return workbench_client(projects, docs, mounted_roots(vault, root))
 
 
+class MirroringAssets(MemoryAssetStore):
+    """Writes mirrors to disk like `AssetStore.mirror`."""
+
+    def mirror(self, asset, root):
+        path = root.joinpath(*asset.logical_path.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(asset.content)
+        return path
+
+
+@pytest.fixture
+def documents(tmp_path, monkeypatch):
+    documents = tmp_path / "Documents"
+    monkeypatch.setattr(config, "DOCUMENTS", documents)
+    return documents
+
+
+def test_a_stored_pdf_is_read_from_its_library_copy_on_disk_and_never_moved(root, vault, docs, projects, documents):
+    assets = MirroringAssets()
+    assets.assets["PDFs/paper.pdf"] = StoredAsset("PDFs/paper.pdf", b"%PDF-1", "pdf", "application/pdf")
+    client = workbench_client(projects, docs, mounted_roots(vault, root), assets=assets)
+
+    prepared = client.post("/api/workbench/prepare", json={"path": "PDFs/paper.pdf"}).json()
+    assert prepared == {"path": str(documents / "PDFs" / "paper.pdf"), "cwd": str(root / "pdf"), "kind": "pdf"}
+    assert (documents / "PDFs" / "paper.pdf").read_bytes() == b"%PDF-1"
+    assert "PDFs/paper.pdf" in assets.assets
+
+    # An existing copy is read as it is
+    assets.read_keys.clear()
+    assert client.post("/api/workbench/prepare", json={"path": "PDFs/paper.pdf"}).json()["path"] == prepared["path"]
+    assert assets.read_keys == []
+    assert client.post("/api/workbench/prepare", json={"path": "PDFs/missing.pdf"}).status_code == 404
+
+
+def test_a_mounted_pdf_is_read_in_place_and_new_pdfs_are_refused(client, vault, root):
+    pdf = vault / "slides.pdf"
+    pdf.write_bytes(b"%PDF-1")
+    assert client.post("/api/workbench/prepare", json={"path": str(pdf)}).json() == {"path": str(pdf), "cwd": str(root / "pdf"), "kind": "pdf"}
+    assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "x.pdf"}).status_code == 400
+
+
 @pytest.mark.parametrize(("path", "kind"), [("a.tex", "latex"), ("/x/B.TEX", "latex"), ("n.md", "markdown"), ("c.Md", "markdown"),
-                                           ("a.pdf", None), ("tex", None), ("a.md.txt", None)])
+                                           ("a.pdf", "pdf"), ("tex", None), ("a.md.txt", None)])
 def test_kind_comes_from_the_suffix_ignoring_case(path, kind):
     assert workbench.kind_of(path) == kind
 
@@ -233,19 +275,19 @@ def test_prepare_answers_the_resolved_absolute_path(client, root, vault):
 
 
 def test_prepare_refuses_unknown_documents_and_kinds(client, vault, docs, projects):
-    docs.write_bytes("project/thesis/document/a.pdf", b"%PDF")
-    projects.add_file("thesis", "project/thesis/document/a.pdf")
+    docs.write_bytes("project/thesis/document/a.csv", b"a,b")
+    projects.add_file("thesis", "project/thesis/document/a.csv")
     other = vault / "notes.txt"
     other.write_text("x", encoding="utf-8")
 
     def status(path: str) -> int:
         return client.post("/api/workbench/prepare", json={"path": path}).status_code
 
-    assert status("project/thesis/document/a.pdf") == 400
+    assert status("project/thesis/document/a.csv") == 400
     assert status(str(other)) == 400
     assert status("project/thesis/document/missing.md") == 404
     assert status("../x.md") == 400
-    assert docs.exists("project/thesis/document/a.pdf")
+    assert docs.exists("project/thesis/document/a.csv")
 
 
 def test_create_writes_a_new_document_into_its_folder_and_lists_it(client, root, projects):
