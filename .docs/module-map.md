@@ -1,4 +1,6 @@
-Generated from 9f773d5 on 2026-10-27
+Generated from 2bfaf7e on 2026-11-01
+
+Also reflects uncommitted working-tree changes: `features/workbench/`, `src/lib/workbench/`, `routes/workbench.py`, `text_merge.py` and the LaTeX cutover.
 
 # Module map
 
@@ -16,6 +18,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- AGENTS.md                         Repository rules; operational documentation index
 |-- README.md                         Setup and developer entry guide
 |-- PRODUCT.md                        Product direction
+|-- CONTEXT.md                        Domain language glossary
 |-- .docs/                            Complementary generated context and maintained guidance
 |-- pyproject.toml                    Python dependencies, packaging and tool configuration
 |-- compose.yaml                      Local PostgreSQL service definition
@@ -56,7 +59,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- models.py             Models, providers, usage, defaults and prompts
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
-|   |       |-- neovim.py             Terminal WebSocket and document-save bridge
+|   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/background/set_content frames
+|   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, file-to-session links
+|   |       |-- latex.py              LaTeX build (`POST /api/latex/build`)
+|   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- omp.py                omp-web API boundary
 |   |       |-- factory.py            Agent factory API boundary
@@ -122,8 +128,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- naming.py                 `slugify` for project slugs
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
-|   |   |-- neovim_session.py         Neovim PTY/process lifecycle
-|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client and save/yank Lua bridge
+|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, `base` tracking, merge on set_text and `:w`
+|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, save/yank/selection/hunk-apply Lua bridge
+|   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
+|   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, `NEW_DOCUMENT`
+|   |   |-- learnharness.py           LearnHarness URL/response-contract owner
+|   |   |-- workbench/                Workbench kinds, folders, omp prompt mirror, rename folder moves
+|   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `config.yml` (source of truth)
 |   |   `-- prompts/                  Internal, non-user-facing prompts
 |   |       `-- non_user_prompts.py
 |   |-- c4/                           Separate stateless TypeScript LikeC4 service
@@ -194,6 +205,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
 |       |   |   |-- OmpProvider.tsx
 |       |   |   `-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
+|       |   |-- workbench/            Editor | rendered file | omp drawer primitive
+|       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
+|       |   |   |-- WorkbenchSplit.tsx Hidden pane, shared page box (`usePaneLayout`)
+|       |   |   |-- usePreparedWorkbench.ts, useWorkbenchChat.ts, useAgentSync.ts Prepare once per path, session link, agent/remote sync
+|       |   |   `-- MarkdownWorkbench.tsx Markdown kind
+|       |   |-- latex/                LaTeX kind: LatexWorkbench, useLatexBuild, LatexPdfPane, LatexBuildStatus
+|       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
 |       |   |   `-- TaskView.tsx
@@ -244,6 +262,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- domain/               Browser domain types and pure document/graph logic
 |       |   |   |-- types.ts              Chat core, models, omp
 |       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts
+|       |   |   |-- workbench.ts, latex.ts    Workbench kinds, notes guard, rename path rewrite, LaTeX build result
 |       |   |   |-- architecture.ts
 |       |   |   |-- canvasDocument.ts
 |       |   |   `-- edgeRouting.ts
@@ -282,6 +301,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-frontend.sh                   Frontend launch/setup
 |-- run-omp.sh                        OMP auth gateway launcher
 |-- run-omp-web.sh                    External omp-web worktree launcher
+|-- ompweb-overlay/                   Private omp-web overlay (embed, bridge, composer, theme), see AGENTS.md
+|-- run-learnharness.sh               LearnHarness sidecar launcher
+|-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
+|-- run-litellm-proxy.sh              LiteLLM proxy, learn mode's model endpoint
 |-- run-factory.sh                    External factory engine launcher
 |-- factory.yaml                      Factory hooks, test gate and preview configuration
 `-- deploy/                           Production units and service/ingress helpers
@@ -300,7 +323,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 
 - Compose features in `src/frontend/app/_components/`; do not make a feature import the app shell.
 - Put feature behavior under its owner in `features/`. Import another feature only through permitted public files at the feature root or one sub-feature level; concept-folder internals are not a general cross-feature API.
-- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor`, `factory -> editor`, `navigation -> factory/memory/omp`, and `omp -> chat/editor/settings`. Other cross-feature edges are disallowed by default. Add shared domain logic below the features rather than bypassing the boundary.
+- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation`, `factory -> editor`, `navigation -> factory/learn/memory/omp`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/omp`, and `omp -> chat/editor/settings`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature. Add shared domain logic below the features rather than bypassing the boundary.
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
 - Keep all iframe URLs, bridge knowledge and message-protocol imports in `features/omp/`. The canonical protocol lives in `packages/chat-ui/src/protocol.ts`; other shell modules may consume the shared rendering package but not that protocol directly.
@@ -345,7 +368,10 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Architecture syntax edits, diagram or layout | `src/c4/ops/`, `workspace.ts`, `payload.ts`, `layout.ts`; `src/frontend/features/editor/architecture/` | `src/lib/architecture_workspace.py`, `architecture_service.py`, `c4_service.py`, `src/backend/routes/architecture.py`; `src/c4/operations.test.ts`, `tests/test_architecture_workspace.py` |
 | Mount browsing or filesystem access policy | `src/lib/file_roots.py`, `host_access.py`, `file_walk.py`, `src/backend/routes/file_roots.py` | `features/navigation/FileMountPicker.tsx`, `components/ui/file-tree/`; `tests/test_file_roots.py` |
 | Git diffs, review drafts or worktree switching | `src/lib/git_diff.py`, `git_worktree.py`; `src/frontend/features/editor/diff/`, `features/navigation/useWorktrees.tsx` | `src/backend/routes/file_git.py`; `tests/test_git_diff.py`, `tests/test_git_worktree.py`, diff `__tests__/` |
-| Neovim editing or terminal save bridge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`; filesystem/identity policy stays with its existing owners |
+| Neovim editing, terminal save bridge or agent-edit merge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `text_merge.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`, `tests/test_text_merge.py`; filesystem/identity policy stays with its existing owners |
+| Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, rename cascade in `project_rename.py`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
+| LaTeX build or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `components/content/PdfViewer.tsx` (`pageBox`); `tests/test_latex.py`, latex `__tests__/` |
+| Learn mode | `src/lib/learnharness.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
@@ -367,6 +393,6 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 
 ## Refresh evidence and scope
 
-- Refresh with Repomix 1.18.0 compressed, parsable XML, default ignore filtering and security scanning enabled. The inspected final inventory contains 620 files across backend routes/services, browser features/shared layers/package, LikeC4, schemas, launchers, deployment, prompts, maintained docs, and Python/browser/service regressions.
+- Refresh with Repomix 1.18.0 compressed, parsable XML, default ignore filtering and security scanning enabled. The inventory contains 791 files (about 1.1M tokens) across backend routes/services, browser features/shared layers/package, LikeC4, both overlays, schemas, launchers, deployment, prompts, maintained docs, and Python/browser/service regressions. The 2026-11-01 refresh checked coverage against the pack and original source for the workbench, LaTeX, Neovim merge and learn-mode entries. Other sections come from the commits since `9f773d5` that updated these docs themselves and were not re-verified line by line.
 - Exclude only these three generated context docs from documentation inputs. Retain maintained guidance through the [repository documentation index](../AGENTS.md#documentation). Exclude dependencies, lockfile bodies, public assets, fonts, images, caches and Tauri build output. The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.
 - Treat compressed declarations as navigation evidence, not proof of behavior. Check original implementations for persistence authority, revision conflicts, access precedence, capability flags, integration defaults/errors, environment loading, and sandbox checkpoints. External engine/fork internals and deployed service behavior are outside this source refresh.

@@ -1,4 +1,6 @@
-Generated from 9f773d5 on 2026-10-27
+Generated from 2bfaf7e on 2026-11-01
+
+Also reflects uncommitted working-tree changes: the workbench (Markdown/LaTeX editor, preview and chat), its backend and the Neovim merge.
 
 # System overview
 
@@ -16,6 +18,8 @@ GigaChad Bot is a self-hosted, local-first LLM workspace for conversations, rese
 | Architecture workspace | A project's merged LikeC4 model, editable as diagrams and `.c4` source |
 | OMP session | An external coding-agent conversation provided by omp-web, distinct from local model chat |
 | Factory task | An agent workflow running in its own git worktree, with review, gates, messages, and optional previews |
+| Workbench | One `.md` or `.tex` file as Neovim beside its rendered view (Markdown preview or built PDF) with an omp chat drawer. The file lives on disk and the agent edits it there |
+| Learn session | A LearnHarness teaching session (probe, plan, teach, recall) shown in learn mode, host-only |
 | Memory | Reviewed, document-backed facts supplied to later chats, globally or within a project; not vector search |
 
 Use [architecture](architecture.md) for implementation, persistence, access boundaries, integration contracts, and failure semantics. Use the [module map](module-map.md) to locate source owners. Find operational instructions through the [repository documentation index](../AGENTS.md#documentation).
@@ -62,7 +66,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Files, PDFs, Study, and research
 
-- Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view.
+- Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view. Tool artifacts (plots, mind maps, Mermaid diagram documents) open rendered and fill the pane, their text is the secondary view.
 - Add a mounted file to a project as a reference. Editing changes the original disk file; removing the project reference does not delete that source.
 - Upload files into a project's files folder and drag them to another project. Chats, canvases and other projects using the file follow it. Drag an uploaded file onto a Code folder to move it to disk, where it then behaves exactly like a mounted file. Uploaded and moved PDFs get MinerU extraction like mounted ones.
 - Rename a file in a project to change only the name that project shows for it. The file, its chat and canvas attachments and its PDF annotations keep pointing at the original, and renaming back to the original name restores it.
@@ -76,6 +80,16 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Generate Mermaid diagrams and mind maps in chat. Use the sandbox plot tool for interactive charts or opt into the workspace agent for file/code work in a persistent chat-scoped sandbox.
 - Save the conversation to checkpoint its sandbox workspace. Rich outputs are stored during execution, but the latest workspace remains staged in backend memory until the chat save succeeds.
 - Optional external services and credentials are real prerequisites. An unavailable integration does not imply a transparent local replacement. See [architecture](architecture.md) for service boundaries and failures.
+
+## Workbench (Markdown and LaTeX)
+
+- With Neovim enabled and host access, `.md` and `.tex` project files and mounted files open in the workbench: Neovim left, rendered view middle, omp chat in a drawer. Without either, they open in the regular document editor. Notes always use the regular editor.
+- A stored project document moves to disk on first open (`GIGACHAD_BASE_DIR/workbench/<kind>/<project>/<name>/`) and stays a disk file from then on. Mounted files are edited in place. New LaTeX documents are created on disk directly.
+- Markdown renders live from the saved text, including Mermaid and mind-map documents. LaTeX builds on open, after every `:w` while the agent is idle and once when an agent run ends. The PDF blurs while the agent edits and a failed build keeps the last good PDF.
+- Visual-mode `<leader>a` quotes the selected lines into the chat draft. Each file keeps one chat session, shared by all devices. The first message of a new session names the file (`File: <path>`).
+- Agent edits appear in Neovim while the agent runs. Unsaved edits on other lines survive. On lines both changed, the agent's version wins, so save often. A save never overwrites an agent edit it has not seen: `:w` merges first and reports "Saved, merged with the agent's edits".
+- Edits from another device show up after it saves. Edits made outside the app (a shell) appear on the next reload or agent run.
+- Workbench chats use a short Markdown or LaTeX prompt kept in this repository, without coding rules or `AGENTS.md`. Hide either pane from the split line or bring it back from the top bar.
 
 ## Canvas
 
@@ -139,6 +153,11 @@ The independent Agents-in-a-box engine runs agent workflows in task git worktree
 - The engine alone starts preview services on ports 8100–8199. Their backend uses development identity and an empty database. Remote production previews must be disabled because remote browsers cannot reach host-loopback ports.
 - Factory features require host access, the separate engine, and its configured sandbox prerequisites. Engine refusals remain refusals; a disconnected engine does not silently turn into an in-process task runner.
 
+## Learn mode
+
+- Study with LearnHarness inside gigachad: it probes what you know, plans concepts toward a goal, teaches with checks and keeps a global knowledge graph. Sessions appear in the sidebar and open as tabs with gigachad's look.
+- Host-only, single learner. LearnHarness owns its knowledge, gigachad chats never read it. Everything else about learn mode: [integration-learnharness](integration-learnharness.md).
+
 ## Memory system
 
 - Keep personal facts/preferences in global memory and project facts in project memory. Atomic memories are single user-confirmed facts, grouped into topics (complete memories with a name and summary). Global memory starts with Profile and Preferences, other topics emerge from extraction.
@@ -149,7 +168,7 @@ The independent Agents-in-a-box engine runs agent workflows in task git worktree
 
 ## User-visible access and failure limits
 
-- Require host access for OMP, factory, Neovim, production redeploy, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents.
+- Require host access for OMP, factory, Neovim, the workbench, learn mode, production redeploy, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents.
 - Mounted trees omit ignored/internal directories. Text editing refuses non-UTF-8 data rather than risking a lossy binary overwrite.
 - A reference is not a backup of the original file; missing references retain only their last available snapshot. PDF extraction may lag a changed file, and visual attachments do not update a previously sent snapshot automatically.
 - Model/provider, OCR, research, sandbox, architecture, OMP, and factory services have independent prerequisites. Service unavailability, invalid upstream responses, rejected edits, and failed saves must remain visible rather than being represented as successful empty results.

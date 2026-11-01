@@ -1,4 +1,6 @@
-Generated from 9f773d5 on 2026-10-27
+Generated from 2bfaf7e on 2026-11-01
+
+Also reflects uncommitted working-tree changes: the workbench, LaTeX cutover, disk-file change events and the Neovim merge.
 
 # Architecture
 
@@ -23,7 +25,7 @@ change log + SSE        LikeC4  omp-web   factory
 | --- | --- |
 | Frontend | Workspace tabs, feature state, API clients. Use server-issued paths, never browser filesystem authority. |
 | FastAPI | Identity, per-user storage, filesystem access, integrations. Keep routes at HTTP/WebSocket boundaries and reuse domain services. Store and file IO blocks, so a handler that calls it is a plain `def` (FastAPI's threadpool) or moves the call into `asyncio.to_thread`; a blocking call inside `async def` stalls every request and SSE stream (`tests/test_route_concurrency.py`). |
-| Startup | Configure the OMP LiteLLM proxy before model calls, apply database migrations, start extraction and change brokers. Shutdown closes clients/pool and stops workers/MinerU children. |
+| Startup | Configure the OMP LiteLLM proxy before model calls, apply database migrations, start extraction and change brokers, mirror the workbench omp prompts (`workbench.mirror_omp`, failures logged, never fatal). Shutdown closes clients/pool and stops workers/MinerU children. |
 | LikeC4 | Stateless model parsing and syntax-tree operations. Backend launcher starts/stops it and waits for health before FastAPI. Architecture routes return 503 if unavailable, but managed launch fails when startup health fails and tears down/restarts both processes if LikeC4 exits. |
 | Development | User-controlled launchers. Agents must not start servers, except through engine-managed factory previews. |
 
@@ -57,7 +59,7 @@ change log + SSE        LikeC4  omp-web   factory
 
 | Operation | Policy |
 | --- | --- |
-| OMP, factory, Neovim, mounting/cloning roots, directory browser, redeploy | Require host access. A mounted root is readable in full, so mounting is a host action. |
+| OMP, factory, Neovim, workbench, LaTeX builds, learn mode, mounting/cloning roots, directory browser, redeploy | Require host access. A mounted root is readable in full, so mounting is a host action. |
 | Ordinary file access | Restrict to that user's registered mounted roots and admitted linked worktrees |
 | Host-access file content | Allow outside mounts only under the service user's home directory, retaining credential-store protection. Unreadable files return 403, not 500. |
 | Git/tree/worktree endpoints | Require a mounted/admitted root. Host-gated factory diff explicitly admits linked git worktrees without mounting the repo. |
@@ -75,6 +77,7 @@ change log + SSE        LikeC4  omp-web   factory
 | Mounted file contents | Original disk files. Projects/attachments reference them rather than creating independently editable copies. |
 | Architecture | Linked clone `docs/architecture/` when present, otherwise PostgreSQL `graph/<slug>/` |
 | Diff notes/layout, per-device preferences, archived Code directories | Browser-local state, not shared database artifacts |
+| Workbench documents | Disk files under `config.WORKBENCH` (`GIGACHAD_BASE_DIR/workbench`), referenced by absolute path from `project.json`. Repo files stay where they are. File-to-omp-session links: per-user JSON `workbench/sessions.json` (absolute path -> session id). |
 | PDF annotations | Canvas document `pdf-annotation/<sha256>.canvas`, keyed by the PDF bytes' SHA-256. `POST /api/fileviewer/annotations` creates it empty on first use. Every copy of the same bytes shares annotations, renames keep them, changed bytes start a fresh canvas. Strokes sync through the collaborative canvas path. |
 
 - Keep logical namespaces independent of the physical Documents layout. Validate storage keys against absolute paths and traversal.
@@ -93,6 +96,7 @@ change log + SSE        LikeC4  omp-web   factory
 - `ProjectStore.update_project` slugifies a new name. Same slug only renames, another slug runs `PostgresProjectRenamer` in one transaction; an existing destination raises `StorageConflictError`.
 - The rename moves document and asset keys under `chat/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`, rewrites slug/history fields and app-relative links inside JSON/`.md`/`.txt`/`.c4`/`.canvas`/`.snap` documents of app namespaces, and rewrites canvas mutation values. Prose, absolute disk paths and similarly named projects stay unchanged. Every move records change rows.
 - A disk folder linked by the old slug's folder name stays linked through `linked_root` in `project.json`.
+- Workbench folders cascade: `workbench.move_project_directories` moves each `WORKBENCH/<kind>/<old>` to `<new>` before the transaction (an existing non-empty destination refuses the rename as a conflict, an empty leftover is removed), and the transaction rewrites those absolute path prefixes in project file lists, `workbench/sessions.json` (keys included), canvases and their mutation log and notes. A failed transaction moves the folders back. A crash between move and commit is not recovered.
 - `archived` is a catalog flag (`PATCH /api/projects/{slug}`) that hides the project from the sidebar. Archiving Code directories is per device (`localStorage` `archived_code_directories`). OMP session archive/restore goes through omp-web.
 
 ### Project file names
@@ -285,10 +289,30 @@ Encode one payload as `?open=<base64url JSON>`:
 - Consume `neovim_available` from `/api/config`, not a frontend reconstruction: require host access, `nvim` on backend `PATH`, and `$XDG_CONFIG_HOME/nvim` (default `~/.config/nvim`) directory. Settings opt-in is per device.
 - Run one `nvim -n` PTY per document through `WS /api/neovim/session`, rendered by xterm.js. Edit a private temporary copy, start in the innermost containing mount or home for database documents.
 - Route `:w` through RPC to the browser's normal document API, including architecture validation. Replace the buffer with stored text if rewritten. Leave modified on failure. The temporary copy is not canonical storage.
+- The session keeps `base`, the text Neovim and storage last agreed on. Browser `{"type":"set_content"}` (agent or remote edit on disk) replaces an unmodified buffer and merges into a modified one with `text_merge.merge_theirs` (`git merge-file -p --theirs`: the incoming side wins conflicting or adjacent lines), keeping it modified. Only changed line ranges are rewritten (`gigachad_set_text`, `vim.diff` hunks), so the cursor stays on its text.
+- `:w` of an absolute disk file whose disk text differs from `base` saves the merge of buffer and disk instead, echoing "Saved, merged with the agent's edits". Unreadable or non-UTF-8 disk text or a refused merge fails the save and keeps the buffer modified. `set_text` and saves share one lock, `set_content` frames run as ordered tasks so a save's reply is never blocked.
+- `ask_keymap` on open installs visual `<leader>a`, which reports `{"type":"selection", start_line, end_line, text}` (full lines) to the browser.
 - Terminate/remove the copy on `:q`, document close, or disconnect. Unsaved edits are unrecoverable. Preserve the session across preview/fullscreen switches. Terminal focus owns all keys, including Escape.
 - Yanks reach the browser clipboard: a `TextYankPost` autocmd notifies over RPC, the socket sends `{"type":"yank"}`, the browser writes it best effort.
 - Theme the terminal from the app: xterm's background is the first opaque ancestor background (`--page`), its foreground is `--ink`, its cursor a 30% `--ink` blend. The browser sends `{"type":"background","light"}` on open and on every theme flip, and the backend sets Neovim's `'background'` over RPC once setup finished, so the user's colorscheme reloads its light or dark palette. The palettes themselves live in the user's Neovim config, not this repo.
 - Treat as host code execution. Match WebSocket origins to `GIGACHAD_CORS_ORIGINS`, or loopback for development `*`.
+
+## Workbench (Markdown and LaTeX)
+
+```text
+open .md/.tex -> POST /api/workbench/prepare -> {path on disk, cwd = WORKBENCH/<kind>, kind}
+  -> Workbench: Neovim (useWorkbenchFile) | renderPane | omp drawer (OmpSurface, cwd)
+agent run: poll file 500 ms -> setContent -> Neovim merge, run end -> onRunEnd (LaTeX build)
+other device: POST /api/fileroots/file -> change event (key = absolute path) -> reload -> setContent
+```
+
+- **Routing.** `.md`/`.tex` project files and mounted files open as `workbench` tab items when Neovim is enabled and the login has host access (`opensInWorkbench`), else in `TextDocumentEditor`. Notes (`note/...`) never do, `prepare` answers 400.
+- **Prepare** (`routes/workbench.py`). A stored project document moves to `WORKBENCH/<kind>/<slug>/<stem>/<name>` through `document_service.move_to_folder` (references rewritten, row deleted, 409 on a name conflict), only after `roots.contains` confirms the target is readable later (else 403, nothing moved). An absolute path is checked with `resolve_allowed` and returned resolved. Prepare is not idempotent for keys: the frontend dedupes it per path (`usePreparedWorkbench`, StrictMode-safe) and replaces the tab item's path with the returned one. `POST /create` writes a new `.tex` (`latex.NEW_DOCUMENT`) or empty `.md` there and lists it.
+- **Prompts.** `src/lib/workbench/omp/{latex,markdown}.md` and `config.yml` are the source of truth, mirrored to `WORKBENCH/<kind>/.omp/{SYSTEM.md,config.yml}` on every start (only changed bytes written). Sessions start in `WORKBENCH/<kind>` because omp reads `config.yml` only from the cwd's `.omp/` but `SYSTEM.md` from the nearest ancestor: that gives the kind's prompt without omp's coding prompt and with user/project `AGENTS.md` and project `CLAUDE.md` disabled. The file is named by a `File: <path>` lead on the first plain message of a new session (`newSessionLead`, relative inside cwd, else absolute).
+- **Sessions.** `GET/PUT /api/workbench/session` link an absolute file path to its omp session, `null` unlinks. The tab item's view wins over the link. Concurrent first links can lose one.
+- **Agent sync** (`useAgentSync`). While the session streams, the file is read every 500 ms and pushed into Neovim when it differs from the synced text. Run end reads once more, then awaits `onRunEnd`. `editing` covers the run plus that handover. A remote `document` change for the open path reloads and pushes the same way.
+- **Kinds.** `MarkdownWorkbench` renders `LaTeXMarkdown` from the synced text, tool artifacts filling the page. `LatexWorkbench` builds on open, after `:w` while idle and on run end (`POST /api/latex/build`: latexmk in the document's folder, output in `.latex-build/`, last good PDF published atomically as `.view.pdf`, 503 without latexmk). A new kind is one wrapper around `Workbench` plus a prompt file and a `Kind` entry.
+- **Limits.** Shell edits outside the app appear on the next reload or run. Users sharing a project slug share its workbench folders. Moving to another backend host needs the same absolute `GIGACHAD_BASE_DIR` (references are absolute) and a copy of `~/.omp` (sessions).
 
 ## Memory and deletion semantics
 
