@@ -3,10 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "assets": "cp node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs && cp node_modules/libavoid-js/dist/libavoid.wasm public/libavoid.wasm",
-    "predev": "npm run assets",
     "dev": "next dev --webpack -p 2999",
-    "prebuild": "npm run assets",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",

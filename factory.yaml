@@ -4,7 +4,6 @@ profile: gigachad
 hooks:
   after_create:
     - [npm, ci, --prefix, src/frontend, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
-    - [npm, --prefix, src/frontend, run, assets]
   after_code: []
   before_remove: []
 gates:

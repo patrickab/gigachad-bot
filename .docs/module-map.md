@@ -154,7 +154,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- AGENTS.md                 Frontend-specific framework guidance
 |       |-- package.json              Frontend scripts/dependencies
 |       |-- eslint.config.mjs         Enforced layer/feature import boundaries
-|       |-- next.config.js            Next.js/export configuration
+|       |-- next.config.mjs           Next.js/export configuration, copies the pdf.js worker and libavoid wasm into public/
 |       |-- vitest.config.ts          Browser unit/component test configuration
 |       |-- app/
 |       |   |-- layout.tsx            Root providers, font and styles

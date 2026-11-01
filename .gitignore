@@ -31,7 +31,7 @@ src/frontend/src-tauri/target
 src/frontend/build
 src/frontend/.env.local
 src/frontend/tsconfig.tsbuildinfo
-# Copied from node_modules by `npm run assets` (predev, prebuild, factory after_create)
+# Copied from node_modules by next.config.mjs whenever Next starts
 src/frontend/public/pdf.worker.min.mjs
 src/frontend/public/libavoid.wasm
 .omp/*
