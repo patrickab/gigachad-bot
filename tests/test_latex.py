@@ -89,39 +89,15 @@ def test_engine_comes_from_the_magic_comment_in_the_first_lines(head, flag):
     assert latex.engine_flag(head) == flag
 
 
-def test_prepare_creates_missing_omp_files_and_never_overwrites_existing_ones(tex_client, document):
-    omp_directory = document.parent / ".omp"
-    omp_directory.mkdir()
-    (omp_directory / "SYSTEM.md").write_text("my prompt", encoding="utf-8")
-
-    response = tex_client.post("/api/latex/prepare", json={"path": str(document)})
-
-    assert response.status_code == 200
-    assert response.json() == {"cwd": str(document.parent)}
-    assert (omp_directory / "SYSTEM.md").read_text(encoding="utf-8") == "my prompt"
-    assert "context-file:project:AGENTS.md" in (omp_directory / "config.yml").read_text(encoding="utf-8")
-
-    (omp_directory / "config.yml").write_text("mine: true\n", encoding="utf-8")
-    tex_client.post("/api/latex/prepare", json={"path": str(document)})
-    assert (omp_directory / "config.yml").read_text(encoding="utf-8") == "mine: true\n"
-
-
-def test_prepare_writes_the_latex_prompt_into_a_fresh_directory(tex_client, document):
-    tex_client.post("/api/latex/prepare", json={"path": str(document)})
-    assert "LaTeX" in (document.parent / ".omp" / "SYSTEM.md").read_text(encoding="utf-8")
-
-
 def test_paths_outside_the_mounts_and_non_tex_files_are_refused(tex_client, tmp_path, document):
     outside = tmp_path / "outside.tex"
     outside.write_text("x", encoding="utf-8")
     notes = document.parent / "notes.md"
     notes.write_text("x", encoding="utf-8")
 
-    assert tex_client.post("/api/latex/prepare", json={"path": str(outside)}).status_code == 403
     assert tex_client.post("/api/latex/build", json={"path": str(outside)}).status_code == 403
-    assert tex_client.post("/api/latex/prepare", json={"path": str(notes)}).status_code == 400
+    assert tex_client.post("/api/latex/build", json={"path": str(notes)}).status_code == 400
     assert tex_client.post("/api/latex/build", json={"path": str(document.parent / "missing.tex")}).status_code == 404
-    assert not (outside.parent / ".omp").exists()
 
 
 def test_logins_without_host_access_are_refused(tmp_path, document):
@@ -185,26 +161,6 @@ def test_build_runs_latexmk_in_the_files_directory_with_the_engine_from_the_magi
     assert arguments == (
         f"-g -pdfxe -interaction=nonstopmode -halt-on-error -file-line-error -synctex=1 -outdir={document.parent}/.latex-build main.tex"
     )
-
-
-def test_project_documents_live_in_their_own_folder_never_a_repository_root(tmp_path):
-    repository = tmp_path / "repo"
-    assert latex.project_folder(tmp_path / "latex", "thesis", "paper", repository) == repository / "latex" / "paper"
-    assert latex.project_folder(tmp_path / "latex", "thesis", "paper", None) == tmp_path / "latex" / "thesis" / "paper"
-
-
-@pytest.mark.parametrize("stem", ["", "..", ".omp", "a/b"])
-def test_project_document_names_cannot_escape_their_folder(tmp_path, stem):
-    with pytest.raises(ValueError):
-        latex.project_folder(tmp_path, "thesis", stem, None)
-
-
-def test_creating_a_document_never_overwrites_an_existing_one(tmp_path):
-    source = latex.create_document(tmp_path / "paper", "paper")
-    source.write_text("mine")
-    with pytest.raises(FileExistsError):
-        latex.create_document(tmp_path / "paper", "paper")
-    assert source.read_text() == "mine"
 
 
 def test_errors_raised_inside_a_package_are_reported_with_the_package_file():

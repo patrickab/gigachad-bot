@@ -1,8 +1,7 @@
-"""LaTeX builds with `latexmk` and the omp workspace files of a `.tex` document's directory.
+"""LaTeX builds with `latexmk`.
 
 - `build` compiles one file into `<directory>/.latex-build`, one build at a time per file, without shell escape
-- `prepare_omp_workspace` gives omp sessions in that directory a plain LaTeX prompt and no AGENTS.md
-- `project_folder` is where a project's LaTeX document lives on disk, one folder per document
+- `NEW_DOCUMENT` is the content of a new `.tex` file
 """
 
 from __future__ import annotations
@@ -17,16 +16,7 @@ import shutil
 import signal
 import time
 
-from lib.prompts.non_user_prompts import SYS_LATEX_ASSISTANT
-
 BUILD_DIRECTORY = ".latex-build"
-OMP_DIRECTORY = ".omp"
-OMP_CONFIG = """\
-disabledExtensions:
-  - context-file:user:AGENTS.md
-  - context-file:project:AGENTS.md
-  - context-file:project:CLAUDE.md
-"""
 # A first section, an empty body builds no PDF ("No pages of output")
 NEW_DOCUMENT = """\
 \\documentclass[11pt]{article}
@@ -218,34 +208,3 @@ def _read_log(log: Path) -> str:
 def _read_head(source: Path) -> str:
     with source.open(encoding="utf-8", errors="replace") as file:
         return "".join(file.readline() for _ in range(_MAGIC_COMMENT_LINES))
-
-
-def prepare_omp_workspace(directory: Path) -> None:
-    """Create `.omp/SYSTEM.md` and `.omp/config.yml` in *directory* when missing, never overwriting what the user edited."""
-    omp_directory = directory / OMP_DIRECTORY
-    omp_directory.mkdir(exist_ok=True)
-    for name, content in (("SYSTEM.md", SYS_LATEX_ASSISTANT), ("config.yml", OMP_CONFIG)):
-        try:
-            with (omp_directory / name).open("x", encoding="utf-8") as file:
-                file.write(content)
-        except FileExistsError:
-            continue
-
-
-def project_folder(latex_root: Path, slug: str, stem: str, linked_root: Path | None) -> Path:
-    """The folder of project *slug*'s LaTeX document *stem*: `<linked repo>/latex/<stem>`, else `<latex_root>/<slug>/<stem>`.
-
-    - A folder of its own per document, so its `.omp/` prompt never reaches coding sessions in the repository root
-    """
-    if not stem or Path(stem).name != stem or stem.startswith("."):
-        raise ValueError("Invalid document name")
-    return (linked_root / "latex" if linked_root else latex_root / slug) / stem
-
-
-def create_document(folder: Path, stem: str) -> Path:
-    """Write a minimal `<folder>/<stem>.tex`, refusing an existing one with FileExistsError."""
-    folder.mkdir(parents=True, exist_ok=True)
-    source = folder / f"{stem}.tex"
-    with source.open("x", encoding="utf-8") as file:
-        file.write(NEW_DOCUMENT)
-    return source
