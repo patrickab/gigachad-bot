@@ -9,16 +9,13 @@ import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { Workbench, type WorkbenchPane, type WorkbenchProps } from "./Workbench"
 
-interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderLabel" | "renderPane" | "status" | "onSaved" | "onRunEnd" | "quoteLanguage"> {
+interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderLabel" | "renderPane" | "status" | "onSaved" | "onPulled" | "onRunEnd" | "quoteLanguage"> {
   /** The project the file belongs to, which may give it a display name. */
   projectSlug: string | null
   /** A clicked `#file:<path>` link in the preview. */
   onNavigate: (path: string) => void
   onModeLabel: (label: string) => void
 }
-
-/** Nothing builds a Markdown file, the preview follows the synced text. */
-const noBuild = async () => {}
 
 const CENTERED_NOTE = "flex h-full items-center justify-center text-xs text-ink-faint"
 
@@ -56,7 +53,6 @@ export function MarkdownWorkbench({ projectSlug, onNavigate, onModeLabel, ...pro
       {...props}
       renderLabel="preview"
       renderPane={(pane) => <MarkdownPage path={props.path} onNavigate={onNavigate} {...pane} />}
-      onRunEnd={noBuild}
       quoteLanguage="markdown"
     />
   )

@@ -18,15 +18,13 @@ import { quoteSelection } from "./quote"
 import { useAgentSync } from "./useAgentSync"
 import { ShowPaneButton, WorkbenchSplit, useHiddenPane, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
-/** What the rendered pane draws from: where it sits, the synced text, and whether the agent is editing. */
+/** What the rendered pane draws from: where it sits, the synced text, and why it could not load. */
 export interface WorkbenchPane {
   layout: PaneLayout
   /** The text Neovim and the disk last agreed on: the loaded file, then every save and every agent edit. Null while loading or after a failed load. */
   text: string | null
   /** Why the file could not load, null otherwise. */
   loadError: string | null
-  /** An agent run and its handover are in progress. */
-  editing: boolean
 }
 
 export interface WorkbenchProps {
@@ -48,10 +46,12 @@ export interface WorkbenchProps {
   renderPane: (pane: WorkbenchPane) => ReactNode
   /** Shown in the `workbenchStatus` top-bar slot after the show-pane button. */
   status?: ReactNode
-  /** A `:w` stored `text`, `agentRunning` while omp runs. */
-  onSaved?: (text: string, agentRunning: boolean) => void
-  /** Awaited once an omp run's last edits are in Neovim, `editing` stays on until it resolves. */
-  onRunEnd: () => Promise<void>
+  /** A `:w` stored `text`. */
+  onSaved?: (text: string) => void
+  /** An agent edit or another device's save of the file reached Neovim as `text`. */
+  onPulled?: (text: string) => void
+  /** Called once an omp run's last edits are in Neovim. */
+  onRunEnd?: () => void
   /** Fence language of the lines `<leader>a` quotes into the chat. */
   quoteLanguage: string
 }
@@ -68,7 +68,7 @@ const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs t
 /**
  * One file as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
  *
- * - While omp runs, its edits on disk flow into Neovim and `renderPane` gets `editing` until `onRunEnd` resolves
+ * - While omp runs, its edits on disk flow into Neovim as they arrive, each one updates the synced text and reaches `onPulled`
  * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
  * - The chat's session is linked to the file, a new one starts in `cwd` and its first message names the file (`File: <path>`)
  * - Another device's save of the file reaches Neovim, merged into unsaved edits by the backend
@@ -76,7 +76,7 @@ const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs t
  */
 export function Workbench({
   path, cwd, ompView, onViewChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
-  renderLabel, renderPane, status, onSaved, onRunEnd, quoteLanguage,
+  renderLabel, renderPane, status, onSaved, onPulled, onRunEnd, quoteLanguage,
 }: WorkbenchProps) {
   const neovim = useNeovimSetting()
   const chat = useFileChat(path, cwd, ompView, onViewChange)
@@ -98,7 +98,7 @@ export function Workbench({
     const stored = await saveFromNeovim(text)
     syncedRef.current = stored
     setSyncedText(stored)
-    onSaved?.(stored, streaming)
+    onSaved?.(stored)
     return stored
   }
 
@@ -121,7 +121,7 @@ export function Workbench({
     if (taken) setSyncedText(text)
     return taken
   }, [pushToNeovim])
-  const { editing } = useAgentSync({ path, streaming, setContent, syncedRef, onRunEnd })
+  useAgentSync({ path, streaming, setContent, syncedRef, onPulled, onRunEnd })
 
   const [hiddenPane, setHiddenPane] = useHiddenPane()
   const splitRef = useRef<HTMLDivElement>(null)
@@ -144,7 +144,7 @@ export function Workbench({
           </div>
           <WorkbenchSplit hidden={hiddenPane} onChange={setHiddenPane} renderLabel={renderLabel} />
           <div className={cn("min-w-0 flex-1", hiddenPane === "render" && "hidden")}>
-            {renderPane({ layout, text: syncedText ?? content, loadError: loadError ? LOAD_MESSAGES[loadError] : null, editing })}
+            {renderPane({ layout, text: syncedText ?? content, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
           </div>
         </div>
       </div>

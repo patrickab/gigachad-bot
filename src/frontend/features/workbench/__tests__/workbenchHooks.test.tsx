@@ -124,17 +124,39 @@ describe("useAgentSync", () => {
   it("pushes another device's save of the file into Neovim when it differs from the synced text", async () => {
     const setContent = vi.fn(() => true)
     const syncedRef = { current: "old" as string | null }
-    renderHook(() => useAgentSync({ path: PATH, streaming: false, setContent, syncedRef, onRunEnd: async () => {} }))
+    const onPulled = vi.fn()
+    renderHook(() => useAgentSync({ path: PATH, streaming: false, setContent, syncedRef, onPulled }))
 
     api.loadFileViewerText.mockResolvedValueOnce("remote")
     act(() => feed.listener?.(change(PATH)))
     await waitFor(() => expect(setContent).toHaveBeenCalledWith("remote"))
     expect(syncedRef.current).toBe("remote")
+    expect(onPulled).toHaveBeenCalledWith("remote")
 
     api.loadFileViewerText.mockResolvedValueOnce("remote")
     act(() => feed.listener?.(change(PATH)))
     act(() => feed.listener?.(change("/data/other.md")))
     await waitFor(() => expect(api.loadFileViewerText).toHaveBeenCalledTimes(2))
     expect(setContent).toHaveBeenCalledTimes(1)
+    expect(onPulled).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands each agent edit to onPulled as it arrives during a run, then calls onRunEnd once the run ends", async () => {
+    const setContent = vi.fn(() => true)
+    const syncedRef = { current: "old" as string | null }
+    const onPulled = vi.fn()
+    const onRunEnd = vi.fn()
+    api.loadFileViewerText.mockResolvedValue("first edit")
+    const { rerender } = renderHook(({ streaming }) => useAgentSync({ path: PATH, streaming, setContent, syncedRef, onPulled, onRunEnd }), { initialProps: { streaming: true } })
+    await waitFor(() => expect(onPulled).toHaveBeenCalledWith("first edit"))
+    expect(onRunEnd).not.toHaveBeenCalled()
+
+    api.loadFileViewerText.mockResolvedValue("second edit")
+    await waitFor(() => expect(onPulled).toHaveBeenCalledWith("second edit"))
+    expect(onPulled).toHaveBeenCalledTimes(2)
+
+    rerender({ streaming: false })
+    await waitFor(() => expect(onRunEnd).toHaveBeenCalledTimes(1))
+    expect(onPulled).toHaveBeenCalledTimes(2)
   })
 })
