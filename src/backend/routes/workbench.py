@@ -44,14 +44,28 @@ class NewDocument(BaseModel):
 
 
 class SessionLink(BaseModel):
-    """The omp session of the absolute file `path`, None for none."""
+    """Make `session_id` the active omp session of the absolute file `path`, None starts a new one."""
 
     path: str
     session_id: str | None
 
 
 class LinkedSession(BaseModel):
+    """The active session (None: a new one) and every session the file had, first linked first."""
+
     session_id: str | None
+    session_ids: list[str]
+
+
+def _linked(value: object) -> LinkedSession:
+    """The stored link of one file: `{"active", "sessions"}`, or a bare session id as stored before sessions were kept."""
+    if isinstance(value, str):
+        return LinkedSession(session_id=value, session_ids=[value])
+    if not isinstance(value, dict):
+        return LinkedSession(session_id=None, session_ids=[])
+    sessions = [session for session in value.get("sessions", []) if isinstance(session, str)]
+    active = value.get("active")
+    return LinkedSession(session_id=active if isinstance(active, str) else None, session_ids=sessions)
 
 
 def _kind(name: str) -> Kind:
@@ -125,15 +139,14 @@ def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_sto
 
 @router.get("/session")
 def get_session(path: str = Query(...), docs: DataStore = Depends(get_document_store)) -> LinkedSession:
-    """The omp session linked to the absolute file `path`."""
+    """The omp sessions linked to the absolute file `path`."""
     links = JsonDocs(docs).read(WORKBENCH_SESSIONS, {})
-    session_id = links.get(path) if isinstance(links, dict) else None
-    return LinkedSession(session_id=session_id if isinstance(session_id, str) else None)
+    return _linked(links.get(path) if isinstance(links, dict) else None)
 
 
 @router.put("/session")
-def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> dict[str, bool]:
-    """Link the omp session `session_id` to the absolute file `path`, None unlinks it."""
+def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
+    """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
     if not PurePosixPath(body.path).is_absolute():
         raise HTTPException(status_code=400, detail="Path must be absolute")
     json_docs = JsonDocs(docs)
@@ -142,9 +155,12 @@ def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)
     except (StorageNotFoundError, ValueError):
         links, revision = {}, None
     links = links if isinstance(links, dict) else {}
-    updated = {key: value for key, value in links.items() if key != body.path}
-    if body.session_id is not None:
-        updated[body.path] = body.session_id
-    if updated != links:
-        json_docs.write(WORKBENCH_SESSIONS, updated, expected=revision)
-    return {"ok": True}
+    current = _linked(links.get(body.path))
+    sessions = current.session_ids
+    if body.session_id is not None and body.session_id not in sessions:
+        sessions = [*sessions, body.session_id]
+    linked = LinkedSession(session_id=body.session_id, session_ids=sessions)
+    if linked != current or not isinstance(links.get(body.path), dict):
+        stored = {"active": linked.session_id, "sessions": linked.session_ids}
+        json_docs.write(WORKBENCH_SESSIONS, {**links, body.path: stored}, expected=revision)
+    return linked

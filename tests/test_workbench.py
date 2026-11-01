@@ -291,19 +291,34 @@ def test_create_removes_the_file_when_listing_it_fails(client, root, projects, m
     assert not (root / "latex").exists()
 
 
-def test_session_links_round_trip_per_file(client, docs):
+def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(client, docs):
     path = "/data/workbench/latex/thesis/paper/paper.tex"
-    assert client.get("/api/workbench/session", params={"path": path}).json() == {"session_id": None}
 
-    assert client.put("/api/workbench/session", json={"path": path, "session_id": "s1"}).json() == {"ok": True}
-    client.put("/api/workbench/session", json={"path": "/other.md", "session_id": "s2"})
+    def linked() -> dict:
+        return client.get("/api/workbench/session", params={"path": path}).json()
 
-    assert client.get("/api/workbench/session", params={"path": path}).json() == {"session_id": "s1"}
-    assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {path: "s1", "/other.md": "s2"}
+    def link(session_id: str | None, file: str = path) -> dict:
+        return client.put("/api/workbench/session", json={"path": file, "session_id": session_id}).json()
 
-    client.put("/api/workbench/session", json={"path": path, "session_id": None})
-    assert client.get("/api/workbench/session", params={"path": path}).json() == {"session_id": None}
+    assert linked() == {"session_id": None, "session_ids": []}
+    assert link("s1") == {"session_id": "s1", "session_ids": ["s1"]}
+    link("other", "/other.md")
+
+    # Reset: a new session is active, the earlier one stays listed until the new one is linked
+    assert link(None) == {"session_id": None, "session_ids": ["s1"]}
+    link("s2")
+    # Picking an earlier session makes it active without reordering or duplicating it
+    assert link("s1") == {"session_id": "s1", "session_ids": ["s1", "s2"]}
+    assert linked() == {"session_id": "s1", "session_ids": ["s1", "s2"]}
+    assert client.get("/api/workbench/session", params={"path": "/other.md"}).json() == {"session_id": "other", "session_ids": ["other"]}
     assert client.put("/api/workbench/session", json={"path": "relative.md", "session_id": "s"}).status_code == 400
+
+
+def test_a_bare_session_id_stored_before_session_lists_reads_as_one_active_session(client, docs):
+    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps({"/a.md": "old"}).encode(), expected=None)
+    assert client.get("/api/workbench/session", params={"path": "/a.md"}).json() == {"session_id": "old", "session_ids": ["old"]}
+    client.put("/api/workbench/session", json={"path": "/a.md", "session_id": "new"})
+    assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/a.md": {"active": "new", "sessions": ["old", "new"]}}
 
 
 @pytest.mark.parametrize(("method", "url", "request_args"), [
