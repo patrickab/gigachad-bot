@@ -46,7 +46,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Attach uploads, mounted files, global/project documents, architecture sources, or drawings. Toggle attachments out of model context without deleting their source; open them to preview or edit.
 - Create project documents in their intended project. Reuse generated tool artifacts as documents and retain source references from web research.
 - Remove chat turns or attachments from context with undo available; resource deletion also offers a deferred undo window. Canvas editing has its own history.
-- Deleting a project, chat (with its branches), canvas, project file or chat upload also deletes what was derived from it, such as uploads, the library PDF copy and its annotation canvas, once no other project, chat or canvas uses them. Annotations of a mounted PDF opened from the file tree stay while that file keeps its bytes. Extracted Markdown and images are kept, and mounted disk files are never deleted.
+- Deleting a project, chat (with its branches), canvas, project file or chat upload also deletes what was derived from it, such as uploads, the library PDF copy and its annotation canvas, once no other project, chat or canvas uses them. Annotations of a mounted PDF opened from the file tree stay while that file keeps its bytes. Extracted Markdown and images are kept, and mounted disk files are never deleted. Deleting a workbench document removes its whole folder from disk (undo only until the deferred delete fires).
 - Inspect provider subscription usage when available: five-hour limits are distinct from weekly/monthly windows. Missing five-hour data is not replaced with a weekly value.
 
 ### Live references versus snapshots
@@ -97,7 +97,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Renaming a file of a LaTeX project (sidebar) also rewrites the references to it in the project's `.tex` and `.bib` files (`\input`, `\include`, `\includegraphics`, `\bibliography`, `\addbibresource`, the `% !TEX root` line). Open buffers pick the new text up, and a failed rewrite leaves the rename in place.
 - Turn a project's workbench `.tex` into a project folder with the folder button on its row ("Make LaTeX project", one way). The folder then lists in the project like a mounted folder: files open and rename as there. Deleting its row only unlists it.
 - A Code folder that holds a `.tex`, and a project folder, shows a create action on its row: type a name (a name without extension gets `.tex`) and Enter. A new `.tex` starts with a `% !TEX root = <relative path>` line when the folder has a root, else with an empty article. New `.bib`, `.sty` and `.cls` files start empty.
-- Paste a PNG from the clipboard into Neovim to store it as `imgs/img-<timestamp>.png` in the project folder (next to the file for Markdown) and insert `\includegraphics[width=\linewidth]{imgs/img-<timestamp>.png}` (Markdown `![](imgs/img-<timestamp>.png)`) below the cursor. A root without `graphicx` gets `\usepackage{graphicx}`. Other images are not pasted, and text pastes stay unchanged.
+- Paste a PNG from the clipboard into Neovim (`p`, `"+p` or Ctrl+Shift+V) to store it as `imgs/img-<timestamp>.png` in the project folder (next to the file for Markdown) and insert `\includegraphics[width=\linewidth]{imgs/img-<timestamp>.png}` (Markdown `![](imgs/img-<timestamp>.png)`) below the cursor. This works in every Neovim editor (workbench, Code file panel, document editor) for a `.tex` or `.md` file on disk. A root without `graphicx` gets `\usepackage{graphicx}`. In any other file Neovim shows an error, other image formats paste nothing, and text pastes stay unchanged.
 
 ## Canvas
 
@@ -128,6 +128,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Optionally edit a diff in Neovim with read-only `HEAD` beside the working file. Save with `:w` and return with `:qa`. Deleted, binary, oversized, and symlinked diff files cannot use this path.
 - Enable Neovim per device when available: host-access identity, `nvim` on backend `PATH`, and an existing `$XDG_CONFIG_HOME/nvim` configuration directory (default `~/.config/nvim`). Otherwise use the built-in editor.
 - Neovim `:w` uses the document's normal save path, including architecture validation; failed saves leave the buffer modified. Yanks are copied to the browser clipboard. Preview/fullscreen switches preserve the session, but closing/quitting/disconnecting terminates it and loses unsaved edits. While focused, its terminal owns all keys, including Escape.
+- The browser is Neovim's clipboard, in every Neovim editor: `p` and `"+p` paste what is on the clipboard of the browser, never the clipboard of the machine Neovim runs on (on the deployed server that is not yours). Chrome asks once to allow reading the clipboard, Firefox and Zen show a paste button on every read. When the browser does not answer (permission denied, nothing within 15 seconds), Neovim shows the reason and pastes what you last yanked in Neovim, so `yy` then `p` always works.
 
 ## Worktrees
 

@@ -182,7 +182,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- useDebouncedSave.ts Quiet-time autosave plus unmount and forced flush
 |       |   |   |-- FileViewer.tsx
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
-|       |   |   |-- NeovimEditor.tsx
+|       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard
+|       |   |   |-- clipboardPaste.ts Browser clipboard read for a paste, and the screenshot store (`imgs/`, `announceFileChange`) behind it
 |       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (local MinerU-grounded chat, or the owner's `renderChat`)
 |       |   |   |-- architecture/     LikeC4 graph/source editing
 |       |   |   |   `-- ArchitectureWindow.tsx
@@ -214,7 +215,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
 |       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`)
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
-|       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames, image paste
+|       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
 |       |   |   |-- useTexProject.ts, LatexRootPicker.tsx Project of the shown file (folder, root, candidates), root choice
