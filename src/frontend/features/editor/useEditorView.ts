@@ -5,9 +5,10 @@ import { useResetOnChange } from "@/hooks/useResetOnChange"
 
 export type EditorView = "edit" | "preview"
 
-/** Plots and mind maps open rendered, their text is the secondary view. */
+/** Plots, mind maps and the diagram tool's documents open rendered, their text is the secondary view.
+ *  A note that merely contains a mermaid block is ordinary Markdown: it opens in edit and previews inline. */
 export function isToolArtifact(path: string, content: string): boolean {
-  return path.endsWith(".plot.json") || /```markmap\b/i.test(content)
+  return path.endsWith(".plot.json") || /```markmap\b/i.test(content) || /^# Mermaid diagram\s+```mermaid\b/.test(content)
 }
 
 /** Edit or preview mode, defaulted once per document when its content first loads: preview for tool artifacts. */

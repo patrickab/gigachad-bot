@@ -7,6 +7,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 import type { PlotFigure } from "@/lib/domain/types"
+import { cn } from "@/lib/utils"
 import { chartHeightFor, readPlotTheme, subplotRowsFor, themedPlotLayout, withoutModelSizing } from "./plotTheme"
 
 // Plotly touches `window` and is sizable (a few hundred KB minified even with the
@@ -30,6 +31,8 @@ const Plot = dynamic(
 
 interface PlotElementProps {
   figure: PlotFigure
+  /** Take the height of the parent, which must have a definite one, instead of the width-based aspect ratio. */
+  fill?: boolean
 }
 
 // react-plotly calls `Plotly.react` whenever `data`, `layout` or `config` changes identity,
@@ -39,11 +42,11 @@ const PINCH_WHEEL_DELTA = 200 // Plotly zooms by exp(-deltaY / 200) per wheel ev
 const PINCH_ZOOM_GAIN = 4.5 // zoom = fingerRatio ** gain; 1 tracks the fingers exactly but feels slow
 const NO_TRACES: unknown[] = []
 
-/** Host size updater: the width, plus the height in fullscreen. Zero widths (hidden/collapsed host) are ignored so Plot never mounts at 0px. */
-const sizeUpdate = (host: HTMLElement, width: number, height: number) => (current: { width: number; height: number }) => {
+/** Host size updater: the width, plus the height in fullscreen or fill mode. Zero widths (hidden/collapsed host) are ignored so Plot never mounts at 0px. */
+const sizeUpdate = (host: HTMLElement, width: number, height: number, fill: boolean) => (current: { width: number; height: number }) => {
   const next = {
     width: Math.round(width),
-    height: host === document.fullscreenElement ? Math.round(height) : 0,
+    height: fill || host === document.fullscreenElement ? Math.round(height) : 0,
   }
   const isUnchanged = next.width === current.width && next.height === current.height
   return next.width > 0 && !isUnchanged ? next : current
@@ -52,10 +55,10 @@ const sizeUpdate = (host: HTMLElement, width: number, height: number) => (curren
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
  *  override; dimensions and hover behavior are controlled by the chat host. Memoized: canvas
  *  pan/zoom re-renders its host every frame while the figure stays the same object. */
-export const PlotElement = memo(function PlotElement({ figure }: PlotElementProps) {
+export const PlotElement = memo(function PlotElement({ figure, fill = false }: PlotElementProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<HTMLElement | null>(null)
-  // Height only counts in fullscreen; inline it follows the width-based aspect ratio.
+  // Height only counts in fullscreen or fill mode; inline it follows the width-based aspect ratio.
   const [hostSize, setHostSize] = useState({ width: 0, height: 0 })
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Theme colors are read once in the layout memo below, so a theme flip must re-run it.
@@ -68,18 +71,19 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
       host,
       entry?.contentRect.width ?? host.clientWidth,
       entry?.contentRect.height ?? host.clientHeight,
+      fill,
     )))
     observer.observe(host)
-    setHostSize(sizeUpdate(host, host.clientWidth, host.clientHeight))
+    setHostSize(sizeUpdate(host, host.clientWidth, host.clientHeight, fill))
     return () => observer.disconnect()
-  }, [])
+  }, [fill])
 
   // Measure in the same batch as the flag so the plot redraws once at its final size.
   useEventListener("document", "fullscreenchange", () => {
     const host = hostRef.current
     if (!host) return
     setIsFullscreen(document.fullscreenElement === host)
-    setHostSize(sizeUpdate(host, host.clientWidth, host.clientHeight))
+    setHostSize(sizeUpdate(host, host.clientWidth, host.clientHeight, fill))
   })
 
   const toggleFullscreen = useCallback(() => {
@@ -151,7 +155,10 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
   return (
     <div
       ref={hostRef}
-      className="group relative w-full overflow-hidden rounded-lg [&:fullscreen]:rounded-none [&:fullscreen]:bg-[var(--paper)]"
+      className={cn(
+        "group relative w-full overflow-hidden rounded-lg [&:fullscreen]:rounded-none [&:fullscreen]:bg-[var(--paper)]",
+        fill && "h-full",
+      )}
     >
       {dimensions && (
         <Plot

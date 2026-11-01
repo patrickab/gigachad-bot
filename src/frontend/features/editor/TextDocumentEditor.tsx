@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Maximize2, Minimize2, X } from "lucide-react"
-import { isModKey } from "@/lib/utils"
+import { cn, isModKey } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
@@ -136,10 +136,18 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
 
   const pills = !isArtifact && <ViewPills view={view} onViewChange={setView} />
 
+  // A tool artifact is the whole document, so its figure takes the pane (`cqh`: the container's height, which
+  // the map and diagram read as their own) instead of the inline chat size.
   const preview = (
-    <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
+    <div
+      className={cn(
+        "flex-1 overflow-y-auto min-h-0 p-4 pt-10",
+        isArtifact && "[container-type:size] [--markmap-height:100cqh] [&_.gc-diagram_svg]:h-[calc(100cqh-5rem)]! [&_.gc-diagram_svg]:max-w-none! [&_.gc-diagram_svg]:w-full",
+      )}
+      onClick={handlePreviewClick}
+    >
       {path.endsWith(".plot.json")
-        ? plotFigure ? <PlotElement figure={plotFigure} /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
+        ? plotFigure ? <PlotElement figure={plotFigure} fill /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
         : <LaTeXMarkdown content={renderedContent ?? content} />}
     </div>
   )

@@ -115,4 +115,12 @@ describe("DocumentEditor tool artifacts", () => {
     expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("```markmap # Topic ```")
     expect(screen.getByRole("button", { name: "Text" })).toHaveAttribute("aria-pressed", "false")
   })
+
+  it("renders mermaid markdown by default", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce("# Mermaid diagram\n\n```mermaid\nflowchart TD\n  A --> B\n```\n")
+    render(<DocumentEditor path="project/proj/document/diagram-call-1.md" slug="proj" onClose={vi.fn()} />)
+
+    expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("```mermaid")
+    expect(screen.getByRole("button", { name: "Text" })).toHaveAttribute("aria-pressed", "false")
+  })
 })
