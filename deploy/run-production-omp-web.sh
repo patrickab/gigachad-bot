@@ -15,12 +15,15 @@ if [[ -z ${GIGACHAD_ENV_FILE+x} ]]; then
     GIGACHAD_ENV_FILE="${XDG_CONFIG_HOME:-"$HOME/.config"}/gigachad-bot/env"
 fi
 source "${repo_root}/deploy/load-env.sh"
+source "${repo_root}/deploy/lib.sh"
 
 case "${1:-}" in
     server)
         if [[ -z ${GIGACHAD_OMP_WEB_FRAME_ANCESTORS:-} && -n ${GIGACHAD_CORS_ORIGINS:-} ]]; then
             export GIGACHAD_OMP_WEB_FRAME_ANCESTORS="${GIGACHAD_CORS_ORIGINS//,/ }"
         fi
+        # Production serves exactly what the fork holds: redeploy.sh fetches it, the launcher never rebases a remote ref.
+        export GIGACHAD_OMP_WEB_REF="${GIGACHAD_OMP_WEB_REF:-$PRODUCTION_OMP_WEB_REF}"
         exec "${repo_root}/run-omp-web.sh"
         ;;
     host)

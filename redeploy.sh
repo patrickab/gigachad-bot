@@ -131,7 +131,7 @@ if ! systemctl --user cat "$omp_web_unit" "$omp_web_host_unit" "$omp_web_gate_un
 fi
 omp_web_repo="$(prod_setting GIGACHAD_OMP_WEB_REPO "$HOME/git/ompweb_original")"
 omp_web_dir="$(prod_setting GIGACHAD_OMP_WEB_DIR "$HOME/.local/share/gigachad-bot/ompweb-upstream")"
-omp_web_ref="$(prod_setting GIGACHAD_OMP_WEB_REF refactor/314-ui-customization-seams)"
+omp_web_ref="$(prod_setting GIGACHAD_OMP_WEB_REF "$PRODUCTION_OMP_WEB_REF")"
 if [[ ! -d $omp_web_repo/.git ]]; then
     printf "No omp-web checkout at %s: git clone %s %s\n" "$omp_web_repo" "$omp_web_remote" "$omp_web_repo" >&2
     exit 1
