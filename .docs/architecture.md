@@ -327,6 +327,20 @@ Encode one payload as `?open=<base64url JSON>`:
   - `serializeNotebook` keeps the file's style (1-space indent, key order, trailing newline, `orig_nbformat`), strips library-injected `metadata.editable` unless the source had it, and a save whose normalized content equals the disk never writes. This also ignores the write's own echo from the file watch
   - Follow: `useFollowFiles` feeds a disk change to `applyIncomingNotebook(model, base, incoming)` which applies `diffNotebook` ops to the shared model, so only changed text moves the cursor
   - **Cell diff policy** ("merge theirs") per field or metadata key: only the editor changed it, keep it. The file changed it, or both did, the file wins. Cells match by id (by position when any ids are missing or repeated). A cell the file deleted is deleted, a cell only the editor added is kept, the file's order wins when it moved a cell. A cell whose type or attachments changed is replaced whole
+- **Cell highlighting and the fork**: `features/notebook/syntaxHighlight.ts` passes one factory (`gigachad-syntax-highlight`, in a module-level array because the library rebuilds its features when the array identity changes, and factory names must be unique) through the `Notebook` `editorExtensions` prop. It is `Prec.high(syntaxHighlighting(HighlightStyle))` for calls (`t.function(variableName/propertyName)`), class names, `t.bool`, `t.escape`, `t.null` plus a small `ViewPlugin` that marks `self`/`cls` and decorator names with `gc-syn-*` classes, because Lezer's Python grammar has no tag for them. Colors are the `--nb-syn-*` tokens in `notebook-theme.css` (Neovim scheme `oh-lucy-evening-custom`, dark and light). Upstream `@datalayer/jupyter-react` has no such prop, so `package.json` uses the fork's release tarball (upstream PR https://github.com/datalayer/jupyter-ui/pull/515). Back to npm once the PR is released: set the npm version, drop the URL, refresh the lockfile.
+  - **Fork release runbook** (repo `~/git/jupyter-ui`, remotes `origin` upstream and `fork` patrickab, Node >= 20):
+    ```bash
+    git fetch origin && git checkout feat/notebook-editor-extensions && git rebase origin/main   # skip once the PR is merged
+    git push --force-with-lease fork feat/notebook-editor-extensions
+    V=$(node -p "require('./packages/react/package.json').version"); N=1                         # N = fork counter
+    git checkout -B release/$V-gc.$N feat/notebook-editor-extensions && npm install              # slow, run in agent-proc
+    cd packages/react && npm version $V-gc.$N --no-git-tag-version && npm run build:lib           # slow
+    mkdir -p /tmp/fork-pack && npm pack --pack-destination /tmp/fork-pack && cd ../..
+    git add packages/react/package.json && git commit -m "chore(release): $V-gc.$N"
+    git push -u fork release/$V-gc.$N && git tag v$V-gc.$N && git push fork v$V-gc.$N
+    gh release create v$V-gc.$N /tmp/fork-pack/datalayer-jupyter-react-$V-gc.$N.tgz -R patrickab/jupyter-ui --title "$V-gc.$N" --prerelease --notes "@datalayer/jupyter-react $V plus the editorExtensions Notebook prop. Tarball only."
+    ```
+    Then `cd src/frontend && npm install https://github.com/patrickab/jupyter-ui/releases/download/v$V-gc.$N/datalayer-jupyter-react-$V-gc.$N.tgz` and restart the dev app (`run.sh` runs `npm ci`).
 - **Shared proxy plumbing**: `src/backend/reverse_proxy.py` holds `streaming_response` (hop-by-hop headers dropped through `lib.upstream.forwardable_headers`) and `forward`, used by the omp-web gate, the LearnHarness gate and the Jupyter route. Errors reuse `lib/upstream.py` (`Upstream*`, `call_upstream`).
 
 ## Workbench (Markdown and LaTeX)
