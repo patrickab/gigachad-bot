@@ -47,7 +47,7 @@ from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
-from backend.websocket_origin import is_trusted_origin
+from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 from lib.file_roots import FileRoots
 from lib.neovim_session import ClipboardError, NeovimSession, Selection, is_neovim_installed
 
@@ -59,7 +59,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/neovim", tags=["neovim"])
 
 _SAVE_TIMEOUT_SECONDS = 60
-_POLICY_VIOLATION = 1008
 _UNSUPPORTED_DATA = 1003
 
 
@@ -249,8 +248,8 @@ async def neovim_session(
     identity: RequestIdentity = Depends(get_request_identity),
     roots: FileRoots = Depends(get_file_roots),
 ) -> None:
-    if not is_trusted_origin(websocket.headers.get("origin")) or not (identity.has_host_access and is_neovim_installed()):
-        await websocket.close(code=_POLICY_VIOLATION)
+    if not is_allowed_websocket(websocket, identity) or not is_neovim_installed():
+        await websocket.close(code=POLICY_VIOLATION)
         return
     await websocket.accept()
     try:

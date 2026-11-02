@@ -1,15 +1,20 @@
-"""Shared HTTP plumbing of the server-to-server adapters (omp-web, the factory engine).
+"""Shared HTTP plumbing of the server-to-server adapters (omp-web, the factory engine, the Jupyter Server).
 
 - Each adapter owns its URL, headers and contract models, this module owns the request, the error mapping and the validation
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 import os
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
+# RFC 9110 connection-specific fields, never forwarded by a proxy. httpx sets `content-length` for the request itself.
+HOP_BY_HOP_HEADERS = frozenset(
+    {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
+)
 TIMEOUT_SECONDS = 10.0
 
 
@@ -45,6 +50,31 @@ def error_message(response: httpx.Response) -> str:
     return str(body)
 
 
+def forwardable_headers(headers: Iterable[tuple[str, str]], dropped: frozenset[str] = frozenset()) -> list[tuple[str, str]]:
+    """*headers* of a proxied message without the hop-by-hop fields and the lowercase names in *dropped*."""
+    refused = HOP_BY_HOP_HEADERS | dropped
+    return [(name, value) for name, value in headers if name.lower() not in refused]
+
+
+@contextmanager
+def unreachable(service: str) -> Iterator[None]:
+    """Report a failed HTTP exchange inside the block as `UpstreamUnavailable` naming *service*."""
+    try:
+        yield
+    except httpx.HTTPError as exc:
+        raise UpstreamUnavailable(f"{service} does not answer: {exc}") from exc
+
+
+def validate_answer[Result](result: type[Result], content: bytes, *, label: str, path: str) -> Result:
+    """The JSON *content* of *label*'s answer to *path* as *result*, `UpstreamContractError` naming the first bad field otherwise."""
+    try:
+        return TypeAdapter(result).validate_json(content)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        field = ".".join(str(part) for part in first["loc"]) or "<root>"
+        raise UpstreamContractError(f"{label} {path}: field `{field}` {first['msg'].lower()}") from exc
+
+
 async def request_json[Result](
     base_url: str,
     method: str,
@@ -59,19 +89,12 @@ async def request_json[Result](
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> Result:
     """Send one request and validate the JSON answer as *result*. *label* names the service in errors, *transport* is for tests."""
-    try:
+    with unreachable(f"{label} at {base_url}"):
         async with httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers, transport=transport) as client:
             response = await client.request(method, path, json=json, params=params)
-    except httpx.HTTPError as exc:
-        raise UpstreamUnavailable(f"{label} at {base_url} does not answer: {exc}") from exc
     if response.is_error:
         raise UpstreamRequestFailed(response.status_code, error_message(response))
-    try:
-        return TypeAdapter(result).validate_json(response.content)
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        field = ".".join(str(part) for part in first["loc"]) or "<root>"
-        raise UpstreamContractError(f"{label} {path}: field `{field}` {first['msg'].lower()}") from exc
+    return validate_answer(result, response.content, label=label, path=path)
 
 
 class UpstreamClient:

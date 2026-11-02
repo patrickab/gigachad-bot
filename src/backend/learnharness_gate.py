@@ -1,7 +1,7 @@
 """Tailnet identity gate in front of LearnHarness, for browsers on other devices.
 
-- Same contract as `omp_web_gate` (whose request helpers it reuses): Tailscale Serve terminates HTTPS and vouches for the login,
-  only logins granted `HOST_CAPABILITY` pass, everyone else gets 403
+- Same contract as `omp_web_gate` (whose login check it reuses, `reverse_proxy.forward` does the proxying): Tailscale Serve
+  terminates HTTPS and vouches for the login, only logins granted `HOST_CAPABILITY` pass, everyone else gets 403
 - A plain identity-checking proxy: keeps `Host`, marks the request HTTPS, streams both ways (LearnHarness streams its turns).
   No LearnHarness knowledge lives here, `lib/learnharness.py` owns that, except one policy: LearnHarness takes no provider
   key, custom endpoint or subscription (models come from gigachad-bot through the LiteLLM proxy), so writes to those
@@ -16,13 +16,13 @@ import posixpath
 
 import httpx
 from starlette.applications import Starlette
-from starlette.background import BackgroundTask
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response, StreamingResponse
+from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
 from backend.identity import host_denied
-from backend.omp_web_gate import HOP_BY_HOP_HEADERS, METHODS, is_allowed, upstream_headers, upstream_target
+from backend.omp_web_gate import METHODS, is_allowed
+from backend.reverse_proxy import forward
 from lib.learnharness import learnharness_url
 
 # Tests swap in an `httpx.MockTransport`, None is the real network.
@@ -55,27 +55,7 @@ async def proxy(request: Request) -> Response:
         return PlainTextResponse(f"{host_denied('LearnHarness')}\n", status_code=403)
     if is_credential_write(request.method, request.url.path):
         return PlainTextResponse(f"{_CREDENTIALS_REFUSED}\n", status_code=403)
-    client: httpx.AsyncClient = request.app.state.client
-    upstream_request = client.build_request(
-        request.method, upstream_target(request), headers=upstream_headers(request), content=request.stream()
-    )
-    try:
-        upstream = await client.send(upstream_request, stream=True)
-    except httpx.HTTPError as exc:
-        return PlainTextResponse(f"LearnHarness does not answer: {exc}\n", status_code=502)
-
-    async def body() -> AsyncIterator[bytes]:
-        async for chunk in upstream.aiter_raw():
-            yield chunk
-
-    response = StreamingResponse(body(), status_code=upstream.status_code, background=BackgroundTask(upstream.aclose))
-    # Raw headers keep repeated fields (several `set-cookie`) that a mapping would merge.
-    response.raw_headers = [
-        (name.lower().encode("latin-1"), value.encode("latin-1"))
-        for name, value in upstream.headers.multi_items()
-        if name.lower() not in HOP_BY_HOP_HEADERS
-    ]
-    return response
+    return await forward(request, "LearnHarness")
 
 
 @asynccontextmanager

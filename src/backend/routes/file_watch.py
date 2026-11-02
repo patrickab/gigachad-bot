@@ -22,15 +22,13 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
 from backend.routes.deps import get_file_roots
-from backend.websocket_origin import is_trusted_origin
+from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 from lib.file_roots import FileRoots
 from lib.file_watch import FileWatcher
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-_POLICY_VIOLATION = 1008
 
 
 class WatchMessage(BaseModel):
@@ -80,8 +78,8 @@ async def _serve(websocket: WebSocket, roots: FileRoots, watcher: FileWatcher) -
 @router.websocket("/watch")
 async def watch_files(websocket: WebSocket, roots: FileRoots = Depends(get_file_roots)) -> None:
     """Refuse untrusted origins like `/api/neovim/session`, the login is the one `get_file_roots` requires."""
-    if not is_trusted_origin(websocket.headers.get("origin")):
-        await websocket.close(code=_POLICY_VIOLATION)
+    if not is_allowed_websocket(websocket):
+        await websocket.close(code=POLICY_VIOLATION)
         return
     await websocket.accept()
 
