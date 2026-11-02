@@ -26,6 +26,13 @@
   stays in Neovim's registers, the yank reaches the caller through `on_yank`. Reads run beside the other requests, so a
   paste waiting for the browser never holds up `set_text`, `:w` or the others
 - `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
+- A notebook session (`cell_session`) starts on an empty placeholder and edits cells instead: `open_cell` shows the scratch buffer
+  of a cell key with exactly the given text (an unlisted buffer, never written, its basename only picks the filetype), `set_cell`
+  replaces that text without any `cell_edit` coming back, `close_cell` wipes the buffer. With an `on_cell` callback the cell
+  buffers report `{"type": "cell_edit", "key", "text"}` (full text after typing, coalesced over 40 ms, only when it differs
+  from what the caller knows), `{"type": "cell_run", "key", "text"}` (`<S-CR>`), `{"type": "cell_exit", "key", "direction",
+  "text"}` (`j`, `k`, `<Down>`, `<Up>` past the last or first line, direction `next` or `prev`) and
+  `{"type": "save_notebook", "key", "text"}` (`:w`), always after the `cell_edit` that brought their text up to date
 - Closing a session discards unsaved edits
 """
 
@@ -52,6 +59,8 @@ Selection = dict[str, int | str]
 SelectLines = Callable[[Selection], None]
 SwitchDocument = Callable[[str], None]
 ReadClipboard = Callable[[str], Awaitable[str]]
+CellEvent = dict[str, str]
+CellEvents = Callable[[CellEvent], None]
 
 _STARTUP_SECONDS = 15
 _RPC_SECONDS = 10
@@ -168,12 +177,15 @@ class NeovimSession:
         first: _Document,
         *,
         baseline: Path | None = None,
+        cell_session: bool = False,
     ) -> None:
         self._documents = {first.path: first}
         self._copies = 1
         # Serializes `open_file`, which looks a document up and then adds it
         self._opening = asyncio.Lock()
         self._baseline = baseline
+        # The placeholder document of a notebook session, until the first cell replaces it
+        self._placeholder = first.path if cell_session else None
         self._process = process
         self._terminal_fd = terminal_fd
         self._workdir = workdir
@@ -198,10 +210,12 @@ class NeovimSession:
         base_content: str | None = None,
         disk_path: Path | None = None,
         path: str | None = None,
+        cell_session: bool = False,
     ) -> NeovimSession:
         """Start `nvim` in *cwd* on a private copy of *content*, diffed against a read-only *base_content* when given.
 
-        *path* names the document in `save`, `selection` and the other calls, default *filename*.
+        *path* names the document in `save`, `selection` and the other calls, default *filename*. A *cell_session* takes
+        *filename*, *content* and *path* as its placeholder document, the first `open_cell` wipes it.
         *disk_path* is the file *content* was read from, `:w` merges its later changes. Call from a running event loop.
         """
         workdir = Path(tempfile.mkdtemp(prefix="gigachad-nvim-"))
@@ -230,7 +244,7 @@ class NeovimSession:
             raise
         finally:
             os.close(child_fd)
-        return cls(process, terminal_fd, workdir, first, baseline=baseline)
+        return cls(process, terminal_fd, workdir, first, baseline=baseline, cell_session=cell_session)
 
     async def connect(
         self,
@@ -239,6 +253,7 @@ class NeovimSession:
         on_selection: SelectLines | None = None,
         on_switched: SwitchDocument | None = None,
         read_clipboard: ReadClipboard | None = None,
+        on_cell: CellEvents | None = None,
     ) -> None:
         """Route `:w` of every document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*.
 
@@ -253,6 +268,8 @@ class NeovimSession:
         pastes the text it returns (linewise when it ends with a newline). When it raises a `ClipboardError`, or gives no answer
         within 15 s ("Clipboard did not answer"), Neovim shows the message and pastes its last copy instead.
         It runs beside every other request, Neovim answers those while it waits.
+
+        *on_cell* receives the events of cell buffers (`open_cell`) in the order Neovim sent them.
         """
 
         async def handle_request(method: str, params: list) -> object:
@@ -269,6 +286,10 @@ class NeovimSession:
                 on_selection(params[0])
             elif method == "switched" and on_switched is not None:
                 on_switched(params[0])
+            elif on_cell is not None and method in ("cell_edit", "cell_run", "save_notebook"):
+                on_cell({"type": method, "key": params[0], "text": params[1]})
+            elif on_cell is not None and method == "cell_exit":
+                on_cell({"type": method, "key": params[0], "direction": params[1], "text": params[2]})
 
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
@@ -287,7 +308,15 @@ class NeovimSession:
             await asyncio.sleep(0.02)  # config and plugins still loading, FileType handlers not registered yet
         first = next(iter(self._documents.values()))
         base = str(self._baseline) if self._baseline is not None else None
-        arguments = [channel, str(first.copy), first.path, base, on_selection is not None, read_clipboard is not None]
+        arguments = [
+            channel,
+            str(first.copy),
+            first.path,
+            base,
+            on_selection is not None,
+            read_clipboard is not None,
+            self._placeholder is not None,
+        ]
         setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, arguments)
         await asyncio.wait_for(setup, _STARTUP_SECONDS)
         self._ready.set()
@@ -371,6 +400,40 @@ class NeovimSession:
     async def show_error(self, text: str) -> None:
         """Show *text* in Neovim's message area as an error."""
         await self._lua("return _G.gigachad_show_error(...)", text)
+
+    async def open_cell(self, key: str, filename: str, text: str, cursor: str) -> None:
+        """Show the scratch buffer of cell *key* holding exactly *text*, the cursor on its `first` or `last` line.
+
+        A new cell gets a private copy named like *filename*, so filetype detection and the user's plugins work. An open cell
+        keeps its buffer and undo history and takes *text* like `set_cell` does. Nothing reaches the disk except the private
+        copy, and no `cell_edit` comes back for *text*.
+        """
+        async with self._opening:
+            copy: Path | None = None
+            if key in self._documents and not await self._lua("return _G.gigachad_has_cell(...)", key):
+                self._forget(key)  # Neovim lost the buffer (`:bdelete`), the copy is stale
+            if key not in self._documents:
+                copy = _private_copy(self._workdir / str(self._copies), filename, text)
+                self._copies += 1
+                self._documents[key] = _Document(key, copy, text, None)
+            await self._lua("return _G.gigachad_open_cell(...)", key, str(copy) if copy else None, text, cursor)
+            if self._placeholder is not None:
+                self._forget(self._placeholder)
+                self._placeholder = None
+
+    async def set_cell(self, key: str, text: str) -> None:
+        """Replace the text of the open cell *key* with exactly *text*, keeping the cursor where its text stays, no `cell_edit` follows.
+
+        Does nothing when the cell is not open.
+        """
+        if key in self._documents:
+            await self._lua("return _G.gigachad_set_cell(...)", key, text)
+
+    async def close_cell(self, key: str) -> None:
+        """Wipe the buffer of the deleted cell *key*, nothing when it is not open."""
+        if key in self._documents:
+            await self._lua("return _G.gigachad_close_cell(...)", key)
+            self._forget(key)
 
     async def _save(self, save: SaveDocument, path: str, text: str) -> dict[str, str | bool]:
         """Store *text* of document *path* merged with the edits made elsewhere since its `base`, `merged` tells if they changed it."""

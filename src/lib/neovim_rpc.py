@@ -19,6 +19,14 @@
   last copy is pasted instead (`yy` then `p` works without the browser's clipboard), a copy stays in Neovim's registers.
   It replaces the provider the user's config chose (`vim.g.clipboard`, even one already in use), the `clipboard` option
   decides which registers reach it
+- With `cell_session` the first document is an empty placeholder. `_G.gigachad_open_cell` shows a cell document: an unlisted
+  scratch buffer whose text is exactly the cell (its lines joined by newlines), with the cursor on its first or last line, replacing
+  the placeholder. `_G.gigachad_set_cell` replaces its text without an echo, `_G.gigachad_close_cell` wipes it. The cell
+  buffer sends notifications: `cell_edit` (key, text) from `TextChanged*` after 40 ms, only when the change tick and the text
+  moved past what the caller knows, `cell_run` (key, text) from `<S-CR>` in normal and insert mode, `cell_exit` (key,
+  "next"|"prev", text) when `j`, `k`, `<Down>` or `<Up>` cannot move any further, and `save_notebook` (key, text) from `:w`.
+  The three of them flush a pending `cell_edit` first. The buffer never counts as modified, and its `j`, `k`, `<Down>`,
+  `<Up>` mappings replace the user's
 """
 
 from __future__ import annotations
@@ -34,10 +42,10 @@ if TYPE_CHECKING:
 
 _READ_CHUNK = 65536
 
-# Receives (channel, first document's private path, its id, optional baseline path, ask_keymap, own_clipboard). Mirrors
+# Receives (channel, first document's private path, its id, optional baseline path, ask_keymap, own_clipboard, cell_session). Mirrors
 # Neovim's write rules: empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
 SETUP_LUA = r"""
-local channel, first_path, first_id, base_path, ask_keymap, own_clipboard = ...
+local channel, first_path, first_id, base_path, ask_keymap, own_clipboard, cell_session = ...
 if base_path == vim.NIL then base_path = nil end
 
 -- Buffers of the documents by id, and back
@@ -91,9 +99,8 @@ local function highlight_remote_edit(buffer, first, count)
 end
 
 -- Rewrites only the changed line ranges, bottom-up, so cursor, view and marks stay on their text.
-local function apply_text(buffer, text)
+local function apply_lines(buffer, new_lines, highlight)
   local old_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
-  local new_lines = stored_lines(buffer, text)
   local hunks = diff_lines(table.concat(old_lines, "\n") .. "\n", table.concat(new_lines, "\n") .. "\n", { result_type = "indices" })
   vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
   for index = #hunks, 1, -1 do
@@ -101,9 +108,11 @@ local function apply_text(buffer, text)
     local first = count_old > 0 and start_old - 1 or start_old
     local replacement = vim.list_slice(new_lines, start_new, start_new + count_new - 1)
     vim.api.nvim_buf_set_lines(buffer, first, first + count_old, false, replacement)
-    highlight_remote_edit(buffer, first, count_new)
+    if highlight then highlight_remote_edit(buffer, first, count_new) end
   end
 end
+
+local function apply_text(buffer, text) apply_lines(buffer, stored_lines(buffer, text), true) end
 
 -- The text `:w` would store, whether it has unsaved edits, and the change tick `gigachad_set_text` checks.
 function _G.gigachad_buffer_state(id)
@@ -228,13 +237,178 @@ function _G.gigachad_show(id)
   return true
 end
 
+-- Cell documents: scratch buffers whose text is exactly one notebook cell (the lines joined by "\n", nothing appended).
+-- They are unlisted, never write a file, and report their changes as `cell_edit`, `cell_run`, `cell_exit` and
+-- `save_notebook` notifications. A cell is `{ timer, tick, text }`: the change tick and text the caller last knew
+local uv = vim.uv or vim.loop
+local EDIT_DEBOUNCE_MS = 40
+local cells = {}
+-- With `cell_session` the first document is an empty placeholder that the first opened cell replaces
+local placeholder_id = cell_session == true and first_id or nil
+
+local function cell_text(buffer) return table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n") end
+
+-- Records what the caller now holds, so the change that caused it never comes back as an edit.
+local function synced(buffer)
+  local state = cells[buffer]
+  state.tick = vim.api.nvim_buf_get_changedtick(buffer)
+  state.text = cell_text(buffer)
+  vim.bo[buffer].modified = false
+end
+
+-- Sends the text when it differs from what the caller knows, the change tick spares comparing the text.
+local function flush_cell(buffer)
+  local state = cells[buffer]
+  if state == nil then return end
+  state.timer:stop()
+  if ids[buffer] == nil or not vim.api.nvim_buf_is_loaded(buffer) then return end
+  local tick = vim.api.nvim_buf_get_changedtick(buffer)
+  if tick == state.tick then return end
+  state.tick = tick
+  local text = cell_text(buffer)
+  if text == state.text then return end
+  state.text = text
+  vim.rpcnotify(channel, "cell_edit", ids[buffer], text)
+end
+
+local function drop_cell(buffer)
+  local state = cells[buffer]
+  if state == nil then return end
+  cells[buffer] = nil
+  state.timer:stop()
+  state.timer:close()
+end
+
+local function exit_cell(buffer, direction)
+  flush_cell(buffer)
+  vim.rpcnotify(channel, "cell_exit", ids[buffer], direction, cell_text(buffer))
+end
+
+local function install_cell(buffer)
+  local options = { buffer = buffer }
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
+    buffer = buffer,
+    callback = function()
+      vim.bo[buffer].modified = false -- the caller holds the text, nothing is left unsaved here
+      local state = cells[buffer]
+      if state ~= nil and not state.timer:is_active() then
+        state.timer:start(EDIT_DEBOUNCE_MS, 0, vim.schedule_wrap(function() flush_cell(buffer) end))
+      end
+    end,
+  })
+  -- `:w` asks the caller to save the notebook, after the last edit
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = buffer,
+    callback = function()
+      flush_cell(buffer)
+      vim.rpcnotify(channel, "save_notebook", ids[buffer], cell_text(buffer))
+      vim.bo[buffer].modified = false
+      vim.api.nvim_echo({ { "Saving notebook" } }, false, {})
+    end,
+  })
+  vim.keymap.set({ "n", "i" }, "<S-CR>", function()
+    flush_cell(buffer)
+    vim.rpcnotify(channel, "cell_run", ids[buffer], cell_text(buffer))
+  end, options)
+  -- Moving past the first or last line leaves the cell. These replace the user's `j`, `k`, `<Down>` and `<Up>` here
+  local function normal_move(direction, key)
+    return function()
+      local window = vim.api.nvim_get_current_win()
+      local before = vim.api.nvim_win_get_cursor(window)[1]
+      pcall(vim.cmd, "normal! " .. vim.v.count1 .. key)
+      if vim.api.nvim_win_get_cursor(window)[1] == before then exit_cell(buffer, direction) end
+    end
+  end
+  local function insert_move(direction, key)
+    return function()
+      local line = vim.api.nvim_win_get_cursor(0)[1]
+      local edge = direction == "next" and line >= vim.api.nvim_buf_line_count(buffer) or direction == "prev" and line <= 1
+      if vim.fn.pumvisible() == 0 and edge then
+        exit_cell(buffer, direction)
+      else
+        vim.api.nvim_feedkeys(vim.keycode(key), "ni", false) -- in front of keys typed meanwhile, so `<Up><Up>` still ends in an exit
+      end
+    end
+  end
+  vim.keymap.set("n", "j", normal_move("next", "j"), options)
+  vim.keymap.set("n", "<Down>", normal_move("next", "j"), options)
+  vim.keymap.set("n", "k", normal_move("prev", "k"), options)
+  vim.keymap.set("n", "<Up>", normal_move("prev", "k"), options)
+  vim.keymap.set("i", "<Down>", insert_move("next", "<Down>"), options)
+  vim.keymap.set("i", "<Up>", insert_move("prev", "<Up>"), options)
+end
+
+-- Whether the cell is open, forgetting a cell whose buffer Neovim unloaded.
+function _G.gigachad_has_cell(key)
+  local buffer = tracked[key]
+  if buffer == nil then return false end
+  if cells[buffer] ~= nil and vim.api.nvim_buf_is_loaded(buffer) then return true end
+  untrack(key)
+  drop_cell(buffer)
+  if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+  return false
+end
+
+-- Shows the cell exactly as `text` with the cursor on its first or last line, opening the private copy first when `private_path` is given.
+function _G.gigachad_open_cell(key, private_path, text, cursor)
+  local buffer = tracked[key]
+  local fresh = buffer == nil
+  if fresh then
+    buffer = vim.fn.bufadd(private_path)
+    tracked[key] = buffer
+    ids[buffer] = key
+    cells[buffer] = { timer = uv.new_timer(), tick = -1, text = nil }
+  end
+  display(key)
+  vim.bo[buffer].buflisted = false -- showing a buffer lists it
+  if fresh then install_cell(buffer) end
+  if cell_text(buffer) ~= text then
+    local lines = vim.split(text, "\n", { plain = true })
+    if fresh then
+      local undolevels = vim.api.nvim_get_option_value("undolevels", { buf = buffer })
+      vim.bo[buffer].undolevels = -1 -- the first text is not an undo step
+      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+      vim.bo[buffer].undolevels = undolevels
+    else
+      apply_lines(buffer, lines, false)
+    end
+  end
+  local row = cursor == "last" and vim.api.nvim_buf_line_count(buffer) or 1
+  vim.api.nvim_win_set_cursor(0, { row, 0 })
+  synced(buffer)
+  if placeholder_id ~= nil and placeholder_id ~= key then
+    local placeholder = tracked[placeholder_id]
+    placeholder_id = nil
+    if placeholder ~= nil and vim.api.nvim_buf_is_valid(placeholder) then vim.api.nvim_buf_delete(placeholder, { force = true }) end
+  end
+end
+
+-- Replaces the text of an open cell, keeping the cursor where its text stays. The caller knows the text, so no edit comes back.
+function _G.gigachad_set_cell(key, text)
+  local buffer = tracked[key]
+  if buffer == nil or cells[buffer] == nil or not vim.api.nvim_buf_is_loaded(buffer) then return false end
+  if cell_text(buffer) ~= text then apply_lines(buffer, vim.split(text, "\n", { plain = true }), false) end
+  synced(buffer)
+  return true
+end
+
+-- Wipes the buffer of a cell that was deleted.
+function _G.gigachad_close_cell(key)
+  local buffer = tracked[key]
+  if buffer == nil then return false end
+  untrack(key)
+  drop_cell(buffer)
+  if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+  return true
+end
+
 track(first_path, first_id)
 display(first_id)
 
 vim.api.nvim_create_autocmd("BufEnter", {
   callback = function(event)
     local id = ids[event.buf]
-    if id == nil or id == current_id then return end
+    if id == nil or id == current_id or cells[event.buf] ~= nil then return end
     current_id = id
     vim.rpcnotify(channel, "switched", id)
   end,
@@ -243,6 +417,7 @@ vim.api.nvim_create_autocmd("BufEnter", {
 vim.api.nvim_create_autocmd("BufDelete", {
   callback = function(event)
     local id = ids[event.buf]
+    drop_cell(event.buf)
     if id == nil then return end
     untrack(id)
   end,

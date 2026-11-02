@@ -30,6 +30,23 @@ bytes both ways, text frames carry JSON control messages:
 The browser persists `:w` through the document's own API, so every save keeps that
 API's validation and side effects. A file-root file changed on disk since Neovim last
 agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved edits.
+
+A notebook session opens with `"cell_mode": true` instead of a document (`filename` and `content` are ignored, `path`, when
+absolute, only picks the working directory). It edits the cells of one notebook, each a scratch buffer that never touches
+the disk, and the browser keeps the notebook:
+
+- client -> server: `{"type": "open_cell", "key", "filename", "text", "cursor": "first" | "last"}` (create or show the buffer
+  of cell *key*, *filename* only picks the filetype, *text* is set exactly, the cursor lands on its first or last line),
+  `{"type": "set_cell", "key", "text"}` (replace the text exactly, keeping the cursor, never answered with a `cell_edit`, nothing
+  for a cell that is not open) and `{"type": "close_cell", "key"}` (wipe the buffer of a deleted cell). These run in the order
+  they were sent
+- server -> client: `{"type": "cell_edit", "key", "text"}` (the full text after typing, at most every 40 ms, only when it
+  differs from what the browser knows), `{"type": "cell_run", "key", "text"}` (`<S-CR>`, Shift+Enter reaches Neovim as
+  CSI-u `ESC [ 13 ; 2 u`), `{"type": "cell_exit", "key", "direction": "next" | "prev", "text"}` (`j`, `k`, `<Down>`,
+  `<Up>` past the last or first line) and `{"type": "save_notebook", "key", "text"}` (`:w`, a notification the browser
+  answers with nothing, it saves the notebook). Every frame Neovim notifies (these, `yank`, `selection`, `switched`) is
+  delivered in the order Neovim sent it, and `cell_run`, `cell_exit` and `save_notebook` carry the text, which a
+  `cell_edit` sent before them already brought up to date
 """
 
 from __future__ import annotations
@@ -42,7 +59,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, WebSocket
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
@@ -63,15 +80,22 @@ _UNSUPPORTED_DATA = 1003
 
 
 class OpenMessage(BaseModel):
-    """`path` is the document's app path: absolute for file-root files, a logical key otherwise."""
+    """`path` is the document's app path: absolute for file-root files, a logical key otherwise. A `cell_mode` session has no document."""
 
-    path: str
-    filename: str
-    content: str
+    path: str | None = None
+    filename: str | None = None
+    content: str | None = None
     base_content: str | None = None
     ask_keymap: bool = False
+    cell_mode: bool = False
     rows: int = Field(ge=1, le=1000)
     cols: int = Field(ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def _document_unless_cell_mode(self) -> OpenMessage:
+        if not self.cell_mode and None in (self.path, self.filename, self.content):
+            raise ValueError("a document needs path, filename and content")
+        return self
 
 
 def working_directory(roots: FileRoots, path: str) -> Path:
@@ -103,6 +127,8 @@ class _BrowserSaves:
         self._websocket = websocket
         self._pending: dict[int, asyncio.Future[dict]] = {}
         self._next_id = 0
+        # What happens in Neovim, sent by `relay_notices` in the order it happened (one task per frame could reorder them)
+        self._notices: asyncio.Queue[dict] = asyncio.Queue()
 
     async def _ask(self, frame: dict, seconds: float | None = None) -> dict:
         """Send *frame* under a new id and wait for the browser's reply to it."""
@@ -129,17 +155,25 @@ class _BrowserSaves:
         text = reply.get("text")
         return text if isinstance(text, str) else ""
 
-    async def yank(self, text: str) -> None:
-        await self._websocket.send_json({"type": "yank", "content": text})
+    def notice(self, frame: dict) -> None:
+        """Queue *frame* for the browser, behind the notices queued before it."""
+        self._notices.put_nowait(frame)
 
-    async def selection(self, selection: Selection) -> None:
-        await self._websocket.send_json({"type": "selection", **selection})
+    async def relay_notices(self) -> None:
+        while True:
+            await self._websocket.send_json(await self._notices.get())
 
-    async def switched(self, path: str) -> None:
-        await self._websocket.send_json({"type": "switched", "path": path})
+    def yank(self, text: str) -> None:
+        self.notice({"type": "yank", "content": text})
 
-    async def open_failed(self, path: str, message: str) -> None:
-        await self._websocket.send_json({"type": "open_failed", "path": path, "message": message})
+    def selection(self, selection: Selection) -> None:
+        self.notice({"type": "selection", **selection})
+
+    def switched(self, path: str) -> None:
+        self.notice({"type": "switched", "path": path})
+
+    def open_failed(self, path: str, message: str) -> None:
+        self.notice({"type": "open_failed", "path": path, "message": message})
 
     def resolve(self, reply: dict) -> None:
         """The browser's `saved` or `clipboard` answer to the question with the same id."""
@@ -167,7 +201,27 @@ async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRo
         await session.open_file(path, disk_file(roots, path))
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
         log.warning("Neovim could not open %s: %s", path, exc)
-        await saves.open_failed(path, str(exc))
+        saves.open_failed(path, str(exc))
+
+
+_CURSORS = ("first", "last")
+_CELL_FRAMES = ("open_cell", "set_cell", "close_cell")
+_CELL_PLACEHOLDER = "gigachad://cell-session"
+
+
+def _cell_job(session: NeovimSession, control: dict) -> tuple[str, Coroutine[None, None, None]] | None:
+    """The Neovim work a well-formed cell frame asks for, with what it does for the log, None for a malformed one."""
+    key, text = control.get("key"), control.get("text")
+    if not isinstance(key, str):
+        return None
+    match control["type"]:
+        case "open_cell" if isinstance(text, str) and isinstance(control.get("filename"), str) and control.get("cursor") in _CURSORS:
+            return "open the cell", session.open_cell(key, control["filename"], text, control["cursor"])
+        case "set_cell" if isinstance(text, str):
+            return "take the cell text", session.set_cell(key, text)
+        case "close_cell":
+            return "close the cell", session.close_cell(key)
+    return None
 
 
 async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves, roots: FileRoots) -> None:
@@ -180,6 +234,15 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
         updates.add(update)
         update.add_done_callback(updates.discard)
 
+    # Cell frames change Neovim one after the other in the order they arrived, so a `set_cell` never overtakes its `open_cell`
+    cell_jobs: asyncio.Queue[tuple[str, Coroutine[None, None, None]]] = asyncio.Queue()
+
+    async def run_cell_jobs() -> None:
+        while True:
+            what, job = await cell_jobs.get()
+            await _guarded(what, job)
+
+    cells = asyncio.create_task(run_cell_jobs())
     try:
         while True:
             message = await websocket.receive()
@@ -208,7 +271,12 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
                 await _guarded("take the theme", session.set_background(control["light"]))
             elif kind == "message" and isinstance(control.get("text"), str):
                 beside_relay(_guarded("show the message", session.show_error(control["text"])))
+            elif kind in _CELL_FRAMES and (job := _cell_job(session, control)) is not None:
+                cell_jobs.put_nowait(job)
     finally:
+        cells.cancel()
+        while not cell_jobs.empty():
+            cell_jobs.get_nowait()[1].close()
         for update in updates:
             update.cancel()
 
@@ -219,15 +287,17 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
     relays = [
         asyncio.create_task(_relay_output(websocket, session)),
         asyncio.create_task(_relay_input(websocket, session, saves, roots)),
+        asyncio.create_task(saves.relay_notices()),
     ]
     # Input flows while connecting, so a startup prompt from the user's config can be answered.
     connecting = asyncio.create_task(
         session.connect(
             saves.save,
-            lambda text: asyncio.create_task(saves.yank(text)),
-            (lambda selection: asyncio.create_task(saves.selection(selection))) if ask_keymap else None,
-            lambda path: asyncio.create_task(saves.switched(path)),
+            saves.yank,
+            saves.selection if ask_keymap else None,
+            saves.switched,
             saves.read_clipboard,
+            saves.notice,
         )
     )
     try:
@@ -257,15 +327,19 @@ async def neovim_session(
     except (ValidationError, ValueError):
         await websocket.close(code=_UNSUPPORTED_DATA)
         return
+    cell_mode = opening.cell_mode
+    # A notebook session has no document, its placeholder is wiped by the first cell
+    path = (opening.path or "") if cell_mode else str(opening.path)
     session = NeovimSession.spawn(
-        opening.filename,
-        opening.content,
+        "placeholder.txt" if cell_mode else str(opening.filename),
+        "" if cell_mode else str(opening.content),
         base_content=opening.base_content,
         rows=opening.rows,
         cols=opening.cols,
-        cwd=working_directory(roots, opening.path),
-        disk_path=disk_file(roots, opening.path),
-        path=opening.path,
+        cwd=working_directory(roots, path),
+        disk_path=None if cell_mode else disk_file(roots, path),
+        path=_CELL_PLACEHOLDER if cell_mode else path,
+        cell_session=cell_mode,
     )
     try:
         await _run(websocket, session, roots, ask_keymap=opening.ask_keymap)
