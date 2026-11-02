@@ -53,7 +53,7 @@ describe("useFilePicker", () => {
       useFilePicker({
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        track,
+        track, onOpenItem: vi.fn(),
       }),
     )
 
@@ -70,7 +70,7 @@ describe("useFilePicker", () => {
       useFilePicker({
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        track,
+        track, onOpenItem: vi.fn(),
       }),
     )
 
@@ -99,7 +99,7 @@ describe("useFilePicker", () => {
       useFilePicker({
         hasMessages: true,
         chatInputRef,
-        track: countingTrack,
+        track: countingTrack, onOpenItem: vi.fn(),
       }),
     )
 
@@ -118,7 +118,7 @@ describe("useFilePicker", () => {
       useFilePicker({
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        track,
+        track, onOpenItem: vi.fn(),
       }),
     )
 
@@ -131,5 +131,18 @@ describe("useFilePicker", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
     })
     expect(result.current.standaloneFile).toBeNull()
+  })
+
+  it("opens an absolute notebook in a tab instead of the overlay, a relative one stays a text file", async () => {
+    const onOpenItem = vi.fn()
+    const { result } = renderHook(() => useFilePicker({ hasMessages: false, chatInputRef: makeChatInputRef(), track, onOpenItem }))
+
+    await act(async () => { await result.current.handleFileSelect("/work/a.ipynb") })
+    expect(onOpenItem).toHaveBeenCalledWith({ kind: "document", path: "/work/a.ipynb", projectSlug: null, rootFile: true })
+    expect(result.current.standaloneFile).toBeNull()
+
+    await act(async () => { await result.current.handleFileSelect("files/b.ipynb") })
+    expect(onOpenItem).toHaveBeenCalledOnce()
+    expect(result.current.standaloneFile).toEqual({ kind: "edit", path: "files/b.ipynb" })
   })
 })

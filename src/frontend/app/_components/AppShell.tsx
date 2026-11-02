@@ -18,6 +18,7 @@ import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
+import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
 import { onFileMove } from "@/lib/backend/fileEvents"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
@@ -50,6 +51,7 @@ export function AppShell() {
   // Project whose dashboard is showing; set from the current tab and never read back as "the" project.
   const [dashboardSlug, setDashboardSlug] = useState<string | null>(null)
   const settings = useSettings()
+  useKernelShutdown()
 
   const handleActiveTabChange = useCallback((tab: Tab) => {
     activeTabRef.current = tab

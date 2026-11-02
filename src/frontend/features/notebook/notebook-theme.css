@@ -1,0 +1,205 @@
+/* gigachad-bot look for the notebook editor. Maps the app role tokens (--ink, --paper, --surface, --divider ...) onto JupyterLab's --jp-* API.
+   `html:root` beats the `:root` rule that JupyterReactTheme injects at the end of <body> (same rule, later in source order, lower specificity).
+   The app tokens already switch with the `.light` class, so the variables need no per-mode copy, except the few the library cannot read as oklch (below).
+   Menus, dialogs and the completer render in portals on <body>, so they take the look from these variables, not from the `.gc-nb` scope. */
+
+html:root {
+  /* Surfaces */
+  --jp-layout-color0: var(--paper);
+  --jp-layout-color1: #090705; /* sRGB literal (paper): @jupyter/web-components parses this as a FAST design token and rejects oklch() */
+  --jp-layout-color2: var(--surface-elevated);
+  --jp-layout-color3: var(--divider-strong);
+  --jp-layout-color4: var(--ink-faint);
+  --jp-inverse-layout-color0: var(--ink);
+  --jp-inverse-layout-color1: var(--ink);
+  --jp-inverse-layout-color2: var(--ink-muted);
+  --jp-inverse-layout-color3: var(--ink-subtle);
+  --jp-inverse-layout-color4: var(--ink-faint);
+
+  /* Borders */
+  --jp-border-color0: var(--divider-strong);
+  --jp-border-color1: var(--divider);
+  --jp-border-color2: var(--divider);
+  --jp-border-color3: var(--divider);
+  --jp-inverse-border-color: var(--divider-strong);
+  --jp-border-radius: 0.375rem; /* --radius-md */
+
+  /* Text */
+  --jp-ui-font-color0: var(--ink);
+  --jp-ui-font-color1: var(--ink);
+  --jp-ui-font-color2: var(--ink-muted);
+  --jp-ui-font-color3: var(--ink-subtle);
+  --jp-ui-inverse-font-color0: var(--paper);
+  --jp-ui-inverse-font-color1: var(--paper);
+  --jp-ui-inverse-font-color2: var(--paper);
+  --jp-ui-inverse-font-color3: var(--paper);
+  --jp-content-font-color0: var(--ink);
+  --jp-content-font-color1: var(--ink);
+  --jp-content-font-color2: var(--ink-muted);
+  --jp-content-font-color3: var(--ink-subtle);
+
+  /* Fonts */
+  --jp-ui-font-family: var(--font-sans), Outfit, system-ui, sans-serif;
+  --jp-content-font-family: var(--font-sans), Outfit, system-ui, sans-serif;
+  --jp-code-font-family-default: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+  --jp-code-font-family: var(--jp-code-font-family-default);
+  --jp-ui-font-size1: 14px;
+  --jp-content-font-size1: 15px;
+  --jp-code-font-size: 13px;
+  --jp-code-line-height: 1.55;
+
+  /* Accent: monochrome, the app has none. Brand/selection fall back to ink tints */
+  --jp-brand-color0: var(--ink);
+  --jp-brand-color1: #b3ada5; /* FAST token, literal needed */
+  --jp-brand-color2: var(--ink-subtle);
+  --jp-brand-color3: var(--hover-overlay-strong);
+  --jp-brand-color4: var(--hover-overlay);
+  --jp-accent-color0: var(--ink);
+  --jp-accent-color1: var(--ink-muted);
+  --jp-error-color0: var(--danger);
+  --jp-error-color1: #fc5855; /* FAST token, literal needed */
+  --jp-error-color2: var(--danger);
+  --jp-warn-color-normal: var(--danger);
+
+  /* Cells */
+  --jp-notebook-padding: 0px;
+  --jp-cell-padding: 0px;
+  --jp-cell-collapser-width: 0px;
+  --jp-cell-collapser-min-height: 0px;
+  --jp-cell-prompt-width: 3.25rem;
+  --jp-cell-prompt-font-family: var(--font-mono), monospace;
+  --jp-cell-editor-background: var(--surface-elevated);
+  --jp-cell-editor-active-background: var(--surface-elevated);
+  --jp-cell-editor-border-color: var(--divider);
+  --jp-cell-editor-active-border-color: var(--ink-subtle);
+  --jp-cell-editor-box-shadow: none;
+  --jp-cell-inprompt-font-color: var(--ink-faint);
+  --jp-cell-outprompt-font-color: var(--ink-faint);
+  --jp-cell-prompt-not-active-font-color: var(--ink-faint);
+  --jp-cell-prompt-not-active-opacity: 1;
+  --jp-notebook-select-background: transparent;
+  --jp-notebook-multiselected-color: var(--hover-overlay);
+  --jp-rendermime-error-background: var(--danger-soft);
+  --jp-rendermime-table-row-background: transparent;
+  --jp-rendermime-table-row-hover-background: var(--hover-overlay);
+  --jp-input-background: var(--surface);
+  --jp-input-box-shadow: none;
+  --jp-input-active-background: var(--surface);
+  --jp-input-active-border-color: var(--divider-strong);
+  --jp-input-active-box-shadow-color: transparent;
+  --jp-editor-selected-background: var(--hover-overlay-strong);
+  --jp-editor-selected-focused-background: var(--hover-overlay-strong);
+
+  /* Toolbar and elevation */
+  --jp-toolbar-background: var(--paper);
+  --jp-toolbar-box-shadow: none;
+  --jp-toolbar-border-color: var(--divider);
+  --jp-elevation-z1: none;
+  --jp-elevation-z2: var(--shadow-sm);
+  --jp-elevation-z4: var(--shadow-md);
+  --jp-elevation-z6: var(--shadow-md);
+  --jp-elevation-z8: var(--shadow-md);
+  --jp-elevation-z12: var(--shadow-lg);
+
+  /* Syntax: warm, low-chroma, shared by both modes through the app tokens */
+  --jp-mirror-editor-keyword-color: var(--ink);
+  --jp-mirror-editor-atom-color: var(--ink-muted);
+  --jp-mirror-editor-number-color: var(--ink-muted);
+  --jp-mirror-editor-def-color: var(--ink);
+  --jp-mirror-editor-variable-color: var(--ink);
+  --jp-mirror-editor-variable-2-color: var(--ink);
+  --jp-mirror-editor-variable-3-color: var(--ink);
+  --jp-mirror-editor-punctuation-color: var(--ink-subtle);
+  --jp-mirror-editor-property-color: var(--ink);
+  --jp-mirror-editor-operator-color: var(--ink-subtle);
+  --jp-mirror-editor-comment-color: var(--ink-subtle);
+  --jp-mirror-editor-string-color: var(--ink-muted);
+  --jp-mirror-editor-string-2-color: var(--ink-muted);
+  --jp-mirror-editor-meta-color: var(--ink-subtle);
+  --jp-mirror-editor-builtin-color: var(--ink);
+  --jp-mirror-editor-bracket-color: var(--ink-subtle);
+  --jp-mirror-editor-tag-color: var(--ink);
+  --jp-mirror-editor-attribute-color: var(--ink-muted);
+  --jp-mirror-editor-header-color: var(--ink);
+  --jp-mirror-editor-quote-color: var(--ink-muted);
+  --jp-mirror-editor-link-color: var(--ink-muted);
+  --jp-mirror-editor-error-color: var(--danger);
+
+  --jp-content-link-color: var(--ink);
+  --jp-content-link-visited-color: var(--ink-muted);
+  --jp-content-link-hover-color: var(--ink-muted);
+
+  /* Scrollbars */
+  --jp-scrollbar-background-color: transparent;
+  /* thumb is consumed as rgb(var(--x)), a raw triplet: app oklch tokens cannot be used, a per-mode literal is needed */
+  --jp-scrollbar-thumb-color: 110, 106, 100;
+
+  /* Remaining hard-coded hues */
+  --jp-focus-outline-color: var(--ink-muted);
+  --jp-accept-color-normal: var(--ink-muted);
+  --jp-accept-color-hover: var(--ink);
+  --jp-accept-color-active: var(--ink);
+  --jp-warn-color-hover: var(--danger);
+  --jp-warn-color-active: var(--danger);
+  --jp-success-color0: var(--ink-muted);
+  --jp-success-color1: var(--ink-muted);
+  --jp-success-color2: var(--ink-subtle);
+  --jp-info-color0: var(--ink-muted);
+  --jp-info-color1: var(--ink-muted);
+  --jp-dialog-background: var(--backdrop);
+  --jp-search-selected-match-background-color: var(--hover-overlay-strong);
+  --jp-search-selected-match-color: var(--ink);
+  --jp-search-unselected-match-background-color: var(--hover-overlay);
+  --jp-search-unselected-match-color: var(--ink);
+  --jp-cell-inprompt-font-color: var(--ink-faint);
+}
+html.light:root { --jp-scrollbar-thumb-color: 150, 146, 138; --jp-layout-color1: #f5eee0; --jp-brand-color1: #5b5851; --jp-error-color1: #c90019; }
+
+/* --- Chrome removal: collapsers, sidebar, resize handle, footer. In/out prompts become a quiet gutter that shows on hover --- */
+.gc-nb .jp-Collapser,
+.gc-nb .jp-CellResizeHandle,
+.gc-nb .jp-Cell-header,
+.gc-nb .jp-Cell-footer,
+.gc-nb .jp-Notebook-footer { display: none; }
+
+/* --- Layout: one centered column like the app's documents --- */
+.gc-nb .jp-WindowedPanel-viewport { padding: 0 1.5rem; max-width: 56rem; margin: 0 auto; box-sizing: content-box; }
+.gc-nb .jp-Cell { margin: 0 0 0.75rem; }
+.gc-nb .jp-InputPrompt, .gc-nb .jp-OutputPrompt { font-size: 11px; opacity: 0; transition: opacity 0.15s; }
+.gc-nb .jp-Cell:hover .jp-InputPrompt, .gc-nb .jp-Cell:hover .jp-OutputPrompt,
+.gc-nb .jp-Cell.jp-mod-active .jp-InputPrompt, .gc-nb .jp-Cell.jp-mod-active .jp-OutputPrompt { opacity: 1; }
+.gc-nb .jp-InputArea-editor { border-radius: var(--radius-md); }
+/* CodeMirror highlight classes are hashed (.ͼ..), so a weight reset is the only handle on the bold keywords */
+.gc-nb .cm-line span { font-weight: inherit !important; }
+
+/* --- Keyboard focus: a visible ring in both modes. Command mode rings the cell's content column (not the prompt gutter beside it), edit mode the editor --- */
+.gc-nb .jp-Notebook.jp-mod-commandMode .jp-Cell.jp-mod-active:focus-visible { box-shadow: none; }
+.gc-nb .jp-Notebook.jp-mod-commandMode .jp-Cell.jp-mod-active:focus-visible::after { content: ""; position: absolute; inset: 0 0 0 var(--jp-cell-prompt-width); border-radius: var(--radius-md); box-shadow: 0 0 0 1px var(--jp-focus-outline-color); pointer-events: none; }
+.gc-nb .jp-Notebook.jp-mod-commandMode .jp-Cell.jp-mod-selected { border-radius: var(--radius-md); }
+
+/* --- ANSI colors are literals in rendermime/style/base.css, not variables: class overrides are the only handle. The app has no hues, so the
+   colors stay calm but apart: errors keep danger, green (tracebacks' file names, line numbers and arrow) the diff green, the rest are ink tints.
+   Names: ansi-<color>-fg and ansi-<color>-intense-fg --- */
+.gc-nb .jp-RenderedText pre :is(.ansi-black-fg, .ansi-black-intense-fg, .ansi-white-fg, .ansi-white-intense-fg) { color: var(--ink-subtle); }
+.gc-nb .jp-RenderedText pre :is(.ansi-red-fg, .ansi-red-intense-fg) { color: var(--danger); }
+.gc-nb .jp-RenderedText pre :is(.ansi-green-fg, .ansi-green-intense-fg) { color: var(--diff-added); }
+.gc-nb .jp-RenderedText pre :is(.ansi-blue-fg, .ansi-blue-intense-fg, .ansi-cyan-fg, .ansi-cyan-intense-fg) { color: var(--ink); }
+.gc-nb .jp-RenderedText pre :is(.ansi-yellow-fg, .ansi-yellow-intense-fg, .ansi-magenta-fg, .ansi-magenta-intense-fg) { color: var(--ink-muted); }
+.gc-nb .jp-RenderedText pre :is(.ansi-black-bg, .ansi-red-bg, .ansi-green-bg, .ansi-yellow-bg, .ansi-blue-bg, .ansi-magenta-bg, .ansi-cyan-bg, .ansi-white-bg,
+  .ansi-black-intense-bg, .ansi-red-intense-bg, .ansi-green-intense-bg, .ansi-yellow-intense-bg, .ansi-blue-intense-bg, .ansi-magenta-intense-bg, .ansi-cyan-intense-bg, .ansi-white-intense-bg) { background-color: var(--hover-overlay-strong); }
+.gc-nb .jp-RenderedText pre .ansi-default-inverse-fg { color: var(--paper); }
+.gc-nb .jp-RenderedText pre .ansi-default-inverse-bg { background-color: var(--ink-subtle); }
+
+/* --- Layout: the notebook fills the box its host gives it (the theme provider's wrapper div has no height of its own, its CSS host div takes none) --- */
+.gc-nb > #dla-JupyterLabCss-id { display: none; }
+.gc-nb > div:not(#dla-JupyterLabCss-id) { height: 100%; }
+
+/* 256-color and truecolor ANSI arrive as inline styles, which only a filter reaches: keep their hue but calm it, and lift (dark) or deepen (light) it so it reads on the paper */
+.gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0.6) brightness(1.25); }
+html.light .gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0.6) brightness(0.8); }
+
+/* --- Completer popup (a portal on <body>): a quiet panel with ink tints, its type badges have no hue (the library colors them red, blue, green ...) --- */
+.jp-Completer.jp-ThemedContainer { background: var(--surface); color: var(--ink); border: 1px solid var(--divider-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-md); }
+.jp-Completer .jp-Completer-item.jp-mod-active { background: var(--hover-overlay-strong); color: var(--ink); }
+.jp-Completer .jp-Completer-type[data-color-index] { background: var(--surface-elevated); color: var(--ink-muted); }
+.jp-Completer .jp-Completer-typeExtended { color: var(--ink-subtle); }

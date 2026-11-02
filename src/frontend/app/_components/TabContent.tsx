@@ -57,7 +57,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const {
     chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems, onBranch,
-  } = useTabChat({ focus, onOpenChat })
+  } = useTabChat({ focus, onOpenChat, onOpenItem })
   const { models, prompts, setPrompts } = chat
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }

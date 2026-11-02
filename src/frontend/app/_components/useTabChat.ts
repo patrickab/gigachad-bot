@@ -5,7 +5,7 @@ import type { ChatFocus } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 import { useBranches } from "@/features/navigation/BranchContext"
-import { itemOf, useTab, type Tab } from "@/contexts/TabContext"
+import { itemOf, useTab, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
 import { useChatTurns } from "@/features/chat/useChatTurns"
@@ -35,7 +35,7 @@ function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branch
 }
 
 /** Run one tab's chat (history, turns, attachments, memory commands, shortcuts); called in every mode so the chat survives mode switches. */
-export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat: (historyFile: string) => void }) {
+export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus; onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
   const { tab, isActive, updateConfig, setHistoryFile, setTitle } = useTab()
   const { projectSlug, config, appMode } = tab
   const chat = useChat()
@@ -52,7 +52,7 @@ export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat
   const { busy: extracting, track } = useBusyCount()
   const chatInputRef = useRef<ChatInputHandle>(null)
 
-  const filePicker = useFilePicker({ hasMessages: messages.length > 0, chatInputRef, track })
+  const filePicker = useFilePicker({ hasMessages: messages.length > 0, chatInputRef, track, onOpenItem })
   const filesEnabled = filePicker.rootFiles.enabled
   const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, track })
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })

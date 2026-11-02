@@ -7,6 +7,8 @@ import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { attachToComposer } from "@/features/chat/attachToComposer"
 import { listRootFiles } from "@/lib/backend/api"
 import type { RootFile } from "@/lib/domain/files"
+import type { WorkspaceItem } from "@/contexts/TabContext"
+import { isNotebookPath } from "@/lib/paths"
 
 /** A picked file opened on its own: a PDF viewer or a text editor. */
 export type StandaloneFile = { kind: "pdf" | "edit"; path: string }
@@ -14,10 +16,12 @@ export type StandaloneFile = { kind: "pdf" | "edit"; path: string }
 const NO_ROOT_FILES = { enabled: false, files: [] as RootFile[] }
 
 /** Own the mounted-file picker: the root file listing, standalone opening in an empty chat, and staging on the composer otherwise. */
-export function useFilePicker({ hasMessages, chatInputRef, track }: {
+export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: {
   hasMessages: boolean
   chatInputRef: RefObject<ChatInputHandle | null>
   track: <T>(work: () => Promise<T>) => Promise<T>
+  /** Opens a picked notebook in a tab, it has no overlay form. */
+  onOpenItem: (item: WorkspaceItem) => void
 }) {
   const [rootFiles, setRootFiles] = useState<{ enabled: boolean; files: RootFile[] }>(NO_ROOT_FILES)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
@@ -38,12 +42,13 @@ export function useFilePicker({ hasMessages, chatInputRef, track }: {
 
   const handleFileSelect = useCallback(async (path: string) => {
     setFilePickerOpen(false)
-    // Empty chat → open standalone (edit text files, view PDFs); active
+    // Empty chat → open standalone (edit text files, view PDFs) or, for a notebook, in a tab; active
     // conversation → stage a live reference on the chat input (the *next*
     // message), not the already-sent latest message.
-    if (!hasMessages) setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
-    else await attachToComposer(chatInputRef, track, path)
-  }, [hasMessages, chatInputRef, track])
+    if (hasMessages) await attachToComposer(chatInputRef, track, path)
+    else if (isNotebookPath(path)) onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })
+    else setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
+  }, [hasMessages, chatInputRef, track, onOpenItem])
 
   useEscapeLayer(() => setStandaloneFile(null), standaloneFile?.kind === "pdf")
 

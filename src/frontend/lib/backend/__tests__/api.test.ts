@@ -104,3 +104,37 @@ describe("api.ts — saveChat", () => {
     expect(JSON.parse(init.body as string)).not.toHaveProperty("tab_name")
   })
 })
+
+describe("api.ts — Jupyter kernels", () => {
+  it("lists the kernel environments of a notebook path", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+
+    await api.fetchKernelSpecs("/work/a b.ipynb")
+
+    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/jupyter\/kernelspecs$/)
+    expect(new URL(lastCall(calls).url).searchParams.get("path")).toBe("/work/a b.ipynb")
+  })
+
+  it("starts a kernel by posting the path and spec name", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+
+    await api.startKernel("/work/a.ipynb", "python3")
+
+    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/jupyter\/kernel$/)
+    expect(lastCall(calls).init.method).toBe("POST")
+    expect(JSON.parse(lastCall(calls).init.body as string)).toEqual({ path: "/work/a.ipynb", name: "python3" })
+  })
+
+  it("shuts a kernel down by path and fails with the backend's detail", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+    await api.shutdownKernel("/work/a.ipynb")
+    expect(lastCall(calls).init.method).toBe("DELETE")
+    expect(new URL(lastCall(calls).url).searchParams.get("path")).toBe("/work/a.ipynb")
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Jupyter is not available" }), { status: 503, headers: { "Content-Type": "application/json" } })))
+    await expect(api.startKernel("/work/a.ipynb", "python3")).rejects.toMatchObject({ name: "ApiError", status: 503, message: "Jupyter is not available" })
+  })
+})

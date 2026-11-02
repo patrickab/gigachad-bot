@@ -33,6 +33,7 @@ from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
 from backend.routes.deps import get_client, shutdown_client
 from backend.routes.deploy import router as deploy_router
+from backend.routes.jupyter import router as jupyter_router
 from backend.routes.neovim import router as neovim_router
 from backend.routes.latex import router as latex_router
 from backend.routes.documents import router as documents_router
@@ -42,7 +43,7 @@ from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib import omp_source
+from lib import jupyter, omp_source
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.file_attach import router as file_attach_router
@@ -111,6 +112,7 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_client()
     kill_all_mineru_servers()
+    await jupyter.shutdown()
     await extract_queue.stop()
     await get_change_broker().stop()
     close_postgres_pool()
@@ -177,6 +179,7 @@ app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(neovim_router)
+app.include_router(jupyter_router)
 app.include_router(latex_router)
 app.include_router(workbench_router)
 app.include_router(deploy_router)

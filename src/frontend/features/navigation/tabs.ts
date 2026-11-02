@@ -71,6 +71,15 @@ export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceIte
   return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
+/** The paths of the files `tabs` hold: a tab holds its file item's file whether or not its editor is open, until the tab closes or takes another item. */
+export function filesOfTabs(tabs: readonly Tab[]): Set<string> {
+  const files = new Set<string>()
+  for (const { workspaceItem } of tabs) {
+    if (workspaceItem && FILE_ITEM_KINDS.includes(workspaceItem.kind)) files.add(workspaceItem.path)
+  }
+  return files
+}
+
 /** Whether `tab` shows the deleted `path` (a file or a folder): its file item lies inside it, or it is a workbench of a LaTeX project folder inside it. */
 export function showsRemoved(tab: Tab, path: string): boolean {
   const item = tab.workspaceItem

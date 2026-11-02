@@ -51,6 +51,7 @@ export default defineConfig([
           crossFeature("chat", "learn"),
           crossFeature("chat", "navigation"),
           crossFeature("editor", "navigation"),
+          crossFeature("editor", "notebook"),
           crossFeature("factory", "editor"),
           crossFeature("navigation", "factory"),
           crossFeature("navigation", "learn"),
@@ -67,6 +68,14 @@ export default defineConfig([
           crossFeature("omp", "settings"),
         ],
       }],
+    },
+  },
+  {
+    // JupyterLab and Datalayer's notebook libraries speak the Jupyter protocol and own the notebook model: `features/notebook/` is the one place that knows them (`AGENTS.md`, "Jupyter exception").
+    files: ["{app,components,contexts,features,hooks,lib}/**/*.{ts,tsx}"],
+    ignores: ["features/notebook/**"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["@datalayer/*", "@jupyterlab/*", "@jupyter/*", "@lumino/*"], message: "Only features/notebook may import the Jupyter libraries." }] }],
     },
   },
   {

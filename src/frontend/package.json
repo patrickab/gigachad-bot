@@ -12,6 +12,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@datalayer/jupyter-react": "^2.0.21",
+    "@jupyterlab/nbformat": "^4.6.4",
+    "@jupyterlab/notebook": "^4.6.4",
+    "@jupyterlab/rendermime-interfaces": "^3.14.4",
+    "@jupyterlab/services": "^7.6.4",
+    "@lumino/widgets": "^2.10.0",
     "@streamdown/math": "^1.0.2",
     "@tauri-apps/api": "^2.0.0",
     "@xterm/addon-fit": "^0.11.0",
@@ -31,8 +37,8 @@
     "pdf-lib": "^1.17.1",
     "perfect-freehand": "^1.2.3",
     "plotly.js-dist-min": "^4.1.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "react-pdf": "^9.2.1",
     "react-plotly.js": "^4.1.0",
     "remark-breaks": "^4.0.0",
@@ -57,11 +63,14 @@
     "@types/react-plotly.js": "^2.6.4",
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^6.1.1",
+    "buffer": "^6.0.3",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.2",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-boundaries": "^7.2.0",
     "jsdom": "^25.0.0",
+    "json5": "^2.2.3",
+    "svg-url-loader": "^8.1.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.71.2",
@@ -70,6 +79,8 @@
   },
   "overrides": {
     "handlebars": "^4.7.10",
-    "katex": "$katex"
+    "katex": "$katex",
+    "@jupyter/web-components": "^0.17.1",
+    "@jupyter/react-components": "^0.17.1"
   }
 }

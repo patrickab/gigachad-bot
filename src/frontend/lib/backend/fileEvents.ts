@@ -13,6 +13,7 @@ type FileMoveListener = (move: FileMove) => void
 const localMoveListeners = new Set<FileMoveListener>()
 const localChangeListeners = new Set<(path: string) => void>()
 const localRemovalListeners = new Set<(path: string) => void>()
+const closedListeners = new Set<(path: string) => void>()
 
 /** Tell every `onFileMove` listener that this device renamed a file, before any tab follows the new path. */
 export function announceFileMove(move: FileMove): void {
@@ -67,4 +68,15 @@ export function onFileRemoval(listener: (path: string) => void): () => void {
     localRemovalListeners.delete(listener)
     stopRemote()
   }
+}
+
+/** Tell every `onFileClosed` listener that no tab shows the file at `path` any more. */
+export function announceFileClosed(path: string): void {
+  for (const listener of closedListeners) listener(path)
+}
+
+/** Call `listener` with the path of every file the last tab showing it left: that tab closed, was deleted, or opened another file. A file only hidden (its editor closed in a tab that still holds it) is not closed. Returns the unsubscribe. */
+export function onFileClosed(listener: (path: string) => void): () => void {
+  closedListeners.add(listener)
+  return () => { closedListeners.delete(listener) }
 }

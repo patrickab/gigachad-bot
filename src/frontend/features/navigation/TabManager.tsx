@@ -7,8 +7,8 @@ import { TabContext, showingItem, type Tab, type TabActions, type TabContextValu
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
-import { onFileRemoval } from "@/lib/backend/fileEvents"
-import { TabStripContext, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabsAfterRemoval, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
+import { announceFileClosed, onFileRemoval } from "@/lib/backend/fileEvents"
+import { TabStripContext, filesOfTabs, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabsAfterRemoval, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -150,6 +150,14 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     setActiveTab(next.activeId)
   })
   useEffect(() => onFileRemoval((path) => closeRemoved(path)), [])
+
+  // Editors keep state outside the tab that their unmount does not end (a notebook's kernel), so a file the last tab holding it let go of is announced.
+  const heldFiles = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const held = filesOfTabs(tabs)
+    for (const path of heldFiles.current ?? held) if (!held.has(path)) announceFileClosed(path)
+    heldFiles.current = held
+  }, [tabs])
 
   useEffect(() => {
     const selected = tabs.find((tab) => tab.id === activeTab)

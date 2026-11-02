@@ -10,6 +10,7 @@ import { getApiBase } from "./config"
 import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/architecture"
 import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument"
 import { deviceHeaders } from "./deviceId"
+import type { KernelSpecs, RunningKernel } from "@/lib/domain/jupyter"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
 import type { LatexBuild, StoredImage, TexProject } from "@/lib/domain/latex"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
@@ -777,4 +778,19 @@ export function sendFactoryMessage(id: string, text: string): Promise<FactoryMes
 
 export function restartFactoryPreview(id: string): Promise<FactoryPreview> {
   return post<FactoryPreview>(`/factory/tasks/${encodeURIComponent(id)}/preview/restart`, {})
+}
+
+/** The kernel environments for the notebook at absolute `path`, and the one it opens with. */
+export function fetchKernelSpecs(path: string, signal?: AbortSignal): Promise<KernelSpecs> {
+  return request<KernelSpecs>(`/jupyter/kernelspecs${toQuery({ path })}`, { signal })
+}
+
+/** Start (or reuse, same name) the kernel of the notebook at `path`. Another name replaces the running one. */
+export function startKernel(path: string, name: string): Promise<RunningKernel> {
+  return post<RunningKernel>("/jupyter/kernel", { path, name })
+}
+
+/** Shut the kernel of the notebook at `path` down, whether or not one runs. */
+export function shutdownKernel(path: string): Promise<void> {
+  return requestVoid(`/jupyter/kernel${toQuery({ path })}`, { method: "DELETE" })
 }

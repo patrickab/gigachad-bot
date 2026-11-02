@@ -30,6 +30,11 @@ export function kindOf(path: string): FileKind {
   return "text"
 }
 
+/** Whether `path` is a notebook the notebook editor opens: an absolute `.ipynb` (kernels and saves need the host path). */
+export function isNotebookPath(path: string): boolean {
+  return path.startsWith("/") && path.endsWith(".ipynb")
+}
+
 /** Natural, case-insensitive order for paths and file names ("file2" before "file10"). */
 export const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
 
