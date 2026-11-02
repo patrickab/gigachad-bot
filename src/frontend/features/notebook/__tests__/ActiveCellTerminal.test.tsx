@@ -20,9 +20,8 @@ function fakeTerminal(input: HTMLTextAreaElement): CellTerminal {
   return {
     state: "running",
     session: {},
-    open: () => true,
-    set: () => true,
-    close: () => true,
+    setCells: () => true,
+    focusCell: () => true,
     focus: () => {},
     restart: () => {},
     cellHeight: () => 16,
@@ -80,7 +79,7 @@ describe("ActiveCellTerminal", () => {
     expect(deleteCell).toHaveBeenCalledTimes(1)
 
     const input = document.createElement("textarea")
-    showing({ key: "tab#a", cell, lines: 2 })
+    showing({ id: "a", cell, lines: 2 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(input)} save={async () => {}} />)
     expect(input.isConnected).toBe(true)
     input.focus()
@@ -94,11 +93,11 @@ describe("ActiveCellTerminal", () => {
     const first = cellWidget()
     const second = cellWidget()
     const input = document.createElement("textarea")
-    const show = showing({ key: "tab#a", cell: first, lines: 1 })
+    const show = showing({ id: "a", cell: first, lines: 1 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(input)} save={async () => {}} />)
     expect(first.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")).not.toBeNull()
 
-    show({ key: "tab#b", cell: second, lines: 1 })
+    show({ id: "b", cell: second, lines: 1 })
     expect(first.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
     const host = second.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")
     expect(host).not.toBeNull()
@@ -108,27 +107,42 @@ describe("ActiveCellTerminal", () => {
 
   it("hides the cell's editor while the terminal is in it, and gives it back", () => {
     const cell = cellWidget()
-    const show = showing({ key: "tab#a", cell, lines: 3 })
+    const show = showing({ id: "a", cell, lines: 3 })
     const { unmount } = render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(true)
 
-    show({ key: null, cell: null, lines: 1 })
+    show({ id: null, cell: null, lines: 1 })
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(false)
     expect(cell.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
 
-    show({ key: "tab#a", cell, lines: 3 })
+    show({ id: "a", cell, lines: 3 })
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(true)
     unmount()
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(false)
   })
 
+  it("attaches to an active cell whose input area the windowed notebook renders later", async () => {
+    const cell = cellWidget()
+    cell.node.innerHTML = ""
+    showing({ id: "a", cell, lines: 1 })
+    render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
+    expect(cell.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
+
+    await act(async () => {
+      cell.node.innerHTML = '<div class="jp-InputArea"><div class="jp-InputArea-editor"></div></div>'
+      await Promise.resolve()
+    })
+
+    expect(cell.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")).not.toBeNull()
+  })
+
   it("makes the terminal as tall as the cell's text needs", () => {
     const cell = cellWidget()
-    const show = showing({ key: "tab#a", cell, lines: 2 })
+    const show = showing({ id: "a", cell, lines: 2 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     const host = () => cell.node.querySelector<HTMLElement>("[data-testid=cell-neovim]")!
     const short = parseFloat(host().style.height)
-    show({ key: "tab#a", cell, lines: 6 })
+    show({ id: "a", cell, lines: 6 })
     expect(parseFloat(host().style.height)).toBeGreaterThanOrEqual(short + 4 * 16)
   })
 })

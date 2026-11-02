@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { CellNeovim, TERMINAL_HOST_CLASS, cellTerminalHeight, languageExtension, type CellModelLike, type CellWidgetLike, type LanguageInfoLike, type NotebookWidgetLike } from "../cellNeovim"
-import type { CellCursor, CellDirection, CellTerminal } from "../cellTerminal"
-import type { NotebookCellContent, NotebookContent, SharedCellLike } from "../notebookSync"
+import type { CellCursor, CellTerminal, CellText } from "../cellTerminal"
+import type { NotebookCellContent, NotebookContent } from "../notebookSync"
 import { FakeNotebook } from "./fakeNotebook"
 
 class Signal<Args> {
@@ -16,86 +16,51 @@ const code = (id: string, source: string): NotebookCellContent => ({ cell_type: 
 const markdown = (id: string, source: string): NotebookCellContent => ({ cell_type: "markdown", id, source, metadata: {} })
 const content = (cells: NotebookCellContent[]): NotebookContent => ({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 })
 
-/** A notebook widget over a `FakeNotebook`, with the signals of the real one. */
+/** A notebook widget over a `FakeNotebook`, with the signals of the real one. The cell list is the model's, as the real notebook rebuilds its widgets from it. */
 class FakeWidget {
-  readonly widgets: (CellWidgetLike & { changed: Signal<unknown>; renderedChanged: Signal<boolean> })[] = []
   readonly activeCellChanged = new Signal<CellWidgetLike | null>()
   readonly stateChanged = new Signal<{ name: string; newValue: unknown }>()
   readonly modes: string[] = []
   private index = 0
 
-  constructor(private readonly model: FakeNotebook) {
-    model.cells.forEach((cell) => this.widgets.push(this.widgetOf(cell)))
-  }
+  constructor(private readonly model: FakeNotebook) {}
 
-  private widgetOf(cell: SharedCellLike & { source?: string }) {
-    const changed = new Signal<unknown>()
-    const renderedChanged = new Signal<boolean>()
-    const model = this.model
-    // A cell widget's `rendered` (markdown) starts true
-    let rendered = cell.cell_type === "markdown"
-    const widget = {
-      // The terminal is in every cell's node, as `ActiveCellTerminal` has it in the active one
-      node: Object.assign(document.createElement("div"), { innerHTML: `<div class="${TERMINAL_HOST_CLASS}"></div>` }),
-      model: {
-        id: cell.id,
-        type: cell.cell_type,
-        sharedModel: {
-          getSource: () => model.cells.find((candidate) => candidate.id === cell.id)?.getSource() ?? "",
-          updateSource: (start: number, end: number, value?: string) => model.cells.find((candidate) => candidate.id === cell.id)?.updateSource(start, end, value),
-          changed,
-        },
-      },
-      get rendered() { return rendered },
-      set rendered(value: boolean) {
-        rendered = value
-        renderedChanged.emit(value)
-      },
-      changed,
-      renderedChanged,
-    }
-    return widget as unknown as CellWidgetLike & { changed: Signal<unknown>; renderedChanged: Signal<boolean> }
+  get widgets(): CellWidgetLike[] {
+    // The terminal is in every cell's node, as `ActiveCellTerminal` has it in the active one
+    return this.model.cells.map((cell) => ({ node: Object.assign(document.createElement("div"), { innerHTML: `<div class="${TERMINAL_HOST_CLASS}"></div>` }), model: { id: cell.id, type: cell.cell_type } }))
   }
 
   get activeCellIndex() { return this.index }
   set activeCellIndex(value: number) {
-    this.index = Math.max(0, Math.min(value, this.widgets.length - 1))
-    this.activeCellChanged.emit(this.widgets[this.index] ?? null)
+    const widgets = this.widgets
+    this.index = Math.max(0, Math.min(value, widgets.length - 1))
+    this.activeCellChanged.emit(widgets[this.index] ?? null)
   }
 
   get activeCell() { return this.widgets[this.index] ?? null }
 
   setMode(mode: string) { this.modes.push(mode) }
-
-  /** What the notebook does when the source of cell `index` changes under it (the user, a file merge). */
-  sourceChanged(index: number) { this.widgets[index].changed.emit({ sourceChange: true }) }
 }
 
 class FakeTerminal implements CellTerminal {
   state: CellTerminal["state"] = "running"
   session: object | null = {}
   accepts = true
-  readonly calls: string[] = []
-  readonly opens: { key: string; filename: string; text: string; cursor: CellCursor }[] = []
-  readonly sets: { key: string; text: string }[] = []
-  readonly closes: string[] = []
+  /** Every `setCells` call, the cells copied. */
+  readonly sets: { filename: string; cells: CellText[] }[] = []
+  readonly focuses: { id: string; cursor: CellCursor }[] = []
   focused = 0
   restarts = 0
 
-  open(key: string, filename: string, text: string, cursor: CellCursor) {
+  setCells(filename: string, cells: readonly CellText[]) {
     if (!this.accepts) return false
-    this.opens.push({ key, filename, text, cursor })
+    this.sets.push({ filename, cells: cells.map((cell) => ({ ...cell })) })
     return true
   }
 
-  set(key: string, text: string) {
+  focusCell(id: string, cursor: CellCursor) {
     if (!this.accepts) return false
-    this.sets.push({ key, text })
-    return true
-  }
-
-  close(key: string) {
-    this.closes.push(key)
+    this.focuses.push({ id, cursor })
     return true
   }
 
@@ -106,10 +71,7 @@ class FakeTerminal implements CellTerminal {
   render() { return null }
 }
 
-/** The shared notebook as the controller sees it: the cell list as of now, whatever the model does later. */
-function modelOf(model: FakeNotebook, changed: Signal<unknown>): CellModelLike {
-  return { get cells() { return model.cells }, transact: (f: () => void, undoable?: boolean) => model.transact(f, undoable), changed } as unknown as CellModelLike
-}
+const modelOf = (model: FakeNotebook) => model as unknown as CellModelLike
 
 function setup(cells: NotebookCellContent[], language: LanguageInfoLike | null = { name: "python", file_extension: ".py" }) {
   const model = new FakeNotebook(content(cells))
@@ -117,22 +79,10 @@ function setup(cells: NotebookCellContent[], language: LanguageInfoLike | null =
   const terminal = new FakeTerminal()
   const runAndAdvance = vi.fn()
   const save = vi.fn()
-  // `changed` reports the cell list: the fake notebook has none, the test emits it
-  const changed = new Signal<unknown>()
-  const controller = new CellNeovim({
-    tabId: "tab",
-    notebook: notebook as unknown as NotebookWidgetLike,
-    model: modelOf(model, changed),
-    terminal,
-    language: () => language,
-    runAndAdvance,
-    save,
-  })
+  const controller = new CellNeovim({ notebook: notebook as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, runAndAdvance, save })
   controller.start()
-  return { model, notebook, terminal, controller, runAndAdvance, save, changed }
+  return { model, notebook, terminal, controller, runAndAdvance, save }
 }
-
-const key = (id: string) => `tab#${id}`
 
 describe("CellNeovim", () => {
   let queued: (() => void)[]
@@ -141,14 +91,45 @@ describe("CellNeovim", () => {
     vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => { queued.push(callback) })
   })
 
-  it("opens the active cell with its text and a filetype from the notebook language", () => {
-    const { terminal } = setup([code("a", "x = 1\ny = 2"), markdown("b", "# t")])
-    expect(terminal.opens).toEqual([{ key: key("a"), filename: "cell.py", text: "x = 1\ny = 2", cursor: "first" }])
+  it("hands Neovim the code cells in order, markdown and raw cells left out, then pins the window to the active one", () => {
+    const { terminal } = setup([code("a", "x = 1\ny = 2"), markdown("m", "# t"), code("b", "z")])
+    expect(terminal.sets).toEqual([{ filename: "notebook.py", cells: [{ id: "a", text: "x = 1\ny = 2" }, { id: "b", text: "z" }] }])
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
   })
 
-  it("names the filetype by the file extension of the notebook language", () => {
-    expect(setup([code("a", "")], { name: "julia", file_extension: ".jl" }).terminal.opens[0].filename).toBe("cell.jl")
-    expect(setup([code("a", "")], null).terminal.opens[0].filename).toBe("cell.txt")
+  it("names the buffer by the file extension of the notebook language", () => {
+    expect(setup([code("a", "")], { name: "julia", file_extension: ".jl" }).terminal.sets[0].filename).toBe("notebook.jl")
+    expect(setup([code("a", "")], { name: "python" }).terminal.sets[0].filename).toBe("notebook.py")
+    expect(setup([code("a", "")], null).terminal.sets[0].filename).toBe("notebook.txt")
+  })
+
+  it("does not send the buffer again when the notebook only learns its language: Neovim keeps the name it has", () => {
+    const model = new FakeNotebook(content([code("a", "x")]))
+    const terminal = new FakeTerminal()
+    let language: LanguageInfoLike | null = null
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, runAndAdvance: vi.fn(), save: vi.fn() })
+    controller.start()
+    language = { name: "python", file_extension: ".py" }
+    model.setMetadata("language_info", { name: "python" })
+    expect(terminal.sets.map((set) => set.filename)).toEqual(["notebook.txt"])
+  })
+
+  it("never hands Neovim a repeated id: a later cell with a taken id gets a number and what Neovim reports maps back to the right cell", () => {
+    const { controller, model, notebook, runAndAdvance, terminal } = setup([code("a", "x"), code("a", "y"), markdown("m", "t"), code("a#2", "z")])
+    expect(terminal.sets[0].cells).toEqual([{ id: "a", text: "x" }, { id: "a#2", text: "y" }, { id: "a#2#2", text: "z" }])
+    notebook.activeCellIndex = 1
+    expect(terminal.focuses.at(-1)).toEqual({ id: "a#2", cursor: "first" })
+
+    controller.listener.edit("a#2", "yy")
+    expect(model.cells.map((cell) => cell.getSource())).toEqual(["x", "yy", "t", "z"])
+    expect(terminal.sets).toHaveLength(1)
+    controller.listener.focus("a#2#2")
+    expect(notebook.activeCellIndex).toBe(3)
+    expect(controller.getSnapshot().id).toBe("a#2#2")
+    controller.listener.run("a", "xx")
+    expect(model.cells[0].getSource()).toBe("xx")
+    expect(notebook.activeCellIndex).toBe(0)
+    expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the notebook out of the cell's editor: command mode, keys to the terminal", () => {
@@ -158,59 +139,80 @@ describe("CellNeovim", () => {
     expect(terminal.focused).toBe(1)
   })
 
-  it("does not focus a terminal that is still in another cell", () => {
-    const { notebook, terminal } = setup([code("a", "x"), code("b", "y")])
-    queued.splice(0)
-    notebook.widgets[1].node.innerHTML = ""
-    notebook.activeCellIndex = 1
-    queued.splice(0).forEach((callback) => callback())
-    expect(terminal.focused).toBe(0)
-  })
-
   it("takes Neovim's edit into the cell outside the undo stack and writes back nothing", () => {
-    const { controller, model, terminal, notebook } = setup([code("a", "x = 1")])
-    controller.listener.edit(key("a"), "x = 12")
+    const { controller, model, terminal } = setup([code("a", "x = 1")])
+    controller.listener.edit("a", "x = 12")
     expect(model.cells[0].getSource()).toBe("x = 12")
     expect(model.transactions.at(-1)).toBe(false)
-    // the notebook reports the change it just got: it is what Neovim sent
-    notebook.sourceChanged(0)
-    expect(terminal.sets).toEqual([])
+    expect(terminal.sets).toHaveLength(1)
   })
 
   it("touches only the text that differs", () => {
     const { controller, model } = setup([code("a", "print(1)\nprint(2)")])
-    controller.listener.edit(key("a"), "print(1)\nprint(22)")
+    controller.listener.edit("a", "print(1)\nprint(22)")
     expect((model.cells[0] as unknown as { updates: unknown[] }).updates).toEqual([{ start: 16, end: 16, value: "2" }])
   })
 
-  it("sends a change made in the notebook to Neovim once", () => {
-    const { model, terminal, notebook } = setup([code("a", "x = 1")])
-    model.cells[0].updateSource(4, 5, "7")
-    notebook.sourceChanged(0)
-    notebook.sourceChanged(0)
-    expect(terminal.sets).toEqual([{ key: key("a"), text: "x = 7" }])
+  it("sends a change made in the notebook to Neovim once, of any cell", () => {
+    const { model, terminal } = setup([code("a", "x = 1"), code("b", "y")])
+    model.cells[1].updateSource(1, 1, "z")
+    expect(terminal.sets.at(-1)).toEqual({ filename: "notebook.py", cells: [{ id: "a", text: "x = 1" }, { id: "b", text: "yz" }] })
+    expect(terminal.sets).toHaveLength(2)
   })
 
   it("sends the change again when the session could not take it", () => {
-    const { model, terminal, notebook } = setup([code("a", "x")])
+    const { model, terminal } = setup([code("a", "x")])
     terminal.accepts = false
     model.cells[0].updateSource(1, 1, "y")
-    notebook.sourceChanged(0)
     terminal.accepts = true
-    notebook.sourceChanged(0)
-    expect(terminal.sets).toEqual([{ key: key("a"), text: "xy" }])
+    model.cells[0].updateSource(2, 2, "z")
+    expect(terminal.sets.at(-1)?.cells).toEqual([{ id: "a", text: "xyz" }])
   })
 
-  it("does not send the typing of a cell Neovim does not show", () => {
-    const { model, terminal, notebook } = setup([code("a", "x"), code("b", "y")])
-    model.cells[1].updateSource(1, 1, "z")
-    notebook.widgets[1].changed.emit({})
-    expect(terminal.sets).toEqual([])
+  it("sends the cell list again when a code cell is added, deleted or moved", () => {
+    const { model, terminal } = setup([code("a", "x"), code("b", "y")])
+    model.insertCell(1, code("c", "z"))
+    expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["a", "c", "b"])
+    model.moveCell(0, 2)
+    expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["c", "b", "a"])
+    model.deleteCellRange(1, 2)
+    expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["c", "a"])
+  })
+
+  it("does not send what Neovim has: a markdown edit, a metadata change", () => {
+    const { model, terminal } = setup([code("a", "x"), markdown("m", "# t")])
+    model.cells[1].updateSource(0, 1, "##")
+    model.setMetadata("k", "v")
+    expect(terminal.sets).toHaveLength(1)
+  })
+
+  it("pins the window to the active code cell however it became active, cursor on its first line", () => {
+    const { notebook, terminal } = setup([code("a", "x"), markdown("m", "# t"), code("b", "y\nz")])
+    // keyboard, click, run and advance, all set the active index
+    notebook.activeCellIndex = 1
+    notebook.activeCellIndex = 2
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }, { id: "b", cursor: "first" }])
+    notebook.activeCellIndex = 0
+    expect(terminal.focuses.at(-1)).toEqual({ id: "a", cursor: "first" })
+  })
+
+  it("shows no terminal in a markdown cell", () => {
+    const { controller, notebook } = setup([code("a", "x"), markdown("m", "# t")])
+    expect(controller.getSnapshot().id).toBe("a")
+    notebook.activeCellIndex = 1
+    expect(controller.getSnapshot().id).toBeNull()
+  })
+
+  it("does not pin the same cell twice", () => {
+    const { model, notebook, terminal } = setup([code("a", "x")])
+    model.cells[0].updateSource(1, 1, "y")
+    notebook.activeCellIndex = 0
+    expect(terminal.focuses).toHaveLength(1)
   })
 
   it("runs the cell with the text Neovim ended with, then advances", () => {
     const { controller, model, runAndAdvance } = setup([code("a", "x"), code("b", "y")])
-    controller.listener.run(key("a"), "x = 1")
+    controller.listener.run("a", "x = 1")
     expect(model.cells[0].getSource()).toBe("x = 1")
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
@@ -218,72 +220,24 @@ describe("CellNeovim", () => {
   it("activates the cell a run is for when another one is active", () => {
     const { controller, notebook, runAndAdvance } = setup([code("a", "x"), code("b", "y")])
     notebook.activeCellIndex = 1
-    controller.listener.run(key("a"), "x")
+    controller.listener.run("a", "x")
     expect(notebook.activeCellIndex).toBe(0)
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
 
-  it("opens the next cell when the active one changes, cursor on its first line", () => {
-    const { notebook, terminal } = setup([code("a", "x"), code("b", "y\nz")])
-    notebook.activeCellIndex = 1
-    expect(terminal.opens.at(-1)).toEqual({ key: key("b"), filename: "cell.py", text: "y\nz", cursor: "first" })
-  })
-
-  it("enters the next cell on its first line and the previous one on its last line", () => {
-    const { controller, notebook, terminal } = setup([code("a", "x"), code("b", "y"), code("c", "z")])
-    controller.listener.exit(key("a"), "next", "x")
-    expect(notebook.activeCellIndex).toBe(1)
-    expect(terminal.opens.at(-1)?.cursor).toBe("first")
-    controller.listener.exit(key("b"), "prev" satisfies CellDirection, "y")
-    expect(notebook.activeCellIndex).toBe(0)
-    expect(terminal.opens.at(-1)).toMatchObject({ key: key("a"), cursor: "last" })
-  })
-
-  it("takes the text of the cell it leaves", () => {
-    const { controller, model } = setup([code("a", "x"), code("b", "y")])
-    controller.listener.exit(key("a"), "next", "x = 5")
-    expect(model.cells[0].getSource()).toBe("x = 5")
-  })
-
-  it("stays put at the first and last cell", () => {
-    const { controller, notebook, terminal } = setup([code("a", "x"), code("b", "y")])
-    controller.listener.exit(key("a"), "prev", "x")
-    expect(notebook.activeCellIndex).toBe(0)
-    notebook.activeCellIndex = 1
-    const opens = terminal.opens.length
-    controller.listener.exit(key("b"), "next", "y")
-    expect(notebook.activeCellIndex).toBe(1)
-    expect(terminal.opens).toHaveLength(opens)
-  })
-
-  it("enters a rendered markdown cell as an editable one", () => {
-    const { controller, notebook, terminal } = setup([code("a", "x"), markdown("b", "# t")])
-    controller.listener.exit(key("a"), "next", "x")
-    expect(notebook.widgets[1].rendered).toBe(false)
-    expect(terminal.opens.at(-1)).toMatchObject({ key: key("b"), filename: "cell.md" })
-  })
-
-  it("renders the markdown cell it was left from, as running it does", () => {
-    const { controller, notebook } = setup([code("a", "x"), markdown("b", "# t"), code("c", "z")])
-    controller.listener.exit(key("a"), "next", "x")
-    expect(notebook.widgets[1].rendered).toBe(false)
-    controller.listener.exit(key("b"), "next", "# t")
-    expect(notebook.widgets[1].rendered).toBe(true)
+  it("follows Neovim into another cell without telling Neovim", () => {
+    const { controller, notebook, terminal } = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
+    controller.listener.focus("b")
     expect(notebook.activeCellIndex).toBe(2)
+    expect(controller.getSnapshot().id).toBe("b")
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
   })
 
-  it("keeps a markdown cell in its editor when there is no cell to go to", () => {
-    const { controller, notebook } = setup([markdown("a", "# t")])
-    notebook.widgets[0].rendered = false
-    controller.listener.exit(key("a"), "next", "# t")
-    expect(notebook.widgets[0].rendered).toBe(false)
-  })
-
-  it("leaves a rendered markdown cell to the notebook, and takes it once it is edited", () => {
-    const { notebook, terminal } = setup([markdown("a", "# t")])
-    expect(terminal.opens).toEqual([])
-    notebook.widgets[0].rendered = false
-    expect(terminal.opens).toEqual([{ key: key("a"), filename: "cell.md", text: "# t", cursor: "first" }])
+  it("ignores a focus on an id that is none of the notebook's cells", () => {
+    const { controller, notebook } = setup([code("a", "x")])
+    controller.listener.focus("gone")
+    expect(notebook.activeCellIndex).toBe(0)
+    expect(controller.getSnapshot().id).toBe("a")
   })
 
   it("claims the keys again when the notebook goes to edit mode under the terminal", () => {
@@ -295,50 +249,53 @@ describe("CellNeovim", () => {
     expect(terminal.focused).toBe(1)
   })
 
-  it("wipes the buffer of a deleted cell", () => {
-    const { model, terminal, notebook, changed } = setup([code("a", "x"), code("b", "y")])
-    notebook.activeCellIndex = 1
-    model.deleteCellRange(0, 1)
-    changed.emit({})
-    expect(terminal.closes).toEqual([key("a")])
-  })
-
-  it("ignores edits of buffers that are no cell of this notebook", () => {
+  it("ignores edits of cells that are none of this notebook's", () => {
     const { controller, model } = setup([code("a", "x")])
-    controller.listener.edit("tab", "scratch")
-    controller.listener.edit("other#a", "scratch")
+    controller.listener.edit("other", "scratch")
     expect(model.cells[0].getSource()).toBe("x")
   })
 
-  it("opens the active cell again once a new session runs", () => {
+  it("sends everything again once a new session runs", () => {
     const { controller, terminal } = setup([code("a", "x")])
     terminal.session = null
     terminal.state = "starting"
     controller.update(terminal)
-    expect(terminal.opens).toHaveLength(1)
+    expect(controller.getSnapshot().id).toBeNull()
     terminal.session = {}
     terminal.state = "running"
     controller.update(terminal)
-    expect(terminal.opens).toHaveLength(2)
+    expect(terminal.sets).toHaveLength(2)
+    expect(terminal.focuses).toHaveLength(2)
   })
 
-  it("opens the cell after the session came up, not before", () => {
+  it("attaches to the first active cell once the session came up, not before, without any click", () => {
     const model = new FakeNotebook(content([code("a", "x")]))
-    const notebook = new FakeWidget(model)
     const terminal = new FakeTerminal()
     terminal.session = null
     terminal.state = "starting"
-    const controller = new CellNeovim({ tabId: "tab", notebook: notebook as unknown as NotebookWidgetLike, model: modelOf(model, new Signal()), terminal, language: () => ({ name: "python", file_extension: ".py" }), runAndAdvance: vi.fn(), save: vi.fn() })
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python", file_extension: ".py" }), runAndAdvance: vi.fn(), save: vi.fn() })
     controller.start()
-    expect(terminal.opens).toEqual([])
-    expect(controller.getSnapshot().key).toBeNull()
+    expect(terminal.sets).toEqual([])
+    expect(controller.getSnapshot().id).toBeNull()
     terminal.session = {}
     controller.update(terminal)
-    expect(terminal.opens).toEqual([{ key: key("a"), filename: "cell.py", text: "x", cursor: "first" }])
-    expect(controller.getSnapshot().key).toBe(key("a"))
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
+    expect(controller.getSnapshot().id).toBe("a")
   })
 
-  it("restarts a stopped session when a cell is activated", () => {
+  it("retries when the session is up but cannot take the frames yet", () => {
+    const model = new FakeNotebook(content([code("a", "x")]))
+    const terminal = new FakeTerminal()
+    terminal.accepts = false
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python" }), runAndAdvance: vi.fn(), save: vi.fn() })
+    controller.start()
+    expect(controller.getSnapshot().id).toBeNull()
+    terminal.accepts = true
+    controller.update(terminal)
+    expect(controller.getSnapshot().id).toBe("a")
+  })
+
+  it("restarts a stopped session when a code cell is activated", () => {
     const { notebook, terminal } = setup([code("a", "x"), code("b", "y")])
     terminal.state = "stopped"
     terminal.session = null
@@ -347,28 +304,24 @@ describe("CellNeovim", () => {
   })
 
   it("reports the shown cell and its line count", () => {
-    const { controller, model, notebook } = setup([code("a", "x")])
-    expect(controller.getSnapshot()).toMatchObject({ key: key("a"), lines: 1 })
-    controller.listener.edit(key("a"), "x\ny\nz")
-    notebook.sourceChanged(0)
+    const { controller } = setup([code("a", "x")])
+    expect(controller.getSnapshot()).toMatchObject({ id: "a", lines: 1 })
+    controller.listener.edit("a", "x\ny\nz")
     expect(controller.getSnapshot().lines).toBe(3)
-    expect(model.cells[0].getSource()).toBe("x\ny\nz")
   })
 
-  it("wipes what it opened and stops listening when disposed", () => {
-    const { controller, notebook, terminal } = setup([code("a", "x"), code("b", "y")])
-    notebook.activeCellIndex = 1
+  it("stops listening when disposed", () => {
+    const { controller, model, notebook, terminal } = setup([code("a", "x")])
     controller.dispose()
-    expect(terminal.closes.sort()).toEqual([key("a"), key("b")])
+    model.cells[0].updateSource(1, 1, "y")
+    expect(terminal.sets).toHaveLength(1)
     expect(notebook.activeCellChanged.size).toBe(0)
     expect(notebook.stateChanged.size).toBe(0)
-    expect(notebook.widgets[1].changed.size).toBe(0)
   })
 
-  it("saves the notebook on :w, with the text of the cell", () => {
-    const { controller, save, model } = setup([code("a", "x")])
-    controller.listener.save(key("a"), "x = 2")
-    expect(model.cells[0].getSource()).toBe("x = 2")
+  it("saves the notebook on :w", () => {
+    const { controller, save } = setup([code("a", "x")])
+    controller.listener.save()
     expect(save).toHaveBeenCalledTimes(1)
   })
 })
@@ -394,6 +347,7 @@ describe("cellTerminalHeight", () => {
 describe("languageExtension", () => {
   it("takes the extension the kernel reports, else the name of the language", () => {
     expect(languageExtension({ name: "python", file_extension: ".py" })).toBe("py")
+    expect(languageExtension({ name: "Python" })).toBe("py")
     expect(languageExtension({ name: "R", file_extension: ".r" })).toBe("r")
     expect(languageExtension({ name: "Julia" })).toBe("julia")
     expect(languageExtension({})).toBeNull()

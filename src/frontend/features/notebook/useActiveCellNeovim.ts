@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { CellNeovim, type CellModelLike, type LanguageInfoLike, type NotebookWidgetLike } from "./cellNeovim"
 import type { CellTerminal } from "./cellTerminal"
 
-/** `CellNeovim` on the active cell of the notebook shown by the tab `tabId`, null until the notebook panel exists. `save` is `:w` in a cell buffer. */
+/** `CellNeovim` on the notebook shown by the tab `tabId`, null until the notebook panel exists. `save` is `:w` in Neovim. */
 export function useActiveCellNeovim(tabId: string, terminal: CellTerminal, save: () => Promise<void>): CellNeovim | null {
   const adapter = useNotebookStore((state) => state.notebooks.get(tabId)?.adapter)
   const model = useNotebookStore((state) => state.notebooks.get(tabId)?.model)
@@ -22,7 +22,6 @@ export function useActiveCellNeovim(tabId: string, terminal: CellTerminal, save:
     if (!adapter || !model) return
     const shared = model.sharedModel as unknown as CellModelLike
     const next = new CellNeovim({
-      tabId,
       notebook: adapter.notebook as unknown as NotebookWidgetLike,
       model: shared,
       terminal: terminalRef.current,

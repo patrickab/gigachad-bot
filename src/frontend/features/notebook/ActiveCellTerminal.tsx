@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { TERMINAL_HOST_CLASS, cellTerminalHeight, type CellNeovimSnapshot } from "./cellNeovim"
 import type { CellTerminal } from "./cellTerminal"
 import { useActiveCellNeovim } from "./useActiveCellNeovim"
 
-const NOTHING_SHOWN: CellNeovimSnapshot = { key: null, cell: null, lines: 1 }
+const NOTHING_SHOWN: CellNeovimSnapshot = { id: null, cell: null, lines: 1 }
 const noSubscription = () => () => {}
 /** Lumino skips the key bindings of an event whose target or ancestor has this attribute. */
 const SUPPRESS_SHORTCUTS = "data-lm-suppress-shortcuts"
@@ -18,9 +18,22 @@ const SUPPRESS_SHORTCUTS = "data-lm-suppress-shortcuts"
  */
 export function ActiveCellTerminal({ tabId, terminal, save }: { tabId: string; terminal: CellTerminal; save: () => Promise<void> }) {
   const controller = useActiveCellNeovim(tabId, terminal, save)
-  const { key, cell, lines } = useSyncExternalStore(controller?.subscribe ?? noSubscription, controller?.getSnapshot ?? (() => NOTHING_SHOWN), () => NOTHING_SHOWN)
+  const { id, cell, lines } = useSyncExternalStore(controller?.subscribe ?? noSubscription, controller?.getSnapshot ?? (() => NOTHING_SHOWN), () => NOTHING_SHOWN)
   const hostRef = useRef<HTMLDivElement>(null)
-  const parent = key === null ? null : cell?.node.querySelector<HTMLElement>(".jp-InputArea") ?? null
+  const [, rerender] = useState(0)
+  const parent = id === null ? null : cell?.node.querySelector<HTMLElement>(".jp-InputArea") ?? null
+
+  // The notebook renders only the cells near the viewport (windowing): a cell that became active by keyboard or run-and-advance may get its input area a moment later
+  useEffect(() => {
+    if (id === null || !cell || parent) return
+    const observer = new MutationObserver(() => {
+      if (!cell.node.querySelector(".jp-InputArea")) return
+      observer.disconnect()
+      rerender((count) => count + 1)
+    })
+    observer.observe(cell.node, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [id, cell, parent])
 
   useLayoutEffect(() => {
     if (!cell || !parent) return

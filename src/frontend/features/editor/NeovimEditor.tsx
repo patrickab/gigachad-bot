@@ -7,7 +7,7 @@ import { neovimSessionUrl } from "@/lib/backend/urls"
 import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
-import type { CellCursor, CellDirection } from "@/features/notebook/cellTerminal"
+import type { CellCursor, CellText } from "@/features/notebook/cellTerminal"
 import { readToken } from "@/lib/palette"
 
 const FONT_SIZE = 13
@@ -106,16 +106,16 @@ interface NeovimOptions {
   onOpenFailed?: (path: string, message: string) => void
   /** The path of the buffer on screen, what a pasted image is stored next to. The document's own path without it, right while the session shows one buffer. */
   shownPath?: () => string
-  /** Shift+Enter reaches Neovim as the CSI-u sequence `<S-CR>` (xterm sends a plain Enter for it), what the notebook cell buffers map to "run cell". */
+  /** Shift+Enter reaches Neovim as the CSI-u sequence `<S-CR>` (xterm sends a plain Enter for it), what the notebook buffer maps to "run cell". */
   cellMode?: boolean
-  /** The text of cell buffer `key` after a change in Neovim. Notifications arrive in the order Neovim made them. */
-  onCellEdit?: (key: string, text: string) => void
-  /** Shift+Enter in cell buffer `key`, with the text it had. */
-  onCellRun?: (key: string, text: string) => void
-  /** `j`/`k` or the arrow keys left cell buffer `key` at its last (`next`) or first (`prev`) line, with the text it had. */
-  onCellExit?: (key: string, direction: CellDirection, text: string) => void
-  /** `:w` in cell buffer `key`, with the text it had. Nothing is answered, the notebook is saved. */
-  onCellSave?: (key: string, text: string) => void
+  /** The cell `id` holds `text` after a change in Neovim. Notifications arrive in the order Neovim made them. */
+  onCellEdit?: (id: string, text: string) => void
+  /** Neovim moved its cursor into the cell `id` (`j`/`k`, `G`, a search, an LSP jump). */
+  onCellFocus?: (id: string) => void
+  /** Shift+Enter in the cell `id`, with the text it had. */
+  onCellRun?: (id: string, text: string) => void
+  /** `:w`: nothing is answered, the notebook is saved. */
+  onCellSave?: () => void
 }
 
 /** The PNG a paste carries, null when the clipboard holds none or also plain text (copied spreadsheet cells come with a picture and paste as text). */
@@ -141,8 +141,8 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  * - `insertLines(text)` inserts lines below the cursor of the shown buffer, false while the session is not open
  * - Neovim's `p` and `"+p` ask the browser clipboard (`clipboard_read`). A screenshot is stored in `imgs/` next to the shown LaTeX or Markdown file and pasted as its reference, text as text, a failure is shown in Neovim. Ctrl+Shift+V of a screenshot does the same through `insert_lines`
  * - Unmounting or a new `document.key` discards unsaved edits
- * - `openCell(key, filename, text, cursor)` shows the scratch buffer of notebook cell `key` holding exactly `text`, `setCell(key, text)` replaces its text (no echo back) and `closeCell(key)` wipes it. Edits, Shift+Enter, `:w` and leaving the cell by `j`/`k` come back as `onCellEdit`, `onCellRun`, `onCellSave` and `onCellExit` in order
- * - `cellMode` makes the session a notebook's: it opens without the document's filename and content (only its `path`, the working directory when absolute) and sends Shift+Enter as `<S-CR>`
+ * - `setCells(filename, cells)` hands the notebook's code cells in order (the one buffer, no echo back, ids unique, `filename` gives the buffer's extension when Neovim creates it), `focusCell(id, cursor)` pins the window to a cell. Edits, Shift+Enter, `:w` and the cursor moving into another cell come back as `onCellEdit`, `onCellRun`, `onCellSave` and `onCellFocus` in order
+ * - `cellMode` makes the session a notebook's: it opens without the document's filename and content (only its `path`, which names the buffer beside the notebook when absolute and in a file root, and picks the working directory) and sends Shift+Enter as `<S-CR>`
  */
 export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string, path: string) => Promise<string>, onQuit: () => void, options: NeovimOptions = {}) {
   const [terminal, setTerminal] = useState<NeovimTerminal | null>(null)
@@ -165,9 +165,8 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   const openFile = useCallback((path: string) => sendFrameRef.current?.({ type: "open_file", path }, true) ?? false, [])
   const renameFile = useCallback((from: string, to: string) => sendFrameRef.current?.({ type: "renamed", from, path: to }, true) ?? false, [])
   const insertLines = useCallback((text: string) => sendFrameRef.current?.({ type: "insert_lines", text }, false) ?? false, [])
-  const openCell = useCallback((key: string, filename: string, text: string, cursor: CellCursor) => sendFrameRef.current?.({ type: "open_cell", key, filename, text, cursor }, true) ?? false, [])
-  const setCell = useCallback((key: string, text: string) => sendFrameRef.current?.({ type: "set_cell", key, text }, false) ?? false, [])
-  const closeCell = useCallback((key: string) => sendFrameRef.current?.({ type: "close_cell", key }, true) ?? false, [])
+  const setCells = useCallback((filename: string, cells: readonly CellText[]) => sendFrameRef.current?.({ type: "set_cells", filename, cells }, true) ?? false, [])
+  const focusCell = useCallback((id: string, cursor: CellCursor) => sendFrameRef.current?.({ type: "focus_cell", id, cursor }, true) ?? false, [])
 
   const documentKey = document?.key ?? null
   const documentPath = document?.path ?? null
@@ -277,10 +276,10 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (message.type === "selection") { readOptions().onSelection?.({ path: message.path, start_line: message.start_line, end_line: message.end_line, text: message.text }); return }
         if (message.type === "switched") { readOptions().onSwitched?.(message.path); return }
         if (message.type === "open_failed") { readOptions().onOpenFailed?.(message.path, message.message); return }
-        if (message.type === "cell_edit") { readOptions().onCellEdit?.(message.key, message.text); return }
-        if (message.type === "cell_run") { readOptions().onCellRun?.(message.key, message.text); return }
-        if (message.type === "cell_exit") { readOptions().onCellExit?.(message.key, message.direction, message.text); return }
-        if (message.type === "save_notebook") { readOptions().onCellSave?.(message.key, message.text); return }
+        if (message.type === "cell_edit") { readOptions().onCellEdit?.(message.id, message.text); return }
+        if (message.type === "cell_focus") { readOptions().onCellFocus?.(message.id); return }
+        if (message.type === "cell_run") { readOptions().onCellRun?.(message.id, message.text); return }
+        if (message.type === "save_notebook") { readOptions().onCellSave?.(); return }
         if (message.type === "clipboard_read") {
           try {
             send(JSON.stringify({ type: "clipboard", id: message.id, text: await readClipboardForPaste(message.path) }))
@@ -370,7 +369,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   }, [documentKey, generation])
 
   const restart = useCallback(() => setGeneration((value) => value + 1), [])
-  return { terminal, status, restart, setContent, openFile, renameFile, insertLines, openCell, setCell, closeCell }
+  return { terminal, status, restart, setContent, openFile, renameFile, insertLines, setCells, focusCell }
 }
 
 function stoppedMessage(exitCode: number | null, closeCode: number): string {

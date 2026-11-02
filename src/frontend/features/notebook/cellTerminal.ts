@@ -1,38 +1,40 @@
 import type { ReactNode } from "react"
 
-/** Where the cursor lands in a cell shown in the terminal. */
-export type CellCursor = "first" | "last"
+/** Where Neovim's cursor lands when its window is pinned to a cell: its first or last line, or wherever it is when the cell is the one it was in. */
+export type CellCursor = "first" | "last" | "keep"
 
-/** `next` leaves through the last line, `prev` through the first. */
-export type CellDirection = "next" | "prev"
+/** One code cell of the notebook as Neovim's buffer holds it. */
+export interface CellText {
+  id: string
+  text: string
+}
 
-/** What Neovim reports about the cell buffers, in the order it happened. `key` names the cell as in `CellTerminal.open`. */
+/** What Neovim reports about the notebook buffer, in the order it happened. `id` is the cell's id in the notebook. */
 export interface CellTerminalListener {
-  /** The buffer of `key` holds `text` after an edit. */
-  edit(key: string, text: string): void
-  /** Shift+Enter in the buffer of `key`. */
-  run(key: string, text: string): void
-  /** `j`/`k` or the arrows left the buffer of `key` through its last or first line. */
-  exit(key: string, direction: CellDirection, text: string): void
-  /** `:w` in the buffer of `key`: the notebook is saved, there is no file. */
-  save(key: string, text: string): void
+  /** The cell `id` holds `text` after an edit. */
+  edit(id: string, text: string): void
+  /** The cursor moved into the cell `id` (`j`/`k`, `G`, a search, an LSP jump): the notebook shows it as the active one. */
+  focus(id: string): void
+  /** Shift+Enter in the cell `id`. */
+  run(id: string, text: string): void
+  /** `:w`: the notebook is saved, there is no file. */
+  save(): void
 }
 
 /**
- * A Neovim terminal that edits one notebook cell at a time, handed in by whoever owns the Neovim session (`features/editor`: the notebook feature does not import it).
+ * The Neovim terminal of a notebook, handed in by whoever owns the Neovim session (`features/editor`: the notebook feature does not import it).
+ * Neovim holds the code cells of the notebook as one buffer (one script for the LSP) and its window shows the focused cell only.
  * Every method returns false while the session cannot take the frame.
  */
 export interface CellTerminal {
   /** `starting` until the session runs, `stopped` once it died (`restart` brings it back). */
   state: "starting" | "running" | "stopped"
-  /** Identifies the running session, another object after a restart: what is open in Neovim belongs to one session. Null unless `running`. */
+  /** Identifies the running session, another object after a restart: what Neovim holds belongs to one session. Null unless `running`. */
   session: object | null
-  /** Show the buffer of cell `key` holding exactly `text`. `filename` only picks the filetype. */
-  open(key: string, filename: string, text: string, cursor: CellCursor): boolean
-  /** The cell `key` changed elsewhere: its buffer takes `text` without echoing it back. */
-  set(key: string, text: string): boolean
-  /** The cell `key` is gone: wipe its buffer. */
-  close(key: string): boolean
+  /** The code cells in notebook order, the whole truth: Neovim replaces what differs without echoing it back. `filename` only picks the filetype. */
+  setCells(filename: string, cells: readonly CellText[]): boolean
+  /** The window shows the cell `id`. */
+  focusCell(id: string, cursor: CellCursor): boolean
   /** Keys go to the terminal. */
   focus(): void
   restart(): void

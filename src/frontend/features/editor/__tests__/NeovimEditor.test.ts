@@ -149,19 +149,18 @@ describe("useNeovimTerminal frames", () => {
 })
 
 describe("useNeovimTerminal notebook cells", () => {
-  it("sends the cell frames with the key of the cell, keeping open and close for after the open frame", async () => {
+  it("sends the notebook frames, keeping them for after the open frame", async () => {
     const { result, socket } = await connect()
 
-    expect(result.current.openCell("nb#a", "cell.py", "x = 1", "last")).toBe(true)
-    expect(result.current.closeCell("nb#b")).toBe(true)
-    expect(result.current.setCell("nb#a", "x = 2")).toBe(false)
+    expect(result.current.setCells("notebook.py", [{ id: "a", text: "x = 1" }, { id: "b", text: "" }])).toBe(true)
+    expect(result.current.focusCell("b", "first")).toBe(true)
     socket.open()
-    expect(result.current.setCell("nb#a", "x = 3")).toBe(true)
+    expect(result.current.focusCell("a", "keep")).toBe(true)
 
     expect(socket.frames.slice(1)).toEqual([
-      { type: "open_cell", key: "nb#a", filename: "cell.py", text: "x = 1", cursor: "last" },
-      { type: "close_cell", key: "nb#b" },
-      { type: "set_cell", key: "nb#a", text: "x = 3" },
+      { type: "set_cells", filename: "notebook.py", cells: [{ id: "a", text: "x = 1" }, { id: "b", text: "" }] },
+      { type: "focus_cell", id: "b", cursor: "first" },
+      { type: "focus_cell", id: "a", cursor: "keep" },
     ])
   })
 
@@ -175,19 +174,19 @@ describe("useNeovimTerminal notebook cells", () => {
   it("hands the notifications of Neovim to the cell options in the order they arrive", async () => {
     const seen: string[] = []
     const { socket } = await connect({
-      onCellEdit: (key, text) => seen.push(`edit ${key} ${text}`),
-      onCellRun: (key, text) => seen.push(`run ${key} ${text}`),
-      onCellExit: (key, direction, text) => seen.push(`exit ${key} ${direction} ${text}`),
-      onCellSave: (key, text) => seen.push(`save ${key} ${text}`),
+      onCellEdit: (id, text) => seen.push(`edit ${id} ${text}`),
+      onCellFocus: (id) => seen.push(`focus ${id}`),
+      onCellRun: (id, text) => seen.push(`run ${id} ${text}`),
+      onCellSave: () => seen.push("save"),
     })
     socket.open()
 
-    socket.receive({ type: "cell_edit", key: "nb#a", text: "x" })
-    socket.receive({ type: "cell_run", key: "nb#a", text: "xy" })
-    socket.receive({ type: "cell_exit", key: "nb#a", direction: "prev", text: "xyz" })
-    socket.receive({ type: "save_notebook", key: "nb#a", text: "xyzw" })
+    socket.receive({ type: "cell_edit", id: "a", text: "x" })
+    socket.receive({ type: "cell_focus", id: "b" })
+    socket.receive({ type: "cell_run", id: "b", text: "xy" })
+    socket.receive({ type: "save_notebook" })
 
-    expect(seen).toEqual(["edit nb#a x", "run nb#a xy", "exit nb#a prev xyz", "save nb#a xyzw"])
+    expect(seen).toEqual(["edit a x", "focus b", "run b xy", "save"])
     expect(socket.frames).toHaveLength(1)
   })
 
