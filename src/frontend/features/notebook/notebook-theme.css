@@ -160,10 +160,11 @@ html.light:root { --jp-scrollbar-thumb-color: 150, 146, 138; --jp-layout-color1:
 /* Syntax palette, copied from the Neovim scheme `~/.os/chezmoi/dot_config/nvim/colors/oh-lucy-evening-custom.lua` (chezmoi source of ~/.config/nvim/colors/).
    One file holds both palettes: `palettes.dark` here, `palettes.light` (the same file, picked when Neovim's 'background' is light) under `html.light:root`.
    The app defines no hue tokens for code (Shiki's andromeeda/snazzy-light in chat code blocks are other schemes), so these are the single source in the app.
-   Each value is named after the palette key it came from: keyword red_key_w, constant pink, function green_func, type blue_type, punctuation gray_punc,
+   Each value is named after the palette key it came from: keyword red_key_w, constant pink, boolean boolean, function green_func, type blue_type, punctuation gray_punc,
    comment comment, string yellow, attribute orange, quote accent */
 html:root {
   --nb-syn-keyword: #ff7da3;
+  --nb-syn-boolean: #b898dd;
   --nb-syn-constant: #bda9d4;
   --nb-syn-function: #7ec49d;
   --nb-syn-type: #8bb8d0;
@@ -175,6 +176,7 @@ html:root {
 }
 html.light:root {
   --nb-syn-keyword: #c61365;
+  --nb-syn-boolean: #8635cc;
   --nb-syn-constant: #805ab8;
   --nb-syn-function: #00814f;
   --nb-syn-type: #0573aa;
@@ -202,6 +204,10 @@ html.light:root {
 /* CodeMirror highlight classes are hashed (.ͼ..), so a weight reset is the only handle on the tags JupyterLab makes bold (keyword, operator, bool, headings).
    The scheme has bold off for keywords and operators (`@keyword.*`, `@operator`), comments stay italic as in Neovim (`@comment`) */
 .gc-nb .cm-line span { font-weight: inherit !important; }
+/* `self`/`cls` (@variable.builtin) and decorator names (@attribute) have no tag in Lezer's Python grammar: syntaxHighlight.ts marks them with these classes.
+   The mark wraps the token's own highlight span, so the color needs the specificity of the inner rule */
+.gc-nb .cm-line .gc-syn-self, .gc-nb .cm-line .gc-syn-self span { color: var(--nb-syn-constant); }
+.gc-nb .cm-line .gc-syn-attribute, .gc-nb .cm-line .gc-syn-attribute span { color: var(--nb-syn-string); }
 
 /* --- Keyboard focus: a visible ring in both modes. Command mode rings the cell's content column (not the prompt gutter beside it), edit mode the editor --- */
 .gc-nb .jp-Notebook.jp-mod-commandMode .jp-Cell.jp-mod-active:focus-visible { box-shadow: none; }

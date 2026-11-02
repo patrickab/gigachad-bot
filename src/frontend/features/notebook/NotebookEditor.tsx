@@ -11,6 +11,7 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { appMarkdownFactory } from "./markdownRenderer"
 import { NotebookToolbar } from "./NotebookToolbar"
 import { createNotebookServiceManager } from "./serviceManager"
+import { NOTEBOOK_EDITOR_EXTENSIONS } from "./syntaxHighlight"
 import { useNotebookFile } from "./useNotebookFile"
 import type { SharedNotebookLike } from "./notebookSync"
 import { useNotebookKernel } from "./useNotebookKernel"
@@ -106,6 +107,7 @@ export function NotebookEditor({ path, tabId }: { path: string; tabId: string })
                 serviceManager={serviceManager}
                 kernelId={kernel.kernelId ?? undefined}
                 renderers={RENDERERS}
+                editorExtensions={NOTEBOOK_EDITOR_EXTENSIONS}
                 cellSidebarMargin={0}
                 height="100%"
                 maxHeight="100%"
