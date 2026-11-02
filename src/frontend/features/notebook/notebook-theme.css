@@ -240,3 +240,7 @@ html.light .gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0
 .jp-Completer .jp-Completer-item.jp-mod-active { background: var(--hover-overlay-strong); color: var(--ink); }
 .jp-Completer .jp-Completer-type[data-color-index] { background: var(--surface-elevated); color: var(--ink-muted); }
 .jp-Completer .jp-Completer-typeExtended { color: var(--ink-subtle); }
+
+/* --- Neovim on the active cell (ActiveCellTerminal): the terminal takes the place of the cell's editor, which stays hidden while it is there --- */
+.gc-nb .jp-Cell.gc-nvim-cell .jp-InputArea-editor { display: none; }
+.gc-nb .gc-nvim-host { flex: 1 1 0; min-width: 0; }

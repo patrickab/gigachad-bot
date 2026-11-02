@@ -9,6 +9,8 @@ import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadSta
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
 import { appMarkdownFactory } from "./markdownRenderer"
+import { ActiveCellTerminal } from "./ActiveCellTerminal"
+import type { CellTerminal } from "./cellTerminal"
 import { NotebookToolbar } from "./NotebookToolbar"
 import { createNotebookServiceManager } from "./serviceManager"
 import { NOTEBOOK_EDITOR_EXTENSIONS } from "./syntaxHighlight"
@@ -50,8 +52,8 @@ function useNotebookServiceManager(): ServiceManager {
   return manager
 }
 
-/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. */
-export function NotebookEditor({ path, tabId }: { path: string; tabId: string }) {
+/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. With a `cellTerminal` the active cell is edited in Neovim. */
+export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; tabId: string; cellTerminal: CellTerminal | null }) {
   const file = useNotebookFile(path)
   const kernel = useNotebookKernel(path, file.initial !== null)
   const theme = useThemeName()
@@ -117,6 +119,7 @@ export function NotebookEditor({ path, tabId }: { path: string; tabId: string })
             </JupyterReactTheme>
           </div>
         ) : <LoadingPlaceholder />}
+        {initial && cellTerminal && <ActiveCellTerminal tabId={tabId} terminal={cellTerminal} save={file.save} />}
       </div>
     </div>
   )

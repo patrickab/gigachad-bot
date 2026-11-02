@@ -433,8 +433,8 @@ export function diffNotebook(base: NotebookContent, current: NotebookContent, in
   return ops
 }
 
-/** Replace the text of `cell` with `value`, touching only the span that differs so a cursor elsewhere in the cell stays put. */
-function updateSource(cell: SharedCellLike, value: string): void {
+/** Replace the text of `cell` with `value`, touching only the span that differs so a cursor elsewhere in the cell stays put. Call inside `model.transact(..., false)` to keep it out of the undo stack. */
+export function setCellSource(cell: Pick<SharedCellLike, "getSource" | "updateSource">, value: string): void {
   const old = cell.getSource()
   if (old === value) return
   let start = 0
@@ -481,7 +481,7 @@ export function applyNotebookOps(model: SharedNotebookLike, ops: readonly Notebo
     for (const op of fields) {
       switch (op.type) {
         case "source":
-          updateSource(model.cells[op.index], op.value)
+          setCellSource(model.cells[op.index], op.value)
           break
         case "outputs":
           model.cells[op.index].setOutputs?.(op.outputs)

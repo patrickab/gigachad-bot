@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
 import { LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
+import type { CellTerminal } from "./cellTerminal"
 import { onFileMove, type FileMove } from "@/lib/backend/fileEvents"
 
 // The notebook libraries touch `document` while they load, so the editor is a client-only chunk.
@@ -20,8 +21,8 @@ function useEditorPath(path: string): { path: string; generation: number } {
   return current
 }
 
-/** A notebook (`.ipynb`) of the file at `path`, shown by the tab `tabId`. Keyed by the tab, so a rename never remounts the editor. */
-export function NotebookDocument({ path, tabId }: { path: string; tabId: string }) {
+/** A notebook (`.ipynb`) of the file at `path`, shown by the tab `tabId`. Keyed by the tab, so a rename never remounts the editor. A `cellTerminal` edits the active cell in Neovim, without one the cells are CodeMirror. */
+export function NotebookDocument({ path, tabId, cellTerminal = null }: { path: string; tabId: string; cellTerminal?: CellTerminal | null }) {
   const editor = useEditorPath(path)
-  return <NotebookEditor key={`${tabId}:${editor.generation}`} path={editor.path} tabId={tabId} />
+  return <NotebookEditor key={`${tabId}:${editor.generation}`} path={editor.path} tabId={tabId} cellTerminal={cellTerminal} />
 }

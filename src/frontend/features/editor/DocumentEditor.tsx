@@ -6,7 +6,7 @@ import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
 import { ArchitectureSourceEditor, TextDocumentEditor, type DocumentEditorProps } from "./TextDocumentEditor"
 import { RawFileView } from "./RawFileView"
 import { EditorShell } from "./EditorShell"
-import { NotebookDocument } from "@/features/notebook/NotebookDocument"
+import { NotebookWithNeovim } from "./NotebookNeovim"
 import { TabContext } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -23,7 +23,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const tabId = useContext(TabContext)?.tab.id
   const ownId = useId()
   if (kindOf(props.path) === "image") return <ImageDocument path={props.path} overlay={props.overlay} onClose={props.onClose} />
-  if (isNotebookPath(props.path)) return <EditorShell overlay={!!props.overlay} fullscreen={false}><NotebookDocument path={props.path} tabId={tabId ?? ownId} /></EditorShell>
+  if (isNotebookPath(props.path)) return <EditorShell overlay={!!props.overlay} fullscreen={false}><NotebookWithNeovim path={props.path} tabId={tabId ?? ownId} /></EditorShell>
   if (isArchitecturePath(props.path)) return <ArchitectureSourceEditor {...props} />
   if (props.path.endsWith(".canvas")) {
     const { persistOverride } = props
