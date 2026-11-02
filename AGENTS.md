@@ -59,3 +59,14 @@ omp tabs embed unmodified upstream omp-web (`kahme247/ompweb`). Everything gigac
 - **One shared iframe**: tabs switch it by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
 - **Atomic commits**: one concern each (adapter, frame, tabs, sidebar, ...), the body names what omp-web contract it relies on
 - **After an omp-web or overlay change**: run the overlay checks in a private check checkout, then the integrator restarts omp-web (it resets its worktree to `GIGACHAD_OMP_WEB_REF` and reapplies the overlay on start), runs `pytest tests/test_omp_web.py` and smokes an omp tab: open a session, switch omp tabs, send a prompt only in an approved throwaway session. Concurrent work: `.docs/integration-ompweb.md`
+
+## Jupyter notebooks
+
+`.ipynb` files open in `@datalayer/jupyter-react`. Architecture: `.docs/architecture.md`, "Jupyter notebooks".
+
+- **Adapter-rule exception**: `@jupyterlab/services` speaks the Jupyter protocol from our bundle, but all traffic goes through the backend proxy `/api/jupyter/server/` (same origin, the token stays server-side). The browser never reaches a Jupyter server directly
+- **One place per side**:
+  - Frontend: `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*` are imported only in `src/frontend/features/notebook/` (eslint enforces it)
+  - Backend: Jupyter server URLs, token and response shapes are known only by `src/lib/jupyter.py`. `routes/jupyter.py` maps its errors and never builds upstream URLs
+- **Keep the `package.json` overrides** `@jupyter/web-components` and `@jupyter/react-components` at `^0.17.1`. With npm's default tree three copies of `@jupyter/web-components` share one FAST foundation and its design tokens recurse until the page freezes
+- **No patch-package**: `redeploy.sh` installs with `npm ci --ignore-scripts`, so a postinstall patch never applies. Library fixes go into `next.config.mjs` as declarative webpack config

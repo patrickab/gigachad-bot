@@ -34,9 +34,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- server.py                 FastAPI composition, lifecycle and shared error mapping
 |   |   |-- http_plumbing.py          Exception-to-HTTP mapping, SSE responses, inline image decoding
 |   |   |-- identity.py               Request identity and host-access capability
-|   |   |-- websocket_origin.py       `is_trusted_origin`: origin policy of the terminal and file watch WebSockets
+|   |   |-- websocket_origin.py       `is_trusted_origin`, `is_allowed_websocket` (origin plus host-access gate of the terminal, file watch and Jupyter WebSockets) and `require_trusted_request` (trusted `Origin` for changing requests, no cross-site reads)
 |   |   |-- sync.py                   PostgreSQL notification broker
 |   |   |-- omp_web_gate.py           Identity-checking frame proxy
+|   |   |-- reverse_proxy.py          Streaming proxy plumbing shared by the omp-web and LearnHarness gates and the Jupyter proxy route
 |   |   |-- install_deps.py           gigachad-install entry point
 |   |   |-- sidecar.py                Desktop (Tauri) entry: prints `{"event":"ready","port":…}` once FastAPI listens
 |   |   `-- routes/                   HTTP, SSE and WebSocket boundaries
@@ -59,6 +60,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
 |   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/switched/open_failed/background frames, `open_file`/`insert_lines`/`set_content`/`renamed` input
+|   |       |-- jupyter.py            Kernelspecs, `POST`/`DELETE /api/jupyter/kernel`, HTTP and WebSocket proxy `/api/jupyter/server/` (trusted-request and host-access gates)
 |   |       |-- file_watch.py         `WS /api/files/watch`: replaceable watch set in, `changed`/`refused` frames out
 |   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, promote a `.tex` to a folder entry, pasted images, chat-key session links
 |   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files
@@ -132,6 +134,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
 |   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge
+|   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs and venv specs, kernel per resolved path, proxy allowlist and session check, idle cull, `move_kernel`/`shutdown_kernels_under`
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
 |   |   |-- latex_references.py       `rewrite_references`: repoint `\input`, `\include`, `\includegraphics`, `\bibliography` and `\addbibresource` references of a LaTeX project after a rename
@@ -217,6 +220,12 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
 |       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
+|       |   |-- notebook/             Jupyter notebook kind, the only importer of `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*`
+|       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab) and the library notebook
+|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Toolbar with kernelspec picker, kernel start by path, `ServiceManager` through the backend proxy
+|       |   |   |-- useNotebookFile.ts, notebookSync.ts Load, debounced save and follow over `useRootFileDocument`, pure nbformat serialization and cell diff (merge theirs)
+|       |   |   |-- useKernelShutdown.ts Kernel shutdown when a notebook's last tab closes
+|       |   |   `-- notebook-theme.css, markdownRenderer.tsx, empty.css App theme through `--jp-*` variables, Markdown cells through `LaTeXMarkdown`, stub for an unused library stylesheet
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
 |       |   |   |-- useTexProject.ts, LatexRootPicker.tsx Project of the shown file (folder, root, candidates), root choice
 |       |   |   `-- useLatexBuild.ts  Root build queue, rebuilds on any change in the folder
@@ -248,6 +257,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- FloatingWindow.tsx
 |       |   |   |-- MenuPopover.tsx   Trigger plus popover menu, closed by outside press or Escape
 |       |   |   |-- PillTabs.tsx, BoardColumn.tsx, Field.tsx
+|       |   |   |-- IconButton.tsx, StatusDot.tsx Quiet square icon button with focus ring, status tone dot (`StatusTone`)
 |       |   |   `-- file-tree/        Shared file tree component and hook
 |       |   `-- content/              Markdown, code, PDF and plot rendering
 |       |       |-- LaTeXMarkdown.tsx Markdown renderer shell
@@ -274,6 +284,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- domain/               Browser domain types and pure document/graph logic
 |       |   |   |-- types.ts              Chat core, models, omp
 |       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts    `files.ts` holds `isNewFileIn`, a folder entry of a project lists `children`
+|       |   |   |-- jupyter.ts            Kernelspec list and running kernel shapes of `/api/jupyter/*`
 |       |   |   |-- workbench.ts, latex.ts    Workbench kinds, notes guard, rename path rewrite, LaTeX build result and tex project
 |       |   |   |-- architecture.ts
 |       |   |   |-- canvasDocument.ts
@@ -383,6 +394,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Neovim editing, terminal save bridge or agent-edit merge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `text_merge.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`, `tests/test_text_merge.py`; filesystem/identity policy stays with its existing owners |
 | Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, buffer routing in `features/navigation/tabs.ts`, rename cascade in `project_rename.py`, `lib/backend/fileEvents.ts`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
 | LaTeX build, tex projects or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `file_walk.py` (build output), `routes/workbench.py` (promote, images), `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
+| Jupyter notebooks (editor, kernels, proxy, file sync) | `src/lib/jupyter.py`, `src/backend/routes/jupyter.py`, `src/frontend/features/notebook/` | `src/backend/reverse_proxy.py`, `websocket_origin.py` (`require_trusted_request`), rename/delete hooks in `routes/documents.py`, `lib/domain/jupyter.ts`, `hooks/useRootFileDocument.ts`, `lib/backend/fileEvents.ts` (`announceFileClosed`), `next.config.mjs`, `AGENTS.md` "Jupyter notebooks"; `tests/test_jupyter.py`, notebook `__tests__/` |
 | File chat sidebar (omp sessions per file or LaTeX project folder) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `fileLead.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
 | Learn mode | `src/lib/learnharness.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
