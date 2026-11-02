@@ -890,6 +890,15 @@ class _Browser:
 
         return await asyncio.wait_for(receive(), 10)
 
+    async def frames(self, count: int) -> list[dict]:
+        """The next *count* JSON frames the server sent, in order."""
+        return [await asyncio.wait_for(self._frames.get(), 10) for _ in range(count)]
+
+    async def silent(self, seconds: float = 0.3) -> None:
+        """No frame arrives within *seconds*."""
+        await asyncio.sleep(seconds)
+        assert self._frames.empty(), f"unexpected frame {self._frames.get_nowait()}"
+
     async def shows(self, text: str) -> None:
         """Wait until the terminal output holds *text*."""
 

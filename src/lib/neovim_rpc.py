@@ -19,14 +19,22 @@
   last copy is pasted instead (`yy` then `p` works without the browser's clipboard), a copy stays in Neovim's registers.
   It replaces the provider the user's config chose (`vim.g.clipboard`, even one already in use), the `clipboard` option
   decides which registers reach it
-- With `cell_session` the first document is an empty placeholder. `_G.gigachad_open_cell` shows a cell document: an unlisted
-  scratch buffer whose text is exactly the cell (its lines joined by newlines), with the cursor on its first or last line, replacing
-  the placeholder. `_G.gigachad_set_cell` replaces its text without an echo, `_G.gigachad_close_cell` wipes it. The cell
-  buffer sends notifications: `cell_edit` (key, text) from `TextChanged*` after 40 ms, only when the change tick and the text
-  moved past what the caller knows, `cell_run` (key, text) from `<S-CR>` in normal and insert mode, `cell_exit` (key,
-  "next"|"prev", text) when `j`, `k`, `<Down>` or `<Up>` cannot move any further, and `save_notebook` (key, text) from `:w`.
-  The three of them flush a pending `cell_edit` first. The buffer never counts as modified, and its `j`, `k`, `<Down>`,
-  `<Up>` mappings replace the user's
+- With `cell_session` the first document is an empty placeholder. `_G.gigachad_set_cells` replaces it with the notebook buffer:
+  one buffer that holds all code cells as one script, each cell led by a marker line (`# %%`). Its name is a virtual path
+  beside the notebook when the caller gives one (never written: `BufWriteCmd` and `FileWriteCmd` are intercepted, no swap or undo
+  file, the buffer keeps an empty `buftype` or `vim.fs.root` would not use its name), else a private copy. It tracks the cells by
+  extmarks on their marker lines, keyed by cell
+  id. Changes that alter, remove or add a marker line are undone (the snapshot of the last intact text is put back) with a short
+  echo, a cell that lost all its lines gets an empty one. Lines put above the first marker (LSP auto-import) move into the first
+  cell. The cursor never rests on a marker line, it goes on into the neighbor cell. The window is pinned to the active cell
+  (`scrolloff=0`, top line the cell's first line, the lines outside it hidden by `conceal_lines` extmarks, so `conceallevel`
+  is raised to 2, Neovim 0.11+) on `CursorMoved*` and `WinScrolled`, and a cursor that leaves the active cell activates the cell
+  it lands in. `_G.gigachad_focus_cell` activates a cell from outside. A rebuild (cells added, removed or moved) drops the undo
+  history, since undoing a step from before it would remove a marker line
+- `more` is off and `messagesopt` makes messages time out after the user's config ran, a hit-enter prompt would stop every request
+- The notebook buffer sends notifications: `cell_edit` (id, text) per changed cell 40 ms after typing (only when its text
+  moved past what the caller knows), `cell_focus` (id) when the cursor crossed into another cell, `cell_run` (id, text) from
+  `<S-CR>` and `save_notebook` from `:w`. The last two flush pending `cell_edit`s first
 """
 
 from __future__ import annotations
@@ -47,6 +55,10 @@ _READ_CHUNK = 65536
 SETUP_LUA = r"""
 local channel, first_path, first_id, base_path, ask_keymap, own_clipboard, cell_session = ...
 if base_path == vim.NIL then base_path = nil end
+-- A message longer than the command line would stop Neovim at a hit-enter or "more" prompt, and a stopped Neovim answers no request
+-- (an LSP client quitting is such a message). Set after the user's config, the messages wait and go away by themselves
+vim.o.more = false
+pcall(function() vim.o.messagesopt = "wait:2000,history:500" end)
 
 -- Buffers of the documents by id, and back
 local tracked = {}
@@ -98,14 +110,16 @@ local function highlight_remote_edit(buffer, first, count)
   end, REMOTE_EDIT_HIGHLIGHT_MS)
 end
 
--- Rewrites only the changed line ranges, bottom-up, so cursor, view and marks stay on their text.
-local function apply_lines(buffer, new_lines, highlight)
-  local old_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+-- Rewrites only the changed line ranges, bottom-up, so cursor, view and marks stay on their text. `from`, `to` limit it to
+-- the rows [from, to) the new lines replace, the whole buffer by default.
+local function apply_lines(buffer, new_lines, highlight, from, to)
+  from = from or 0
+  local old_lines = vim.api.nvim_buf_get_lines(buffer, from, to or -1, false)
   local hunks = diff_lines(table.concat(old_lines, "\n") .. "\n", table.concat(new_lines, "\n") .. "\n", { result_type = "indices" })
   vim.api.nvim_buf_clear_namespace(buffer, remote_edit_namespace, 0, -1)
   for index = #hunks, 1, -1 do
     local start_old, count_old, start_new, count_new = unpack(hunks[index])
-    local first = count_old > 0 and start_old - 1 or start_old
+    local first = (count_old > 0 and start_old - 1 or start_old) + from
     local replacement = vim.list_slice(new_lines, start_new, start_new + count_new - 1)
     vim.api.nvim_buf_set_lines(buffer, first, first + count_old, false, replacement)
     if highlight then highlight_remote_edit(buffer, first, count_new) end
@@ -237,168 +251,507 @@ function _G.gigachad_show(id)
   return true
 end
 
--- Cell documents: scratch buffers whose text is exactly one notebook cell (the lines joined by "\n", nothing appended).
--- They are unlisted, never write a file, and report their changes as `cell_edit`, `cell_run`, `cell_exit` and
--- `save_notebook` notifications. A cell is `{ timer, tick, text }`: the change tick and text the caller last knew
+-- The notebook buffer: all code cells of the notebook as one script, each led by a marker line. It is an unlisted buffer on a
+-- file name (virtual beside the notebook, or a private copy: filetype detection, the user's plugins and LSP see one file) and
+-- never writes it. The caller holds the
+-- notebook, `nb` is `{ buffer, marker, order, index, marks, known, lookalikes, snapshot, tick, active, timer, busy }`:
+--   order      the cell ids in notebook order, `index` maps an id to its position
+--   marks      the extmark (`cells_namespace`) of every cell's marker line, how a cell is found: never by counting marker text
+--   known      the text of every cell as the caller last knew it, what `cell_edit` is measured against
+--   lookalikes lines inside the cells' own text that read like a marker and are none
+--   snapshot   `{ lines, rows }` the last text whose marker lines were intact, put back when a change breaks them
+--   tick       the change tick `snapshot` belongs to, `active` the cell the window is pinned to, `busy` while this code edits
+-- Changes of the cells and moves into another cell leave as `cell_edit`, `cell_focus`, `cell_run` and `save_notebook`
 local uv = vim.uv or vim.loop
 local EDIT_DEBOUNCE_MS = 40
-local cells = {}
--- With `cell_session` the first document is an empty placeholder that the first opened cell replaces
+local cells_namespace = vim.api.nvim_create_namespace("gigachad_cells")
+local hidden_namespace = vim.api.nvim_create_namespace("gigachad_cells_hidden")
+-- With `cell_session` the first document is an empty placeholder that the notebook buffer replaces
 local placeholder_id = cell_session == true and first_id or nil
+local nb = nil
 
-local function cell_text(buffer) return table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n") end
-
--- Records what the caller now holds, so the change that caused it never comes back as an edit.
-local function synced(buffer)
-  local state = cells[buffer]
-  state.tick = vim.api.nvim_buf_get_changedtick(buffer)
-  state.text = cell_text(buffer)
-  vim.bo[buffer].modified = false
+local function forget_notebook()
+  if nb == nil then return end
+  nb.timer:stop()
+  nb.timer:close()
+  nb = nil
 end
 
--- Sends the text when it differs from what the caller knows, the change tick spares comparing the text.
-local function flush_cell(buffer)
-  local state = cells[buffer]
-  if state == nil then return end
-  state.timer:stop()
-  if ids[buffer] == nil or not vim.api.nvim_buf_is_loaded(buffer) then return end
-  local tick = vim.api.nvim_buf_get_changedtick(buffer)
-  if tick == state.tick then return end
-  state.tick = tick
-  local text = cell_text(buffer)
-  if text == state.text then return end
-  state.text = text
-  vim.rpcnotify(channel, "cell_edit", ids[buffer], text)
+local function notebook_window()
+  local current = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(current) == nb.buffer then return current end
+  local window = vim.fn.bufwinid(nb.buffer)
+  return window ~= -1 and window or nil
 end
 
-local function drop_cell(buffer)
-  local state = cells[buffer]
-  if state == nil then return end
-  cells[buffer] = nil
-  state.timer:stop()
-  state.timer:close()
+-- The row (0-based) of a cell's marker line.
+local function mark_row(id)
+  return vim.api.nvim_buf_get_extmark_by_id(nb.buffer, cells_namespace, nb.marks[id], {})[1]
 end
 
-local function exit_cell(buffer, direction)
-  flush_cell(buffer)
-  vim.rpcnotify(channel, "cell_exit", ids[buffer], direction, cell_text(buffer))
+-- The rows [first content row, row after the last) of the cell at `index`, 0-based.
+local function cell_range(index)
+  local next_id = nb.order[index + 1]
+  local stop = next_id ~= nil and mark_row(next_id) or vim.api.nvim_buf_line_count(nb.buffer)
+  return mark_row(nb.order[index]) + 1, stop
 end
 
-local function install_cell(buffer)
-  local options = { buffer = buffer }
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
-    buffer = buffer,
-    callback = function()
-      vim.bo[buffer].modified = false -- the caller holds the text, nothing is left unsaved here
-      local state = cells[buffer]
-      if state ~= nil and not state.timer:is_active() then
-        state.timer:start(EDIT_DEBOUNCE_MS, 0, vim.schedule_wrap(function() flush_cell(buffer) end))
+-- The cell holding the 0-based `row`, and whether the row is its marker line.
+local function locate(row)
+  local low, high, found = 1, #nb.order, nil
+  while low <= high do
+    local middle = math.floor((low + high) / 2)
+    if mark_row(nb.order[middle]) <= row then
+      found, low = middle, middle + 1
+    else
+      high = middle - 1
+    end
+  end
+  return found, found ~= nil and mark_row(nb.order[found]) == row
+end
+
+local function cell_lines(text) return vim.split(text, "\n", { plain = true }) end
+
+-- The lines of the script for `cells` and the row of every marker.
+local function script_of(cells, marker)
+  local lines, rows = {}, {}
+  for index, cell in ipairs(cells) do
+    rows[index] = #lines
+    lines[#lines + 1] = marker
+    for _, line in ipairs(cell_lines(cell.text)) do lines[#lines + 1] = line end
+  end
+  if #lines == 0 then lines[1] = "" end
+  return lines, rows
+end
+
+local function marker_count(lines)
+  local count = 0
+  for _, line in ipairs(lines) do
+    if line == nb.marker then count = count + 1 end
+  end
+  return count
+end
+
+-- The marker rows in cell order when every marker line is where its extmark says and no other line reads as one, else nil.
+local function intact(lines)
+  local rows, previous = {}, -1
+  for index, id in ipairs(nb.order) do
+    local row = mark_row(id)
+    if row == nil or row <= previous or lines[row + 1] ~= nb.marker then return nil end
+    rows[index], previous = row, row
+  end
+  if #rows > 0 and rows[1] ~= 0 then return nil end
+  if marker_count(lines) ~= #rows + nb.lookalikes then return nil end
+  return rows
+end
+
+-- A cell has at least one line, as an empty buffer does: gives one to every cell that lost all of its lines. A cursor the
+-- deleted line left on the marker below goes onto the new line.
+local function fill_empty_cells(lines, rows)
+  local filled = false
+  local window = notebook_window()
+  for index = #rows, 1, -1 do
+    local stop = rows[index + 1] or #lines
+    if stop == rows[index] + 1 then
+      local cursor = window ~= nil and vim.api.nvim_win_get_cursor(window)[1] or nil
+      vim.api.nvim_buf_set_lines(nb.buffer, stop, stop, false, { "" })
+      if cursor ~= nil and cursor == (rows[index + 1] ~= nil and stop + 1 or stop) then
+        vim.api.nvim_win_set_cursor(window, { rows[index] + 2, 0 })
       end
-    end,
-  })
+      filled = true
+    end
+  end
+  return filled
+end
+
+-- Edits made by this code, they are no change to report or to check.
+local function quietly(work)
+  nb.busy = true
+  local ok, failure = pcall(work)
+  nb.busy = false
+  if not ok then error(failure, 0) end
+end
+
+-- Lines above the first marker (an LSP quick fix that adds an import, `:0put`) join the first cell as its first lines: the marker
+-- line moves back to the top. False when something else is off. Joins the undo step of the change that put them there.
+local function adopt_head(lines)
+  local first = nb.order[1] ~= nil and mark_row(nb.order[1]) or nil
+  if first == nil or first <= 0 or lines[first + 1] ~= nb.marker then return false end
+  for row = 1, first do
+    if lines[row] == nb.marker then return false end
+  end
+  local previous = first
+  for index = 2, #nb.order do
+    local row = mark_row(nb.order[index])
+    if row == nil or row <= previous or lines[row + 1] ~= nb.marker then return false end
+    previous = row
+  end
+  local moved = vim.list_slice(lines, 1, first)
+  table.insert(moved, 1, nb.marker)
+  quietly(function()
+    pcall(vim.cmd, "undojoin")
+    vim.api.nvim_buf_set_lines(nb.buffer, 0, first + 1, false, moved)
+    vim.api.nvim_buf_set_extmark(nb.buffer, cells_namespace, 0, 0, { id = nb.marks[nb.order[1]] })
+  end)
+  return true
+end
+
+-- Takes the buffer as the new snapshot when its marker lines are intact. False when they are not.
+local function settle()
+  local lines = vim.api.nvim_buf_get_lines(nb.buffer, 0, -1, false)
+  local rows = intact(lines)
+  if rows == nil and adopt_head(lines) then
+    lines = vim.api.nvim_buf_get_lines(nb.buffer, 0, -1, false)
+    rows = intact(lines)
+  end
+  if rows == nil then return false end
+  if fill_empty_cells(lines, rows) then
+    lines = vim.api.nvim_buf_get_lines(nb.buffer, 0, -1, false)
+    rows = intact(lines)
+    if rows == nil then return false end
+  end
+  nb.snapshot = { lines = lines, rows = rows }
+  nb.tick = vim.api.nvim_buf_get_changedtick(nb.buffer)
+  vim.bo[nb.buffer].modified = false -- the caller holds the text, nothing is left unsaved here
+  return true
+end
+
+local function same_lines(first, second)
+  if #first ~= #second then return false end
+  for index = 1, #first do
+    if first[index] ~= second[index] then return false end
+  end
+  return true
+end
+
+-- Puts the last intact text back. A change made in normal mode is undone as such, so it leaves no step behind. Otherwise (insert
+-- mode, or the text differs after the undo) the text is replaced in the undo step of the change that broke it.
+local function restore()
+  local snapshot = nb.snapshot
+  quietly(function()
+    local undone = false
+    if vim.fn.mode() == "n" then
+      pcall(vim.cmd, "silent undo")
+      undone = same_lines(vim.api.nvim_buf_get_lines(nb.buffer, 0, -1, false), snapshot.lines)
+    end
+    if not undone then
+      pcall(vim.cmd, "undojoin")
+      apply_lines(nb.buffer, snapshot.lines, false)
+    end
+    for index, id in ipairs(nb.order) do
+      vim.api.nvim_buf_set_extmark(nb.buffer, cells_namespace, snapshot.rows[index], 0, { id = nb.marks[id] })
+    end
+  end)
+  nb.tick = vim.api.nvim_buf_get_changedtick(nb.buffer)
+  vim.bo[nb.buffer].modified = false
+  vim.api.nvim_echo({ { "Cell marker lines cannot be changed" } }, true, {})
+  -- The cursor stays where it was before the change, the undo would have moved it to the change
+  local window = notebook_window()
+  if window ~= nil and nb.cursor ~= nil then
+    local row = math.min(nb.cursor[1], vim.api.nvim_buf_line_count(nb.buffer))
+    local line = vim.api.nvim_buf_get_lines(nb.buffer, row - 1, row, false)[1]
+    vim.api.nvim_win_set_cursor(window, { row, math.min(nb.cursor[2], #line) })
+  end
+end
+
+-- Checks a change made since the snapshot, false when it was idle or fine, true when it broke a marker line and was undone.
+local function sync()
+  if nb == nil or nb.busy or vim.api.nvim_buf_get_changedtick(nb.buffer) == nb.tick then return false end
+  if settle() then return false end
+  restore()
+  return true
+end
+
+-- Tells the caller the cells whose text moved past what it knows, in notebook order.
+local function flush_edits()
+  if nb == nil then return end
+  nb.timer:stop()
+  sync()
+  local lines, rows = nb.snapshot.lines, nb.snapshot.rows
+  for index, id in ipairs(nb.order) do
+    local text = table.concat(lines, "\n", rows[index] + 2, rows[index + 1] or #lines)
+    if text ~= nb.known[id] then
+      nb.known[id] = text
+      vim.rpcnotify(channel, "cell_edit", id, text)
+    end
+  end
+end
+
+-- Pins the window to the active cell: the top line is its first line (when it fits), everything outside it is hidden.
+local function pin()
+  local window = notebook_window()
+  local index = window ~= nil and nb.index[nb.active] or nil
+  if index == nil then return end
+  local start, stop = cell_range(index)
+  local total = vim.api.nvim_buf_line_count(nb.buffer)
+  -- Setting an option, even to its value, makes the cursor forget the column it wants
+  if vim.wo[window].scrolloff ~= 0 then vim.wo[window].scrolloff = 0 end
+  if vim.wo[window].conceallevel < 2 then vim.wo[window].conceallevel = 2 end -- lines are only hidden from level 2
+  vim.api.nvim_win_call(window, function()
+    local view = vim.fn.winsaveview()
+    local height = vim.api.nvim_win_text_height(window, { start_row = start, end_row = stop - 1 }).all
+    local fits = height <= vim.api.nvim_win_get_height(window)
+    -- A cell taller than the window scrolls with its cursor, but never above its first line
+    if view.topline < start + 1 or (fits and view.topline ~= start + 1) then vim.fn.winrestview({ topline = start + 1 }) end
+  end)
+  -- Both ranges hold whole lines, the end row included whatever the end column. Moving only the window leaves them as they are
+  local key = table.concat({ start, stop, total, vim.api.nvim_buf_get_changedtick(nb.buffer) }, ":")
+  if key == nb.hidden then return end
+  nb.hidden = key
+  vim.api.nvim_buf_clear_namespace(nb.buffer, hidden_namespace, 0, -1)
+  if start > 0 then
+    vim.api.nvim_buf_set_extmark(nb.buffer, hidden_namespace, 0, 0, { end_row = start - 1, end_col = 0, conceal_lines = "" })
+  end
+  if stop < total then
+    local last = vim.api.nvim_buf_get_lines(nb.buffer, total - 1, total, false)[1]
+    vim.api.nvim_buf_set_extmark(nb.buffer, hidden_namespace, stop, 0, { end_row = total - 1, end_col = #last, conceal_lines = "" })
+  end
+end
+
+-- Makes `id` the active cell and puts the cursor in it: "first" or "last" line, "keep" it where it is when that is inside,
+-- or `{ offset, col }` the line offset (0-based) and column to land on, clamped to the cell. Pins the window.
+local function show_cell(id, cursor)
+  local start, stop = cell_range(nb.index[id])
+  nb.active = id
+  local window = notebook_window()
+  if window ~= nil then
+    local row, col = start + 1, 0
+    if cursor == "last" then
+      row = stop
+    elseif cursor == "keep" then
+      local here = vim.api.nvim_win_get_cursor(window)
+      if here[1] > start and here[1] <= stop then row, col = here[1], here[2] end
+    elseif type(cursor) == "table" then
+      row, col = math.min(start + 1 + cursor.offset, stop), cursor.col
+    end
+    local line = vim.api.nvim_buf_get_lines(nb.buffer, row - 1, row, false)[1] or ""
+    vim.api.nvim_win_set_cursor(window, { row, math.min(col, #line) })
+  end
+  pin()
+  if window ~= nil then nb.cursor = vim.api.nvim_win_get_cursor(window) end
+end
+
+-- Keeps the cursor off marker lines, activates the cell it is in and pins the window to it. Moving onto a marker goes on
+-- into the neighbor: down into the first line of the next cell, up into the last line of the previous one (the first
+-- cell's own first line when there is none). A jump onto a marker lands on the first line of that cell.
+local function follow_cursor()
+  if nb == nil or nb.busy or #nb.order == 0 then return end
+  local window = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(window) ~= nb.buffer then return end
+  sync()
+  local view = vim.fn.winsaveview()
+  local index, on_marker = locate(view.lnum - 1)
+  if index == nil then return end
+  if on_marker then
+    local leaving_up = index == nb.index[nb.active] and index > 1
+    local target = leaving_up and index - 1 or index
+    local start, stop = cell_range(target)
+    local row = leaving_up and stop or start + 1
+    local line = vim.api.nvim_buf_get_lines(nb.buffer, row - 1, row, false)[1]
+    local insert = vim.fn.mode():sub(1, 1) == "i"
+    local col = math.min(view.curswant, math.max(#line - (insert and 0 or 1), 0))
+    vim.fn.winrestview({ lnum = row, col = col, curswant = view.curswant })
+    index = target
+  end
+  local id = nb.order[index]
+  if id ~= nb.active then
+    flush_edits()
+    nb.active = id
+    vim.rpcnotify(channel, "cell_focus", id)
+  end
+  pin()
+  nb.cursor = vim.api.nvim_win_get_cursor(window)
+end
+
+local function on_change()
+  if nb == nil then return end
+  if sync() then follow_cursor() end
+  if not nb.timer:is_active() then nb.timer:start(EDIT_DEBOUNCE_MS, 0, vim.schedule_wrap(flush_edits)) end
+end
+
+local function install_notebook(buffer)
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, { buffer = buffer, callback = on_change })
   -- `:w` asks the caller to save the notebook, after the last edit
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = buffer,
     callback = function()
-      flush_cell(buffer)
-      vim.rpcnotify(channel, "save_notebook", ids[buffer], cell_text(buffer))
+      flush_edits()
+      vim.rpcnotify(channel, "save_notebook")
       vim.bo[buffer].modified = false
       vim.api.nvim_echo({ { "Saving notebook" } }, false, {})
     end,
   })
+  -- `:1,2w!` has no `BufWriteCmd`, it writes the buffer's file as `FileWriteCmd` (`acwrite` would stop it too, but a buffer with a
+  -- `buftype` makes `vim.fs.root` ignore its name, and the LSP would find no project)
+  vim.api.nvim_create_autocmd({ "FileWriteCmd", "FileAppendCmd" }, {
+    buffer = buffer,
+    callback = function() vim.api.nvim_echo({ { "The notebook is only written whole, with :w" } }, true, {}) end,
+  })
   vim.keymap.set({ "n", "i" }, "<S-CR>", function()
-    flush_cell(buffer)
-    vim.rpcnotify(channel, "cell_run", ids[buffer], cell_text(buffer))
-  end, options)
-  -- Moving past the first or last line leaves the cell. These replace the user's `j`, `k`, `<Down>` and `<Up>` here
-  local function normal_move(direction, key)
-    return function()
-      local window = vim.api.nvim_get_current_win()
-      local before = vim.api.nvim_win_get_cursor(window)[1]
-      pcall(vim.cmd, "normal! " .. vim.v.count1 .. key)
-      if vim.api.nvim_win_get_cursor(window)[1] == before then exit_cell(buffer, direction) end
-    end
-  end
-  local function insert_move(direction, key)
-    return function()
-      local line = vim.api.nvim_win_get_cursor(0)[1]
-      local edge = direction == "next" and line >= vim.api.nvim_buf_line_count(buffer) or direction == "prev" and line <= 1
-      if vim.fn.pumvisible() == 0 and edge then
-        exit_cell(buffer, direction)
-      else
-        vim.api.nvim_feedkeys(vim.keycode(key), "ni", false) -- in front of keys typed meanwhile, so `<Up><Up>` still ends in an exit
-      end
-    end
-  end
-  vim.keymap.set("n", "j", normal_move("next", "j"), options)
-  vim.keymap.set("n", "<Down>", normal_move("next", "j"), options)
-  vim.keymap.set("n", "k", normal_move("prev", "k"), options)
-  vim.keymap.set("n", "<Up>", normal_move("prev", "k"), options)
-  vim.keymap.set("i", "<Down>", insert_move("next", "<Down>"), options)
-  vim.keymap.set("i", "<Up>", insert_move("prev", "<Up>"), options)
+    flush_edits()
+    if nb.active ~= nil then vim.rpcnotify(channel, "cell_run", nb.active, nb.known[nb.active]) end
+  end, { buffer = buffer })
 end
 
--- Whether the cell is open, forgetting a cell whose buffer Neovim unloaded.
-function _G.gigachad_has_cell(key)
-  local buffer = tracked[key]
-  if buffer == nil then return false end
-  if cells[buffer] ~= nil and vim.api.nvim_buf_is_loaded(buffer) then return true end
-  untrack(key)
-  drop_cell(buffer)
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "WinScrolled" }, { callback = follow_cursor })
+-- A scroll that `WinScrolled` did not report (a second one right after the pin) is caught when Neovim goes idle
+vim.api.nvim_create_autocmd("SafeState", {
+  callback = function()
+    follow_cursor()
+  end,
+})
+
+-- Whether the notebook buffer exists, forgetting one that Neovim unloaded.
+function _G.gigachad_has_notebook()
+  if nb == nil then return false end
+  if vim.api.nvim_buf_is_loaded(nb.buffer) then return true end
+  local buffer = nb.buffer
+  forget_notebook()
   if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
   return false
 end
 
--- Shows the cell exactly as `text` with the cursor on its first or last line, opening the private copy first when `private_path` is given.
-function _G.gigachad_open_cell(key, private_path, text, cursor)
-  local buffer = tracked[key]
-  local fresh = buffer == nil
-  if fresh then
-    buffer = vim.fn.bufadd(private_path)
-    tracked[key] = buffer
-    ids[buffer] = key
-    cells[buffer] = { timer = uv.new_timer(), tick = -1, text = nil }
+-- Shows the private copy as the notebook buffer, replacing the placeholder.
+local function create_notebook(private_path, marker, script)
+  local buffer = vim.fn.bufadd(private_path)
+  local virtual = script ~= nil and script ~= vim.NIL
+  if virtual then
+    -- The name only exists for the LSP (root markers, `.venv`): nothing is ever written there, no swap or undo file either
+    vim.bo[buffer].swapfile = false
+    vim.bo[buffer].undofile = false
   end
-  display(key)
+  vim.api.nvim_win_set_buf(0, buffer)
+  if virtual then
+    local lines = vim.split(script, "\n", { plain = true })
+    if lines[#lines] == "" then table.remove(lines) end
+    local levels = vim.bo[buffer].undolevels -- the global one stays in charge unless the buffer had its own
+    vim.bo[buffer].undolevels = -1 -- the first text is no undo step
+    vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+    vim.bo[buffer].undolevels = levels
+    vim.bo[buffer].modified = false
+  end
   vim.bo[buffer].buflisted = false -- showing a buffer lists it
-  if fresh then install_cell(buffer) end
-  if cell_text(buffer) ~= text then
-    local lines = vim.split(text, "\n", { plain = true })
-    if fresh then
-      local undolevels = vim.api.nvim_get_option_value("undolevels", { buf = buffer })
-      vim.bo[buffer].undolevels = -1 -- the first text is not an undo step
-      vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
-      vim.bo[buffer].undolevels = undolevels
-    else
-      apply_lines(buffer, lines, false)
-    end
-  end
-  local row = cursor == "last" and vim.api.nvim_buf_line_count(buffer) or 1
-  vim.api.nvim_win_set_cursor(0, { row, 0 })
-  synced(buffer)
-  if placeholder_id ~= nil and placeholder_id ~= key then
+  vim.bo[buffer].bufhidden = "hide"
+  nb = {
+    buffer = buffer,
+    marker = marker,
+    order = {},
+    index = {},
+    marks = {},
+    known = {},
+    lookalikes = 0,
+    snapshot = { lines = {}, rows = {} },
+    tick = vim.api.nvim_buf_get_changedtick(buffer), -- the loaded private copy is no change
+    timer = uv.new_timer(),
+    busy = false,
+  }
+  install_notebook(buffer)
+  if placeholder_id ~= nil then
     local placeholder = tracked[placeholder_id]
     placeholder_id = nil
     if placeholder ~= nil and vim.api.nvim_buf_is_valid(placeholder) then vim.api.nvim_buf_delete(placeholder, { force = true }) end
   end
 end
 
--- Replaces the text of an open cell, keeping the cursor where its text stays. The caller knows the text, so no edit comes back.
-function _G.gigachad_set_cell(key, text)
-  local buffer = tracked[key]
-  if buffer == nil or cells[buffer] == nil or not vim.api.nvim_buf_is_loaded(buffer) then return false end
-  if cell_text(buffer) ~= text then apply_lines(buffer, vim.split(text, "\n", { plain = true }), false) end
-  synced(buffer)
+-- Builds the script of `cells` from scratch (a changed list of cells). The cursor stays on its line of its cell when that
+-- cell is still there, and so does the active cell. A cell the caller still sends as it was told it (`known`) while its
+-- text moved on in Neovim keeps the newer text, `cell_edit` brings it to the caller.
+local function rebuild(cells)
+  local old = nb.snapshot
+  local texts = {}
+  for index, id in ipairs(nb.order) do
+    texts[id] = table.concat(old.lines, "\n", old.rows[index] + 2, old.rows[index + 1] or #old.lines)
+  end
+  local previous = nb.index[nb.active]
+  local window = notebook_window()
+  local cursor
+  if window ~= nil and #nb.order > 0 then
+    local position = vim.api.nvim_win_get_cursor(window)
+    local index = locate(position[1] - 1)
+    if index ~= nil then
+      cursor = { id = nb.order[index], offset = math.max(position[1] - 2 - old.rows[index], 0), col = position[2] }
+    end
+  end
+  local shown = {}
+  for index, cell in ipairs(cells) do
+    local text = nb.known[cell.id] == cell.text and texts[cell.id] or cell.text
+    shown[index] = { id = cell.id, text = text }
+  end
+  local lines, rows = script_of(shown, nb.marker)
+  quietly(function()
+    -- The undo steps before a rebuild describe a structure that is gone: undoing one would remove a marker line, and the
+    -- protection would then refuse every later `u`. A rebuild that changes text drops the history, the typing before it
+    -- stays untouched but can no longer be undone
+    local levels = vim.bo[nb.buffer].undolevels
+    vim.bo[nb.buffer].undolevels = -1
+    local ok, failure = pcall(apply_lines, nb.buffer, lines, false)
+    vim.bo[nb.buffer].undolevels = levels
+    if not ok then error(failure, 0) end
+    vim.api.nvim_buf_clear_namespace(nb.buffer, cells_namespace, 0, -1)
+    nb.marks = {}
+    for index, cell in ipairs(shown) do
+      nb.marks[cell.id] = vim.api.nvim_buf_set_extmark(nb.buffer, cells_namespace, rows[index], 0, {})
+    end
+  end)
+  local order, index, known = {}, {}, {}
+  for position, cell in ipairs(cells) do
+    order[position], index[cell.id], known[cell.id] = cell.id, position, cell.text
+  end
+  nb.order, nb.index, nb.known = order, index, known
+  nb.lookalikes = marker_count(lines) - #cells
+  if not settle() then
+    nb.snapshot = { lines = lines, rows = rows }
+    nb.tick = vim.api.nvim_buf_get_changedtick(nb.buffer)
+  end
+  local active = nb.active
+  if active == nil or index[active] == nil then
+    local fallback = cells[math.min(previous or 1, #cells)]
+    active = fallback ~= nil and fallback.id or nil
+  end
+  nb.active = active
+  if active ~= nil then
+    show_cell(active, cursor ~= nil and cursor.id == active and cursor or "first")
+  end
+end
+
+-- Makes the notebook buffer hold `cells`, a list of `{ id, text }` in notebook order, creating it first when `private_path`
+-- is given. The same ids in the same order only replace the text of cells that differ (minimal hunks, the cursor stays).
+-- No `cell_edit` comes back for what the caller sent.
+function _G.gigachad_set_cells(private_path, marker, cells, script)
+  if private_path ~= nil and private_path ~= vim.NIL then create_notebook(private_path, marker, script) end
+  if nb == nil then error("No notebook buffer", 0) end
+  sync()
+  local same = #cells == #nb.order
+  for index, cell in ipairs(cells) do
+    same = same and cell.id == nb.order[index]
+  end
+  if same then
+    for index, cell in ipairs(cells) do
+      local start, stop = cell_range(index)
+      local current = table.concat(vim.api.nvim_buf_get_lines(nb.buffer, start, stop, false), "\n")
+      -- Text the caller got from this buffer earlier is no news: what was typed since stays
+      if cell.text ~= current and cell.text ~= nb.known[cell.id] then
+        quietly(function() apply_lines(nb.buffer, cell_lines(cell.text), false, start, stop) end)
+      end
+      nb.known[cell.id] = cell.text
+    end
+    nb.lookalikes = marker_count(vim.api.nvim_buf_get_lines(nb.buffer, 0, -1, false)) - #cells
+    if settle() then
+      if nb.active == nil and #cells > 0 then show_cell(cells[1].id, "first") end
+      pin()
+      return true
+    end
+  end
+  rebuild(cells)
   return true
 end
 
--- Wipes the buffer of a cell that was deleted.
-function _G.gigachad_close_cell(key)
-  local buffer = tracked[key]
-  if buffer == nil then return false end
-  untrack(key)
-  drop_cell(buffer)
-  if vim.api.nvim_buf_is_valid(buffer) then vim.api.nvim_buf_delete(buffer, { force = true }) end
+-- Activates the cell `id`, `cursor` is "first", "last" or "keep". False for a cell that is not there. No `cell_focus` comes back.
+function _G.gigachad_focus_cell(id, cursor)
+  if nb == nil or nb.index[id] == nil then return false end
+  sync()
+  if nb.active ~= id then flush_edits() end
+  show_cell(id, cursor)
   return true
 end
 
@@ -408,7 +761,7 @@ display(first_id)
 vim.api.nvim_create_autocmd("BufEnter", {
   callback = function(event)
     local id = ids[event.buf]
-    if id == nil or id == current_id or cells[event.buf] ~= nil then return end
+    if id == nil or id == current_id then return end
     current_id = id
     vim.rpcnotify(channel, "switched", id)
   end,
@@ -417,7 +770,7 @@ vim.api.nvim_create_autocmd("BufEnter", {
 vim.api.nvim_create_autocmd("BufDelete", {
   callback = function(event)
     local id = ids[event.buf]
-    drop_cell(event.buf)
+    if nb ~= nil and event.buf == nb.buffer then forget_notebook() end
     if id == nil then return end
     untrack(id)
   end,

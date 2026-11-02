@@ -26,24 +26,33 @@
   stays in Neovim's registers, the yank reaches the caller through `on_yank`. Reads run beside the other requests, so a
   paste waiting for the browser never holds up `set_text`, `:w` or the others
 - `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
-- A notebook session (`cell_session`) starts on an empty placeholder and edits cells instead: `open_cell` shows the scratch buffer
-  of a cell key with exactly the given text (an unlisted buffer, never written, its basename only picks the filetype), `set_cell`
-  replaces that text without any `cell_edit` coming back, `close_cell` wipes the buffer. With an `on_cell` callback the cell
-  buffers report `{"type": "cell_edit", "key", "text"}` (full text after typing, coalesced over 40 ms, only when it differs
-  from what the caller knows), `{"type": "cell_run", "key", "text"}` (`<S-CR>`), `{"type": "cell_exit", "key", "direction",
-  "text"}` (`j`, `k`, `<Down>`, `<Up>` past the last or first line, direction `next` or `prev`) and
-  `{"type": "save_notebook", "key", "text"}` (`:w`), always after the `cell_edit` that brought their text up to date
+- A notebook session (`cell_session`) starts on an empty placeholder and holds the notebook in ONE buffer: `set_cells` shows all
+  code cells as one script (a `# %%` marker line before each cell, so an LSP sees every cell). With an absolute `notebook_path`
+  the buffer's name is virtual, `<notebook_path><extension of the set_cells filename>` beside the notebook (`.ipynb.py` for a
+  Python notebook), never created on disk (every write is intercepted, no swap or undo file) so an LSP finds the
+  project and `.venv` from the notebook's directory. Without it the buffer is a private copy named like the filename (it picks
+  the filetype, never written back). Neovim's window is pinned to the active cell, `focus_cell` activates one from outside.
+  Later `set_cells` replace only the text of the cells that differ (no `cell_edit` comes back for it) or rebuild the script when
+  the ids or their order differ (the filename is not read again, a rebuild drops the undo history). Cells are found by extmarks
+  on their marker lines, edits that alter, remove or add a marker line are undone, lines put above the first marker join the
+  first cell. With an `on_cell` callback the buffer reports
+  `{"type": "cell_edit", "id", "text"}` (full text of a cell after typing, coalesced over 40 ms, only when it differs from
+  what the caller knows), `{"type": "cell_focus", "id"}` (the cursor moved into another cell), `{"type": "cell_run", "id",
+  "text"}` (`<S-CR>` in the active cell) and `{"type": "save_notebook"}` (`:w`), always after the `cell_edit`s they follow
+- Every session turns `more` off and lets messages time out (`messagesopt`) once the user's config ran: Neovim answers no RPC
+  request while it waits at a hit-enter prompt
 - Closing a session discards unsaved edits
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import fcntl
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -62,6 +71,9 @@ ReadClipboard = Callable[[str], Awaitable[str]]
 CellEvent = dict[str, str]
 CellEvents = Callable[[CellEvent], None]
 
+# The line that leads every cell in the notebook buffer
+NOTEBOOK_MARKER = "# %%"
+
 _STARTUP_SECONDS = 15
 _RPC_SECONDS = 10
 _SHUTDOWN_SECONDS = 2
@@ -70,6 +82,7 @@ _READ_CHUNK = 65536
 _SET_TEXT_ATTEMPTS = 5
 # How long a paste waits for the browser, which may be asking the user for permission first.
 _CLIPBOARD_SECONDS = 15
+_EXTENSION = re.compile(r"\.[A-Za-z0-9_+-]{1,16}")
 
 
 def is_neovim_installed() -> bool:
@@ -90,6 +103,18 @@ def _private_copy(directory: Path, filename: str, content: str) -> Path:
     document = directory / _document_name(filename)
     document.write_text(content, encoding="utf-8", newline="")
     return document
+
+
+def _notebook_script(cells: Sequence[Mapping[str, str]]) -> str:
+    """The text of the notebook buffer for *cells*: a marker line before the lines of each cell."""
+    lines = [line for cell in cells for line in (NOTEBOOK_MARKER, *cell["text"].split("\n"))]
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def _virtual_name(notebook: Path, filename: str) -> Path:
+    """The name of the notebook buffer beside *notebook*: its path plus the extension of *filename* (`.py` when that is none)."""
+    suffix = Path(_document_name(filename)).suffix
+    return Path(f"{notebook}{suffix if _EXTENSION.fullmatch(suffix) else '.py'}")
 
 
 def _read_for_opening(file: Path) -> str:
@@ -178,13 +203,18 @@ class NeovimSession:
         *,
         baseline: Path | None = None,
         cell_session: bool = False,
+        notebook_path: Path | None = None,
     ) -> None:
         self._documents = {first.path: first}
+        # The private copy of the notebook buffer
+        self._notebook: Path | None = None
+        # The notebook's file when its buffer is virtual: named `<notebook_path><extension>` beside the notebook, never on disk
+        self._notebook_path = notebook_path if cell_session and notebook_path is not None and notebook_path.is_absolute() else None
         self._copies = 1
-        # Serializes `open_file`, which looks a document up and then adds it
+        # Serializes `open_file` and `set_cells`, which look a document up and then add it
         self._opening = asyncio.Lock()
         self._baseline = baseline
-        # The placeholder document of a notebook session, until the first cell replaces it
+        # The placeholder document of a notebook session, until the notebook buffer replaces it
         self._placeholder = first.path if cell_session else None
         self._process = process
         self._terminal_fd = terminal_fd
@@ -211,11 +241,14 @@ class NeovimSession:
         disk_path: Path | None = None,
         path: str | None = None,
         cell_session: bool = False,
+        notebook_path: Path | None = None,
     ) -> NeovimSession:
         """Start `nvim` in *cwd* on a private copy of *content*, diffed against a read-only *base_content* when given.
 
         *path* names the document in `save`, `selection` and the other calls, default *filename*. A *cell_session* takes
-        *filename*, *content* and *path* as its placeholder document, the first `open_cell` wipes it.
+        *filename*, *content* and *path* as its placeholder document, the first `set_cells` wipes it. With an absolute
+        *notebook_path* the buffer is named `<notebook_path><extension>` (virtual: nothing is created there), so an LSP finds the
+        project and its `.venv` from the notebook's directory, else it is a private copy named like the `set_cells` filename.
         *disk_path* is the file *content* was read from, `:w` merges its later changes. Call from a running event loop.
         """
         workdir = Path(tempfile.mkdtemp(prefix="gigachad-nvim-"))
@@ -244,7 +277,7 @@ class NeovimSession:
             raise
         finally:
             os.close(child_fd)
-        return cls(process, terminal_fd, workdir, first, baseline=baseline, cell_session=cell_session)
+        return cls(process, terminal_fd, workdir, first, baseline=baseline, cell_session=cell_session, notebook_path=notebook_path)
 
     async def connect(
         self,
@@ -269,7 +302,7 @@ class NeovimSession:
         within 15 s ("Clipboard did not answer"), Neovim shows the message and pastes its last copy instead.
         It runs beside every other request, Neovim answers those while it waits.
 
-        *on_cell* receives the events of cell buffers (`open_cell`) in the order Neovim sent them.
+        *on_cell* receives the events of the notebook buffer (`set_cells`) in the order Neovim sent them.
         """
 
         async def handle_request(method: str, params: list) -> object:
@@ -286,10 +319,12 @@ class NeovimSession:
                 on_selection(params[0])
             elif method == "switched" and on_switched is not None:
                 on_switched(params[0])
-            elif on_cell is not None and method in ("cell_edit", "cell_run", "save_notebook"):
-                on_cell({"type": method, "key": params[0], "text": params[1]})
-            elif on_cell is not None and method == "cell_exit":
-                on_cell({"type": method, "key": params[0], "direction": params[1], "text": params[2]})
+            elif on_cell is not None and method in ("cell_edit", "cell_run"):
+                on_cell({"type": method, "id": params[0], "text": params[1]})
+            elif on_cell is not None and method == "cell_focus":
+                on_cell({"type": method, "id": params[0]})
+            elif on_cell is not None and method == "save_notebook":
+                on_cell({"type": method})
 
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
@@ -401,39 +436,42 @@ class NeovimSession:
         """Show *text* in Neovim's message area as an error."""
         await self._lua("return _G.gigachad_show_error(...)", text)
 
-    async def open_cell(self, key: str, filename: str, text: str, cursor: str) -> None:
-        """Show the scratch buffer of cell *key* holding exactly *text*, the cursor on its `first` or `last` line.
+    async def set_cells(self, filename: str, cells: Sequence[Mapping[str, str]]) -> None:
+        """Make the notebook buffer hold *cells*, `{"id", "text"}` for every code cell in notebook order.
 
-        A new cell gets a private copy named like *filename*, so filetype detection and the user's plugins work. An open cell
-        keeps its buffer and undo history and takes *text* like `set_cell` does. Nothing reaches the disk except the private
-        copy, and no `cell_edit` comes back for *text*.
+        The first call (or one after Neovim lost the buffer) creates it and replaces the placeholder. Its name comes from
+        *filename*, so filetype detection and the user's plugins work: beside the notebook as `<notebook_path><extension of
+        filename>` (virtual, `.py` for an extension that is none), else a private copy named like *filename*. Later calls do not
+        read *filename* again. They replace the text of the cells that differ and rebuild the script when the ids or their order
+        differ (the undo history is dropped then), the cursor stays in its cell where possible. The ids must be unique. No
+        `cell_edit` comes back for what was given. A cell whose text still is what `cell_edit` last reported keeps the text
+        typed since.
         """
         async with self._opening:
             copy: Path | None = None
-            if key in self._documents and not await self._lua("return _G.gigachad_has_cell(...)", key):
-                self._forget(key)  # Neovim lost the buffer (`:bdelete`), the copy is stale
-            if key not in self._documents:
-                copy = _private_copy(self._workdir / str(self._copies), filename, text)
-                self._copies += 1
-                self._documents[key] = _Document(key, copy, text, None)
-            await self._lua("return _G.gigachad_open_cell(...)", key, str(copy) if copy else None, text, cursor)
+            if self._notebook is None or not await self._lua("return _G.gigachad_has_notebook()"):
+                if self._notebook is not None and self._notebook_path is None:
+                    self._notebook.unlink(missing_ok=True)  # Neovim lost the buffer (`:bwipeout`), the copy is stale
+                script = _notebook_script(cells)
+                if self._notebook_path is not None:
+                    copy = self._notebook = _virtual_name(self._notebook_path, filename)
+                else:
+                    copy = self._notebook = _private_copy(self._workdir / str(self._copies), filename, script)
+                    self._copies += 1
+            script_text = script if copy is not None and self._notebook_path is not None else None
+            await self._lua(
+                "return _G.gigachad_set_cells(...)", str(copy) if copy else None, NOTEBOOK_MARKER, list(cells), script_text
+            )
             if self._placeholder is not None:
                 self._forget(self._placeholder)
                 self._placeholder = None
 
-    async def set_cell(self, key: str, text: str) -> None:
-        """Replace the text of the open cell *key* with exactly *text*, keeping the cursor where its text stays, no `cell_edit` follows.
+    async def focus_cell(self, cell_id: str, cursor: str) -> None:
+        """Pin the window to the cell *cell_id*, the cursor on its `first` or `last` line, or `keep` where it is when inside it.
 
-        Does nothing when the cell is not open.
+        Does nothing for an unknown cell. No `cell_focus` comes back.
         """
-        if key in self._documents:
-            await self._lua("return _G.gigachad_set_cell(...)", key, text)
-
-    async def close_cell(self, key: str) -> None:
-        """Wipe the buffer of the deleted cell *key*, nothing when it is not open."""
-        if key in self._documents:
-            await self._lua("return _G.gigachad_close_cell(...)", key)
-            self._forget(key)
+        await self._lua("return _G.gigachad_focus_cell(...)", cell_id, cursor)
 
     async def _save(self, save: SaveDocument, path: str, text: str) -> dict[str, str | bool]:
         """Store *text* of document *path* merged with the edits made elsewhere since its `base`, `merged` tells if they changed it."""
