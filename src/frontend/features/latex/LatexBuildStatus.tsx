@@ -1,6 +1,7 @@
 "use client"
 
 import { MenuPopover } from "@/components/ui/MenuPopover"
+import { StatusDot } from "@/components/ui/StatusDot"
 import type { LatexIssue } from "@/lib/domain/latex"
 import { relativeIn } from "@/lib/paths"
 import type { LatexBuildState } from "./useLatexBuild"
@@ -28,7 +29,7 @@ function locationOf(error: LatexIssue, shownPath: string, folder: string): strin
 export function LatexBuildStatus({ build, path, folder }: { build: LatexBuildState; path: string; folder: string }) {
   const status = statusOf(build)
   if (!status) return null
-  const dot = <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.problem ? "bg-danger" : "bg-ink-faint"}`} />
+  const dot = <StatusDot tone={status.problem ? "error" : "idle"} />
   const label = <span className="truncate">{status.text}</span>
   const rowClass = "flex items-center gap-1.5 px-1 text-[11px] text-ink-subtle"
   if (!status.problem) return <div role="status" className={rowClass}>{dot}{label}</div>

@@ -11,8 +11,8 @@ import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useModeLabel } from "@/hooks/useModeLabel"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
-import { useRootFileDocument, type DocumentCodec } from "../useRootFileDocument"
-import { useDebouncedSave } from "../useDebouncedSave"
+import { useRootFileDocument, type DocumentCodec } from "@/hooks/useRootFileDocument"
+import { useDebouncedSave } from "@/hooks/useDebouncedSave"
 
 const AUTOSAVE_DELAY_MS = 1000
 

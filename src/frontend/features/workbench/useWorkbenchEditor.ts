@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react"
 import { useNeovimTerminal, type NeovimSelection, type NeovimStatus, type NeovimTerminal } from "@/features/editor/NeovimEditor"
-import { loadFailureOf, type FileLoadFailure } from "@/features/editor/useRootFileDocument"
+import { loadFailureOf, type FileLoadFailure } from "@/hooks/useRootFileDocument"
 import { loadFileViewerText, writeRootFile } from "@/lib/backend/api"
 import { onFileMove } from "@/lib/backend/fileEvents"
 import { syncCursorReady } from "@/lib/backend/syncStream"

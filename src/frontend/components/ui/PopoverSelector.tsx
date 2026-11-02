@@ -5,6 +5,7 @@ import { Check, type LucideIcon } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { cn } from "@/lib/utils"
+import { IconButton } from "./IconButton"
 
 interface SelectorCategory<T> { key: string; label: string; items: T[] }
 
@@ -57,12 +58,6 @@ const tabClass = (active: boolean) => cn(
   "w-full whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
   active ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink",
 )
-
-function HeaderActionButton({ icon: Icon, label, onClick }: HeaderAction) {
-  return <button type="button" onClick={onClick} aria-label={label} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-  </button>
-}
 
 export function PopoverSelector<T>({
   triggerLabel, triggerContent, triggerClassName, label, categories, itemKey, isSelected, renderItem, onSelect,
@@ -147,7 +142,7 @@ export function PopoverSelector<T>({
       )}
     >
       {view ?? <>
-        {(tabs || headerAction) && <div className="flex items-center gap-1 border-b border-divider p-1.5">{tabs}{headerAction && <>{!tabs && <span className="flex-1" />}<HeaderActionButton {...headerAction} /></>}</div>}
+        {(tabs || headerAction) && <div className="flex items-center gap-1 border-b border-divider p-1.5">{tabs}{headerAction && <>{!tabs && <span className="flex-1" />}<IconButton {...headerAction} className="hover:bg-surface-elevated" /></>}</div>}
         {list}
         {footer && <div className="border-t border-divider p-1.5">{footer}</div>}
       </>}

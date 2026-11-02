@@ -56,12 +56,17 @@ export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number
   return `${getApiBase()}/canvases/${encodePath(canvasKey)}/stream${toQuery({ sinceRevision })}`
 }
 
+/** WebSocket URL of the backend route at `path` (with its leading slash): the backend base URL with its scheme switched to ws(s). */
+export function apiWsUrl(path: string): string {
+  return `${getApiBase().replace(/^http/, "ws")}${path}`
+}
+
 /** WebSocket for one Neovim terminal session, see `backend/routes/neovim.py`. */
 export function neovimSessionUrl(): string {
-  return `${getApiBase().replace(/^http/, "ws")}/neovim/session`
+  return apiWsUrl("/neovim/session")
 }
 
 /** WebSocket that pushes the changes of watched disk files, see `backend/routes/file_watch.py`. */
 export function fileWatchUrl(): string {
-  return `${getApiBase().replace(/^http/, "ws")}/files/watch`
+  return apiWsUrl("/files/watch")
 }

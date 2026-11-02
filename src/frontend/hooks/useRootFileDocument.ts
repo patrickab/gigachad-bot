@@ -26,8 +26,8 @@ interface RootFileDocumentOptions<T> {
   /** Re-read the stored text after each save, for stores that normalize what they keep. */
   readBackAfterSave?: boolean
   onSaved?: (text: string) => void
-  /** Called with the text of a followed disk change whatever the state of the edit, for editors that merge it themselves. */
-  onFollowed?: (text: string, path: string) => void
+  /** Called with the text of a followed disk change whatever the state of the edit, and the value it replaces (as last loaded or saved), for editors that merge it themselves. */
+  onFollowed?: (text: string, path: string, replaced: T | null) => void
 }
 
 const isDiskPath = (path: string) => path.startsWith("/")
@@ -44,7 +44,7 @@ export function loadFailureOf(error: unknown): FileLoadFailure {
 /**
  * Load, edit and save one file the backend serves, as `codec` reads its text.
  *
- * - Saves are chained so an earlier slow write can never resolve after, and clobber, a newer one
+ * - Saves are chained so an earlier slow write can never resolve after, and clobber, a newer one, and a followed disk change is read behind them, so the echo of an own write is recognised
  * - `dirty` while the value is not the one last loaded or saved
  * - Follows the file: a change of an absolute `path` on disk (by anyone) and a remote change event of a stored key reload the value only when clean
  * - The caller starts the first load, `reload()` in an effect
@@ -96,13 +96,16 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
   })
   useEffect(() => subscribeToChanges((event) => reloadOnRemoteChange(event)), [])
 
+  // Saves and followed reads run one at a time: a read after a write sees the text that write recorded, so its echo is ignored.
+  const saveChain = useRef(Promise.resolve())
+
   // A read still running when the path changes must not land on the new document.
   const pathRef = useRef(path)
   useEffect(() => { pathRef.current = path }, [path])
   useFollowFiles(isDiskPath(path) ? [path] : [], (changed) => {
-    loadFileViewerText(changed).then((text) => {
+    saveChain.current = saveChain.current.then(() => loadFileViewerText(changed)).then((text) => {
       if (changed !== pathRef.current || text === diskTextRef.current) return
-      onFollowed?.(text, changed)
+      onFollowed?.(text, changed, savedRef.current.value)
       if (!dirtyRef.current) apply(text)
     }).catch(() => {})
   })
@@ -124,15 +127,27 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
     onSaved?.(text)
   }, [write, path, codec, readBackAfterSave, onSaved, setDirty])
 
-  const saveChain = useRef(Promise.resolve())
-  /** Queue a save of `next`; `onlyIfChanged` skips text equal to the last loaded or saved one. */
-  const persist = useCallback((next: T, onlyIfChanged = false) => {
-    const text = codec.serialize(next)
-    if (onlyIfChanged && text === savedRef.current.text) return Promise.resolve()
-    const run = saveChain.current.then(() => persistNow(next, text))
+  /** The value as last loaded or saved, null before the first load. */
+  const saved = useCallback(() => savedRef.current.value, [])
+
+  /**
+   * Queue a save of what `produce` returns once every earlier save and followed read has finished, null saves nothing.
+   * `produce` gets the value as last loaded or saved, which a value changing outside React state needs to be judged against.
+   */
+  const persistFrom = useCallback((produce: (saved: T | null) => T | null) => {
+    const run = saveChain.current.then(async () => {
+      const next = produce(saved())
+      if (next !== null) await persistNow(next, codec.serialize(next))
+    })
     saveChain.current = run.catch(() => {})
     return run
-  }, [codec, persistNow])
+  }, [codec, persistNow, saved])
+
+  /** Queue a save of `next`; `onlyIfChanged` skips text equal to the last loaded or saved one. */
+  const persist = useCallback((next: T, onlyIfChanged = false) => {
+    return persistFrom(() => onlyIfChanged && codec.serialize(next) === savedRef.current.text ? null : next)
+  }, [codec, persistFrom])
+
 
   /** Neovim owns the text while it runs: persist `text`, then show and return what was stored. */
   const saveFromNeovim = useCallback(async (text: string) => {
@@ -141,5 +156,5 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
     return savedRef.current.text
   }, [codec, persist])
 
-  return { value, loadedPath, loadError, dirty, reload, setValue, persist, saveFromNeovim }
+  return { value, loadedPath, loadError, dirty, reload, setValue, persist, persistFrom, saved, saveFromNeovim }
 }

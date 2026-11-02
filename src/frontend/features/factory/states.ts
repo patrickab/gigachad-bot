@@ -1,3 +1,4 @@
+import type { StatusTone } from "@/components/ui/StatusDot"
 import type { Phase, TaskState } from "@/lib/domain/factory"
 
 interface BoardColumn {
@@ -61,8 +62,6 @@ export function taskStatusLine(state: TaskState, phase: Phase | null, round: num
   if (!working || !phase) return STATE_LABELS[state]
   return `${STATE_LABELS[state]} · ${PHASE_LABELS[phase]}${round > 0 ? ` · round ${round}` : ""}`
 }
-
-export type StatusTone = "idle" | "active" | "attention" | "error" | "done"
 
 /** Visual weight of a state: what is running, what waits on the user, what failed. */
 export function statusTone(state: TaskState): StatusTone {

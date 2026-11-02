@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import { fenceCode } from "@gigachad/chat-ui"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { RawFileView } from "./RawFileView"
-import { TEXT_CODEC, useRootFileDocument, type FileLoadFailure } from "./useRootFileDocument"
+import { TEXT_CODEC, useRootFileDocument, type FileLoadFailure } from "@/hooks/useRootFileDocument"
 
 /** Panel share of the width it splits with the main surface, on every open. */
 const OPEN_SHARE = 0.5
