@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CellNeovim, TERMINAL_HOST_CLASS, cellTerminalHeight, languageExtension, type CellModelLike, type CellWidgetLike, type LanguageInfoLike, type NotebookWidgetLike } from "../cellNeovim"
 import type { CellCursor, CellTerminal, CellText } from "../cellTerminal"
 import type { NotebookCellContent, NotebookContent } from "../notebookSync"
@@ -21,6 +21,9 @@ class FakeWidget {
   readonly activeCellChanged = new Signal<CellWidgetLike | null>()
   readonly stateChanged = new Signal<{ name: string; newValue: unknown }>()
   readonly modes: string[] = []
+  readonly node = document.createElement("div")
+  /** Every `scrollToItem` call. */
+  readonly scrolls: { index: number; align?: string }[] = []
   private index = 0
 
   constructor(private readonly model: FakeNotebook) {}
@@ -40,6 +43,11 @@ class FakeWidget {
   get activeCell() { return this.widgets[this.index] ?? null }
 
   setMode(mode: string) { this.modes.push(mode) }
+
+  scrollToItem(index: number, align?: string) {
+    this.scrolls.push({ index, align })
+    return Promise.resolve()
+  }
 }
 
 class FakeTerminal implements CellTerminal {
@@ -77,12 +85,24 @@ function setup(cells: NotebookCellContent[], language: LanguageInfoLike | null =
   const model = new FakeNotebook(content(cells))
   const notebook = new FakeWidget(model)
   const terminal = new FakeTerminal()
+  const run = vi.fn()
   const runAndAdvance = vi.fn()
   const save = vi.fn()
-  const controller = new CellNeovim({ notebook: notebook as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, runAndAdvance, save })
+  const controller = new CellNeovim({ notebook: notebook as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, run, runAndAdvance, save })
   controller.start()
-  return { model, notebook, terminal, controller, runAndAdvance, save }
+  return { model, notebook, terminal, controller, run, runAndAdvance, save }
 }
+
+/** What Jupyter's advance does: the next cell becomes active, a code cell is added when the active one is the last. */
+function advancing({ model, notebook, runAndAdvance }: ReturnType<typeof setup>) {
+  runAndAdvance.mockImplementation(() => {
+    if (notebook.activeCellIndex === model.cells.length - 1) model.insertCell(model.cells.length, code("new", ""))
+    notebook.activeCellIndex++
+  })
+}
+
+/** Lets the promise callbacks of the notebook's scrolling run. */
+const settled = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 describe("CellNeovim", () => {
   let queued: (() => void)[]
@@ -90,6 +110,7 @@ describe("CellNeovim", () => {
     queued = []
     vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => { queued.push(callback) })
   })
+  afterEach(() => { Reflect.deleteProperty(Element.prototype, "scrollIntoView") })
 
   it("hands Neovim the code cells in order, markdown and raw cells left out, then pins the window to the active one", () => {
     const { terminal } = setup([code("a", "x = 1\ny = 2"), markdown("m", "# t"), code("b", "z")])
@@ -107,7 +128,7 @@ describe("CellNeovim", () => {
     const model = new FakeNotebook(content([code("a", "x")]))
     const terminal = new FakeTerminal()
     let language: LanguageInfoLike | null = null
-    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, runAndAdvance: vi.fn(), save: vi.fn() })
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => language, run: vi.fn(), runAndAdvance: vi.fn(), save: vi.fn() })
     controller.start()
     language = { name: "python", file_extension: ".py" }
     model.setMetadata("language_info", { name: "python" })
@@ -225,6 +246,85 @@ describe("CellNeovim", () => {
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
 
+  it("runs on to the next code cell, not the markdown cell between: Neovim has no markdown cell to show", () => {
+    const harness = setup([code("a", "x"), markdown("m", "# t"), markdown("n", "text"), code("b", "y")])
+    advancing(harness)
+    harness.controller.listener.run("a", "x")
+    expect(harness.notebook.activeCellIndex).toBe(3)
+    expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
+    expect(harness.controller.getSnapshot().id).toBe("b")
+    expect(harness.run).not.toHaveBeenCalled()
+  })
+
+  it("lets Jupyter advance onto a code cell that follows directly", () => {
+    const harness = setup([code("a", "x"), code("b", "y")])
+    advancing(harness)
+    harness.controller.listener.run("a", "x")
+    expect(harness.notebook.activeCellIndex).toBe(1)
+    expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
+  })
+
+  it("stays in the cell when only markdown cells follow, Neovim stays on it", () => {
+    const harness = setup([code("a", "x"), markdown("m", "# done")])
+    advancing(harness)
+    harness.controller.listener.run("a", "x = 2")
+    expect(harness.run).toHaveBeenCalledTimes(1)
+    expect(harness.runAndAdvance).not.toHaveBeenCalled()
+    expect(harness.notebook.activeCellIndex).toBe(0)
+    expect(harness.controller.getSnapshot().id).toBe("a")
+    expect(harness.model.cells[0].getSource()).toBe("x = 2")
+  })
+
+  it("lets Jupyter add the cell after the last one of the notebook, Neovim follows into it", () => {
+    const harness = setup([markdown("m", "# t"), code("a", "x")])
+    advancing(harness)
+    harness.controller.listener.run("a", "x")
+    expect(harness.model.cells.map((cell) => cell.id)).toEqual(["m", "a", "new"])
+    expect(harness.notebook.activeCellIndex).toBe(2)
+    expect(harness.terminal.focuses.at(-1)).toEqual({ id: "new", cursor: "first" })
+  })
+
+  it("does not move when Jupyter did not advance, the kernel is not ready", () => {
+    const harness = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
+    harness.controller.listener.run("a", "x")
+    expect(harness.notebook.activeCellIndex).toBe(0)
+  })
+
+  it("opens a notebook that starts with a markdown cell on its first code cell, without any click", () => {
+    const { controller, notebook, terminal } = setup([markdown("t", "# Title"), markdown("q", "Question"), code("a", "x"), code("b", "y")])
+    expect(notebook.activeCellIndex).toBe(2)
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
+    expect(controller.getSnapshot().id).toBe("a")
+  })
+
+  it("places the first code cell once: a markdown cell chosen later stays active", () => {
+    const { controller, notebook } = setup([markdown("t", "# Title"), code("a", "x")])
+    expect(notebook.activeCellIndex).toBe(1)
+    notebook.activeCellIndex = 0
+    expect(notebook.activeCellIndex).toBe(0)
+    expect(controller.getSnapshot().id).toBeNull()
+  })
+
+  it("places the first code cell when the session comes up after the notebook did", () => {
+    const model = new FakeNotebook(content([markdown("t", "# Title"), code("a", "x")]))
+    const notebook = new FakeWidget(model)
+    const terminal = new FakeTerminal()
+    terminal.session = null
+    terminal.state = "starting"
+    const controller = new CellNeovim({ notebook: notebook as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => null, run: vi.fn(), runAndAdvance: vi.fn(), save: vi.fn() })
+    controller.start()
+    expect(notebook.activeCellIndex).toBe(1)
+    terminal.session = {}
+    controller.update(terminal)
+    expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
+  })
+
+  it("leaves a notebook without code cells on its first cell", () => {
+    const { notebook, terminal } = setup([markdown("t", "# Title"), markdown("q", "Question")])
+    expect(notebook.activeCellIndex).toBe(0)
+    expect(terminal.focuses).toEqual([])
+  })
+
   it("follows Neovim into another cell without telling Neovim", () => {
     const { controller, notebook, terminal } = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
     controller.listener.focus("b")
@@ -273,7 +373,7 @@ describe("CellNeovim", () => {
     const terminal = new FakeTerminal()
     terminal.session = null
     terminal.state = "starting"
-    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python", file_extension: ".py" }), runAndAdvance: vi.fn(), save: vi.fn() })
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python", file_extension: ".py" }), run: vi.fn(), runAndAdvance: vi.fn(), save: vi.fn() })
     controller.start()
     expect(terminal.sets).toEqual([])
     expect(controller.getSnapshot().id).toBeNull()
@@ -287,7 +387,7 @@ describe("CellNeovim", () => {
     const model = new FakeNotebook(content([code("a", "x")]))
     const terminal = new FakeTerminal()
     terminal.accepts = false
-    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python" }), runAndAdvance: vi.fn(), save: vi.fn() })
+    const controller = new CellNeovim({ notebook: new FakeWidget(model) as unknown as NotebookWidgetLike, model: modelOf(model), terminal, language: () => ({ name: "python" }), run: vi.fn(), runAndAdvance: vi.fn(), save: vi.fn() })
     controller.start()
     expect(controller.getSnapshot().id).toBeNull()
     terminal.accepts = true
@@ -308,6 +408,97 @@ describe("CellNeovim", () => {
     expect(controller.getSnapshot()).toMatchObject({ id: "a", lines: 1 })
     controller.listener.edit("a", "x\ny\nz")
     expect(controller.getSnapshot().lines).toBe(3)
+  })
+
+  it("brings the cell that becomes active into view, the terminal in it too, not a markdown cell", async () => {
+    const reveal = vi.fn()
+    Element.prototype.scrollIntoView = reveal
+    const { notebook } = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
+    await settled()
+    expect(notebook.scrolls).toEqual([{ index: 0, align: "auto" }])
+    expect(reveal).toHaveBeenCalledTimes(1)
+    expect(reveal).toHaveBeenCalledWith({ block: "nearest" })
+
+    notebook.activeCellIndex = 2
+    await settled()
+    expect(notebook.scrolls.at(-1)).toEqual({ index: 2, align: "auto" })
+    expect(reveal).toHaveBeenCalledTimes(2)
+
+    notebook.activeCellIndex = 1
+    await settled()
+    expect(notebook.scrolls).toHaveLength(2)
+  })
+
+  it("does not scroll again for an edit of the cell that is shown", async () => {
+    const { controller, notebook } = setup([code("a", "x")])
+    await settled()
+    controller.listener.edit("a", "x\ny\nz")
+    await settled()
+    expect(notebook.scrolls).toHaveLength(1)
+  })
+
+  describe("when the browser tab holding the notebook is hidden and shown again", () => {
+    afterEach(() => { vi.unstubAllGlobals() })
+
+    /** A `ResizeObserver` that reports what the test says: the notebook's height. */
+    function observing() {
+      const callbacks: ResizeObserverCallback[] = []
+      vi.stubGlobal("ResizeObserver", class {
+        constructor(callback: ResizeObserverCallback) { callbacks.push(callback) }
+        observe() {}
+        disconnect() {}
+      })
+      return (height: number) => callbacks.forEach((callback) => callback([{ contentRect: { height } } as ResizeObserverEntry], {} as ResizeObserver))
+    }
+
+    it("scrolls the active cell back into view, then the terminal in it, and gives the terminal the keys: the browser dropped all of it", async () => {
+      const report = observing()
+      const reveal = vi.fn()
+      Element.prototype.scrollIntoView = reveal
+      const { notebook, terminal } = setup([markdown("t", "# Title"), code("a", "x")])
+      await settled()
+      notebook.scrolls.splice(0)
+      reveal.mockClear()
+      report(700)
+      report(0)
+      queued.splice(0)
+      expect(notebook.scrolls).toEqual([])
+
+      report(700)
+      await settled()
+      expect(notebook.scrolls).toEqual([{ index: 1, align: "auto" }])
+      expect(reveal).toHaveBeenCalledTimes(1)
+      expect(reveal).toHaveBeenCalledWith({ block: "nearest" })
+      queued.splice(0).forEach((callback) => callback())
+      expect(terminal.focused).toBe(1)
+    })
+
+    it("does nothing for the first size report, the notebook was never hidden", () => {
+      const report = observing()
+      const { notebook } = setup([code("a", "x")])
+      report(700)
+      report(650)
+      expect(notebook.scrolls).toEqual([])
+    })
+
+    it("does nothing while no cell has the terminal", () => {
+      const report = observing()
+      const { notebook } = setup([markdown("t", "# Title")])
+      report(0)
+      report(700)
+      expect(notebook.scrolls).toEqual([])
+    })
+
+    it("stops watching the size when disposed", () => {
+      const disconnect = vi.fn()
+      vi.stubGlobal("ResizeObserver", class {
+        observe() {}
+        disconnect() { disconnect() }
+      })
+      const { controller } = setup([code("a", "x")])
+      controller.dispose()
+      expect(disconnect).toHaveBeenCalledTimes(1)
+    })
   })
 
   it("stops listening when disposed", () => {

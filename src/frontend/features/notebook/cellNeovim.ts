@@ -17,9 +17,13 @@ export interface CellWidgetLike {
 export interface NotebookWidgetLike {
   activeCellIndex: number
   readonly activeCell: CellWidgetLike | null
+  /** The notebook's scrolling element: it is empty (no size) while a hidden tab holds it. */
+  readonly node: HTMLElement
   readonly activeCellChanged: SignalLike<CellWidgetLike | null>
   readonly stateChanged: SignalLike<{ name: string; newValue: unknown }>
   setMode(mode: "command" | "edit", options?: { focus?: boolean }): void
+  /** Scrolls the windowed notebook to the cell at `index`, `auto` moving the least. Unlike `scrollToCell` it leaves the selection and the focus alone. */
+  scrollToItem(index: number, align?: "auto" | "smart" | "start" | "center" | "end"): Promise<void>
 }
 
 /** The shared notebook: its Yjs document's `update` is the one signal that sees every change of every cell. */
@@ -37,6 +41,9 @@ interface CellNeovimDeps {
   terminal: CellTerminal
   /** What the notebook says about its language (`python`, `.py`), null when it says nothing. */
   language: () => LanguageInfoLike | null
+  /** Runs the active cell, which stays the active one. */
+  run: () => void
+  /** Runs the active cell and moves to the next, which is a new cell at the end of the notebook. */
   runAndAdvance: () => void
   save: () => void
 }
@@ -92,7 +99,9 @@ interface CodeCell {
  * - Neovim knows a cell by its `key`, the cell's id. A notebook file may repeat ids, so a later cell with a taken id gets `<id>#2` and so on: Neovim never gets a repeated id (it would refuse the cells), and everything it reports maps back to the cell by its key
  * - An edit in Neovim goes into its cell (`setCellSource`, outside the undo stack) and into `sent` first, so it is not sent back
  * - The active code cell gets the window (`focusCell`) however it became active: click, keyboard, run and advance, first load. A markdown or raw cell has no Neovim, its own editor shows
+ * - The notebook lands on a code cell wherever Neovim can follow: a notebook that opens on a markdown cell (a title) activates its first code cell once, and Shift+Enter moves to the next code cell as `j` does, never to the markdown cells between
  * - Neovim moving its cursor into another cell activates that cell, Shift+Enter runs the cell and advances
+ * - A hidden browser tab (`display: none`) loses the notebook's scroll position and its keyboard focus: when the notebook is on screen again the active cell is scrolled back into view and the terminal gets the keys
  */
 export class CellNeovim {
   /** The terminal calls these, `terminal.subscribe` hands them over. */
@@ -110,6 +119,9 @@ export class CellNeovim {
   private readonly subscribers = new Set<() => void>()
   private snapshot: CellNeovimSnapshot = { id: null, cell: null, lines: 1 }
   private started = false
+  private placed = false
+  private visibility: ResizeObserver | null = null
+  private visible: boolean | null = null
 
   constructor(private readonly deps: CellNeovimDeps) {
     this.terminal = deps.terminal
@@ -122,6 +134,11 @@ export class CellNeovim {
     this.deps.notebook.activeCellChanged.connect(this.onActiveChanged)
     this.deps.notebook.stateChanged.connect(this.onNotebookState)
     this.deps.model.ydoc.on("update", this.onModelUpdate)
+    // Without ResizeObserver (a test environment) there is no hidden tab either
+    if (typeof ResizeObserver !== "undefined") {
+      this.visibility = new ResizeObserver(this.onResize)
+      this.visibility.observe(this.deps.notebook.node)
+    }
     this.reconcile()
   }
 
@@ -131,6 +148,9 @@ export class CellNeovim {
     this.deps.notebook.activeCellChanged.disconnect(this.onActiveChanged)
     this.deps.notebook.stateChanged.disconnect(this.onNotebookState)
     this.deps.model.ydoc.off("update", this.onModelUpdate)
+    this.visibility?.disconnect()
+    this.visibility = null
+    this.visible = null
     this.sent = null
     this.shown = null
   }
@@ -176,14 +196,30 @@ export class CellNeovim {
     const source = id === null ? undefined : this.codeCell(id)?.cell.getSource()
     const lines = source === undefined ? 1 : lineCount(source)
     if (this.snapshot.id === id && this.snapshot.cell === cell && this.snapshot.lines === lines) return
+    const entered = id !== null && this.snapshot.id !== id
     this.snapshot = { id, cell, lines }
     for (const subscriber of [...this.subscribers]) subscriber()
+    // After the notebook has finished the activation that got us here
+    if (entered) void Promise.resolve().then(() => this.reveal())
+  }
+
+  /**
+   * A notebook opens with its first cell active, often a markdown title: Neovim has nothing to show there and the first code cell would stay CodeMirror until a click.
+   * Once, when the notebook has its first active cell, that cell becomes the first code cell. Later markdown cells the user picks stay.
+   */
+  private placeFirst() {
+    if (this.placed || !this.deps.notebook.activeCell) return
+    this.placed = true
+    if (isCode(this.deps.notebook.activeCell)) return
+    const first = this.codeCells()[0]
+    if (first) this.activate(first.index)
   }
 
   /**
    * Bring Neovim to the notebook's state, whatever changed: the code cells it holds, and the window on the active cell. Idempotent, every trigger calls it.
    */
   private reconcile() {
+    this.placeFirst()
     const active = this.deps.notebook.activeCell
     if (!this.session) {
       this.shown = null
@@ -240,6 +276,35 @@ export class CellNeovim {
     if (change.name === "mode" && change.newValue === "edit" && this.shown !== null) this.claimKeys()
   }
 
+  /** The notebook node has no size while a hidden tab holds it, and its size is back when the tab is shown again. */
+  private readonly onResize = (entries: readonly ResizeObserverEntry[]) => {
+    const visible = entries[entries.length - 1].contentRect.height > 0
+    const wasHidden = this.visible === false
+    this.visible = visible
+    if (visible && wasHidden) this.show()
+  }
+
+  /** The notebook is on screen again: the browser dropped the scroll position of the hidden tab and the focus of the terminal. */
+  private show() {
+    if (this.shown === null) return
+    this.reveal(() => this.claimKeys())
+  }
+
+  /**
+   * The terminal of the active cell comes into view. The windowed notebook scrolls to the cell (it measures its cells as they render, an element's own `scrollIntoView` goes by the heights it
+   * estimated and the cells above grow afterwards), then the terminal itself is scrolled to: the cell holds its outputs too, and a tall output keeps the cell in view while the terminal at its top is cut.
+   */
+  private reveal(then?: () => void) {
+    const { notebook } = this.deps
+    if (this.shown === null || this.visible === false) return
+    const settled = () => {
+      if (this.shown === null) return
+      notebook.activeCell?.node.querySelector(`.${TERMINAL_HOST_CLASS}`)?.scrollIntoView?.({ block: "nearest" })
+      then?.()
+    }
+    notebook.scrollToItem(notebook.activeCellIndex, "auto").then(settled, settled)
+  }
+
   private readonly onModelUpdate = () => {
     this.reconcile()
   }
@@ -258,11 +323,22 @@ export class CellNeovim {
     if (this.deps.notebook.activeCellIndex !== index) this.deps.notebook.activeCellIndex = index
   }
 
+  /**
+   * Shift+Enter in Neovim: the cell with Neovim's text runs and Neovim goes on to the next cell it has, a code cell, as `j` crosses cells. Jupyter's advance would stop at the markdown cell
+   * between, with no Neovim there and the next code cell CodeMirror until a click. Without a next code cell the cell stays (Neovim stays on it) unless it is the last of the notebook, where Jupyter adds a cell.
+   */
   private run(id: string, text: string) {
     const index = this.edit(id, text)
     if (index < 0) return
     this.activate(index)
+    const { notebook, model } = this.deps
+    const next = this.codeCells().find((candidate) => candidate.index > index)
+    if (!next && index < model.cells.length - 1) {
+      this.deps.run()
+      return
+    }
     this.deps.runAndAdvance()
+    if (next && notebook.activeCellIndex === index + 1 && !isCode(notebook.activeCell)) this.activate(next.index)
   }
 
   /** Neovim pinned its window to the cell `key` itself: the notebook follows, Neovim is not told. */

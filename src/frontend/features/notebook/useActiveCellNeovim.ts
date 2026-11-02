@@ -30,6 +30,7 @@ export function useActiveCellNeovim(tabId: string, terminal: CellTerminal, save:
         const spec = model.sharedModel.getMetadata("kernelspec") as { language?: string } | undefined
         return info ?? (spec?.language ? { name: spec.language } : null)
       },
+      run: () => { void adapter.commands.execute(NotebookCommandIds.run) },
       runAndAdvance: () => { void adapter.commands.execute(NotebookCommandIds.runAndAdvance) },
       save: () => { void saveRef.current() },
     })

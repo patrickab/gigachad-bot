@@ -53,6 +53,7 @@ afterEach(() => {
   cleanup()
   document.body.innerHTML = ""
   controller.current = null
+  Reflect.deleteProperty(Element.prototype, "scrollIntoView")
 })
 
 describe("ActiveCellTerminal", () => {
@@ -134,6 +135,17 @@ describe("ActiveCellTerminal", () => {
     })
 
     expect(cell.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")).not.toBeNull()
+  })
+
+  it("scrolls the terminal itself into view, not its cell: a tall output keeps the cell in view while the terminal at its top is cut", () => {
+    const reveal = vi.fn()
+    Element.prototype.scrollIntoView = reveal
+    const cell = cellWidget()
+    showing({ id: "a", cell, lines: 3 })
+    render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
+    expect(reveal).toHaveBeenCalledTimes(1)
+    expect(reveal).toHaveBeenCalledWith({ block: "nearest" })
+    expect(reveal.mock.contexts[0]).toBe(cell.node.querySelector("[data-testid=cell-neovim]"))
   })
 
   it("makes the terminal as tall as the cell's text needs", () => {

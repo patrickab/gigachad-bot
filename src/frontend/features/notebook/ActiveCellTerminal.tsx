@@ -59,7 +59,8 @@ export function ActiveCellTerminal({ tabId, terminal, save }: { tabId: string; t
     return () => observer.disconnect()
   }, [parent])
 
-  useEffect(() => { if (parent) cell?.node.scrollIntoView?.({ block: "nearest" }) }, [cell, parent])
+  // The terminal itself comes into view, not its cell: the cell holds the outputs too, and a tall output keeps the cell "visible" while the terminal at its top is cut at the edge
+  useEffect(() => { if (parent) hostRef.current?.scrollIntoView?.({ block: "nearest" }) }, [cell, parent])
 
   if (!parent) return null
   return createPortal(

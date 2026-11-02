@@ -227,7 +227,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- useNotebookFile.ts, notebookSync.ts Load, debounced save and follow over `useRootFileDocument`, pure nbformat serialization and cell diff (merge theirs)
 |       |   |   |-- useKernelShutdown.ts Kernel shutdown when a notebook's last tab closes
 |       |   |   |-- syntaxHighlight.ts Neovim-scheme highlight style and `self`/decorator marks, passed through the fork's `editorExtensions` prop
-|       |   |   |-- cellTerminal.ts, cellNeovim.ts, useActiveCellNeovim.ts The `CellTerminal` seam to `features/editor`, `CellNeovim` (notebook code cells <-> Neovim buffer, window follows the active cell, run, height, filetype from `language_info`), its hook over the notebook store
+|       |   |   |-- cellTerminal.ts, cellNeovim.ts, useActiveCellNeovim.ts The `CellTerminal` seam to `features/editor`, `CellNeovim` (notebook code cells <-> Neovim buffer, window follows the active cell, first code cell active on open, run goes on to the next code cell, scroll and keys back after a hidden tab, height, filetype from `language_info`), its hook over the notebook store
 |       |   |   |-- ActiveCellTerminal.tsx Portal of the terminal into the active cell's input area, key suppression for the notebook's shortcuts
 |       |   |   `-- notebook-theme.css, markdownRenderer.tsx, empty.css App theme through `--jp-*` variables, Markdown cells through `LaTeXMarkdown`, stub for an unused library stylesheet
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
