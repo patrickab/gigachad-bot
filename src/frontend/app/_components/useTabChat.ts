@@ -19,7 +19,7 @@ import { fetchOmpSessionHistory, loadChatHistory } from "@/lib/backend/api"
 import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
-import { isEditableTarget, isModKey, isNeovimKeyEvent } from "@/lib/utils"
+import { isEditableTarget, isModKey, isTerminalKeyEvent } from "@/lib/utils"
 import { useBusyCount } from "@/hooks/useBusyCount"
 import { useEventListener } from "@/hooks/useEventListener"
 
@@ -116,7 +116,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
 
   // Capture phase so the shortcuts win over handlers inside focused editors.
   useEventListener("window", "keydown", (e) => {
-    if (isNeovimKeyEvent(e)) return
+    if (isTerminalKeyEvent(e)) return
     if (e.altKey && e.key === "s") {
       e.preventDefault()
       if (persistence.isTitled) persistence.handleQuickSave()

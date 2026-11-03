@@ -27,11 +27,11 @@ describe("useEscapeLayer", () => {
     document.removeEventListener("keydown", below)
   })
 
-  it("leaves Escape to a focused Neovim terminal, so vim can leave insert mode without closing the window", () => {
+  it("leaves Escape to a focused terminal, so vim can leave insert mode without closing the window", () => {
     const closeWindow = vi.fn()
     const layer = renderHook(() => useEscapeLayer(closeWindow))
     const terminal = document.createElement("div")
-    terminal.dataset.neovimTerminal = ""
+    terminal.dataset.terminal = ""
     const terminalInput = document.body.appendChild(terminal).appendChild(document.createElement("textarea"))
 
     const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })

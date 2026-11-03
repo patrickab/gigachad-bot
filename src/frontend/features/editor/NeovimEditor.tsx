@@ -8,11 +8,8 @@ import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import type { CellCursor, CellText } from "@/features/notebook/cellTerminal"
-import { readToken } from "@/lib/palette"
+import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
 
-const FONT_SIZE = 13
-// Local Nerd Fonts first, so icons from the user's config render as in a terminal. "Mono" keeps icons one cell wide.
-const NERD_FONTS = "'JetBrainsMono Nerd Font Mono', 'Symbols Nerd Font Mono'"
 const POLICY_VIOLATION = 1008
 /** Quiet time after the last size change before the terminal refits. */
 const FIT_SETTLE_MS = 150
@@ -25,39 +22,6 @@ const SYNC_END = "\x1b[?2026l"
 const SHIFT_ENTER = "\x1b[13;2u"
 // One char per byte, so the ASCII marker can be found in raw PTY output
 const BYTE_DECODER = new TextDecoder("latin1")
-
-type Rgb = [red: number, green: number, blue: number]
-
-/** `color` as RGB, null when fully transparent. Canvas resolves any CSS color, xterm only takes opaque ones. */
-function toRgb(color: string): Rgb | null {
-  const context = window.document.createElement("canvas").getContext("2d", { willReadFrequently: true })
-  if (!context) return null
-  context.fillStyle = color
-  context.fillRect(0, 0, 1, 1)
-  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data
-  return alpha === 0 ? null : [red, green, blue]
-}
-
-const rgbCss = ([red, green, blue]: Rgb) => `rgb(${red}, ${green}, ${blue})`
-
-/** Share of ink in the cursor block over the background: clearly visible, softer than full ink. */
-const CURSOR_INK_SHARE = 0.3
-
-const mix = (base: Rgb, over: Rgb, share: number): Rgb => base.map((channel, index) => Math.round(channel + (over[index] - channel) * share)) as Rgb
-
-/** Terminal colors of the app theme: the background `element` sits on, and the ink on it. `isLight` is what Neovim gets as 'background'. */
-function terminalTheme(element: HTMLElement) {
-  let background: Rgb | null = null
-  for (let node: HTMLElement | null = element; node && !background; node = node.parentElement) background = toRgb(getComputedStyle(node).backgroundColor)
-  background ??= toRgb(readToken("paper")) ?? [0, 0, 0]
-  const ink = toRgb(readToken("ink")) ?? [255, 255, 255]
-  const [red, green, blue] = background
-  return {
-    // The character under the cursor block keeps the ink
-    theme: { background: rgbCss(background), foreground: rgbCss(ink), cursor: rgbCss(mix(background, ink, CURSOR_INK_SHARE)), cursorAccent: rgbCss(ink) },
-    isLight: 0.299 * red + 0.587 * green + 0.114 * blue > 128,
-  }
-}
 
 /** A running terminal whose host element survives React remounts (fullscreen, overlay). */
 export interface NeovimTerminal {
@@ -191,7 +155,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       if (disposed) return
       const host = window.document.createElement("div")
       host.className = "h-full w-full font-mono"
-      const xterm = new Terminal({ fontSize: FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })
+      const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
       let isOpen = false
@@ -419,7 +383,7 @@ export function NeovimEditor({ terminal, status, onRestart, className, fitHeight
   useEffect(() => { terminal?.restyle() }, [terminal, theme])
 
   return (
-    <div ref={slotRef} data-neovim-terminal className={cn("relative min-h-0 flex-1 overflow-hidden bg-page px-2 pt-1", className)}>
+    <div ref={slotRef} data-terminal className={cn("relative min-h-0 flex-1 overflow-hidden bg-page px-2 pt-1", className)}>
       {status.state === "stopped" && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-page text-xs text-ink-faint">
           <span>{status.message}</span>

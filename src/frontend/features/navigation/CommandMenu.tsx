@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
-import { cn, isNeovimKeyEvent } from "@/lib/utils"
+import { cn, isTerminalKeyEvent } from "@/lib/utils"
 
 export interface CommandMenuItem {
   command: string
@@ -36,7 +36,7 @@ export function CommandMenu({ items, query, onRun, onClose }: CommandMenuProps) 
 
   // Capture phase so the keys are handled before the focused input sees them.
   useEventListener("window", "keydown", (e) => {
-    if (isNeovimKeyEvent(e)) return
+    if (isTerminalKeyEvent(e)) return
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx((i) => (i + 1) % filtered.length); return }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx((i) => (i - 1 + filtered.length) % filtered.length); return }
     if (e.key === "Enter" && filtered.length > 0) { e.preventDefault(); onRun(filtered[selectedIdx]?.command ?? filtered[0].command) }

@@ -49,17 +49,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-import fcntl
 import os
 from pathlib import Path
 import re
 import shutil
-import struct
 import subprocess
 import tempfile
-import termios
 
 from lib.neovim_rpc import SETUP_LUA, NeovimRpc, NeovimRpcError
+from lib.pty_process import claim_controlling_terminal, set_terminal_size, terminal_environment
 from lib.text_merge import TextMergeError, merge_theirs
 
 SaveDocument = Callable[[str, str], Awaitable[str]]
@@ -167,21 +165,6 @@ class _Document:
             raise RuntimeError(f"cannot read {self.disk_path.name} on disk to merge with it, nothing written: {exc}") from exc
 
 
-def _set_terminal_size(fd: int, rows: int, cols: int) -> None:
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-
-
-def _claim_controlling_terminal() -> None:
-    """Make the PTY the child's controlling terminal so resizes deliver SIGWINCH."""
-    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-
-
-def _environment() -> dict[str, str]:
-    environment = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"}
-    environment.pop("NVIM", None)  # set when the backend itself runs inside a Neovim terminal
-    return environment
-
-
 class NeovimSession:
     """One `nvim` process in a PTY, editing temporary copies of documents.
 
@@ -259,7 +242,7 @@ class NeovimSession:
             baseline = workdir / "base" / _document_name(filename)
             baseline.write_text(base_content, encoding="utf-8", newline="")
         terminal_fd, child_fd = os.openpty()
-        _set_terminal_size(terminal_fd, rows, cols)
+        set_terminal_size(terminal_fd, rows, cols)
         try:
             process = subprocess.Popen(
                 ["nvim", "-n", "--listen", str(workdir / "rpc.sock"), str(first.copy)],
@@ -267,9 +250,9 @@ class NeovimSession:
                 stdout=child_fd,
                 stderr=child_fd,
                 cwd=cwd,
-                env=_environment(),
+                env=terminal_environment(),
                 start_new_session=True,
-                preexec_fn=_claim_controlling_terminal,
+                preexec_fn=claim_controlling_terminal,
             )
         except BaseException:
             os.close(terminal_fd)
@@ -526,7 +509,7 @@ class NeovimSession:
 
     def resize(self, rows: int, cols: int) -> None:
         if self._terminal_fd >= 0:
-            _set_terminal_size(self._terminal_fd, rows, cols)
+            set_terminal_size(self._terminal_fd, rows, cols)
 
     async def wait(self) -> int:
         """Exit code of `nvim`."""

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
-import { isModKey, isNeovimKeyEvent } from "@/lib/utils"
+import { isModKey, isTerminalKeyEvent } from "@/lib/utils"
 
 /** Ctrl+Up/Down keyboard focus over a chat's question/answer pairs. */
 export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
@@ -40,7 +40,7 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   // Capture phase so these shortcuts win over editor and input handlers
   useEventListener("window", "keydown", (e) => {
     const eat = () => { e.preventDefault(); e.stopPropagation() }
-    if (isNeovimKeyEvent(e)) return
+    if (isTerminalKeyEvent(e)) return
     if (isModKey(e) && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       eat()
       navigateFocus(e.key)

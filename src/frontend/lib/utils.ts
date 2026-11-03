@@ -5,9 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-/** True for key events typed into a Neovim terminal (`data-neovim-terminal`), which owns every key while focused. */
-export function isNeovimKeyEvent(event: Event): boolean {
-  return event.target instanceof Element && event.target.closest("[data-neovim-terminal]") !== null
+/** True for key events typed into a terminal (`data-terminal`: Neovim, the shell), which owns every key while focused. */
+export function isTerminalKeyEvent(event: Event): boolean {
+  return event.target instanceof Element && event.target.closest("[data-terminal]") !== null
 }
 
 /** Message of `cause` when it is an `Error` with a non-empty message, else `fallback`. */
