@@ -60,6 +60,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
 |   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/switched/open_failed/background frames, `open_file`/`insert_lines`/`set_content`/`renamed` input, cell mode (`cell_mode` open, `set_cells`/`focus_cell` in, `cell_edit`/`cell_focus`/`cell_run`/`save_notebook` out), every notification through one ordered queue
+|   |       |-- terminal.py           `WS /api/terminal/session`: login shell on a PTY, `open`/`resize`/`escape` in, `leave`/`exit` out
 |   |       |-- jupyter.py            Kernelspecs, `POST`/`DELETE /api/jupyter/kernel`, HTTP and WebSocket proxy `/api/jupyter/server/` (trusted-request and host-access gates)
 |   |       |-- file_watch.py         `WS /api/files/watch`: replaceable watch set in, `changed`/`refused` frames out
 |   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, promote a `.tex` to a folder entry, pasted images, chat-key session links
@@ -132,6 +133,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
 |   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`, the notebook buffer (`set_cells`/`focus_cell`, virtual name beside the notebook, marker lines, extmarks per cell id)
+|   |   |-- pty_process.py            `PtyProcess` (child on a PTY, output queue, resize, foreground check, hangup on close) and the PTY helpers Neovim shares
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
 |   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge, notebook-buffer block (marker protection, window pin, `cell_edit`/`cell_focus`/`cell_run`/`save_notebook` notifications)
 |   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs and venv specs, kernel per resolved path, proxy allowlist and session check, idle cull, `move_kernel`/`shutdown_kernels_under`
@@ -186,6 +188,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- FileViewer.tsx
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
 |       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard, cell-mode frames (`set_cells`/`focus_cell`, `cell_*` notifications) and Shift+Enter, `fitHeightAtOnce` for a terminal whose height follows its text
+|       |   |   |-- ShellTerminal.tsx `ShellTerminals`: one floating login shell per tab (host access only), `t` opens the active tab's, Esc at the prompt, a double Esc or a click beside it hides it, `exit` or closing the tab ends it
+|       |   |   |-- terminalTheme.ts  xterm colors and fonts from the app theme, shared by Neovim and the shell
 |       |   |   |-- NotebookNeovim.tsx `NotebookWithNeovim`: one cell-mode Neovim session per notebook tab (the notebook as one buffer), handed to the notebook as a `CellTerminal`
 |       |   |   |-- clipboardPaste.ts Browser clipboard read for a paste, and the screenshot store (`imgs/`, `announceFileChange`) behind it
 |       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (local MinerU-grounded chat, or the owner's `renderChat`)
