@@ -780,6 +780,11 @@ export function restartFactoryPreview(id: string): Promise<FactoryPreview> {
   return post<FactoryPreview>(`/factory/tasks/${encodeURIComponent(id)}/preview/restart`, {})
 }
 
+/** Where the notebook at absolute `path` works, its kernel and its chat: the mounted root holding it, else its folder. */
+export async function fetchNotebookDirectory(path: string, signal?: AbortSignal): Promise<string> {
+  return (await request<{ path: string }>(`/jupyter/directory${toQuery({ path })}`, { signal })).path
+}
+
 /** The kernel environments for the notebook at absolute `path`, and the one it opens with. */
 export function fetchKernelSpecs(path: string, signal?: AbortSignal): Promise<KernelSpecs> {
   return request<KernelSpecs>(`/jupyter/kernelspecs${toQuery({ path })}`, { signal })

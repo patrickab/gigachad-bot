@@ -517,8 +517,8 @@ class JupyterHost:
         if result.returncode != 0:
             raise UpstreamRequestFailed(502, f"{installing} failed: {result.stderr.strip()[-_LOG_TAIL_BYTES:]}")
 
-    def start_kernel(self, path: str, name: str) -> KernelRef:
-        """The kernel of the notebook at *path* running kernelspec *name*: the running one, or a new one replacing another."""
+    def start_kernel(self, path: str, name: str, directory: str) -> KernelRef:
+        """The kernel of the notebook at *path* running kernelspec *name*: the running one, or a new one in the absolute *directory* replacing another."""
         notebook = notebook_path(path)
         listed = self.kernelspecs(str(notebook))
         if name not in {spec.name for spec in listed.specs}:
@@ -536,7 +536,8 @@ class JupyterHost:
             venv = next((venv for venv in _find_venvs(notebook) if venv.spec.name == name), None)
             if venv is not None and not _has_ipykernel(venv.directory):
                 self._install_ipykernel(venv)
-            response = self._call("POST", "api/kernels", json={"name": name, "path": str(notebook.parent.relative_to("/"))})
+            cwd = Path(directory).resolve().relative_to("/")
+            response = self._call("POST", "api/kernels", json={"name": name, "path": str(cwd)})
             if response.status_code != 201:
                 raise UpstreamContractError(
                     f"Jupyter server answered {response.status_code} to the kernel start: {response.text[:300]}"

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import type { NeovimSelection } from "@/features/editor/NeovimEditor"
 import type { ComposerInsertion } from "@/features/omp/OmpComposer"
@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   loadFileSessions: vi.fn<(path: string) => Promise<Sessions>>(),
   saveFileSession: vi.fn(),
   informFileSession: vi.fn(),
+  fetchNotebookDirectory: vi.fn<(path: string) => Promise<string>>(),
 }))
 const neovim = vi.hoisted(() => ({ onSelection: undefined as ((selection: NeovimSelection) => void) | undefined }))
 vi.mock("@/lib/backend/api", () => api)
@@ -30,6 +31,12 @@ import { NotebookWorkbench } from "../NotebookWorkbench"
 
 const PATH = "/home/me/project/notebooks/analysis.ipynb"
 
+const MOUNT = "/home/me/project"
+
+beforeEach(() => {
+  api.fetchNotebookDirectory.mockResolvedValue(MOUNT)
+})
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -49,18 +56,35 @@ const workbenchOf = (drawerOpen: boolean, onDrawerOpenChange = vi.fn()) => (
 )
 
 describe("NotebookWorkbench", () => {
-  it("links the chat to the notebook: a new session starts in its folder and names the file", async () => {
+  it("links the chat to the notebook: a new session starts in the mount root holding it, so relative links resolve there, and names the file relative to it", async () => {
     api.loadFileSessions.mockResolvedValue({ active: null, sessionIds: [], moved: [] })
     render(workbenchOf(true))
-    expect(screen.getByText(`notebook ${PATH}`)).toBeTruthy()
-    expect(await screen.findByText(`chat ${JSON.stringify({ kind: "new", cwd: "/home/me/project/notebooks" })} File: analysis.ipynb`)).toBeTruthy()
+    expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
+    expect(await screen.findByText(`chat ${JSON.stringify({ kind: "new", cwd: MOUNT })} File: notebooks/analysis.ipynb`)).toBeTruthy()
+    expect(api.fetchNotebookDirectory).toHaveBeenCalledWith(PATH, expect.any(AbortSignal))
     expect(api.loadFileSessions).toHaveBeenCalledWith(PATH)
+  })
+
+  it("starts a notebook outside every mount in its folder, the directory the backend answers", async () => {
+    api.fetchNotebookDirectory.mockResolvedValue("/home/me/project/notebooks")
+    api.loadFileSessions.mockResolvedValue({ active: null, sessionIds: [], moved: [] })
+    render(workbenchOf(true))
+    expect(await screen.findByText(`chat ${JSON.stringify({ kind: "new", cwd: "/home/me/project/notebooks" })} File: analysis.ipynb`)).toBeTruthy()
+  })
+
+  it("offers a retry when the directory cannot be found", async () => {
+    api.fetchNotebookDirectory.mockRejectedValueOnce(new Error("offline"))
+    api.loadFileSessions.mockResolvedValue({ active: null, sessionIds: [], moved: [] })
+    render(workbenchOf(true))
+    const retry = await screen.findByRole("button", { name: /retry/i })
+    act(() => retry.click())
+    expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
   })
 
   it("shows no chat while the drawer is closed", async () => {
     api.loadFileSessions.mockResolvedValue({ active: "linked", sessionIds: ["linked"], moved: [] })
     render(workbenchOf(false))
-    expect(screen.getByText(`notebook ${PATH}`)).toBeTruthy()
+    expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
     await vi.waitFor(() => expect(api.loadFileSessions).toHaveBeenCalled())
     expect(screen.queryByText(/^chat /)).toBeNull()
   })
@@ -69,6 +93,7 @@ describe("NotebookWorkbench", () => {
     api.loadFileSessions.mockResolvedValue({ active: null, sessionIds: [], moved: [] })
     const onDrawerOpenChange = vi.fn()
     const { rerender } = render(workbenchOf(false, onDrawerOpenChange))
+    await screen.findByText(`notebook ${PATH}`)
     act(() => neovim.onSelection?.({ path: `${PATH}.py`, start_line: 2, end_line: 3, text: "x = 1\ny = 2" }))
     expect(onDrawerOpenChange).toHaveBeenCalledWith(true)
 

@@ -107,11 +107,11 @@ def names(specs: jupyter.KernelSpecList) -> list[str]:
     return [spec.name for spec in specs.specs]
 
 
-def client_for(host: JupyterHost, *, host_access: bool = True):
-    """A client whose requests come from the app's own page (`ORIGIN`), `sent_from` changes that."""
+def client_for(host: JupyterHost, *mounts: Path, host_access: bool = True):
+    """A client whose requests come from the app's own page (`ORIGIN`), `sent_from` changes that. *mounts* are its mounted file roots."""
     overrides = {
         get_request_identity: request_identity(host_access),
-        get_file_roots: mounted_roots(host_access=host_access),
+        get_file_roots: mounted_roots(*mounts, host_access=host_access),
         jupyter_route.get_jupyter_host: host,
     }
     client = route_client(jupyter_route.router, overrides=overrides)
@@ -543,13 +543,13 @@ def test_idle_kernels_nobody_is_connected_to_are_culled_and_start_again_for_thei
     host = JupyterHost(tmp_path / "jupyter")
     nb = str(notebook(home / "a.ipynb"))
     try:
-        kernel = host.start_kernel(nb, "python3")
+        kernel = host.start_kernel(nb, "python3", str(home))
         deadline = time.monotonic() + 30
         while host._is_running(kernel) and time.monotonic() < deadline:
             time.sleep(0.5)
 
         assert not host._is_running(kernel)
-        assert host.start_kernel(nb, "python3").kernel_id != kernel.kernel_id
+        assert host.start_kernel(nb, "python3", str(home)).kernel_id != kernel.kernel_id
     finally:
         host.stop()
 
@@ -577,6 +577,20 @@ def test_a_notebook_has_one_kernel_whichever_way_its_path_is_spelled(world):
     again = start(world, real / "b.ipynb", "python3")
     jupyter.shutdown_kernels_under(str(link))
     assert world.client.get(f"{SERVER}/api/kernels/{again['kernel_id']}").status_code == 404
+
+
+def test_a_notebook_in_a_mount_works_in_the_mount_root_and_others_in_their_folder(world):
+    mount = world.home / "repo"
+    nb = notebook(mount / "notebooks" / "a.ipynb")
+    loose = notebook(world.project / "loose" / "a.ipynb")
+    with client_for(world.host, mount) as client:
+        assert client.get("/api/jupyter/directory", params={"path": str(nb)}).json() == {"path": str(mount)}
+        assert client.get("/api/jupyter/directory", params={"path": str(loose)}).json() == {"path": str(loose.parent)}
+        kernel = client.post("/api/jupyter/kernel", json={"path": str(nb), "name": "python3"})
+        assert kernel.status_code == 200, kernel.text
+
+        assert execute(client, kernel.json()["kernel_id"], "import os; print(os.getcwd())").strip() == str(mount)
+    world.host.shutdown_kernel(str(nb))
 
 
 def test_the_proxy_forwards_request_bodies_and_methods(world):
@@ -775,7 +789,7 @@ def test_a_server_that_died_is_started_again_without_the_kernels_it_took_along(w
 @requires_proc
 def test_stopping_the_host_ends_the_server_its_kernels_and_its_files(tmp_path, home):
     host = JupyterHost(tmp_path / "jupyter")
-    kernel = host.start_kernel(str(notebook(home / "a.ipynb")), "python3")
+    kernel = host.start_kernel(str(notebook(home / "a.ipynb")), "python3", str(home))
     kernels = kernel_processes(kernel.kernel_id)
     process = host._server.process
     scratch = Path(host._server.scratch.name)
@@ -798,7 +812,7 @@ def backend_with_a_kernel(backend_process, tmp_path, home):
         from pathlib import Path
         from lib.jupyter import JupyterHost
         host = JupyterHost(Path({str(tmp_path / "jupyter")!r}))
-        kernel = host.start_kernel({str(notebook(home / "a.ipynb"))!r}, "python3")
+        kernel = host.start_kernel({str(notebook(home / "a.ipynb"))!r}, "python3", {str(home)!r})
         server = host._server
         print(json.dumps({{"server": server.process.pid, "scratch": server.scratch.name, "kernel_id": kernel.kernel_id}}), flush=True)
         time.sleep(600)

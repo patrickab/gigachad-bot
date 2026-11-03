@@ -228,7 +228,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`, `PANE_TOP_PX` also pads the notebook under the top bar)
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
 |       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames
-|       |   |   |-- NotebookWorkbench.tsx A notebook tab: `NotebookWithNeovim` plus the chat drawer linked to the notebook path (new sessions in its folder)
+|       |   |   |-- NotebookWorkbench.tsx A notebook tab: `NotebookWithNeovim` plus the chat drawer linked to the notebook path (new sessions in its mount root, else its folder)
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- notebook/             Jupyter notebook kind, the only importer of `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*`
 |       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab and `useEditorPath` generation) and the library notebook (runs under the top bar, restart revives a dead kernel with a new one)

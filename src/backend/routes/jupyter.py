@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket
@@ -56,6 +57,10 @@ class StartKernelRequest(BaseModel):
     name: str
 
 
+class NotebookDirectory(BaseModel):
+    path: str
+
+
 def get_jupyter_host() -> JupyterHost:
     return jupyter.host()
 
@@ -71,6 +76,18 @@ def _allowed_notebook(roots: FileRoots, path: str) -> str:
     return str(notebook)
 
 
+def _working_directory(roots: FileRoots, notebook: str) -> str:
+    """Where the notebook *notebook* works (kernel and chat): the mounted root holding it, so repo-relative paths resolve, else its folder."""
+    with contextlib.suppress(ValueError):
+        return str(roots.root_of(notebook))
+    return str(Path(notebook).parent)
+
+
+@router.get("/directory", response_model=NotebookDirectory, dependencies=[_host_only, _trusted])
+async def notebook_directory(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> NotebookDirectory:
+    return NotebookDirectory(path=_working_directory(roots, _allowed_notebook(roots, path)))
+
+
 @router.get("/kernelspecs", response_model=KernelSpecList, dependencies=[_host_only, _trusted])
 async def list_kernelspecs(
     path: str = Query(...), host: JupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
@@ -82,7 +99,8 @@ async def list_kernelspecs(
 async def start_kernel(
     req: StartKernelRequest, host: JupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> KernelRef:
-    return await call_upstream(asyncio.to_thread(host.start_kernel, _allowed_notebook(roots, req.path), req.name))
+    notebook = _allowed_notebook(roots, req.path)
+    return await call_upstream(asyncio.to_thread(host.start_kernel, notebook, req.name, _working_directory(roots, notebook)))
 
 
 @router.delete("/kernel", status_code=204, dependencies=[_host_only, _trusted])
