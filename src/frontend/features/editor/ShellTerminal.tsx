@@ -34,19 +34,18 @@ function isLeaveKey(event: KeyboardEvent): boolean {
   return event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing
 }
 
-/** Run the backend login shell while `sessionKey` is set, a new key starts a new shell.
+/** Run one backend login shell, a new `sessionKey` starts a new one.
  *
  * - `onExit` follows the shell's `exit`
  * - `onLeave` follows an Esc at the shell's prompt, or a double Esc while a program runs (the program gets the first one)
  */
-function useShellSession(sessionKey: number | null, onExit: () => void, onLeave: () => void) {
+function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => void) {
   const [terminal, setTerminal] = useState<ShellTerminal | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const exit = useEffectEvent(onExit)
   const leave = useEffectEvent(onLeave)
 
   useEffect(() => {
-    if (sessionKey === null) return
     let disposed = false
     let dispose = () => {}
 
@@ -167,35 +166,64 @@ function ShellTerminalSlot({ terminal, failure, onRestart }: { terminal: ShellTe
   )
 }
 
-/** Floating login shell on the backend host, for logins with host access.
- *
- * - `t` outside a text field opens it, 2/3 of the screen wide and high
- * - Esc at the prompt or a click beside it hides it, the shell keeps running and `t` shows it again. While a program runs (vim,
- *   less) Esc is the program's, a double Esc hides the window
- * - `exit` ends the shell and closes the window
- */
-export function ShellTerminalWindow() {
-  const hostAccess = useHostAccess()
-  const [sessionKey, setSessionKey] = useState<number | null>(null)
-  const [visible, setVisible] = useState(false)
-  const end = useCallback(() => {
-    setSessionKey(null)
-    setVisible(false)
-  }, [])
-  const hide = useCallback(() => setVisible(false), [])
-  const { terminal, failure } = useShellSession(sessionKey, end, hide)
-
-  useEventListener("document", "keydown", (event) => {
-    if (!hostAccess || !isOpenTerminalKey(event)) return
-    event.preventDefault()
-    setSessionKey((key) => key ?? 0)
-    setVisible(true)
-  })
-
-  if (!visible || sessionKey === null) return null
+/** One tab's shell: `sessionKey` names its run, the window shows while `shown`. Unmounting hangs the shell up. */
+function TabShell({ sessionKey, shown, onExit, onHide, onRestart }: {
+  sessionKey: number
+  shown: boolean
+  onExit: () => void
+  onHide: () => void
+  onRestart: () => void
+}) {
+  const { terminal, failure } = useShellSession(sessionKey, onExit, onHide)
+  if (!shown) return null
   return (
-    <FloatingWindow onClose={hide} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3">
-      <ShellTerminalSlot terminal={terminal} failure={failure} onRestart={() => setSessionKey((key) => (key ?? 0) + 1)} />
+    <FloatingWindow onClose={onHide} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3">
+      <ShellTerminalSlot terminal={terminal} failure={failure} onRestart={onRestart} />
     </FloatingWindow>
   )
+}
+
+/** A tab's shell: `key` names its run (a restart counts up), `visible` whether its window is open while the tab is frontmost. */
+interface TabShellState {
+  key: number
+  visible: boolean
+}
+
+/** Floating login shells on the backend host, one per tab, for logins with host access.
+ *
+ * - `t` outside a text field opens the active tab's shell, 2/3 of the screen wide and high. Another tab shows its own shell, or none
+ * - Esc at the prompt or a click beside it hides it, the shell keeps running and `t` shows it again. While a program runs (vim,
+ *   less) Esc is the program's, a double Esc hides the window
+ * - `exit` ends the shell and closes the window, closing its tab hangs it up
+ */
+export function ShellTerminals({ activeTabId, tabIds }: { activeTabId: string | null; tabIds: readonly string[] }) {
+  const hostAccess = useHostAccess()
+  const [shells, setShells] = useState<ReadonlyMap<string, TabShellState>>(new Map())
+  // Shells of closed tabs leave the state here, their windows already unmounted with the tab
+  const update = useCallback((tabId: string, change: (shell: TabShellState | undefined) => TabShellState | undefined) => {
+    setShells((current) => {
+      const next = new Map([...current].filter(([id]) => tabIds.includes(id)))
+      const changed = change(current.get(tabId))
+      if (changed) next.set(tabId, changed)
+      else next.delete(tabId)
+      return next
+    })
+  }, [tabIds])
+
+  useEventListener("document", "keydown", (event) => {
+    if (!hostAccess || activeTabId === null || !isOpenTerminalKey(event)) return
+    event.preventDefault()
+    update(activeTabId, (shell) => ({ key: shell?.key ?? 0, visible: true }))
+  })
+
+  return [...shells].filter(([tabId]) => tabIds.includes(tabId)).map(([tabId, shell]) => (
+    <TabShell
+      key={tabId}
+      sessionKey={shell.key}
+      shown={shell.visible && tabId === activeTabId}
+      onExit={() => update(tabId, () => undefined)}
+      onHide={() => update(tabId, (current) => current && { ...current, visible: false })}
+      onRestart={() => update(tabId, (current) => current && { ...current, key: current.key + 1 })}
+    />
+  ))
 }

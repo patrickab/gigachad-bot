@@ -10,7 +10,7 @@ import { BranchProvider, useBranches } from "@/features/navigation/BranchContext
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
 import { FilePanelProvider } from "@/features/editor/FilePanel"
-import { ShellTerminalWindow } from "@/features/editor/ShellTerminal"
+import { ShellTerminals } from "@/features/editor/ShellTerminal"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
@@ -43,6 +43,11 @@ function ProjectListSync() {
   return null
 }
 
+/** Whether `ids` already lists the ids of `tabs` in order, so a tab update that keeps them re-renders nothing. */
+function hasTabIds(ids: readonly string[], tabs: readonly Tab[]): boolean {
+  return ids.length === tabs.length && tabs.every((tab, index) => tab.id === ids[index])
+}
+
 /** Keep project navigation and memory shared while each tab retains its own workspace. */
 export function AppShell() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
@@ -51,13 +56,21 @@ export function AppShell() {
   const [focus, setFocus] = useState<ChatFocus>({ qaIndex: null, key: 0 })
   // Project whose dashboard is showing; set from the current tab and never read back as "the" project.
   const [dashboardSlug, setDashboardSlug] = useState<string | null>(null)
+  // What the shells (one per tab) need: the frontmost tab and which tabs still exist
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [tabIds, setTabIds] = useState<readonly string[]>([])
   const settings = useSettings()
   useKernelShutdown()
 
   const handleActiveTabChange = useCallback((tab: Tab) => {
     activeTabRef.current = tab
+    setActiveTabId(tab.id)
     if (tab.projectSlug) lastProjectTabs.current.set(tab.projectSlug, tab.id)
     setDashboardSlug((current) => current === tab.projectSlug ? current : null)
+  }, [])
+
+  const handleTabsChange = useCallback((tabs: Tab[]) => {
+    setTabIds((current) => hasTabIds(current, tabs) ? current : tabs.map((tab) => tab.id))
   }, [])
 
   const openNewTab = useCallback((patch: Partial<Tab>) => {
@@ -133,7 +146,7 @@ export function AppShell() {
           <MemoryViewerProvider>
             <OmpProvider>
               <LearnProvider onOpenItem={handleOpenItem}>
-                <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
                   <EnabledToolsProvider>
                     <FilePanelProvider>
                       <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
@@ -145,7 +158,7 @@ export function AppShell() {
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />
             <MemoryViewer />
-            <ShellTerminalWindow />
+            <ShellTerminals activeTabId={activeTabId} tabIds={tabIds} />
           </MemoryViewerProvider>
         </SidebarProvider>
       </BranchProvider>
