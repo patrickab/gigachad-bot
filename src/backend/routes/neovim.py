@@ -18,7 +18,8 @@ bytes both ways, text frames carry JSON control messages:
   nothing, an `error` is shown as an error in Neovim and its last copy is pasted instead) and `{"type": "message", "text"}`
   (Neovim shows *text* as an error, for failures that have no request)
 - server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
-  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
+  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines, in a notebook buffer `path` is the
+  buffer's name, `.ipynb.py` or `.ipynb.md`, and the lines count from the active cell's first line),
   `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
   `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file, `{"type": "leave"}` on `<Esc>` in normal
   mode (the browser gives focus back to the app),
@@ -33,27 +34,48 @@ API's validation and side effects. A file-root file changed on disk since Neovim
 agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved edits.
 
 A notebook session opens with `"cell_mode": true` instead of a document (`filename` and `content` are ignored). `path`, when it
-names an existing notebook file under the file roots (`disk_file`), picks the working directory and names the buffer
-`<path><extension>` (extension of the first `set_cells` filename, `.py` unless the notebook's language says otherwise): a
-virtual name beside the notebook that is never written (writes are intercepted, no swap or undo file), so the user's LSP finds the
-notebook's project and `.venv`. Any other path (a logical key, outside the roots, missing) gets a private copy. It holds all
-code cells of one notebook as ONE buffer (a `# %%` marker line before each cell, so the user's LSP sees every cell), its window
-is pinned to the active cell (every other line is hidden with `conceal_lines` extmarks and the window's `conceallevel` is raised
-to 2, Neovim 0.11 or newer is required), and the browser keeps the notebook:
+names an existing notebook file under the file roots (`disk_file`), picks the working directory and names the buffers
+`<path><extension>` (extension of the first `set_cells` filename, `.py` unless the notebook's language says otherwise) and
+`<path>.md`: virtual names beside the notebook that are never written (writes are intercepted, no swap or undo file), so the
+user's LSP finds the notebook's project and `.venv` (a `renamed` of that notebook names the buffers beside the new file). Any other
+path (a logical key, outside the roots, missing) gets private copies. It holds all code cells of one notebook as ONE buffer (a
+`# %%` marker line before each cell, so the user's LSP sees every cell) and all markdown cells as a second one (`<!-- %% -->`
+before each cell). The window shows one of them, pinned to its active cell (every other line is hidden with `conceal_lines`
+extmarks and the window's `conceallevel` is raised to 2, Neovim 0.11 or newer is required), and the browser keeps the notebook:
 
-- client -> server: `{"type": "set_cells", "filename", "cells": [{"id", "text"}]}` (the authoritative list of code cells in notebook
-  order with unique ids, *filename* only gives the extension and is read when the buffer is created. The first one builds the
-  buffer, later ones replace the text of the cells that differ without a `cell_edit` coming back, and rebuild it when the ids or
-  their order differ, keeping the cursor in its cell where possible) and `{"type": "focus_cell", "id", "cursor": "first" | "last" |
-  "keep"}` (pin the window to that cell, the cursor on its first or last line, or where it is when that is inside the cell, no
-  `cell_focus` comes back). They run in the order they were sent. A malformed frame, a `set_cells` that repeats a cell id
-  included, is dropped with a warning in the log, nothing answers it
+- client -> server: `{"type": "set_cells", "filename", "cells": [{"id", "text", "kind": "code" | "markdown"}]}` (the
+  authoritative list of code and markdown cells in notebook order with ids unique across both, no `kind` is code, *filename* only
+  gives the code buffer's extension and is read when a buffer is created. The first one builds the buffers, later ones replace
+  the text of the cells that differ without a `cell_edit` coming back, and rebuild a buffer when its ids or their order differ,
+  keeping the cursor in its cell where possible) and `{"type": "focus_cell", "id", "cursor": "first" | "last" | "keep" |
+  {"line": n}}` (show the buffer of that cell's kind pinned to the cell, the cursor on its first or last line, where it is when
+  that is inside the cell, or on line n of the cell, 0 is the first; no `cell_focus` comes back). They run in the order they were
+  sent. A malformed frame, a `set_cells` that repeats a cell id or has another kind included, is dropped with a warning in the
+  log, nothing answers it
 - server -> client: `{"type": "cell_edit", "id", "text"}` (the full text of a changed cell, at most every 40 ms, only when it
-  differs from what the browser knows), `{"type": "cell_focus", "id"}` (the cursor moved into another cell: `j`, `k`, `G`,
-  `gg`, a search, an LSP jump), `{"type": "cell_run", "id", "text"}` (`<S-CR>` in the active cell, Shift+Enter reaches Neovim as
-  CSI-u `ESC [ 13 ; 2 u`) and `{"type": "save_notebook"}` (`:w`, a notification the browser answers with nothing, it saves the
-  notebook). Every frame Neovim notifies (these, `yank`, `selection`, `switched`) is delivered in the order Neovim sent it,
-  and `cell_run` and `save_notebook` come after the `cell_edit`s that brought the cells up to date
+  differs from what the browser knows), `{"type": "cell_focus", "id"}` (the cursor moved into another cell of the same buffer:
+  `j`, `k`, `G`, `gg`, a search, an LSP jump), `{"type": "cell_exit", "id", "direction": "up" | "down"}` (`j`, `k`, `<Up>` or
+  `<Down>` on the first or last line of the cell `id` whose neighbor in the notebook that way is a cell of the other kind: the
+  cursor stays, the browser activates that neighbor), `{"type": "cell_run", "id", "text", "advance"}` (`<S-CR>` with `advance`
+  true, `<C-CR>` with false, Shift+Enter and Ctrl+Enter reach Neovim as CSI-u `ESC [ 13 ; 2 u` and `ESC [ 13 ; 5 u`; in a
+  markdown cell the browser renders it), `{"type": "cell_leave", "id"}` (`<Esc>` in normal mode in a markdown cell: the browser
+  renders it) and `{"type": "save_notebook"}` (`:w`, a notification the browser answers with nothing, it saves the
+  notebook). `{"type": "cell_height", "id", "rows"}` is how many screen rows the active cell takes in Neovim's window (wrapped
+  lines, folds, virtual lines), sent when a cell is pinned and whenever that changes: the browser sizes the terminal to it.
+  `{"type": "cell_render", "id", "styles", "lines", "base", "rows", "height", "wrap"?}` is a code cell as Neovim draws it, for the
+  browser to show in place of a cell that is not being edited: `lines` are `[[text, style], ...]` runs (the number column and
+  signs lead each line, diagnostics follow it), `style` indexes `styles` (`fg`/`bg`/`sp` as `#rrggbb`, `bold`, `italic`,
+  `strike`, `underline` as `line` or `curl`), `base` is the colorscheme's `Normal` `fg`/`bg`, `rows` the cell line (0-based) of
+  every line, `height` its screen rows in the window, `wrap` (only when the window wraps lines) the column a wrapped line goes on
+  at (see `lib/neovim_render.py`). It comes for every code cell, 150 ms after the cell, its diagnostics, its semantic tokens (or
+  the tokens its last render lacked), the colorscheme, the number column options, 'wrap', the width or (absolute line numbers)
+  its first line
+  changed (the active cell only for its first), and for a cell just left, ahead of the `cell_focus` that says so (or of the
+  markdown buffer taking the window: renders wait while it has it). Markdown cells get none.
+  `{"type": "cell_render", "id"}` without lines takes the render back (it failed, or the buffer grew past 4000 lines: every
+  cell), the browser shows its own editor there until the next render. Every frame Neovim
+  notifies (these, `yank`, `selection`, `switched`) is delivered in the order Neovim sent it, and `cell_run`, `cell_exit`,
+  `cell_leave` and `save_notebook` come after the `cell_edit`s that brought the cells up to date
 
 Marker lines cannot be changed: an edit that alters, removes or adds one is undone with a short message in Neovim (so a line
 inside a cell that reads `# %%` cannot be edited from Neovim either), and the cursor never rests on one. Lines an edit puts
@@ -223,15 +245,20 @@ async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRo
 
 _CURSORS = ("first", "last", "keep")
 _CELL_FRAMES = ("set_cells", "focus_cell")
+_CELL_KINDS = ("code", "markdown")
 _CELL_PLACEHOLDER = "gigachad://cell-session"
 
 
-def _code_cells(value: object) -> list[dict[str, str]] | None:
-    """The `{"id", "text"}` cells of a `set_cells` frame, None when it is malformed or an id repeats (logged)."""
+def _cells(value: object) -> list[dict[str, str]] | None:
+    """The `{"id", "text", "kind"}` cells of a `set_cells` frame (no `kind` is code), None when malformed or an id repeats (logged)."""
     if not isinstance(value, list):
         return None
-    cells = [{"id": cell.get("id"), "text": cell.get("text")} for cell in value if isinstance(cell, dict)]
-    if len(cells) != len(value) or not all(isinstance(text, str) for cell in cells for text in cell.values()):
+    cells = [
+        {"id": cell.get("id"), "text": cell.get("text"), "kind": cell.get("kind", "code")} for cell in value if isinstance(cell, dict)
+    ]
+    if len(cells) != len(value) or not all(isinstance(cell["id"], str) and isinstance(cell["text"], str) for cell in cells):
+        return None
+    if not all(cell["kind"] in _CELL_KINDS for cell in cells):
         return None
     if len({cell["id"] for cell in cells}) != len(cells):
         log.warning("set_cells repeats a cell id, the frame is dropped and Neovim keeps the cells it has")
@@ -239,13 +266,22 @@ def _code_cells(value: object) -> list[dict[str, str]] | None:
     return cells
 
 
+def _cursor(value: object) -> str | int | None:
+    """Where a `focus_cell` puts the cursor: `first`, `last`, `keep`, or the line (0 is the first) of `{"line": n}`, else None."""
+    if value in _CURSORS:
+        return str(value)
+    if isinstance(value, dict) and type(value.get("line")) is int and value["line"] >= 0:
+        return value["line"]
+    return None
+
+
 def _cell_job(session: NeovimSession, control: dict) -> tuple[str, Coroutine[None, None, None]] | None:
     """The Neovim work a well-formed notebook frame asks for, with what it does for the log, None for a malformed one."""
     match control["type"]:
-        case "set_cells" if isinstance(control.get("filename"), str) and (cells := _code_cells(control.get("cells"))) is not None:
+        case "set_cells" if isinstance(control.get("filename"), str) and (cells := _cells(control.get("cells"))) is not None:
             return "take the cells", session.set_cells(control["filename"], cells)
-        case "focus_cell" if isinstance(control.get("id"), str) and control.get("cursor") in _CURSORS:
-            return "show the cell", session.focus_cell(control["id"], control["cursor"])
+        case "focus_cell" if isinstance(control.get("id"), str) and (cursor := _cursor(control.get("cursor"))) is not None:
+            return "show the cell", session.focus_cell(control["id"], cursor)
     log.warning("Dropped a malformed %s frame", control["type"])
     return None
 

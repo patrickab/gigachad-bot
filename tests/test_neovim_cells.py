@@ -3,12 +3,14 @@
 import asyncio
 import contextlib
 from pathlib import Path
+import re
 import shutil
 
 import pytest
 
 from backend import websocket_origin
 from backend.routes import neovim as neovim_route
+from lib.neovim_render import parse_tohtml
 from lib.neovim_session import NOTEBOOK_MARKER, NeovimSession
 from tests.conftest import mounted_roots, request_identity
 from tests.test_neovim import _Browser, _drain, _evaluates_to, neovim_home, requires_nvim  # noqa: F401
@@ -47,16 +49,38 @@ async def _save(path: str, text: str) -> str:
     return text
 
 
+class _Events(asyncio.Queue):
+    """What a notebook session reports. The renders of the cells (`cell_render`) and the screen rows of the active cell (`cell_height`)
+    are kept apart in `renders` and `heights`, they come on their own time.
+
+    `log` holds every event of all three in the order they came.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.renders: asyncio.Queue[dict] = asyncio.Queue()
+        self.heights: asyncio.Queue[dict] = asyncio.Queue()
+        self.log: list[dict] = []
+
+    def put_nowait(self, event: dict) -> None:
+        self.log.append(event)
+        aside = {"cell_render": self.renders, "cell_height": self.heights}.get(event["type"])
+        if aside is None:
+            super().put_nowait(event)
+        else:
+            aside.put_nowait(event)
+
+
 @contextlib.asynccontextmanager
-async def _notebook(home, cells=CELLS, *, rows=24, filename="nb.py", notebook_path=None):
+async def _notebook(home, cells=CELLS, *, rows=24, filename="nb.py", notebook_path=None, on_selection=None):
     """A connected notebook session showing *cells*, and the queue of the events it reports."""
-    events: asyncio.Queue[dict] = asyncio.Queue()
+    events = _Events()
     session = NeovimSession.spawn(
         "placeholder.txt", "", rows=rows, cols=80, cwd=home, path="placeholder", cell_session=True, notebook_path=notebook_path
     )
     drain = asyncio.create_task(_drain(session))
     try:
-        await asyncio.wait_for(session.connect(_save, lambda text: None, on_cell=events.put_nowait), 15)
+        await asyncio.wait_for(session.connect(_save, lambda text: None, on_selection, on_cell=events.put_nowait), 15)
         await session.set_cells(filename, cells)
         yield session, events
     finally:
@@ -312,7 +336,7 @@ async def test_set_cells_keeps_text_typed_since_the_caller_was_told_the_cell(neo
         # One call, so no 40 ms flush runs in between: "x" was typed and not reported when the old text comes back
         await session._lua(
             "vim.api.nvim_buf_set_text(0, 1, 0, 1, 0, { 'x' }) "
-            "_G.gigachad_set_cells(nil, ..., { { id = 'a', text = 'import os\\nx = 1' } })",
+            "_G.gigachad_set_cells({ code = { marker = ..., cells = { { id = 'a', text = 'import os\\nx = 1' } } } }, { 'a' })",
             NOTEBOOK_MARKER,
         )
         assert (await _lines(session))[1] == "ximport os"
@@ -693,16 +717,16 @@ async def test_shift_enter_runs_the_active_cell_after_reporting_what_was_typed(n
 
         session.write_input(b"Ax" + SHIFT_ENTER)  # insert mode, typed and run at once
         assert await _next(events) == {"type": "cell_edit", "id": "b", "text": "print(os.sep)x\ny = 2\nz = 3"}
-        assert await _next(events) == {"type": "cell_run", "id": "b", "text": "print(os.sep)x\ny = 2\nz = 3"}
+        assert await _next(events) == {"type": "cell_run", "id": "b", "text": "print(os.sep)x\ny = 2\nz = 3", "advance": True}
 
         await _type(session, ESC)
         session.write_input(SHIFT_ENTER)  # normal mode, nothing new to report
-        assert await _next(events) == {"type": "cell_run", "id": "b", "text": "print(os.sep)x\ny = 2\nz = 3"}
+        assert await _next(events) == {"type": "cell_run", "id": "b", "text": "print(os.sep)x\ny = 2\nz = 3", "advance": True}
 
         # After moving on, the new cell is the one that runs
         await session.focus_cell("c", "first")
         session.write_input(SHIFT_ENTER)
-        assert await _next(events) == {"type": "cell_run", "id": "c", "text": "w = 4"}
+        assert await _next(events) == {"type": "cell_run", "id": "c", "text": "w = 4", "advance": True}
         await _quiet(events)
 
 
@@ -845,6 +869,34 @@ async def test_no_kind_of_write_creates_the_virtual_file_or_reads_one_that_is_th
         assert stale.read_text() == "stale = 1\n"
 
 
+@requires_nvim
+async def test_a_renamed_notebook_names_its_buffer_beside_the_new_file_and_writes_stay_intercepted(neovim_home, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    notebook = project / "analysis.ipynb"
+    notebook.write_text("{}")
+    async with _notebook(neovim_home, notebook_path=notebook) as (session, events):
+        await _type(session, b"Ax", ESC)
+        renamed = project / "report.ipynb"
+        notebook.rename(renamed)
+
+        elsewhere = tmp_path / "moved.ipynb"
+        await session.rename(str(tmp_path / "other.ipynb"), str(elsewhere), elsewhere)  # not this notebook
+        await session.rename(str(notebook), "report", None)  # no validated file: nothing to name the buffer after
+        assert await _eval(session, "expand('%:p')") == f"{notebook}.py"
+
+        modified = await _eval(session, "&modified")
+        await session.rename(str(notebook), str(renamed), renamed)
+        assert await _eval(session, "[expand('%:p'), &modified, &filetype]") == [f"{renamed}.py", modified, "python"]
+        assert await _lines(session) == ["# %%", "import osx", *SCRIPT[2:]]
+        await session.focus_cell("b", "first")  # the cells go on
+        assert await _eval(session, "line('.')") == FIRST["b"]
+
+        session.write_input(b":w\r")
+        while (await _next(events))["type"] != "save_notebook":
+            pass
+        await asyncio.sleep(0.3)
+        assert sorted(path.name for path in project.iterdir()) == ["report.ipynb"]
 
 
 @requires_nvim
@@ -896,11 +948,25 @@ vim.api.nvim_create_autocmd("FileType", {{
         assert await unresolved() == expected
 
 
+class _NotebookBrowser(_Browser):
+    """A browser of a notebook session: the renders of the cells (`cell_render`) and the active cell's screen rows (`cell_height`) are
+    kept apart in `renders` and `heights`, they come on their own time."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.renders: asyncio.Queue[dict] = asyncio.Queue()
+        self.heights: asyncio.Queue[dict] = asyncio.Queue()
+
+    async def send_json(self, frame: dict) -> None:
+        aside = {"cell_render": self.renders, "cell_height": self.heights}.get(frame["type"])
+        await (self._frames if aside is None else aside).put(frame)
+
+
 @contextlib.asynccontextmanager
 async def _notebook_browser(monkeypatch, tmp_path, *, notebook: Path | None = None, root: Path | None = None):
     """The session endpoint serving a browser that opened a notebook, with Neovim connected once the body starts."""
     monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
-    browser = _Browser()
+    browser = _NotebookBrowser()
     path = notebook or tmp_path / "nb.ipynb"
     serving = asyncio.create_task(neovim_route.neovim_session(browser, request_identity(), mounted_roots(root or tmp_path)))
     browser.send({"type": "open", "cell_mode": True, "path": str(path), "rows": 24, "cols": 80})
@@ -930,6 +996,10 @@ async def test_every_notebook_frame_over_the_socket(neovim_home, tmp_path, monke
         browser.send({"type": "message", "text": "Settled"})
         await browser.shows("Settled")
         await browser.silent()  # no echo for what the browser sent
+        render = await asyncio.wait_for(browser.renders.get(), 10)  # every cell is drawn as Neovim draws it
+        assert render["id"] in ("a", "b", "c") and render["lines"]
+        heights = [await asyncio.wait_for(browser.heights.get(), 10) for _ in range(2)]  # the screen rows of the pinned cell
+        assert heights == [{"type": "cell_height", "id": "a", "rows": 2}, {"type": "cell_height", "id": "b", "rows": 3}]
 
         browser.type(b"Ax")  # on the last line of cell b
         assert await browser.next_frame("cell_edit") == {"type": "cell_edit", "id": "b", "text": "print(os.sep)\ny = 2\nz = 3x"}
@@ -937,7 +1007,8 @@ async def test_every_notebook_frame_over_the_socket(neovim_home, tmp_path, monke
         browser.type(ESC)
         await asyncio.sleep(0.1)
         browser.type(SHIFT_ENTER)
-        assert await browser.next_frame("cell_run") == {"type": "cell_run", "id": "b", "text": "print(os.sep)\ny = 2\nz = 3x"}
+        run = {"type": "cell_run", "id": "b", "text": "print(os.sep)\ny = 2\nz = 3x", "advance": True}
+        assert await browser.next_frame("cell_run") == run
 
         browser.type(DOWN)  # past the last line of b: into c
         assert await browser.next_frame("cell_focus") == {"type": "cell_focus", "id": "c"}
@@ -947,6 +1018,11 @@ async def test_every_notebook_frame_over_the_socket(neovim_home, tmp_path, monke
         )
         browser.send({"type": "focus_cell", "id": "d", "cursor": "first"})
         await browser.shows("new")
+        browser.send({"type": "focus_cell", "id": "b", "cursor": {"line": 1}})  # a click on the second line of b's snapshot
+        browser.send({"type": "message", "text": "On b"})
+        await browser.shows("On b")
+        browser.type(b"iY\x1b")
+        assert await browser.next_frame("cell_edit") == {"type": "cell_edit", "id": "b", "text": "print(os.sep)\nYy = 2\nz = 3"}
         browser.type(b":w\r")
         assert await browser.next_frame("save_notebook") == {"type": "save_notebook"}
 
@@ -957,6 +1033,8 @@ async def test_malformed_notebook_frames_are_ignored_and_the_session_lives_on(ne
         browser.send({"type": "set_cells", "filename": "nb.py", "cells": CELLS})
         for bad in (
             {"type": "set_cells", "filename": "nb.py", "cells": "nope"},
+            {"type": "set_cells", "filename": "nb.py", "cells": [{"id": "r", "text": "x", "kind": "raw"}]},
+            {"type": "set_cells", "filename": "nb.py", "cells": [{"id": "r", "text": "x", "kind": 3}]},
             {"type": "set_cells", "filename": "nb.py", "cells": [{"id": "a"}]},
             {"type": "set_cells", "filename": "nb.py", "cells": [{"id": 1, "text": "x"}]},
             {"type": "set_cells", "filename": "nb.py", "cells": [{"id": "a", "text": "x"}, {"id": "a", "text": "y"}]},
@@ -994,7 +1072,7 @@ async def test_frames_keep_their_order_through_one_queue(neovim_home, tmp_path, 
             text = f"import os\nx = 1{digits}"
             assert await browser.frames(2) == [
                 {"type": "cell_edit", "id": "a", "text": text},
-                {"type": "cell_run", "id": "a", "text": text},
+                {"type": "cell_run", "id": "a", "text": text, "advance": True},
             ]
             browser.type(ESC)
             await asyncio.sleep(0.1)
@@ -1145,3 +1223,779 @@ async def test_lines_put_above_the_first_marker_join_the_first_cell(neovim_home,
         assert await _lines(session) == SCRIPT
         assert await _marks(session) == MARKER_LINES
         assert MARKER_MESSAGE not in await _messages(session)
+
+
+# --- Every cell drawn as Neovim draws it (`cell_render`) ---
+
+HEX = re.compile(r"#[0-9a-f]{6}")
+STYLE_KEYS = {"fg", "bg", "sp", "bold", "italic", "strike", "underline"}
+
+
+def _texts(render: dict) -> list[str]:
+    """The lines of a render as plain text, gutter included."""
+    return ["".join(text for text, _style in line) for line in render["lines"]]
+
+
+def _well_formed(render: dict) -> None:
+    """A render holds data only: strings, style indexes in range, styles of known keys with `#rrggbb` colors."""
+    assert render["styles"][0] == {}
+    for style in render["styles"]:
+        assert set(style) <= STYLE_KEYS
+        assert all(HEX.fullmatch(style[key]) for key in ("fg", "bg", "sp") if key in style)
+        assert all(style[key] is True for key in ("bold", "italic", "strike") if key in style)
+        assert style.get("underline", "line") in ("line", "curl")
+    for line in render["lines"]:
+        for text, style in line:
+            assert isinstance(text, str) and text and 0 <= style < len(render["styles"])
+    assert set(render["base"]) <= {"fg", "bg"}
+    assert isinstance(render["height"], int) and render["height"] >= 1
+
+
+async def _renders(events: _Events, seconds: float = 0.8) -> dict[str, dict]:
+    """The renders that came until none came for *seconds*, the last one of every cell."""
+    seen: dict[str, dict] = {}
+    while True:
+        try:
+            render = await asyncio.wait_for(events.renders.get(), seconds)
+        except TimeoutError:
+            return seen
+        _well_formed(render)
+        seen[render["id"]] = render
+
+
+@requires_nvim
+async def test_every_cell_is_rendered_with_its_exact_text(neovim_home):
+    async with _notebook(neovim_home) as (session, events):  # cell a is active: it gets its first render too
+        renders = await _renders(events)
+        assert set(renders) == {"a", "b", "c"}
+        assert _texts(renders["a"]) == ["import os", "x = 1"]
+        assert _texts(renders["b"]) == ["print(os.sep)", "y = 2", "z = 3"]
+        assert _texts(renders["c"]) == ["w = 4"]
+        assert HEX.fullmatch(renders["b"]["base"]["fg"])
+
+
+@requires_nvim
+async def test_markup_in_a_cell_stays_text(neovim_home):
+    hostile = '<img src=x onerror="alert(1)"> &amp; </span><span class="Normal">&lt;'
+    cells = [CELLS[0], {"id": "h", "text": f"s = '{hostile}'\n# </pre><script>alert(2)</script>"}]
+    async with _notebook(neovim_home, cells) as (session, events):
+        renders = await _renders(events)
+        assert _texts(renders["h"]) == cells[1]["text"].split("\n")
+
+
+@requires_nvim
+async def test_only_the_cells_that_changed_are_rendered_again(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        assert set(await _renders(events)) == {"a", "b", "c"}
+
+        await session.set_cells("nb.py", [*CELLS[:2], {"id": "c", "text": "w = 5\nv = 6"}])
+        renders = await _renders(events)
+        assert set(renders) == {"c"}
+        assert _texts(renders["c"]) == ["w = 5", "v = 6"]
+
+        await session.set_cells("nb.py", [*CELLS[:2], {"id": "c", "text": "w = 5\nv = 6"}])
+        assert await _renders(events) == {}
+
+
+@requires_nvim
+async def test_the_cell_being_typed_in_is_rendered_when_it_is_left_before_its_neighbor_takes_the_focus(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await _type(session, b"Ax", ESC)  # cell a: "import osx"
+        assert await _renders(events) == {}  # the active cell is Neovim's own window, it is not rendered
+
+        await _type(session, b"jj")  # past the last line of a: into b
+        assert await _next(events) == {"type": "cell_edit", "id": "a", "text": "import osx\nx = 1"}
+        assert await _next(events) == {"type": "cell_focus", "id": "b"}
+        kinds = [(event["type"], event["id"]) for event in events.log if event["type"] in ("cell_render", "cell_focus")]
+        assert kinds[-2:] == [("cell_render", "a"), ("cell_focus", "b")]
+        left = [event for event in events.log if event["type"] == "cell_render" and event["id"] == "a"][-1]
+        assert _texts(left)[0] == "import osx"
+
+
+@requires_nvim
+async def test_focus_cell_puts_the_cursor_on_the_clicked_line_and_the_left_cell_keeps_its_current_render(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session.focus_cell("b", 1)  # a click on the second line of b's render
+        assert await _eval(session, "line('.')") == FIRST["b"] + 1
+        assert await _renders(events) == {}  # a did not change since its first render
+        await session.focus_cell("c", 7)  # past the end: the last line
+        assert await _eval(session, "line('.')") == LAST["c"]
+
+
+@requires_nvim
+async def test_diagnostics_signs_and_the_number_column_are_rendered(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session._lua("vim.wo.number = true")
+        renders = await _renders(events)
+        assert set(renders) == {"b", "c"}  # the number column changes every cell
+        assert _texts(renders["b"]) == ["  5 print(os.sep)", "  6 y = 2", "  7 z = 3"]
+
+        await session._lua(
+            "vim.diagnostic.config({ virtual_text = true, signs = true })"
+            " vim.diagnostic.set(vim.api.nvim_create_namespace('test'), 0,"
+            " { { lnum = 4, col = 0, end_col = 5, message = 'Undefined name', severity = vim.diagnostic.severity.ERROR } })"
+        )
+        renders = await _renders(events)
+        assert set(renders) == {"b", "c"}  # the cell with the diagnostic, and the sign column it opens in every cell
+        first, *rest = _texts(renders["b"])
+        assert re.fullmatch(r"\S+\s+5 print\(os\.sep\)\s+\S+ Undefined name", first)
+        assert rest == ["    6 y = 2", "    7 z = 3"]
+        assert _texts(renders["c"]) == ["    9 w = 4"]
+        message = next(run for run in renders["b"]["lines"][0] if "Undefined name" in run[0])
+        assert "fg" in renders["b"]["styles"][message[1]]
+
+
+@requires_nvim
+async def test_a_new_colorscheme_renders_every_cell_again(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        before = await _renders(events)
+        await session._lua("vim.cmd.colorscheme('vim')")
+        after = await _renders(events)
+        assert set(after) == {"b", "c"}
+        assert after["b"]["base"] != before["b"]["base"]
+
+
+@requires_nvim
+async def test_with_absolute_numbers_a_line_added_above_renders_the_cells_below_again(neovim_home):
+    grown = [{"id": "a", "text": "import os\nx = 1\nv = 0"}, *CELLS[1:]]
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session._lua("vim.wo.number = true")
+        await _renders(events)
+
+        await session.set_cells("nb.py", grown)
+        renders = await _renders(events)
+        assert set(renders) == {"b", "c"}  # a is the active cell, Neovim's own window shows it
+        assert _texts(renders["b"]) == ["  6 print(os.sep)", "  7 y = 2", "  8 z = 3"]
+        assert _texts(renders["c"]) == [" 10 w = 4"]
+
+        # Relative numbers read the same wherever the cell starts
+        await session._lua("vim.wo.number = false vim.wo.relativenumber = true")
+        await _renders(events)
+        await session.set_cells("nb.py", CELLS)
+        assert await _renders(events) == {}
+
+
+# A language server's semantic tokens as Neovim keeps them, faked: `version` is the text version the result belongs to
+FAKE_TOKENS = """
+local buffer = vim.api.nvim_get_current_buf()
+vim.api.nvim_set_hl(0, "@lsp.type.function.python", { fg = "#123456" })
+vim.lsp.util.buf_versions[buffer] = ...
+vim.lsp.semantic_tokens.__STHighlighter.active[buffer] = {
+  on_win = function() end,
+  client_state = { { current_result = { version = select(2, ...), highlights = {
+    { line = 4, start_col = 0, end_col = 5, type = "function", modifiers = {} },
+  } } } },
+}
+local request = { type = "complete", method = "textDocument/semanticTokens/full" }
+vim.api.nvim_exec_autocmds("LspRequest", { buffer = buffer, data = { request = request } })
+"""
+
+
+def _token_colored(render: dict) -> bool:
+    """Whether `print` of cell b is drawn in the color of its (fake) semantic token."""
+    return any(text == "print" and render["styles"][style].get("fg") == "#123456" for text, style in render["lines"][0])
+
+
+@requires_nvim
+async def test_a_render_made_before_the_tokens_of_its_text_arrived_is_made_again_when_they_do(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session._lua(FAKE_TOKENS, 1, 1)
+        assert _token_colored((await _renders(events))["b"])
+
+        # An edit that moves no token: the result for the new text is still out when b is rendered
+        await session._lua(FAKE_TOKENS, 2, 1)
+        await session.set_cells("nb.py", [CELLS[0], {"id": "b", "text": "print(os.sep)\ny = 3\nz = 3"}, CELLS[2]])
+        renders = await _renders(events)
+        assert set(renders) == {"b"}
+        assert not _token_colored(renders["b"])
+
+        # The same tokens arrive for it: the signature is what it was, the render gets them all the same
+        await session._lua(FAKE_TOKENS, 2, 2)
+        renders = await _renders(events)
+        assert set(renders) == {"b"}
+        assert _token_colored(renders["b"])
+        await session._lua(FAKE_TOKENS, 2, 2)
+        assert await _renders(events) == {}  # and once only
+
+
+async def _render_frames(events: _Events, seconds: float = 0.8) -> list[dict]:
+    """Every `cell_render` frame (renders and the ones that take a render back) until none came for *seconds*."""
+    frames = []
+    while True:
+        try:
+            frames.append(await asyncio.wait_for(events.renders.get(), seconds))
+        except TimeoutError:
+            return frames
+
+
+@requires_nvim
+async def test_a_notebook_grown_past_the_render_limit_takes_every_render_back_and_renders_again_below_it(neovim_home):
+    long = {"id": "c", "text": "\n".join(f"w{index} = {index}" for index in range(4100))}
+    async with _notebook(neovim_home) as (session, events):
+        assert set(await _renders(events)) == {"a", "b", "c"}
+
+        await session.set_cells("nb.py", [*CELLS[:2], long])
+        assert await _render_frames(events) == [{"type": "cell_render", "id": cell} for cell in ("a", "b", "c")]
+        await session.set_cells("nb.py", [*CELLS[:2], {**long, "text": long["text"] + "\nmore = 1"}])
+        assert await _render_frames(events) == []  # taken back once, nothing renders past the limit
+
+        await session.set_cells("nb.py", CELLS)
+        renders = await _renders(events)
+        assert set(renders) == {"a", "b", "c"}
+        assert _texts(renders["c"]) == ["w = 4"]
+
+
+@requires_nvim
+async def test_a_failed_render_takes_the_cell_render_back_until_the_cell_renders_again(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session._lua("_G.real_open_win = vim.api.nvim_open_win vim.api.nvim_open_win = function() error('x') end")
+        await session.set_cells("nb.py", [CELLS[0], {"id": "b", "text": "changed"}, CELLS[2]])
+        assert await _render_frames(events) == [{"type": "cell_render", "id": "b"}]
+        assert ":1: x" in (await session._lua("return _G.gigachad_render_state()"))["failure"]  # the test's error, kept
+
+        await session._lua("vim.api.nvim_open_win = _G.real_open_win")
+        await session.set_cells("nb.py", [CELLS[0], {"id": "b", "text": "changed again"}, CELLS[2]])
+        renders = await _renders(events)
+        assert set(renders) == {"b"}
+        assert _texts(renders["b"]) == ["changed again"]
+
+
+# What a notifier such as noice.nvim watches: whether `vim.notify` is still its own. The 'statuscolumn' runs inside every render (on
+# its float) and notes what it sees there, an extmark `tohtml` does not support makes `tohtml` warn on every render of cell b
+WATCH_RENDERS = """
+_G.notices, _G.during, _G.window_events = {}, {}, {}
+_G.own_notify = function(message) table.insert(_G.notices, message) end
+vim.notify = _G.own_notify
+function _G.watch_render()
+  table.insert(_G.during, { vim.notify == _G.own_notify, vim.o.eventignore, vim.fn.win_gettype() })
+  return ""
+end
+vim.o.eventignore = "FocusGained"
+vim.api.nvim_create_autocmd({ "WinClosed", "OptionSet" }, {
+  callback = function(event) table.insert(_G.window_events, event.event .. " " .. event.match) end,
+})
+local namespace = vim.api.nvim_create_namespace("test_right_align")
+vim.api.nvim_buf_set_extmark(0, namespace, 4, 0, { virt_text = { { "!", "Comment" } }, virt_text_pos = "right_align" })
+vim.wo.statuscolumn = "%{v:lua.watch_render()}%l "
+"""
+
+
+@requires_nvim
+async def test_renders_leave_vim_notify_and_eventignore_alone_and_say_nothing(neovim_home):
+    async with _notebook(neovim_home) as (session, events):
+        await _renders(events)
+        await session._lua(WATCH_RENDERS)
+        assert "b" in await _renders(events)  # the new 'statuscolumn' renders the cells again
+        for colorscheme in ("vim", "default"):
+            await session._lua(f"vim.cmd.colorscheme('{colorscheme}')")
+            assert set(await _renders(events)) == {"b", "c"}
+        await session.set_cells("nb.py", [CELLS[0], {"id": "b", "text": "print(os.sep)\ny = 3"}, CELLS[2]])
+        assert "b" in await _renders(events)
+        await asyncio.sleep(0.3)  # past the warnings `tohtml` schedules
+
+        state = await session._lua(
+            "return { vim.notify == _G.own_notify, _G.notices, _G.during, _G.window_events, vim.o.eventignore }"
+        )
+        same, notices, during, window_events, ignored = state
+        assert same and notices == [] and ignored == "FocusGained"
+        assert any(kind == "popup" for _same, _ignored, kind in during), "the statuscolumn never ran in a render"
+        assert all(same and ignored == "FocusGained" for same, ignored, _kind in during)
+        assert not [event for event in window_events if event.startswith("WinClosed") or event == "OptionSet signcolumn"]
+
+@requires_nvim
+async def test_rendering_gives_way_to_typing_and_goes_on_after_it(neovim_home):
+    cells = [{"id": f"k{index}", "text": f"v{index} = {index}"} for index in range(60)]
+    async with _notebook(neovim_home, cells) as (session, events):
+        assert len(await _renders(events)) == 60
+        await session._lua("vim.cmd.colorscheme('vim')")  # every cell but the active one renders again
+        first = await asyncio.wait_for(events.renders.get(), 10)
+
+        session.write_input(b"A")
+        for _ in range(15):  # faster than the 150 ms pause a render waits for
+            session.write_input(b"x")
+            await asyncio.sleep(0.05)
+        during = events.renders.qsize()
+        session.write_input(ESC)
+
+        assert during <= 10, f"{during} cells rendered while typing"
+        rest = await _renders(events)
+        assert {first["id"], *rest} == {cell["id"] for cell in cells[1:]}
+
+
+
+def test_parse_tohtml_keeps_text_and_valid_styles_only():
+    html = (
+        "<style>\n.Keyword {color: #c61365; font-style: italic}\n.Bad {color: red; background-color: url(x)}\n"
+        ".Warn {text-decoration-color: #bb4f04; text-decoration-style: wavy; text-decoration-line: underline}\n</style>\n"
+        '<pre>\n<span class="Keyword">import</span> <span class="Bad">x</span>\n'
+        '<span class="Warn">&lt;b&gt; &amp;</span> <img src=x onerror=alert(1)></span>\n\n</pre>'
+    )
+    gutter = [[["1 ", {"fg": "#a1968a"}]], [["2 ", {"fg": "red", "bold": "yes", "underline": "wavy", "onclick": "x"}]]]
+    rendering = parse_tohtml(html, gutter, {"fg": "#ded7d0", "bg": "javascript:x", "bold": True})
+    assert _texts(rendering) == ["1 import x", "2 <b> & <img src=x onerror=alert(1)>"]
+    styles = rendering["styles"]
+    assert [styles[style] for _text, style in rendering["lines"][0]] == [{"fg": "#a1968a"}, {"fg": "#c61365", "italic": True}, {}]
+    assert [styles[style] for _text, style in rendering["lines"][1]] == [{}, {"sp": "#bb4f04", "underline": "curl"}, {}]
+    assert rendering["base"] == {"fg": "#ded7d0"}
+
+
+def test_parse_tohtml_starts_the_range_without_what_the_rows_above_left_open():
+    html = (
+        "<style>\n.Warn {text-decoration-line: underline}\n.Keyword {color: #c61365}\n</style>\n"
+        '<pre><span class="Warn"></span></span><span class="Warn">\n<span class="Keyword">x</span> = 1\n\n</pre>'
+    )
+    rendering = parse_tohtml(html)
+    assert [(text, rendering["styles"][style]) for text, style in rendering["lines"][0]] == [("x", {"fg": "#c61365"}), (" = 1", {})]
+
+
+def test_parse_tohtml_takes_the_screen_rows_and_the_wrap_column_only_when_they_are_valid():
+    html = "<style>\n</style>\n<pre>\nx = 1\ny = 2\n\n</pre>"
+    assert parse_tohtml(html, None, None, None, 5, 4) | {"styles": None} == {
+        "styles": None, "lines": [[["x = 1", 0]], [["y = 2", 0]]], "base": {}, "rows": [0, 1], "height": 5, "wrap": 4
+    }
+    for height, wrap in ((0, -1), (True, False), ("3", "4"), (None, None)):
+        rendering = parse_tohtml(html, None, None, None, height, wrap)
+        assert rendering["height"] == 2 and "wrap" not in rendering  # the lines' count, and a window that does not wrap
+
+
+@requires_nvim
+async def test_a_render_takes_the_screen_rows_of_its_cell_and_the_wrap_column(neovim_home):
+    long = " ".join(["word"] * 40)  # 199 columns: three screen lines in 80
+    cells = [CELLS[0], {"id": "w", "text": f"{long}\nx = 1"}]
+    async with _notebook(neovim_home, cells) as (session, events):
+        render = (await _renders(events))["w"]
+        assert (_texts(render), render["height"], render["wrap"]) == ([long, "x = 1"], 4, 0)
+
+        await session._lua("vim.wo.number = true")  # wrapped lines go on after the number column
+        render = (await _renders(events))["w"]
+        assert (render["height"], render["wrap"]) == (4, 4)
+
+        await session._lua("vim.wo.wrap = false")
+        render = (await _renders(events))["w"]
+        assert render["height"] == 2 and "wrap" not in render
+
+
+# --- Markdown cells in a second buffer, and leaving a buffer at a cell of the other kind ---
+
+CTRL_ENTER = b"\x1b[13;5u"  # what the browser sends for Ctrl+Enter, Neovim reads it as <C-CR>
+MIXED = [
+    {"id": "m0", "kind": "markdown", "text": "# Title\nIntro"},
+    {"id": "a", "kind": "code", "text": "import os\nx = 1"},
+    {"id": "b", "text": "print(os.sep)"},  # no kind: a code cell
+    {"id": "m1", "kind": "markdown", "text": "Some *text*"},
+    {"id": "m2", "kind": "markdown", "text": "More\ntext"},
+    {"id": "c", "kind": "code", "text": "w = 4"},
+]
+CODE_SCRIPT = ["# %%", "import os", "x = 1", "# %%", "print(os.sep)", "# %%", "w = 4"]
+MARKDOWN_SCRIPT = ["<!-- %% -->", "# Title", "Intro", "<!-- %% -->", "Some *text*", "<!-- %% -->", "More", "text"]
+# First and last line of every cell of MIXED in its own buffer
+MIXED_SPANS = {"a": (2, 3), "b": (5, 5), "c": (7, 7), "m0": (2, 3), "m1": (5, 5), "m2": (7, 8)}
+
+
+async def _markdown_buffer(session: NeovimSession) -> dict | None:
+    """Name, lines, filetype, listed and modified flags of the markdown buffer, None when there is none."""
+    code = "for _, b in ipairs(vim.api.nvim_list_bufs()) do local name = vim.api.nvim_buf_get_name(b) "
+    code += "if name:match('%.md$') then return { name = name, lines = vim.api.nvim_buf_get_lines(b, 0, -1, false), "
+    code += "filetype = vim.bo[b].filetype, listed = vim.bo[b].buflisted, modified = vim.bo[b].modified } end end return vim.NIL"
+    return await session._lua(code)
+
+
+async def _focus_mixed(session: NeovimSession, cell: str, cursor: str) -> None:
+    await session.focus_cell(cell, cursor)
+    await _pinned(session, *MIXED_SPANS[cell])
+
+
+@requires_nvim
+async def test_markdown_cells_are_a_second_buffer_with_their_own_markers(neovim_home):
+    async with _notebook(neovim_home, CELLS) as (session, events):
+        assert await _markdown_buffer(session) is None  # no markdown cells, no buffer for them
+
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        assert await _lines(session) == CODE_SCRIPT  # the window shows the code cells, the first one active
+        await _pinned(session, 2, 3)
+        markdown = await _markdown_buffer(session)
+        assert markdown["lines"] == MARKDOWN_SCRIPT
+        assert [markdown["filetype"], markdown["listed"], markdown["modified"]] == ["markdown", False, False]
+        assert Path(markdown["name"]).name == "nb.md" and Path(markdown["name"]).is_relative_to(session._workdir)
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_focus_cell_on_a_markdown_cell_puts_the_markdown_buffer_in_the_window_pinned_to_it(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await session.focus_cell("m2", "last")
+        assert await _lines(session) == MARKDOWN_SCRIPT
+        assert await _eval(session, "&filetype") == "markdown"
+        await _pinned(session, 7, 8)
+        assert await _eval(session, "line('.')") == 8
+
+        await _focus_mixed(session, "b", "first")  # back to the code
+        assert await _lines(session) == CODE_SCRIPT
+        await _focus_mixed(session, "m0", "keep")
+        assert await _eval(session, "line('.')") == 2
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_markdown_cells_report_edits_cross_into_an_adjacent_markdown_cell_and_keep_their_markers(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "m1", "first")
+        await _type(session, b"A!", ESC)  # an Escape that ends an insert leaves nothing
+        assert await _next(events) == {"type": "cell_edit", "id": "m1", "text": "Some *text*!"}
+
+        session.write_input(b"j")  # m2 comes right after m1 in the notebook
+        assert await _next(events) == {"type": "cell_focus", "id": "m2"}
+        await _pinned(session, 7, 8)
+        session.write_input(b"k")
+        assert await _next(events) == {"type": "cell_focus", "id": "m1"}
+        await _pinned(session, 5, 5)
+
+        await _type(session, b":4d\r")  # the marker line of m1
+        await _reverted(session)
+        assert await _lines(session) == [*MARKDOWN_SCRIPT[:4], "Some *text*!", *MARKDOWN_SCRIPT[5:]]
+        assert [event for event in await _settled(events) if event["type"] == "cell_edit"] == []
+
+
+EXITS = {
+    "k-above-code": ("a", "first", b"k", {"type": "cell_exit", "id": "a", "direction": "up"}),
+    "up-above-code": ("a", "first", UP, {"type": "cell_exit", "id": "a", "direction": "up"}),
+    "j-below-code": ("b", "last", b"j", {"type": "cell_exit", "id": "b", "direction": "down"}),
+    "down-in-insert-mode": ("b", "last", b"A" + DOWN, {"type": "cell_exit", "id": "b", "direction": "down"}),
+    "k-above-markdown": ("m1", "first", b"k", {"type": "cell_exit", "id": "m1", "direction": "up"}),
+    "j-below-markdown": ("m2", "last", b"j", {"type": "cell_exit", "id": "m2", "direction": "down"}),
+    "down-below-markdown": ("m2", "last", DOWN, {"type": "cell_exit", "id": "m2", "direction": "down"}),
+    "up-in-insert-mode": ("m1", "first", b"i" + UP, {"type": "cell_exit", "id": "m1", "direction": "up"}),
+    "j-into-the-next-code-cell": ("a", "last", b"j", {"type": "cell_focus", "id": "b"}),
+    "j-past-the-last-cell": ("c", "last", b"j", None),
+    "k-past-the-first-cell": ("m0", "first", b"k", None),
+}
+
+
+@requires_nvim
+@pytest.mark.parametrize(("cell", "cursor", "keys", "expected"), EXITS.values(), ids=EXITS.keys())
+async def test_an_up_or_down_key_at_the_edge_toward_a_cell_of_the_other_kind_leaves_the_buffer(
+    neovim_home, cell, cursor, keys, expected
+):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, cell, cursor)
+        line = await _eval(session, "line('.')")
+        await _type(session, keys)
+        if expected is not None:
+            assert await _next(events) == expected
+        await _quiet(events)
+        if expected is not None and expected["type"] == "cell_exit" and cell.startswith("m"):
+            await _pinned(session, *MIXED_SPANS["a"])  # the markdown editing ended: the code is back in the window
+        elif expected is None or expected["type"] == "cell_exit":
+            assert await _eval(session, "line('.')") == line  # the cursor stays, the caller activates the neighbor
+            await _pinned(session, *MIXED_SPANS[cell])
+
+
+@requires_nvim
+async def test_leaving_a_markdown_cell_by_its_edge_puts_the_code_back_in_the_window(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "m2", "last")
+        await _type(session, b"A" + DOWN)
+        assert await _next(events) == {"type": "cell_exit", "id": "m2", "direction": "down"}
+        await _evaluates_to(session, "[&filetype, mode()]", ["python", "n"])
+        await _pinned(session, *MIXED_SPANS["a"])  # the code book's active cell
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_a_code_cell_left_by_its_edge_is_rendered_before_the_exit(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _renders(events)
+        await _focus_mixed(session, "b", "last")
+        await _type(session, b"Ax", ESC)
+        assert await _next(events) == {"type": "cell_edit", "id": "b", "text": "print(os.sep)x"}
+        session.write_input(b"j")
+        assert await _next(events) == {"type": "cell_exit", "id": "b", "direction": "down"}
+        exit_at = next(index for index, event in enumerate(events.log) if event["type"] == "cell_exit")
+        renders = [event for event in events.log[:exit_at] if event["type"] == "cell_render" and event["id"] == "b"]
+        assert _texts(renders[-1]) == ["print(os.sep)x"]
+
+
+@requires_nvim
+async def test_the_edits_of_a_cell_are_reported_before_it_is_left(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "b", "last")
+        session.write_input(b"Ax" + DOWN)  # typed and gone at once
+        assert await _next(events) == {"type": "cell_edit", "id": "b", "text": "print(os.sep)x"}
+        assert await _next(events) == {"type": "cell_exit", "id": "b", "direction": "down"}
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_a_screen_line_mapping_of_j_goes_through_a_wrapped_last_line_before_it_leaves(neovim_home):
+    (neovim_home / "init.lua").write_text("vim.keymap.set({ 'n', 'x' }, 'j', \"v:count == 0 ? 'gj' : 'j'\", { expr = true })\n")
+    long = " ".join(["word"] * 40)  # 199 columns: three screen lines in 80
+    cells = [{"id": "m", "kind": "markdown", "text": long}, {"id": "c", "text": "x = 1"}]
+    async with _notebook(neovim_home, cells) as (session, events):
+        await session.focus_cell("m", "first")
+        await _evaluates_to(session, "&filetype", "markdown")
+        for row in (2, 3):
+            await _type(session, b"j")
+            assert await _eval(session, "[line('.'), winline()]") == [2, row]
+        await _quiet(events)
+        await _type(session, b"j")
+        assert await _next(events) == {"type": "cell_exit", "id": "m", "direction": "down"}
+        await session.focus_cell("m", "first")  # the exit gave the window back to the code
+        await _evaluates_to(session, "&filetype", "markdown")
+        await _type(session, b"2j")  # with a count the mapping gives plain `j`: the last line is the edge wherever the cursor is on it
+        assert await _next(events) == {"type": "cell_exit", "id": "m", "direction": "down"}
+        assert await _eval(session, "[line('.'), mode()]") == [2, "n"]  # the count is dropped, Neovim answers again
+
+
+async def _heights(events: _Events, seconds: float = 0.4) -> list[tuple[str, int]]:
+    """The `cell_height`s that came until none came for *seconds*, as (id, rows)."""
+    seen = []
+    while True:
+        try:
+            event = await asyncio.wait_for(events.heights.get(), seconds)
+        except TimeoutError:
+            return seen
+        seen.append((event["id"], event["rows"]))
+
+
+@requires_nvim
+async def test_the_active_cell_tells_its_screen_rows_when_it_is_pinned_and_whenever_they_change(neovim_home):
+    long = " ".join(["word"] * 40)  # 199 columns: three screen lines in 80
+    cells = [{"id": "a", "text": "x = 1\ny = 2"}, {"id": "m", "kind": "markdown", "text": f"# Title\n{long}"}, {"id": "b", "text": long}]
+    async with _notebook(neovim_home, cells) as (session, events):
+        assert await _heights(events) == [("a", 2)]
+        await session.focus_cell("m", "first")
+        assert await _heights(events) == [("m", 4)]  # a title and a line wrapped into three
+        await session.focus_cell("b", "first")
+        assert await _heights(events) == [("b", 3)]
+
+        session.resize(24, 40)  # narrower: the long line takes five rows
+        assert await _heights(events) == [("b", 5)]
+        await _type(session, b"o", b"z", ESC)
+        assert await _heights(events) == [("b", 6)]
+        await _type(session, b"k", b"j")  # moving inside the cell changes nothing
+        assert await _heights(events) == []
+        await session._lua("vim.wo.wrap = false")
+        assert await _heights(events) == [("b", 2)]
+
+        await session.set_cells("nb.py", [*cells[:2], {"id": "b", "text": "a\nb\nc"}])  # a new text from the notebook
+        assert await _heights(events) == [("b", 3)]
+        await session.focus_cell("a", "first")
+        await session.focus_cell("b", "first")  # told again: the caller may have sized another cell meanwhile
+        assert await _heights(events) == [("a", 2), ("b", 3)]
+
+
+@requires_nvim
+async def test_ctrl_enter_runs_a_cell_in_place_and_shift_enter_runs_and_advances_in_both_buffers(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "a", "first")
+        session.write_input(b"Ay" + CTRL_ENTER)
+        assert await _next(events) == {"type": "cell_edit", "id": "a", "text": "import osy\nx = 1"}
+        assert await _next(events) == {"type": "cell_run", "id": "a", "text": "import osy\nx = 1", "advance": False}
+        await _type(session, ESC)
+        session.write_input(CTRL_ENTER)  # normal mode too
+        assert await _next(events) == {"type": "cell_run", "id": "a", "text": "import osy\nx = 1", "advance": False}
+
+        await _focus_mixed(session, "m1", "first")
+        session.write_input(CTRL_ENTER)
+        assert await _next(events) == {"type": "cell_run", "id": "m1", "text": "Some *text*", "advance": False}
+        await _evaluates_to(session, "&filetype", "python")  # the run ended the editing: the code is back in the window
+        await _focus_mixed(session, "m1", "first")
+        session.write_input(b"A." + SHIFT_ENTER)
+        assert await _next(events) == {"type": "cell_edit", "id": "m1", "text": "Some *text*."}
+        assert await _next(events) == {"type": "cell_run", "id": "m1", "text": "Some *text*.", "advance": True}
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_the_ask_keymap_quotes_lines_of_the_active_cell_counted_from_its_first_line(neovim_home, tmp_path):
+    selections: asyncio.Queue[dict] = asyncio.Queue()
+    notebook = tmp_path / "nb.ipynb"
+    notebook.write_text("{}")
+    async with _notebook(neovim_home, MIXED, notebook_path=notebook, on_selection=selections.put_nowait) as (session, events):
+        await _focus_mixed(session, "a", "first")
+        await _type(session, b"Vj\\a")
+        quoted = await asyncio.wait_for(selections.get(), 10)
+        assert quoted == {"path": f"{notebook}.py", "start_line": 1, "end_line": 2, "text": "import os\nx = 1"}
+
+        await _focus_mixed(session, "m2", "last")
+        await _type(session, b"V\\a")
+        quoted = await asyncio.wait_for(selections.get(), 10)
+        assert quoted == {"path": f"{notebook}.md", "start_line": 2, "end_line": 2, "text": "text"}
+        assert await _eval(session, "mode()") == "n"
+
+
+@requires_nvim
+async def test_escape_in_normal_mode_leaves_a_markdown_cell_after_its_edits(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "m2", "first")
+        await _type(session, b"iZ", ESC)  # ends the insert only
+        assert await _next(events) == {"type": "cell_edit", "id": "m2", "text": "ZMore\ntext"}
+        await _quiet(events)
+        await _type(session, ESC)
+        assert await _next(events) == {"type": "cell_leave", "id": "m2"}
+        await _evaluates_to(session, "&filetype", "python")  # the code is back in the window
+
+        await _focus_mixed(session, "m2", "first")
+        session.write_input(b"x")
+        await asyncio.sleep(0.01)  # within the 40 ms the edit waits
+        session.write_input(ESC)
+        assert await _next(events) == {"type": "cell_edit", "id": "m2", "text": "More\ntext"}
+        assert await _next(events) == {"type": "cell_leave", "id": "m2"}
+
+        await _focus_mixed(session, "a", "first")  # code Escape sends no cell event, the global `leave` is not wired here
+        await _type(session, ESC)
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_the_users_own_escape_runs_before_a_markdown_cell_is_left(neovim_home):
+    (neovim_home / "init.lua").write_text("vim.keymap.set('n', '<Esc>', function() vim.g.escaped = (vim.g.escaped or 0) + 1 end)\n")
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "m1", "first")
+        await _type(session, ESC)
+        assert await _next(events) == {"type": "cell_leave", "id": "m1"}
+        assert await _eval(session, "g:escaped") == 1
+
+
+@requires_nvim
+async def test_code_cells_render_again_once_a_markdown_cell_is_left(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _renders(events)
+        await _focus_mixed(session, "m1", "first")
+        await _type(session, ESC)
+        assert await _next(events) == {"type": "cell_leave", "id": "m1"}
+        await session.set_cells("nb.py", [*MIXED[:2], {"id": "b", "text": "print(2)"}, *MIXED[3:]])  # changed on disk
+        renders = await _renders(events)
+        assert list(renders) == ["b"] and _texts(renders["b"]) == ["print(2)"]
+
+
+@requires_nvim
+async def test_only_code_cells_render_and_the_code_cell_left_for_markdown_is_rendered_before_it(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        assert set(await _renders(events)) == {"a", "b", "c"}
+        await _type(session, b"Az", ESC)
+        assert await _next(events) == {"type": "cell_edit", "id": "a", "text": "import osz\nx = 1"}
+        assert await _renders(events) == {}  # the active cell is drawn by Neovim itself
+
+        await session.focus_cell("m1", "first")
+        render = events.renders.get_nowait()  # sent before the markdown took the window
+        assert render["id"] == "a" and _texts(render) == ["import osz", "x = 1"]
+
+        # While the markdown is in the window, renders wait: they follow the window's options
+        a = {"id": "a", "kind": "code", "text": "import osz\nx = 1"}  # as Neovim told it
+        await session.set_cells("nb.py", [MIXED[0], a, {"id": "b", "text": "print(1)"}, *MIXED[3:]])
+        await _type(session, b"Aq", ESC)
+        assert await _next(events) == {"type": "cell_edit", "id": "m1", "text": "Some *text*q"}
+        assert await _renders(events) == {}
+
+        await session.focus_cell("c", "first")
+        renders = await _renders(events)
+        assert list(renders) == ["b"] and _texts(renders["b"]) == ["print(1)"]
+
+
+@requires_nvim
+async def test_the_markdown_buffer_is_named_beside_the_notebook_never_written_and_follows_a_rename(neovim_home, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    notebook = project / "analysis.ipynb"
+    notebook.write_text("{}")
+    async with _notebook(neovim_home, MIXED, notebook_path=notebook) as (session, events):
+        await _focus_mixed(session, "m1", "first")
+        assert await _eval(session, "[expand('%:p'), &filetype, &swapfile, &undofile]") == [f"{notebook}.md", "markdown", 0, 0]
+        assert await _lines(session) == MARKDOWN_SCRIPT
+        await _type(session, b"Ax", ESC)
+        for command in (":w", ":1,2w!", ":up"):
+            await _type(session, command.encode() + b"\r")
+            await asyncio.sleep(0.2)
+        assert [event["type"] for event in await _settled(events)][:2] == ["cell_edit", "save_notebook"]
+
+        renamed = project / "report.ipynb"
+        notebook.rename(renamed)
+        await session.rename(str(notebook), str(renamed), renamed)
+        assert await _eval(session, "[expand('%:p'), &filetype]") == [f"{renamed}.md", "markdown"]
+        await _focus_mixed(session, "a", "first")
+        assert await _eval(session, "expand('%:p')") == f"{renamed}.py"
+        await _type(session, b":w\r")
+        assert await _next(events) == {"type": "save_notebook"}
+        await asyncio.sleep(0.3)
+        assert sorted(path.name for path in project.iterdir()) == ["report.ipynb"]
+
+
+@requires_nvim
+async def test_the_users_markdown_settings_reach_the_window_once_it_shows_the_markdown(neovim_home):
+    (neovim_home / "init.lua").write_text(
+        "vim.api.nvim_create_autocmd('FileType', { pattern = 'markdown', callback = function() vim.opt_local.spell = true end })\n"
+    )
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        assert await _eval(session, "&spell") == 0
+        await _focus_mixed(session, "m0", "first")
+        assert await _eval(session, "&spell") == 1
+        await _focus_mixed(session, "a", "first")
+        assert await _eval(session, "&spell") == 0
+        await _focus_mixed(session, "m1", "first")
+        assert await _eval(session, "&spell") == 1
+        await _quiet(events)
+
+
+@requires_nvim
+async def test_set_cells_changes_the_markdown_buffer_as_it_does_the_code_buffer(neovim_home):
+    async with _notebook(neovim_home, MIXED) as (session, events):
+        await _focus_mixed(session, "m2", "first")
+        changed = [*MIXED[:4], {"id": "m2", "kind": "markdown", "text": "Changed\ntext"}, MIXED[5]]
+        await session.set_cells("nb.py", changed)  # one cell's text: replaced in place
+        assert await _lines(session) == [*MARKDOWN_SCRIPT[:6], "Changed", "text"]
+        await _pinned(session, 7, 8)
+
+        # b turns into a markdown cell: it leaves the script and joins the markdown between m0 and m1
+        turned = [MIXED[0], MIXED[1], {"id": "b", "kind": "markdown", "text": "print(os.sep)"}, *changed[3:]]
+        await session.set_cells("nb.py", turned)
+        expected = [*MARKDOWN_SCRIPT[:3], "<!-- %% -->", "print(os.sep)", *MARKDOWN_SCRIPT[3:6], "Changed", "text"]
+        assert await _lines(session) == expected
+        await _focus_mixed(session, "a", "first")
+        assert await _lines(session) == ["# %%", "import os", "x = 1", "# %%", "w = 4"]
+        await _quiet(events)
+
+        await session.focus_cell("m0", "first")
+        await _type(session, b":bwipeout!\r")  # Neovim lost the markdown buffer: the next set_cells makes it again
+        await _evaluates_to(session, "bufname() =~ '\\.md$'", 0)
+        await session.set_cells("nb.py", MIXED)
+        await _focus_mixed(session, "m1", "first")
+        assert await _lines(session) == MARKDOWN_SCRIPT
+        await _settled(events)
+        session.write_input(b"Ax")
+        assert await _next(events) == {"type": "cell_edit", "id": "m1", "text": "Some *text*x"}
+
+
+@requires_nvim
+async def test_markdown_frames_over_the_socket(neovim_home, tmp_path, monkeypatch):
+    async with _notebook_browser(monkeypatch, tmp_path) as browser:
+        browser.send({"type": "set_cells", "filename": "nb.py", "cells": MIXED})
+        browser.send({"type": "focus_cell", "id": "m1", "cursor": "first"})
+        browser.send({"type": "message", "text": "Settled"})
+        await browser.shows("Settled")
+        await browser.silent()
+
+        browser.type(b"A!")
+        assert await browser.next_frame("cell_edit") == {"type": "cell_edit", "id": "m1", "text": "Some *text*!"}
+        browser.type(CTRL_ENTER)
+        assert await browser.next_frame("cell_run") == {"type": "cell_run", "id": "m1", "text": "Some *text*!", "advance": False}
+        browser.send({"type": "focus_cell", "id": "m1", "cursor": "first"})  # the run ended the editing, the user edits again
+        await asyncio.sleep(0.2)
+        browser.type(ESC)
+        assert await browser.next_frame("cell_leave") == {"type": "cell_leave", "id": "m1"}
+        browser.send({"type": "focus_cell", "id": "m1", "cursor": "first"})
+        await asyncio.sleep(0.2)
+        browser.type(b"k")
+        assert await browser.next_frame("cell_exit") == {"type": "cell_exit", "id": "m1", "direction": "up"}
+        await browser.silent()
+
+        renders = set()
+        while not browser.renders.empty():
+            renders.add(browser.renders.get_nowait()["id"])
+        assert renders and renders <= {"a", "b", "c"}
