@@ -19,7 +19,7 @@ function quoteLanguage(path: string): string {
  *
  * - The chat is linked to the notebook's path, a new session starts in the notebook's directory and its first message names the file (`File: <name>`)
  * - Visual-mode `<leader>a` in Neovim quotes the selected lines of the active cell into the chat draft as the notebook's lines (counted from the cell's first line), fenced in the cell's language, opening the drawer if it is closed
- * - The notebook's run and kernel controls and the chat's model controls render into the top bar's `workbenchStatus` and `workbenchAgent` slots
+ * - The notebook's run and kernel controls render centered in the top bar's `center` slot, the chat's model controls into its `workbenchAgent` slot
  */
 export function NotebookWorkbench({ path, tabId, ...chatProps }: WorkbenchChatProps & { path: string; tabId: string }) {
   const cwd = dirName(path)

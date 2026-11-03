@@ -63,6 +63,8 @@ interface WorkspaceSurfaceProps {
 /** What one mode puts in the top bar beside the sidebar toggle, and the surface below it. */
 interface Surface {
   left: ReactNode
+  /** Centered in the bar, independent of the left and right items. */
+  center?: ReactNode
   right: ReactNode
   /** Scrolling surfaces run on under the floating TopBar. The rest start below it. */
   runsUnderTopBar: boolean
@@ -124,7 +126,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
-  // The workbench's bar, a notebook's too: the surface renders its controls into the agent and status slots, the chat drawer opens at the right end
+  // The workbench's bar, a notebook's too: the surface renders its controls into the agent and status slots (a notebook's into the center one), the chat drawer opens at the right end
   const workbenchBar = {
     left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
     right: <>
@@ -188,6 +190,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       const isPdfDocument = !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
       if (!diffItem && documentItem && isNotebookPath(documentItem.path)) return {
         ...workbenchBar,
+        center: <TopBarSlot name="center">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
         runsUnderTopBar: true,
         body: <NotebookWorkbench
           path={documentItem.path}
@@ -320,6 +323,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   return <>
     <TopBar
       left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{surface.left}</>}
+      center={surface.center}
       right={surface.right}
     />
     <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>

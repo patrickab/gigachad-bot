@@ -232,7 +232,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- notebook/             Jupyter notebook kind, the only importer of `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*`
 |       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab and `useEditorPath` generation) and the library notebook (runs under the top bar, restart revives a dead kernel with a new one)
-|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Run/kernel buttons and kernelspec picker rendered into the top bar's `workbenchStatus` slot, kernel start by path, `ServiceManager` through the backend proxy
+|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Run/kernel buttons and kernelspec picker rendered centered into the top bar's `center` slot, kernel start by path, `ServiceManager` through the backend proxy
 |       |   |   |-- useNotebookFile.ts, notebookSync.ts Load, debounced save and follow over `useRootFileDocument`, pure nbformat serialization and cell diff (merge theirs)
 |       |   |   |-- useKernelShutdown.ts Kernel shutdown when a notebook's last tab closes
 |       |   |   |-- syntaxHighlight.ts Neovim-scheme highlight style and `self`/decorator marks, passed through the fork's `editorExtensions` prop

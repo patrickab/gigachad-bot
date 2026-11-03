@@ -15,12 +15,20 @@ import type { ReactNode, Ref } from "react"
  * ...   </>}
  * ...   right={<TopBarPill><TokenCounter … /></TopBarPill>}
  * ... />
+ *
+ * `center` sits in the middle of the bar between two equal side columns, so it stays centered and the left and right items
+ * keep their places. Only when a side outgrows its half does the middle move over, nothing ever overlaps.
  */
-export function TopBar({ left, right }: { left?: ReactNode; right?: ReactNode }) {
+export function TopBar({ left, center, right }: { left?: ReactNode; center?: ReactNode; right?: ReactNode }) {
   // The bar ignores pointer events so clicks between controls reach the content beneath.
-  return <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-center justify-between gap-3 px-3">
+  if (center === undefined) return <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-center justify-between gap-3 px-3">
     <div className="relative z-10 flex min-w-0 items-center gap-3">{left}</div>
     <div className="relative z-10 flex shrink-0 items-center justify-end gap-3">{right}</div>
+  </header>
+  return <header className="pointer-events-none absolute inset-x-0 top-0 z-40 grid h-11 grid-cols-[1fr_auto_1fr] items-center gap-3 px-3">
+    <div className="relative z-10 flex items-center gap-3">{left}</div>
+    <div className="relative z-10 flex items-center gap-3">{center}</div>
+    <div className="relative z-10 flex items-center justify-end gap-3">{right}</div>
   </header>
 }
 

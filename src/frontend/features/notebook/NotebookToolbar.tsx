@@ -50,11 +50,11 @@ interface NotebookToolbarProps {
   onRestartKernel: () => void
 }
 
-/** Run, interrupt, restart and add-cell buttons plus the kernel picker, in the top bar's `workbenchStatus` slot. */
+/** Run, interrupt, restart and add-cell buttons plus the kernel picker, in the top bar's `center` slot. */
 export function NotebookToolbar({ notebookId, specs, kernelName, kernelFailed, onSelectKernel, onRestartKernel }: NotebookToolbarProps) {
   const status = useNotebookStore((state) => state.selectKernelStatus(notebookId))
   const idle = status === "idle"
-  return <InTopBar name="workbenchStatus">
+  return <InTopBar name="center">
     <TopBarPill>
       <div role="toolbar" aria-label="Notebook" className="flex items-center gap-0.5">
         <IconButton icon={Play} label="Run cell" disabled={!idle} onClick={() => notebookStore.getState().run(notebookId)} />
