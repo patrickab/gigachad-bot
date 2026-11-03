@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
-import signal
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -68,15 +67,6 @@ log = logging.getLogger(__name__)
 if is_cors_unsafe_for_production():
     raise RuntimeError("GIGACHAD_CORS_ORIGINS must list exact browser origins in production, never `*`")
 
-
-# Kill MinerU child servers before exiting so they do not outlive the API.
-def _signal_handler(signum: int, frame: object) -> None:
-    kill_all_mineru_servers()
-    sys.exit(128 + signum)
-
-
-signal.signal(signal.SIGTERM, _signal_handler)
-signal.signal(signal.SIGINT, _signal_handler)
 
 # `asyncio.to_thread` runs on the loop's default executor, only `min(32, cpus + 4)` workers (12 on 8 cores).
 # Streaming chats hold one worker per pending token, sandbox runs and Neovim sessions one for their whole
