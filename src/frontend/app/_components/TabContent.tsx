@@ -133,7 +133,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
                   persistOverride={(content) => writeRootFile(standaloneFile.path, content)}
                   onClose={() => filePicker.setStandaloneFile(null)}
                   onModeLabel={setModeLabel}
-                  onNavigate={(path) => filePicker.setStandaloneFile({ kind: "edit", path })}
+                  onNavigate={filePicker.openFile}
                   model={config.selectedModel}
                 />
               </TopBarSlotProvider>

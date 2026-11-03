@@ -21,6 +21,7 @@ import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
 import { LearnSurface } from "@/features/learn/LearnSurface"
 import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
+import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpFileChat } from "@/features/omp/OmpFileChat"
@@ -34,6 +35,7 @@ import { useHostAccess } from "@/contexts/SettingsContext"
 import type { OmpView, Usage } from "@/lib/domain/types"
 import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
+import { isNotebookPath } from "@/lib/paths"
 
 /** Model picker props shared by the chat, document and omp top bars. */
 export type ModelProps = Omit<ComponentProps<typeof ModelDropdown>, "selectedModel" | "onSelect" | "chatColumn">
@@ -122,6 +124,21 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
+  // The workbench's bar, a notebook's too: the surface renders its controls into the agent and status slots, the chat drawer opens at the right end
+  const workbenchBar = {
+    left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+    right: <>
+      <TopBarSlot name="workbenchStatus">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+      <TopBarTransparent>
+        <ThemeToggle />
+        <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+          <X className="h-4 w-4" />
+        </button>
+      </TopBarTransparent>
+      {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
+    </>,
+  }
+  const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands: ompShellCommands, modelProps }
 
   const surfaces: Record<AppSurface, () => Surface> = {
     chat: () => ({
@@ -169,6 +186,17 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       const diffItem = itemOf(tab, "diff")
       const documentItem = itemOf(tab, "document")
       const isPdfDocument = !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
+      if (!diffItem && documentItem && isNotebookPath(documentItem.path)) return {
+        ...workbenchBar,
+        runsUnderTopBar: true,
+        body: <NotebookWorkbench
+          path={documentItem.path}
+          tabId={tab.id}
+          ompView={documentItem.omp}
+          onViewChange={(omp) => setWorkspaceItem({ ...documentItem, omp })}
+          {...workbenchChatProps}
+        />,
+      }
       return {
         left: <TopBarTransparent>
           <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
@@ -243,17 +271,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     workbench: () => {
       const workbenchItem = itemOf(tab, "workbench")
       return {
-        left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
-        right: <>
-          <TopBarSlot name="workbenchStatus">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
-          <TopBarTransparent>
-            <ThemeToggle />
-            <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
-              <X className="h-4 w-4" />
-            </button>
-          </TopBarTransparent>
-          {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
-        </>,
+        ...workbenchBar,
         runsUnderTopBar: true,
         body: workbenchItem ? (
           <WorkbenchItemBody
@@ -261,11 +279,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
             onItemChange={setWorkspaceItem}
             onDocumentsChanged={refreshDocuments}
             onModeLabel={setModeLabel}
-            drawerOpen={workbenchDrawerOpen}
-            onDrawerOpenChange={setWorkbenchDrawerOpen}
             onClose={() => setAppMode("chat")}
-            shellCommands={ompShellCommands}
-            modelProps={modelProps}
+            {...workbenchChatProps}
           />
         ) : chatBody,
       }

@@ -18,7 +18,7 @@ export interface WorkspaceItem {
   sessionKey?: string
   /** The LaTeX project folder a `workbench` item shows: opening another file of it switches this tab's buffer. */
   texFolder?: string
-  /** What an `omp` item shows in omp-web's frame, and the chat session of a `workbench` item. */
+  /** What an `omp` item shows in omp-web's frame, and the chat session of a `workbench` item or a notebook `document` item. */
   omp?: OmpView
   /** What a `learn` item shows in LearnHarness's frame. */
   learn?: LearnView

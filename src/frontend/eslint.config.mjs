@@ -55,6 +55,7 @@ export default defineConfig([
           crossFeature("factory", "editor"),
           crossFeature("navigation", "factory"),
           crossFeature("navigation", "learn"),
+          crossFeature("notebook", "navigation"),
           crossFeature("notebook", "workbench"),
           crossFeature("learn", "chat"),
           crossFeature("learn", "settings"),

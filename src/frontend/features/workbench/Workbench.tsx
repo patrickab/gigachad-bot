@@ -1,20 +1,17 @@
 "use client"
 
-import { useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
-import { NeovimEditor, type NeovimSelection } from "@/features/editor/NeovimEditor"
+import { NeovimEditor } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
-import { TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
+import { TopBarPill } from "@/features/navigation/TopBar"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
-import { OmpModelSelector, OmpReasoningSelector, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
-import { OmpChatPanel } from "@/features/omp/OmpChatPanel"
 import { fileLead, projectLead } from "@/features/omp/fileLead"
-import { useFileChat } from "@/features/omp/useFileChat"
-import type { OmpView } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { useFollowBuffers } from "./useFollowBuffers"
+import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
 import { useWorkbenchEditor } from "./useWorkbenchEditor"
 import { WorkbenchViewSwitch, useWorkbenchView, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
 
@@ -35,24 +32,17 @@ interface WorkbenchProject {
   root: string | null
 }
 
-export interface WorkbenchProps {
+export interface WorkbenchProps extends WorkbenchChatProps {
   /** Absolute disk path of the shown file. The first path starts Neovim, a later one switches its buffer, so one workbench can walk the files of a project. */
   path: string
   /** The directory a new chat session starts in. */
   cwd: string
   /** The project every file of the workbench belongs to: its folder's chat is shared by them all. Without one the chat belongs to the shown file. */
   project?: WorkbenchProject
-  /** The chat session this tab's item shows, undefined before the first one. */
-  ompView: OmpView | undefined
-  onViewChange: (view: OmpView) => void
   /** Neovim shows another file than `path` (`:bnext`), `path` should follow. Also asks to go back to the shown file when another one could not open. */
   onPathChange: (path: string) => void
-  drawerOpen: boolean
-  onDrawerOpenChange: (open: boolean) => void
   /** `:q` in Neovim. */
   onClose: () => void
-  shellCommands: ShellCommands
-  modelProps: Omit<ComponentProps<typeof OmpModelSelector>, "view">
   renderPane: (pane: WorkbenchPane) => ReactNode
   /** Shown in the `workbenchStatus` top-bar slot after the view switch. */
   status?: ReactNode
@@ -61,9 +51,6 @@ export interface WorkbenchProps {
   /** Fence language of the lines `<leader>a` quotes into the chat. */
   quoteLanguage: string
 }
-
-/** Width of the chat panel (the tab's file panel card, like the PDF assistant), editor and rendered file share what is left. */
-const DRAWER_WIDTH_PX = 360
 
 const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
 
@@ -76,28 +63,11 @@ const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs t
  * - A pasted image goes next to the shown file and its reference lands below the cursor
  * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots
  */
-export function Workbench({
-  path, cwd, project, ompView, onViewChange, onPathChange, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps,
-  renderPane, status, onSaved, quoteLanguage,
-}: WorkbenchProps) {
+export function Workbench({ path, cwd, project, onPathChange, onClose, renderPane, status, onSaved, quoteLanguage, ...chatProps }: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  const chat = useFileChat(
-    project?.folder ?? path,
-    cwd,
-    ompView,
-    onViewChange,
-    project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd),
-  )
-  const { view } = chat
+  const chat = useWorkbenchChat(project?.folder ?? path, cwd, project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd), chatProps)
 
-  const [insertion, setInsertion] = useState<ComposerInsertion | null>(null)
-  const insertionCount = useRef(0)
-  const quoteIntoChat = (selection: NeovimSelection) => {
-    onDrawerOpenChange(true)
-    setInsertion({ id: ++insertionCount.current, text: quoteSelection(selection, quoteLanguage) })
-  }
-
-  const editor = useWorkbenchEditor({ path, enabled: neovim.enabled, onPathChange, onSaved, onClose, onSelection: quoteIntoChat })
+  const editor = useWorkbenchEditor({ path, enabled: neovim.enabled, onPathChange, onSaved, onClose, onSelection: (selection) => chat.quote(quoteSelection(selection, quoteLanguage)) })
   const { content, loadError, notice } = editor
   useFollowBuffers({ synced: editor.synced, paths: editor.openPaths, setContent: editor.setContent })
 
@@ -125,22 +95,7 @@ export function Workbench({
           </div>
         </div>
       </div>
-      {drawerOpen && (
-        <OmpChatPanel
-          chat={chat}
-          width={DRAWER_WIDTH_PX}
-          onClose={() => onDrawerOpenChange(false)}
-          shellCommands={shellCommands}
-          insertion={insertion}
-          onInserted={() => setInsertion(null)}
-        />
-      )}
-      <InTopBar name="workbenchAgent">
-        {view && <>
-          <TopBarPill><OmpReasoningSelector view={view} /></TopBarPill>
-          <TopBarTransparent><OmpModelSelector view={view} {...modelProps} /></TopBarTransparent>
-        </>}
-      </InTopBar>
+      <WorkbenchChat state={chat} {...chatProps} />
       <InTopBar name="workbenchStatus">
         <TopBarPill>
           <WorkbenchViewSwitch view={workbenchView} onChange={setWorkbenchView} />

@@ -145,4 +145,15 @@ describe("useFilePicker", () => {
     expect(onOpenItem).toHaveBeenCalledOnce()
     expect(result.current.standaloneFile).toEqual({ kind: "edit", path: "files/b.ipynb" })
   })
+
+  it("opens a notebook linked from the standalone overlay in a tab and closes the overlay", () => {
+    const onOpenItem = vi.fn()
+    const { result } = renderHook(() => useFilePicker({ hasMessages: false, chatInputRef: makeChatInputRef(), track, onOpenItem }))
+
+    act(() => { result.current.openFile("/work/notes.md") })
+    expect(result.current.standaloneFile).toEqual({ kind: "edit", path: "/work/notes.md" })
+    act(() => { result.current.openFile("/work/a.ipynb") })
+    expect(onOpenItem).toHaveBeenCalledWith({ kind: "document", path: "/work/a.ipynb", projectSlug: null, rootFile: true })
+    expect(result.current.standaloneFile).toBeNull()
+  })
 })

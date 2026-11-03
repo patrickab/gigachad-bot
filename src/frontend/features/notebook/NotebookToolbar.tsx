@@ -5,6 +5,8 @@ import { FastForward, Play, Plus, RotateCw, Square } from "lucide-react"
 import { IconButton } from "@/components/ui/IconButton"
 import { PopoverSelector } from "@/components/ui/PopoverSelector"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
+import { TopBarPill } from "@/features/navigation/TopBar"
+import { InTopBar } from "@/features/navigation/TopBarSlots"
 import type { KernelSpecInfo, KernelSpecs } from "@/lib/domain/jupyter"
 
 /** What the kernel is doing, in words for the trigger and the dot's tone. */
@@ -48,19 +50,20 @@ interface NotebookToolbarProps {
   onRestartKernel: () => void
 }
 
-/** Run, interrupt, restart and add-cell buttons plus the kernel picker, in the column the cells sit in. */
+/** Run, interrupt, restart and add-cell buttons plus the kernel picker, in the top bar's `workbenchStatus` slot. */
 export function NotebookToolbar({ notebookId, specs, kernelName, kernelFailed, onSelectKernel, onRestartKernel }: NotebookToolbarProps) {
   const status = useNotebookStore((state) => state.selectKernelStatus(notebookId))
   const idle = status === "idle"
-  return <div role="toolbar" aria-label="Notebook" className="shrink-0 border-b border-divider/50">
-    <div className="mx-auto flex h-9 w-full max-w-[59rem] items-center gap-0.5 px-6">
-      <IconButton icon={Play} label="Run cell" disabled={!idle} onClick={() => notebookStore.getState().run(notebookId)} />
-      <IconButton icon={FastForward} label="Run all cells" disabled={!idle} onClick={() => notebookStore.getState().runAll(notebookId)} />
-      <IconButton icon={Square} label="Interrupt kernel" disabled={status !== "busy"} onClick={() => notebookStore.getState().interrupt(notebookId)} />
-      <IconButton icon={RotateCw} label="Restart kernel" disabled={!status || status === "starting" || status === "restarting"} onClick={onRestartKernel} />
-      <IconButton icon={Plus} label="Add cell below" onClick={() => notebookStore.getState().insertBelow(notebookId, "code")} />
-      <span className="flex-1" />
-      <KernelPicker specs={specs} name={kernelName} status={status} failed={kernelFailed} onSelect={onSelectKernel} />
-    </div>
-  </div>
+  return <InTopBar name="workbenchStatus">
+    <TopBarPill>
+      <div role="toolbar" aria-label="Notebook" className="flex items-center gap-0.5">
+        <IconButton icon={Play} label="Run cell" disabled={!idle} onClick={() => notebookStore.getState().run(notebookId)} />
+        <IconButton icon={FastForward} label="Run all cells" disabled={!idle} onClick={() => notebookStore.getState().runAll(notebookId)} />
+        <IconButton icon={Square} label="Interrupt kernel" disabled={status !== "busy"} onClick={() => notebookStore.getState().interrupt(notebookId)} />
+        <IconButton icon={RotateCw} label="Restart kernel" disabled={!status || status === "starting" || status === "restarting"} onClick={onRestartKernel} />
+        <IconButton icon={Plus} label="Add cell below" onClick={() => notebookStore.getState().insertBelow(notebookId, "code")} />
+        <KernelPicker specs={specs} name={kernelName} status={status} failed={kernelFailed} onSelect={onSelectKernel} />
+      </div>
+    </TopBarPill>
+  </InTopBar>
 }

@@ -40,15 +40,21 @@ export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: 
     refreshFileList()
   }, [refreshFileList])
 
+  // Opens a file without a chat: a notebook in a tab, a PDF or a text file standalone
+  const openFile = useCallback((path: string) => {
+    if (isNotebookPath(path)) {
+      setStandaloneFile(null)
+      onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })
+    } else setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
+  }, [onOpenItem])
+
   const handleFileSelect = useCallback(async (path: string) => {
     setFilePickerOpen(false)
-    // Empty chat → open standalone (edit text files, view PDFs) or, for a notebook, in a tab; active
-    // conversation → stage a live reference on the chat input (the *next*
+    // Empty chat → open the file; active conversation → stage a live reference on the chat input (the *next*
     // message), not the already-sent latest message.
     if (hasMessages) await attachToComposer(chatInputRef, track, path)
-    else if (isNotebookPath(path)) onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })
-    else setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
-  }, [hasMessages, chatInputRef, track, onOpenItem])
+    else openFile(path)
+  }, [hasMessages, chatInputRef, track, openFile])
 
   useEscapeLayer(() => setStandaloneFile(null), standaloneFile?.kind === "pdf")
 
@@ -61,5 +67,6 @@ export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: 
     refreshFileList,
     openFilePicker,
     handleFileSelect,
+    openFile,
   }
 }
