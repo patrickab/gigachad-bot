@@ -28,7 +28,7 @@ class FakeWidget {
   readonly activeCellChanged = new Signal<CellWidgetLike | null>()
   readonly stateChanged = new Signal<{ name: string; newValue: unknown }>()
   readonly node = document.createElement("div")
-  private readonly nodes = new Map<string, HTMLElement>()
+  private readonly nodes = new WeakMap<object, HTMLElement>()
   private index = 0
 
   constructor(private readonly model: FakeNotebook) {
@@ -37,13 +37,13 @@ class FakeWidget {
 
   get widgets(): CellWidgetLike[] {
     return this.model.cells.map((cell) => {
-      let node = this.nodes.get(cell.id)
+      let node = this.nodes.get(cell)
       if (!node) {
         node = Object.assign(document.createElement("div"), { className: "jp-Cell", innerHTML: '<div class="jp-InputArea"><div class="jp-InputArea-editor"></div></div>' })
-        this.nodes.set(cell.id, node)
+        this.nodes.set(cell, node)
         this.node.appendChild(node)
       }
-      return { node, model: { id: cell.id, type: cell.cell_type } }
+      return { node, model: { type: cell.cell_type } }
     })
   }
 

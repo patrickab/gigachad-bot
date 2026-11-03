@@ -13,7 +13,7 @@ interface SignalLike<Args> {
 /** The `@jupyterlab/cells` cell widget members used here. A markdown cell (`MarkdownCell`) also shows its text `rendered` or its editor. */
 export interface CellWidgetLike {
   readonly node: HTMLElement
-  readonly model: { readonly id: string; readonly type: string }
+  readonly model: { readonly type: string }
   rendered?: boolean
   readonly renderedChanged?: SignalLike<boolean>
 }
@@ -105,6 +105,21 @@ const isCode = (cell: CellWidgetLike | null): cell is CellWidgetLike => cell?.mo
 
 const sameCells = (a: readonly CellText[], b: readonly CellText[]) => a.length === b.length && a.every((cell, index) => cell.id === b[index].id && cell.text === b[index].text && cell.kind === b[index].kind)
 
+/** The keys of the cells without an id, one for each cell as long as it lives. `#` is in no nbformat id, so `#<n>` is no other cell's id. */
+const keysOfIdless = new WeakMap<SharedCellLike, string>()
+let idlessCount = 0
+
+/** The cell's id, else the key it got for having none. */
+function idOrKey(cell: SharedCellLike): string {
+  if (cell.id) return cell.id
+  let key = keysOfIdless.get(cell)
+  if (key === undefined) {
+    key = `#${++idlessCount}`
+    keysOfIdless.set(cell, key)
+  }
+  return key
+}
+
 /** A code or markdown cell of the notebook: `key` is what Neovim knows it by, `index` its position among all cells (the notebook widget's index too). */
 interface NeovimCell {
   key: string
@@ -124,7 +139,7 @@ interface PendingEntry {
  * Neovim on a notebook, both ways, with `terminal` as the session. Neovim holds all code cells as one buffer, all markdown cells as another, its window shows the active cell.
  *
  * - `setCells` hands Neovim the code and markdown cells whenever the notebook changes them (anything but Neovim's own edits): `sent` is what Neovim has, an update equal to it is not sent
- * - Neovim knows a cell by its `key`, the cell's id. A notebook file may repeat ids, so a later cell with a taken id gets `<id>#2` and so on: Neovim never gets a repeated id (it would refuse the cells), and everything it reports maps back to the cell by its key
+ * - Neovim knows a cell by its `key`, the cell's id. A cell without one (a notebook below nbformat 4.5) gets `#1`, `#2`... for as long as it lives. A notebook file may repeat ids, so a later cell with a taken id gets `<id>#2` and so on: Neovim never gets a repeated id (it would refuse the cells), and everything it reports maps back to the cell by its key
  * - An edit in Neovim goes into its cell (`setCellSource`, outside the undo stack) and into `sent` first, so it is not sent back
  * - The active code cell gets the window (`focusCell`) however it became active: click, keyboard, run and advance, first load. A raw cell has no Neovim, its own editor shows
  * - A markdown cell shows its rendered text. Editing it (double-click, Enter: the notebook unrenders it) puts the terminal in its place with the window on it, until Esc in normal mode, Ctrl or Shift+Enter, `j`/`k` out of it, or another cell becomes active: then it is rendered again
@@ -269,15 +284,16 @@ export class CellNeovim {
     }
   }
 
-  /** The notebook's code and markdown cells in order with the key Neovim knows each by: the cell's id, `<id>#2`, `<id>#3` for a repeat of an id (and past an id that is taken already). */
+  /** The notebook's code and markdown cells in order with the key Neovim knows each by: the cell's id (or its key for having none), `<id>#2`, `<id>#3` for a repeat of an id (and past an id that is taken already). */
   private cells(): NeovimCell[] {
     const taken = new Set<string>()
     const cells: NeovimCell[] = []
     this.deps.model.cells.forEach((cell, index) => {
       const kind = cell.cell_type
       if (kind !== "code" && kind !== "markdown") return
-      let key = cell.id
-      for (let repeat = 2; taken.has(key); repeat++) key = `${cell.id}#${repeat}`
+      const id = idOrKey(cell)
+      let key = id
+      for (let repeat = 2; taken.has(key); repeat++) key = `${id}#${repeat}`
       taken.add(key)
       cells.push({ key, index, kind, cell })
     })

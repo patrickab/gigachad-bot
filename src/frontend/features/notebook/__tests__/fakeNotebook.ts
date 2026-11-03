@@ -10,7 +10,7 @@ export class FakeCell implements SharedCellLike {
   outputs: JsonObject[]
   private count: number | null
 
-  constructor(readonly id: string, readonly cell_type: string, source: string, metadata: JsonObject, outputs: JsonObject[], count: number | null, private readonly notify: () => void) {
+  constructor(readonly id: string | undefined, readonly cell_type: string, source: string, metadata: JsonObject, outputs: JsonObject[], count: number | null, private readonly notify: () => void) {
     this.source = source
     this.metadata = metadata
     this.outputs = outputs
@@ -90,8 +90,9 @@ export class FakeNotebook implements SharedNotebookLike {
     const metadata = clone(content.metadata)
     delete metadata.orig_nbformat
     this.metadata = metadata
-    // A notebook below 4.5 has no ids, the model makes its own
-    content.cells.forEach((cell) => this.live.push(this.make(clone(cell), content.nbformat_minor >= 5)))
+    // Like jupyter-react's loader: a notebook below 4.5 keeps no ids, and a cell without one gets none
+    const useId = content.nbformat === 4 && content.nbformat_minor >= 5
+    content.cells.forEach((cell) => this.live.push(this.make(clone(cell), useId ? cell.id : undefined)))
     this.commit()
   }
 
@@ -103,16 +104,16 @@ export class FakeNotebook implements SharedNotebookLike {
 
   private readonly notify = () => { for (const listener of [...this.listeners]) listener() }
 
-  private make(cell: NotebookCellContent, keepId: boolean): FakeCell {
+  private make(cell: NotebookCellContent, id: string | undefined): FakeCell {
     const metadata = clone(cell.metadata ?? {})
     if (this.options.injectEditable) metadata.editable = true
     const source = Array.isArray(cell.source) ? cell.source.join("") : cell.source
-    const id = keepId && cell.id ? cell.id : `generated-${this.next++}`
     return new FakeCell(id, cell.cell_type, source, metadata, clone(cell.outputs ?? []), cell.cell_type === "code" ? (cell.execution_count ?? null) : null, this.notify)
   }
 
   insertCell(index: number, cell: NotebookCellContent) {
-    const made = this.make(clone(cell), true)
+    // Like `YNotebook.insertCell`: a cell without an id gets a new one
+    const made = this.make(clone(cell), cell.id ?? `generated-${this.next++}`)
     this.live.splice(index, 0, made)
     this.commit()
     this.notify()
@@ -162,7 +163,14 @@ export class FakeNotebook implements SharedNotebookLike {
     this.notify()
   }
 
+  /** Like `YNotebook.toJSON`: no ids below nbformat 4.5. */
   toJSON(): NotebookContent {
-    return { cells: this.cells.map((cell) => cell.toJSON()), metadata: this.getMetadata(), nbformat: this.nbformat, nbformat_minor: this.nbformat_minor }
+    const prune = this.nbformat === 4 && this.nbformat_minor <= 4
+    const cells = this.cells.map((cell) => {
+      const json = cell.toJSON()
+      if (prune) delete json.id
+      return json
+    })
+    return { cells, metadata: this.getMetadata(), nbformat: this.nbformat, nbformat_minor: this.nbformat_minor }
   }
 }

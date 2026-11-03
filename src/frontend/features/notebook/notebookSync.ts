@@ -31,7 +31,8 @@ export interface NotebookContent {
 
 /** The `@jupyter/ydoc` `YCodeCell`, `YMarkdownCell` and `YRawCell` members this file uses. */
 export interface SharedCellLike {
-  readonly id: string
+  /** Undefined for a cell loaded without one: jupyter-react keeps no id of a notebook below nbformat 4.5 and makes none for a cell that lacks it. */
+  readonly id: string | undefined
   readonly cell_type: string
   getSource(): string
   updateSource(start: number, end: number, value?: string): void

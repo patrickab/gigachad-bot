@@ -27,7 +27,7 @@ class FakeCellWidget implements CellWidgetLike {
   focused = 0
   private shown = true
 
-  constructor(readonly model: { id: string; type: string }) {
+  constructor(readonly model: { type: string }) {
     if (model.type === "markdown") this.renderedChanged = new Signal<boolean>(this)
     this.node.focus = () => { this.focused++ }
   }
@@ -57,7 +57,7 @@ class FakeWidget {
     return this.model.cells.map((cell) => {
       const known = this.made.get(cell)
       if (known) return known
-      const widget = new FakeCellWidget({ id: cell.id, type: cell.cell_type })
+      const widget = new FakeCellWidget({ type: cell.cell_type })
       this.made.set(cell, widget)
       return widget
     })
@@ -111,8 +111,8 @@ class FakeTerminal implements CellTerminal {
 
 const modelOf = (model: FakeNotebook) => model as unknown as CellModelLike
 
-function setup(cells: NotebookCellContent[], language: LanguageInfoLike | null = { name: "python", file_extension: ".py" }) {
-  const model = new FakeNotebook(content(cells))
+function setup(cells: NotebookCellContent[] | NotebookContent, language: LanguageInfoLike | null = { name: "python", file_extension: ".py" }) {
+  const model = new FakeNotebook(Array.isArray(cells) ? content(cells) : cells)
   const notebook = new FakeWidget(model)
   const terminal = new FakeTerminal()
   const run = vi.fn()
@@ -181,6 +181,31 @@ describe("CellNeovim", () => {
     expect(model.cells[0].getSource()).toBe("xx")
     expect(notebook.activeCellIndex).toBe(0)
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives every cell of a notebook without ids (below nbformat 4.5) its own key for as long as it lives, and what Neovim reports maps back to it", () => {
+    const legacy: NotebookContent = { ...content([code("", "a = 1"), markdown("", "# t"), code("", "b = a")]), nbformat_minor: 4 }
+    for (const cell of legacy.cells) delete cell.id
+    const harness = setup(legacy)
+    const { controller, model, notebook, runAndAdvance, terminal } = harness
+    advancing(harness)
+    expect(model.cells.map((cell) => cell.id)).toEqual([undefined, undefined, undefined])
+    const keys = terminal.sets[0].cells.map((cell) => cell.id)
+    expect(terminal.sets[0].cells.map((cell) => cell.kind)).toEqual(["code", "markdown", "code"])
+    for (const key of keys) expect(key).toMatch(/\S/)
+    expect(new Set(keys).size).toBe(3)
+    expect(terminal.focuses).toEqual([{ id: keys[0], cursor: "first" }])
+    expect(controller.codeCellWidgets().map((widget) => widget.key)).toEqual([keys[0], keys[2]])
+
+    model.insertCell(3, code("added", "c"))
+    expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual([...keys, "added"])
+    controller.listener.edit(keys[2], "b = a + 1")
+    expect(model.cells.map((cell) => cell.getSource())).toEqual(["a = 1", "# t", "b = a + 1", "c"])
+    controller.listener.run(keys[0], "a = 2", true)
+    expect(model.cells[0].getSource()).toBe("a = 2")
+    expect(runAndAdvance).toHaveBeenCalledTimes(1)
+    expect(notebook.activeCellIndex).toBe(2)
+    expect(terminal.focuses.at(-1)).toEqual({ id: keys[2], cursor: "first" })
   })
 
   it("keeps the notebook out of the cell's editor: command mode, keys to the terminal", () => {

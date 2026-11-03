@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   applyIncomingNotebook,
   diffNotebook,
+  notebookOf,
   normalizeNotebook,
   parseNotebook,
   rejoinNotebook,
@@ -378,6 +379,17 @@ describe("diff policy", () => {
       const model = new FakeNotebook(start)
       applyIncomingNotebook(model, start, withoutIds([["code", "a"]]))
       expect(model.cells.map((cell) => cell.source)).toEqual(["a"])
+    })
+
+    it("saves no ids, also for a cell the model added with one", () => {
+      const start = withoutIds([["code", "a"], ["markdown", "b"]])
+      const model = new FakeNotebook(start)
+      model.insertCell(1, { cell_type: "code", source: "new", metadata: {}, outputs: [], execution_count: null })
+      expect(model.cells[1].id).toBeDefined()
+      const saved = JSON.parse(serializeNotebook(notebookOf(model), start)) as NotebookContent
+      expect(saved.nbformat_minor).toBe(4)
+      expect(sourcesOf(rejoinNotebook(saved))).toEqual(["a", "new", "b"])
+      for (const cell of saved.cells) expect(cell).not.toHaveProperty("id")
     })
   })
 })
