@@ -152,13 +152,13 @@ describe("useNeovimTerminal notebook cells", () => {
   it("sends the notebook frames, keeping them for after the open frame", async () => {
     const { result, socket } = await connect()
 
-    expect(result.current.setCells("notebook.py", [{ id: "a", text: "x = 1" }, { id: "b", text: "" }])).toBe(true)
+    expect(result.current.setCells("notebook.py", [{ id: "a", text: "x = 1", kind: "code" }, { id: "m", text: "# t", kind: "markdown" }])).toBe(true)
     expect(result.current.focusCell("b", "first")).toBe(true)
     socket.open()
     expect(result.current.focusCell("a", "keep")).toBe(true)
 
     expect(socket.frames.slice(1)).toEqual([
-      { type: "set_cells", filename: "notebook.py", cells: [{ id: "a", text: "x = 1" }, { id: "b", text: "" }] },
+      { type: "set_cells", filename: "notebook.py", cells: [{ id: "a", text: "x = 1", kind: "code" }, { id: "m", text: "# t", kind: "markdown" }] },
       { type: "focus_cell", id: "b", cursor: "first" },
       { type: "focus_cell", id: "a", cursor: "keep" },
     ])
@@ -176,21 +176,29 @@ describe("useNeovimTerminal notebook cells", () => {
     const { socket } = await connect({
       onCellEdit: (id, text) => seen.push(`edit ${id} ${text}`),
       onCellFocus: (id) => seen.push(`focus ${id}`),
-      onCellRun: (id, text) => seen.push(`run ${id} ${text}`),
+      onCellRun: (id, text, advance) => seen.push(`run ${id} ${text} ${advance}`),
+      onCellLeave: (id) => seen.push(`leave ${id}`),
+      onCellExit: (id, direction) => seen.push(`exit ${id} ${direction}`),
       onCellSave: () => seen.push("save"),
+      onCellHeight: (id, rows) => seen.push(`height ${id} ${rows}`),
     })
     socket.open()
 
     socket.receive({ type: "cell_edit", id: "a", text: "x" })
     socket.receive({ type: "cell_focus", id: "b" })
-    socket.receive({ type: "cell_run", id: "b", text: "xy" })
+    socket.receive({ type: "cell_height", id: "b", rows: 4 })
+    socket.receive({ type: "cell_run", id: "b", text: "xy", advance: true })
+    socket.receive({ type: "cell_run", id: "b", text: "xy", advance: false })
+    socket.receive({ type: "cell_leave", id: "m" })
+    socket.receive({ type: "cell_exit", id: "m", direction: "up" })
+    socket.receive({ type: "cell_exit", id: "b", direction: "down" })
     socket.receive({ type: "save_notebook" })
 
-    expect(seen).toEqual(["edit a x", "focus b", "run b xy", "save"])
+    expect(seen).toEqual(["edit a x", "focus b", "height b 4", "run b xy true", "run b xy false", "leave m", "exit m up", "exit b down", "save"])
     expect(socket.frames).toHaveLength(1)
   })
 
-  it("sends Shift+Enter as the CSI-u key in cell mode only and leaves other keys to xterm", async () => {
+  it("sends Shift+Enter and Ctrl+Enter as their CSI-u keys in cell mode only and leaves other keys to xterm", async () => {
     const cell = await connect({ cellMode: true })
     const sendKey = (init: KeyboardEventInit, type = "keydown") => {
       const event = new KeyboardEvent(type, { cancelable: true, ...init })
@@ -200,16 +208,19 @@ describe("useNeovimTerminal notebook cells", () => {
     cell.socket.open()
     expect(sendKey({ key: "Enter", shiftKey: true })).toMatchObject({ handled: false })
     expect(sendKey({ key: "Enter", shiftKey: true }, "keypress")).toMatchObject({ handled: false })
+    expect(sendKey({ key: "Enter", ctrlKey: true })).toMatchObject({ handled: false })
     expect(sendKey({ key: "Enter" }).handled).toBe(true)
     expect(sendKey({ key: "Enter", shiftKey: true, ctrlKey: true }).handled).toBe(true)
+    expect(sendKey({ key: "Enter", ctrlKey: true, altKey: true }).handled).toBe(true)
     expect(sendKey({ key: "a", shiftKey: true }).handled).toBe(true)
-    expect(cell.socket.binary.map((data) => new TextDecoder().decode(data))).toEqual(["\x1b[13;2u"])
+    expect(cell.socket.binary.map((data) => new TextDecoder().decode(data))).toEqual(["\x1b[13;2u", "\x1b[13;5u"])
 
     cell.unmount()
     FakeSocket.instances = []
     const plain = await connect()
     plain.socket.open()
     expect(sendKey({ key: "Enter", shiftKey: true }).handled).toBe(true)
+    expect(sendKey({ key: "Enter", ctrlKey: true }).handled).toBe(true)
     expect(plain.socket.binary).toEqual([])
   })
 })

@@ -1,3 +1,5 @@
+import { isRecord } from "@/lib/utils"
+
 export interface Usage {
   prompt_tokens: number
   completion_tokens: number
@@ -41,7 +43,7 @@ export interface PlotFigure {
 
 /** Any JSON object passes: Plotly validates the interior, so the guard only rejects non-objects. */
 export function isPlotFigure(value: unknown): value is PlotFigure {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  return isRecord(value)
 }
 
 /** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry

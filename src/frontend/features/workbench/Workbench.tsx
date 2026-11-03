@@ -12,6 +12,7 @@ import { fileLead, projectLead } from "@/features/omp/fileLead"
 import { useFileChat } from "@/features/omp/useFileChat"
 import type { OmpView } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
+import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { useFollowBuffers } from "./useFollowBuffers"
 import { useWorkbenchEditor } from "./useWorkbenchEditor"
@@ -63,8 +64,6 @@ export interface WorkbenchProps {
 
 /** Width of the chat panel (the tab's file panel card, like the PDF assistant), editor and rendered file share what is left. */
 const DRAWER_WIDTH_PX = 360
-/** Neovim sits on a page like the PDF's (`.pdf-page`), its size set by the pane layout. */
-const EDITOR_PAGE = "rounded-2xl px-3 pt-3 shadow-[var(--shadow-md)]"
 
 const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
 

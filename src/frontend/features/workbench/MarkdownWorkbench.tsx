@@ -7,6 +7,7 @@ import { ARTIFACT_FILL, followFileLink, isToolArtifact } from "@/features/editor
 import { useModeLabel } from "@/hooks/useModeLabel"
 import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
+import { PREVIEW_PAGE } from "./pages"
 import { Workbench, type WorkbenchPane, type WorkbenchProps } from "./Workbench"
 
 interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderPane" | "status" | "project" | "onSaved" | "quoteLanguage"> {
@@ -28,7 +29,7 @@ function MarkdownPage({ path, layout, text, loadError, onNavigate }: WorkbenchPa
     <div className="h-full overflow-y-auto" onClick={(event) => followFileLink(event, onNavigate)}>
       <div style={{ paddingTop: layout.top, paddingBottom: layout.bottom }}>
         <div
-          className={cn("mx-auto rounded-2xl bg-page p-6 shadow-[var(--shadow-md)]", artifact && ARTIFACT_FILL)}
+          className={cn("mx-auto", PREVIEW_PAGE, artifact && ARTIFACT_FILL)}
           style={{ width: layout.width, minHeight: layout.height, height: artifact ? layout.height : undefined }}
         >
           <LaTeXMarkdown content={text} />

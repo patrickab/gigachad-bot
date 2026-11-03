@@ -8,6 +8,7 @@ import type { CellTerminal } from "../cellTerminal"
 
 const controller = vi.hoisted(() => ({ current: null as unknown }))
 vi.mock("../useActiveCellNeovim", () => ({ useActiveCellNeovim: () => controller.current }))
+const NO_RENDERS = new Map()
 
 /** What xterm does to its host: it creates the input element once it is open, after the host is in the page. */
 function Xterm({ lateInput }: { lateInput: HTMLTextAreaElement }) {
@@ -24,7 +25,7 @@ function fakeTerminal(input: HTMLTextAreaElement): CellTerminal {
     focusCell: () => true,
     focus: () => {},
     restart: () => {},
-    cellHeight: () => 16,
+    metrics: () => ({ fontFamily: "monospace", fontSize: 13, cellWidth: 8, cellHeight: 16, columns: 80 }),
     subscribe: () => () => {},
     render: () => <Xterm lateInput={input} />,
   }
@@ -45,6 +46,10 @@ function showing(snapshot: CellNeovimSnapshot) {
   controller.current = {
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     getSnapshot: () => current,
+    subscribeRenders: () => () => {},
+    getRenders: () => NO_RENDERS,
+    codeCellWidgets: () => [],
+    notebookNode: document.body,
   }
   return (next: CellNeovimSnapshot) => { current = next; act(() => listeners.forEach((listener) => listener())) }
 }
@@ -80,7 +85,7 @@ describe("ActiveCellTerminal", () => {
     expect(deleteCell).toHaveBeenCalledTimes(1)
 
     const input = document.createElement("textarea")
-    showing({ id: "a", cell, lines: 2 })
+    showing({ id: "a", cell, rows: 2 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(input)} save={async () => {}} />)
     expect(input.isConnected).toBe(true)
     input.focus()
@@ -94,11 +99,11 @@ describe("ActiveCellTerminal", () => {
     const first = cellWidget()
     const second = cellWidget()
     const input = document.createElement("textarea")
-    const show = showing({ id: "a", cell: first, lines: 1 })
+    const show = showing({ id: "a", cell: first, rows: 1 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(input)} save={async () => {}} />)
     expect(first.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")).not.toBeNull()
 
-    show({ id: "b", cell: second, lines: 1 })
+    show({ id: "b", cell: second, rows: 1 })
     expect(first.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
     const host = second.node.querySelector(".jp-InputArea [data-testid=cell-neovim]")
     expect(host).not.toBeNull()
@@ -108,15 +113,15 @@ describe("ActiveCellTerminal", () => {
 
   it("hides the cell's editor while the terminal is in it, and gives it back", () => {
     const cell = cellWidget()
-    const show = showing({ id: "a", cell, lines: 3 })
+    const show = showing({ id: "a", cell, rows: 3 })
     const { unmount } = render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(true)
 
-    show({ id: null, cell: null, lines: 1 })
+    show({ id: null, cell: null, rows: 1 })
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(false)
     expect(cell.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
 
-    show({ id: "a", cell, lines: 3 })
+    show({ id: "a", cell, rows: 3 })
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(true)
     unmount()
     expect(cell.node.classList.contains("gc-nvim-cell")).toBe(false)
@@ -125,7 +130,7 @@ describe("ActiveCellTerminal", () => {
   it("attaches to an active cell whose input area the windowed notebook renders later", async () => {
     const cell = cellWidget()
     cell.node.innerHTML = ""
-    showing({ id: "a", cell, lines: 1 })
+    showing({ id: "a", cell, rows: 1 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     expect(cell.node.querySelector("[data-testid=cell-neovim]")).toBeNull()
 
@@ -141,7 +146,7 @@ describe("ActiveCellTerminal", () => {
     const reveal = vi.fn()
     Element.prototype.scrollIntoView = reveal
     const cell = cellWidget()
-    showing({ id: "a", cell, lines: 3 })
+    showing({ id: "a", cell, rows: 3 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     expect(reveal).toHaveBeenCalledTimes(1)
     expect(reveal).toHaveBeenCalledWith({ block: "nearest" })
@@ -150,11 +155,11 @@ describe("ActiveCellTerminal", () => {
 
   it("makes the terminal as tall as the cell's text needs", () => {
     const cell = cellWidget()
-    const show = showing({ id: "a", cell, lines: 2 })
+    const show = showing({ id: "a", cell, rows: 2 })
     render(<ActiveCellTerminal tabId="tab" terminal={fakeTerminal(document.createElement("textarea"))} save={async () => {}} />)
     const host = () => cell.node.querySelector<HTMLElement>("[data-testid=cell-neovim]")!
     const short = parseFloat(host().style.height)
-    show({ id: "a", cell, lines: 6 })
+    show({ id: "a", cell, rows: 6 })
     expect(parseFloat(host().style.height)).toBeGreaterThanOrEqual(short + 4 * 16)
   })
 })

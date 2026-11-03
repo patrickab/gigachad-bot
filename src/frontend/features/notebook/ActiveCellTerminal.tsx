@@ -2,11 +2,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
-import { TERMINAL_HOST_CLASS, cellTerminalHeight, type CellNeovimSnapshot } from "./cellNeovim"
+import { TERMINAL_BOX_CLASS, TERMINAL_HOST_CLASS, cellTerminalHeight, type CellNeovimSnapshot } from "./cellNeovim"
+import { CellSnapshots } from "./CellSnapshots"
 import type { CellTerminal } from "./cellTerminal"
 import { useActiveCellNeovim } from "./useActiveCellNeovim"
 
-const NOTHING_SHOWN: CellNeovimSnapshot = { id: null, cell: null, lines: 1 }
+const NOTHING_SHOWN: CellNeovimSnapshot = { id: null, cell: null, rows: 1 }
 const noSubscription = () => () => {}
 /** Lumino skips the key bindings of an event whose target or ancestor has this attribute. */
 const SUPPRESS_SHORTCUTS = "data-lm-suppress-shortcuts"
@@ -14,11 +15,12 @@ const SUPPRESS_SHORTCUTS = "data-lm-suppress-shortcuts"
 /**
  * The Neovim terminal of the active notebook cell (`useActiveCellNeovim`), inside that cell's input area in place of its CodeMirror editor, which stays
  * hidden while the terminal is there. The terminal is one element that moves from cell to cell with the session alive. It sits in the notebook's DOM, so
- * the notebook must leave its keys alone (`SUPPRESS_SHORTCUTS`), and its height follows the cell's lines: the rows are what keep the cell tall enough.
+ * the notebook must leave its keys alone (`SUPPRESS_SHORTCUTS`), and its height follows the screen rows Neovim draws the cell's text in: the rows are what keep the cell tall enough.
+ * Every other code cell shows how Neovim draws it (`CellSnapshots`).
  */
 export function ActiveCellTerminal({ tabId, terminal, save }: { tabId: string; terminal: CellTerminal; save: () => Promise<void> }) {
   const controller = useActiveCellNeovim(tabId, terminal, save)
-  const { id, cell, lines } = useSyncExternalStore(controller?.subscribe ?? noSubscription, controller?.getSnapshot ?? (() => NOTHING_SHOWN), () => NOTHING_SHOWN)
+  const { id, cell, rows, reveal } = useSyncExternalStore(controller?.subscribe ?? noSubscription, controller?.getSnapshot ?? (() => NOTHING_SHOWN), () => NOTHING_SHOWN)
   const hostRef = useRef<HTMLDivElement>(null)
   const [, rerender] = useState(0)
   const parent = id === null ? null : cell?.node.querySelector<HTMLElement>(".jp-InputArea") ?? null
@@ -43,7 +45,7 @@ export function ActiveCellTerminal({ tabId, terminal, save }: { tabId: string; t
 
   // The terminal needs a height before it can be fitted. Once it is on screen its row height is known and the height is set again.
   const setHeight = () => {
-    if (hostRef.current) hostRef.current.style.height = `${cellTerminalHeight(lines, terminal.cellHeight())}px`
+    if (hostRef.current) hostRef.current.style.height = `${cellTerminalHeight(rows, terminal.metrics()?.cellHeight ?? 0)}px`
   }
   useLayoutEffect(setHeight)
   useEffect(setHeight)
@@ -60,13 +62,17 @@ export function ActiveCellTerminal({ tabId, terminal, save }: { tabId: string; t
   }, [parent])
 
   // The terminal itself comes into view, not its cell: the cell holds the outputs too, and a tall output keeps the cell "visible" while the terminal at its top is cut at the edge
-  useEffect(() => { if (parent) hostRef.current?.scrollIntoView?.({ block: "nearest" }) }, [cell, parent])
+  useEffect(() => { if (parent && reveal !== false) hostRef.current?.scrollIntoView?.({ block: "nearest" }) }, [cell, parent, reveal])
 
-  if (!parent) return null
-  return createPortal(
-    <div ref={hostRef} {...{ [SUPPRESS_SHORTCUTS]: "true" }} data-testid="cell-neovim" className={TERMINAL_HOST_CLASS}>
-      {terminal.render("h-full rounded-md border border-ink-subtle bg-surface-elevated px-2 py-1")}
-    </div>,
-    parent,
+  return (
+    <>
+      {parent && createPortal(
+        <div ref={hostRef} {...{ [SUPPRESS_SHORTCUTS]: "true" }} data-testid="cell-neovim" className={TERMINAL_HOST_CLASS}>
+          {terminal.render(TERMINAL_BOX_CLASS)}
+        </div>,
+        parent,
+      )}
+      {controller && <CellSnapshots controller={controller} terminal={terminal} />}
+    </>
   )
 }

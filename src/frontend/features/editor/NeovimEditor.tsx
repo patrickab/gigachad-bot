@@ -7,7 +7,7 @@ import { neovimSessionUrl } from "@/lib/backend/urls"
 import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
-import type { CellCursor, CellText } from "@/features/notebook/cellTerminal"
+import type { CellCursor, CellExitDirection, CellText, CellTextMetrics } from "@/features/notebook/cellTerminal"
 import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
 
 const POLICY_VIOLATION = 1008
@@ -18,8 +18,9 @@ const REDRAW_TIMEOUT_MS = 500
 // Synchronized output (DEC mode 2026): xterm holds rendering in between, Neovim wraps each redraw in it.
 const SYNC_START = "\x1b[?2026h"
 const SYNC_END = "\x1b[?2026l"
-// Shift+Enter as the kitty keyboard protocol writes it: key 13 with the shift modifier
+// Shift+Enter and Ctrl+Enter as the kitty keyboard protocol writes them: key 13 with the shift (2) or ctrl (5) modifier
 const SHIFT_ENTER = "\x1b[13;2u"
+const CTRL_ENTER = "\x1b[13;5u"
 // One char per byte, so the ASCII marker can be found in raw PTY output
 const BYTE_DECODER = new TextDecoder("latin1")
 
@@ -31,8 +32,8 @@ export interface NeovimTerminal {
   focus: () => void
   /** Repaint with the colors of the current app theme. */
   restyle: () => void
-  /** Height of one terminal row in px, 0 before the terminal is on screen. */
-  cellHeight: () => number
+  /** How the terminal draws text (font, size of one cell in px), null before it was on screen. Kept while the terminal is off screen. */
+  metrics: () => CellTextMetrics | null
 }
 
 export type NeovimStatus =
@@ -70,16 +71,24 @@ interface NeovimOptions {
   onOpenFailed?: (path: string, message: string) => void
   /** The path of the buffer on screen, what a pasted image is stored next to. The document's own path without it, right while the session shows one buffer. */
   shownPath?: () => string
-  /** Shift+Enter reaches Neovim as the CSI-u sequence `<S-CR>` (xterm sends a plain Enter for it), what the notebook buffer maps to "run cell". */
+  /** Shift+Enter and Ctrl+Enter reach Neovim as the CSI-u sequences `<S-CR>` and `<C-CR>` (xterm sends a plain Enter for both), what the notebook buffers map to "run cell". */
   cellMode?: boolean
   /** The cell `id` holds `text` after a change in Neovim. Notifications arrive in the order Neovim made them. */
   onCellEdit?: (id: string, text: string) => void
   /** Neovim moved its cursor into the cell `id` (`j`/`k`, `G`, a search, an LSP jump). */
   onCellFocus?: (id: string) => void
-  /** Shift+Enter in the cell `id`, with the text it had. */
-  onCellRun?: (id: string, text: string) => void
+  /** Shift+Enter (`advance`) or Ctrl+Enter in the cell `id`, with the text it had. */
+  onCellRun?: (id: string, text: string, advance: boolean) => void
+  /** Esc in normal mode in the markdown cell `id`. */
+  onCellLeave?: (id: string) => void
+  /** Neovim's cursor left the cell `id` past its edge toward a cell of the other kind. */
+  onCellExit?: (id: string, direction: CellExitDirection) => void
   /** `:w`: nothing is answered, the notebook is saved. */
   onCellSave?: () => void
+  /** Neovim drew the cell `id` (`cell_render`, unchecked). */
+  onCellRender?: (id: string, rendering: unknown) => void
+  /** The text of the cell `id` Neovim's window is pinned to takes `rows` screen rows there. */
+  onCellHeight?: (id: string, rows: number) => void
 }
 
 /** Move focus from the terminal in `host` to the closest focusable element around it (a notebook cell takes its arrow keys again), else to the page. */
@@ -113,8 +122,8 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  * - `insertLines(text)` inserts lines below the cursor of the shown buffer, false while the session is not open
  * - Neovim's `p` and `"+p` ask the browser clipboard (`clipboard_read`). A screenshot is stored in `imgs/` next to the shown LaTeX or Markdown file and pasted as its reference, text as text, a failure is shown in Neovim. Ctrl+Shift+V of a screenshot does the same through `insert_lines`
  * - Unmounting or a new `document.key` discards unsaved edits
- * - `setCells(filename, cells)` hands the notebook's code cells in order (the one buffer, no echo back, ids unique, `filename` gives the buffer's extension when Neovim creates it), `focusCell(id, cursor)` pins the window to a cell. Edits, Shift+Enter, `:w` and the cursor moving into another cell come back as `onCellEdit`, `onCellRun`, `onCellSave` and `onCellFocus` in order
- * - `cellMode` makes the session a notebook's: it opens without the document's filename and content (only its `path`, which names the buffer beside the notebook when absolute and in a file root, and picks the working directory) and sends Shift+Enter as `<S-CR>`
+ * - `setCells(filename, cells)` hands the notebook's code and markdown cells in order (a buffer per kind, no echo back, ids unique, `filename` gives the code buffer's extension when Neovim creates it), `focusCell(id, cursor)` pins the window to a cell. Edits, Shift+Enter and Ctrl+Enter, Esc in a markdown cell, `:w`, the cursor moving into another cell or out of its buffer's cells come back as `onCellEdit`, `onCellRun`, `onCellLeave`, `onCellSave`, `onCellFocus` and `onCellExit` in order, how Neovim draws each code cell as `onCellRender`, the screen rows of the pinned cell as `onCellHeight`
+ * - `cellMode` makes the session a notebook's: it opens without the document's filename and content (only its `path`, which names the buffers beside the notebook when absolute and in a file root, and picks the working directory) and sends Shift+Enter as `<S-CR>`, Ctrl+Enter as `<C-CR>`
  */
 export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string, path: string) => Promise<string>, onQuit: () => void, options: NeovimOptions = {}) {
   const [terminal, setTerminal] = useState<NeovimTerminal | null>(null)
@@ -251,8 +260,12 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (message.type === "open_failed") { readOptions().onOpenFailed?.(message.path, message.message); return }
         if (message.type === "cell_edit") { readOptions().onCellEdit?.(message.id, message.text); return }
         if (message.type === "cell_focus") { readOptions().onCellFocus?.(message.id); return }
-        if (message.type === "cell_run") { readOptions().onCellRun?.(message.id, message.text); return }
+        if (message.type === "cell_run") { readOptions().onCellRun?.(message.id, message.text, message.advance !== false); return }
+        if (message.type === "cell_leave") { readOptions().onCellLeave?.(message.id); return }
+        if (message.type === "cell_exit") { readOptions().onCellExit?.(message.id, message.direction === "up" ? "up" : "down"); return }
         if (message.type === "save_notebook") { readOptions().onCellSave?.(); return }
+        if (message.type === "cell_render") { readOptions().onCellRender?.(message.id, message); return }
+        if (message.type === "cell_height") { readOptions().onCellHeight?.(message.id, message.rows); return }
         if (message.type === "clipboard_read") {
           try {
             send(JSON.stringify({ type: "clipboard", id: message.id, text: await readClipboardForPaste(message.path) }))
@@ -274,11 +287,11 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         setStatus({ state: "stopped", message: stoppedMessage(exitCode, event.code) })
       }
       xterm.onData((data) => send(encoder.encode(data)))
-      // xterm sends a plain Enter for Shift+Enter, which Neovim cannot tell from Enter. The CSI-u form is what a terminal with the kitty keyboard protocol sends
+      // xterm sends a plain Enter for Shift+Enter and Ctrl+Enter, which Neovim cannot tell from Enter. The CSI-u form is what a terminal with the kitty keyboard protocol sends
       xterm.attachCustomKeyEventHandler((event) => {
-        if (!readOptions().cellMode || event.key !== "Enter" || !event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return true
+        if (!readOptions().cellMode || event.key !== "Enter" || event.shiftKey === event.ctrlKey || event.altKey || event.metaKey) return true
         event.preventDefault()
-        if (event.type === "keydown") send(encoder.encode(SHIFT_ENTER))
+        if (event.type === "keydown") send(encoder.encode(event.shiftKey ? SHIFT_ENTER : CTRL_ENTER))
         return false
       })
       xterm.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0))))
@@ -320,6 +333,17 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         backgroundIsLight = isLight
       }
 
+      // The last size measured on screen: a terminal that is off screen measures nothing. The same object while nothing changed
+      let measured: CellTextMetrics | null = null
+      const metrics = () => {
+        const screen = isOpen ? xterm.element?.querySelector<HTMLElement>(".xterm-screen") : null
+        const box = screen?.getBoundingClientRect()
+        if (!box || box.height === 0 || xterm.rows === 0 || xterm.cols === 0) return measured
+        const next = { fontFamily: xterm.options.fontFamily ?? "", fontSize: TERMINAL_FONT_SIZE, cellWidth: box.width / xterm.cols, cellHeight: box.height / xterm.rows, columns: xterm.cols }
+        if (!measured || Object.entries(next).some(([key, value]) => measured?.[key as keyof CellTextMetrics] !== value)) measured = next
+        return measured
+      }
+
       setStatus({ state: "running" })
       setTerminal({
         attach: (parent) => { parent.appendChild(host); applyTheme(parent); fit() },
@@ -327,7 +351,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         fit,
         restyle: () => { if (host.parentElement) applyTheme(host.parentElement) },
         focus: () => xterm.focus(),
-        cellHeight: () => (isOpen && xterm.rows > 0 ? (xterm.element?.querySelector<HTMLElement>(".xterm-screen")?.offsetHeight ?? 0) / xterm.rows : 0),
+        metrics,
       })
       sendFrameRef.current = sendFrame
       dispose = () => { sendFrameRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }

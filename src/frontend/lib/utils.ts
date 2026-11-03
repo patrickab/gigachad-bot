@@ -34,6 +34,11 @@ export function toggled<T>(set: ReadonlySet<T>, value: T): Set<T> {
   return next
 }
 
+/** True for a plain object (not null, not an array), its values typed `V`: the shape check before reading parsed JSON. */
+export function isRecord<V = unknown>(value: unknown): value is Record<string, V> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /** Read `blob` as a `data:` URL. */
 export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -9,8 +9,14 @@ import { onFileMove, type FileMove } from "@/lib/backend/fileEvents"
 // The notebook libraries touch `document` while they load, so the editor is a client-only chunk.
 const NotebookEditor = dynamic(() => import("./NotebookEditor").then((module) => module.NotebookEditor), { ssr: false, loading: () => <LoadingPlaceholder /> })
 
+/** The file a notebook tab shows: `generation` counts the other files opened in the tab, a rename keeps it. */
+export interface EditorPath {
+  path: string
+  generation: number
+}
+
 /** The path the open editor follows. A rename (a file move whose source is the shown path) moves it along and keeps the editor, any other path (another file opened in the tab) starts a fresh editor. */
-function useEditorPath(path: string): { path: string; generation: number } {
+export function useEditorPath(path: string): EditorPath {
   const [current, setCurrent] = useState({ path, generation: 0 })
   const [moves, setMoves] = useState<FileMove[]>([])
   useEffect(() => onFileMove((move) => setMoves((seen) => [...seen.slice(-19), move])), [])
@@ -21,8 +27,10 @@ function useEditorPath(path: string): { path: string; generation: number } {
   return current
 }
 
-/** A notebook (`.ipynb`) of the file at `path`, shown by the tab `tabId`. Keyed by the tab, so a rename never remounts the editor. A `cellTerminal` edits the active cell in Neovim, without one the cells are CodeMirror. */
-export function NotebookDocument({ path, tabId, cellTerminal = null }: { path: string; tabId: string; cellTerminal?: CellTerminal | null }) {
-  const editor = useEditorPath(path)
+/**
+ * A notebook (`.ipynb`) of the file `editor` (`useEditorPath`), shown by the tab `tabId`. Keyed by the tab and the generation, so a rename never remounts the editor and
+ * another file gets a fresh one. A `cellTerminal` edits the active cell in Neovim, without one the cells are CodeMirror.
+ */
+export function NotebookDocument({ editor, tabId, cellTerminal = null }: { editor: EditorPath; tabId: string; cellTerminal?: CellTerminal | null }) {
   return <NotebookEditor key={`${tabId}:${editor.generation}`} path={editor.path} tabId={tabId} cellTerminal={cellTerminal} />
 }

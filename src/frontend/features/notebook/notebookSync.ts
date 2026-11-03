@@ -5,6 +5,8 @@
  * (`@jupyter/ydoc` 4.x, `notebook.sharedModel`) must satisfy it.
  */
 
+import { isRecord } from "@/lib/utils"
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
@@ -80,7 +82,7 @@ export type NotebookOp =
   | { type: "cellMetadata"; index: number; set: JsonObject; remove: string[] }
   | { type: "notebookMetadata"; set: JsonObject; remove: string[] }
 
-const isObject = (value: unknown): value is JsonObject => typeof value === "object" && value !== null && !Array.isArray(value)
+const isObject = isRecord<JsonValue>
 const isString = (value: unknown): value is string => typeof value === "string"
 const isLines = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString)
 

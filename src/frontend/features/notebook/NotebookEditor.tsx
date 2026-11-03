@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
+import { PANE_TOP_PX } from "@/features/workbench/WorkbenchSplit"
 import { appMarkdownFactory } from "./markdownRenderer"
 import { ActiveCellTerminal } from "./ActiveCellTerminal"
 import type { CellTerminal } from "./cellTerminal"
@@ -20,6 +21,8 @@ import { useNotebookKernel } from "./useNotebookKernel"
 import "./notebook-theme.css"
 
 const RENDERERS = [appMarkdownFactory]
+/** The notebook runs under the top bar: its cells start where the markdown preview's page does (see `notebook-theme.css`). */
+const NOTEBOOK_TOP = { "--gc-nb-top": `${PANE_TOP_PX}px` } as React.CSSProperties
 
 /** Ctrl or Cmd+S inside `root` saves through the file API: the library's own save command talks to a Jupyter contents API this app does not expose. */
 function useSaveShortcut(root: React.RefObject<HTMLElement | null>, save: () => Promise<void>) {
@@ -76,15 +79,27 @@ export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; ta
   const onSession = useCallback((session: Session.ISessionConnection | undefined) => { sessionRef.current = session }, [])
 
   const { select, kernelName } = kernel
-  const selectKernel = useCallback(async (name: string) => {
-    if (name === kernelName) return
+  const startKernelOf = useCallback(async (name: string) => {
     // The backend replaces the kernel under the open session, which the server then drops: end the session first so the library starts a fresh one on the new kernel.
     await sessionRef.current?.shutdown().catch(() => {})
     const spec = await select(name)
     // The choice lives in the notebook, the file hook saves it with the next change.
     if (spec) modelRef.current?.sharedModel.setMetadata("kernelspec", { name: spec.name, display_name: spec.display_name, language: spec.language })
-  }, [select, kernelName])
-  const restartKernel = useCallback(() => { void sessionRef.current?.kernel?.restart() }, [])
+  }, [select])
+  const selectKernel = useCallback(async (name: string) => {
+    if (name !== kernelName) await startKernelOf(name)
+  }, [startKernelOf, kernelName])
+  // A kernel that died, or that the Jupyter server lost (it restarts with the backend), cannot restart: a new one of the same spec takes its place.
+  const restartKernel = useCallback(async () => {
+    const running = sessionRef.current?.kernel
+    if (running && running.status !== "dead") {
+      try {
+        await running.restart()
+        return
+      } catch { /* gone from the server: start a new one */ }
+    }
+    if (kernelName) await startKernelOf(kernelName)
+  }, [startKernelOf, kernelName])
 
   if (file.error) return <LoadFailure message={file.error} onRetry={file.reload} />
 
@@ -96,12 +111,12 @@ export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; ta
         kernelName={kernel.kernelName}
         kernelFailed={kernel.error !== null}
         onSelectKernel={(name) => void selectKernel(name)}
-        onRestartKernel={restartKernel}
+        onRestartKernel={() => void restartKernel()}
       />
-      <ErrorText className="shrink-0 px-6 py-1.5 text-center">{kernel.error ?? file.saveError}</ErrorText>
       <div className="relative min-h-0 flex-1">
+        <ErrorText className="absolute inset-x-0 top-11 z-10 bg-paper px-6 py-1.5 text-center">{kernel.error ?? file.saveError}</ErrorText>
         {initial ? (
-          <div className="gc-nb absolute inset-0">
+          <div className="gc-nb absolute inset-0" style={NOTEBOOK_TOP}>
             <JupyterReactTheme colormode={theme} useBaseStyles={false} backgroundColor="var(--paper)">
               <Notebook
                 id={tabId}

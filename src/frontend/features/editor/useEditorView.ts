@@ -3,10 +3,9 @@
 import { useState, type MouseEvent } from "react"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { isPlotFigure, type PlotFigure } from "@/lib/domain/types"
+import { isRecord } from "@/lib/utils"
 
 export type EditorView = "edit" | "preview"
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 
 /**
  * The figure a `.json` document holds, null when it holds none.

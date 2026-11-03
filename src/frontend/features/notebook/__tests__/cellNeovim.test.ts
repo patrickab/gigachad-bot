@@ -4,19 +4,43 @@ import type { CellCursor, CellTerminal, CellText } from "../cellTerminal"
 import type { NotebookCellContent, NotebookContent } from "../notebookSync"
 import { FakeNotebook } from "./fakeNotebook"
 
+/** A Lumino signal: slots get the object it belongs to as the sender. */
 class Signal<Args> {
   private readonly slots = new Set<(sender: unknown, args: Args) => void>()
+  constructor(private readonly sender: unknown = null) {}
   connect(slot: (sender: unknown, args: Args) => void) { this.slots.add(slot) }
   disconnect(slot: (sender: unknown, args: Args) => void) { this.slots.delete(slot) }
-  emit(args: Args) { for (const slot of [...this.slots]) slot(this, args) }
+  emit(args: Args) { for (const slot of [...this.slots]) slot(this.sender, args) }
   get size() { return this.slots.size }
 }
 
 const code = (id: string, source: string): NotebookCellContent => ({ cell_type: "code", id, source, metadata: {}, outputs: [], execution_count: null })
 const markdown = (id: string, source: string): NotebookCellContent => ({ cell_type: "markdown", id, source, metadata: {} })
+const raw = (id: string, source: string): NotebookCellContent => ({ cell_type: "raw", id, source, metadata: {} })
 const content = (cells: NotebookCellContent[]): NotebookContent => ({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 })
 
-/** A notebook widget over a `FakeNotebook`, with the signals of the real one. The cell list is the model's, as the real notebook rebuilds its widgets from it. */
+/** A cell widget: the terminal is in every cell's node, as `ActiveCellTerminal` has it in the active one. A markdown cell is rendered until edited, as the notebook loads it. Like the real `MarkdownCell`, it reports a change of `rendered` later (the real one after its render), with the value it has then. */
+class FakeCellWidget implements CellWidgetLike {
+  readonly node = Object.assign(document.createElement("div"), { innerHTML: `<div class="${TERMINAL_HOST_CLASS}"></div>` })
+  readonly renderedChanged?: Signal<boolean>
+  /** How often the cell got the keyboard focus. */
+  focused = 0
+  private shown = true
+
+  constructor(readonly model: { id: string; type: string }) {
+    if (model.type === "markdown") this.renderedChanged = new Signal<boolean>(this)
+    this.node.focus = () => { this.focused++ }
+  }
+
+  get rendered(): boolean | undefined { return this.renderedChanged ? this.shown : undefined }
+  set rendered(value: boolean | undefined) {
+    if (!this.renderedChanged || value === undefined || value === this.shown) return
+    this.shown = value
+    void Promise.resolve().then(() => this.renderedChanged?.emit(this.shown))
+  }
+}
+
+/** A notebook widget over a `FakeNotebook`, with the signals of the real one. The cell list is the model's, as the real notebook rebuilds its widgets from it, a cell keeps its widget. */
 class FakeWidget {
   readonly activeCellChanged = new Signal<CellWidgetLike | null>()
   readonly stateChanged = new Signal<{ name: string; newValue: unknown }>()
@@ -25,12 +49,18 @@ class FakeWidget {
   /** Every `scrollToItem` call. */
   readonly scrolls: { index: number; align?: string }[] = []
   private index = 0
+  private readonly made = new WeakMap<object, FakeCellWidget>()
 
   constructor(private readonly model: FakeNotebook) {}
 
-  get widgets(): CellWidgetLike[] {
-    // The terminal is in every cell's node, as `ActiveCellTerminal` has it in the active one
-    return this.model.cells.map((cell) => ({ node: Object.assign(document.createElement("div"), { innerHTML: `<div class="${TERMINAL_HOST_CLASS}"></div>` }), model: { id: cell.id, type: cell.cell_type } }))
+  get widgets(): FakeCellWidget[] {
+    return this.model.cells.map((cell) => {
+      const known = this.made.get(cell)
+      if (known) return known
+      const widget = new FakeCellWidget({ id: cell.id, type: cell.cell_type })
+      this.made.set(cell, widget)
+      return widget
+    })
   }
 
   get activeCellIndex() { return this.index }
@@ -74,7 +104,7 @@ class FakeTerminal implements CellTerminal {
 
   focus() { this.focused++ }
   restart() { this.restarts++ }
-  cellHeight() { return 16 }
+  metrics() { return { fontFamily: "monospace", fontSize: 13, cellWidth: 8, cellHeight: 16, columns: 80 } }
   subscribe() { return () => {} }
   render() { return null }
 }
@@ -112,9 +142,9 @@ describe("CellNeovim", () => {
   })
   afterEach(() => { Reflect.deleteProperty(Element.prototype, "scrollIntoView") })
 
-  it("hands Neovim the code cells in order, markdown and raw cells left out, then pins the window to the active one", () => {
-    const { terminal } = setup([code("a", "x = 1\ny = 2"), markdown("m", "# t"), code("b", "z")])
-    expect(terminal.sets).toEqual([{ filename: "notebook.py", cells: [{ id: "a", text: "x = 1\ny = 2" }, { id: "b", text: "z" }] }])
+  it("hands Neovim the code and markdown cells in order with their kind, raw cells left out, then pins the window to the active one", () => {
+    const { terminal } = setup([code("a", "x = 1\ny = 2"), markdown("m", "# t"), raw("r", "raw"), code("b", "z")])
+    expect(terminal.sets).toEqual([{ filename: "notebook.py", cells: [{ id: "a", text: "x = 1\ny = 2", kind: "code" }, { id: "m", text: "# t", kind: "markdown" }, { id: "b", text: "z", kind: "code" }] }])
     expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
   })
 
@@ -135,9 +165,9 @@ describe("CellNeovim", () => {
     expect(terminal.sets.map((set) => set.filename)).toEqual(["notebook.txt"])
   })
 
-  it("never hands Neovim a repeated id: a later cell with a taken id gets a number and what Neovim reports maps back to the right cell", () => {
-    const { controller, model, notebook, runAndAdvance, terminal } = setup([code("a", "x"), code("a", "y"), markdown("m", "t"), code("a#2", "z")])
-    expect(terminal.sets[0].cells).toEqual([{ id: "a", text: "x" }, { id: "a#2", text: "y" }, { id: "a#2#2", text: "z" }])
+  it("never hands Neovim a repeated id, across kinds: a later cell with a taken id gets a number and what Neovim reports maps back to the right cell", () => {
+    const { controller, model, notebook, runAndAdvance, terminal } = setup([code("a", "x"), code("a", "y"), markdown("a", "t"), code("a#2", "z")])
+    expect(terminal.sets[0].cells.map(({ id, kind }) => [id, kind])).toEqual([["a", "code"], ["a#2", "code"], ["a#3", "markdown"], ["a#2#2", "code"]])
     notebook.activeCellIndex = 1
     expect(terminal.focuses.at(-1)).toEqual({ id: "a#2", cursor: "first" })
 
@@ -147,7 +177,7 @@ describe("CellNeovim", () => {
     controller.listener.focus("a#2#2")
     expect(notebook.activeCellIndex).toBe(3)
     expect(controller.getSnapshot().id).toBe("a#2#2")
-    controller.listener.run("a", "xx")
+    controller.listener.run("a", "xx", true)
     expect(model.cells[0].getSource()).toBe("xx")
     expect(notebook.activeCellIndex).toBe(0)
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
@@ -177,7 +207,7 @@ describe("CellNeovim", () => {
   it("sends a change made in the notebook to Neovim once, of any cell", () => {
     const { model, terminal } = setup([code("a", "x = 1"), code("b", "y")])
     model.cells[1].updateSource(1, 1, "z")
-    expect(terminal.sets.at(-1)).toEqual({ filename: "notebook.py", cells: [{ id: "a", text: "x = 1" }, { id: "b", text: "yz" }] })
+    expect(terminal.sets.at(-1)).toEqual({ filename: "notebook.py", cells: [{ id: "a", text: "x = 1", kind: "code" }, { id: "b", text: "yz", kind: "code" }] })
     expect(terminal.sets).toHaveLength(2)
   })
 
@@ -187,10 +217,10 @@ describe("CellNeovim", () => {
     model.cells[0].updateSource(1, 1, "y")
     terminal.accepts = true
     model.cells[0].updateSource(2, 2, "z")
-    expect(terminal.sets.at(-1)?.cells).toEqual([{ id: "a", text: "xyz" }])
+    expect(terminal.sets.at(-1)?.cells).toEqual([{ id: "a", text: "xyz", kind: "code" }])
   })
 
-  it("sends the cell list again when a code cell is added, deleted or moved", () => {
+  it("sends the cell list again when a cell is added, deleted, moved or changes its type", () => {
     const { model, terminal } = setup([code("a", "x"), code("b", "y")])
     model.insertCell(1, code("c", "z"))
     expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["a", "c", "b"])
@@ -198,13 +228,18 @@ describe("CellNeovim", () => {
     expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["c", "b", "a"])
     model.deleteCellRange(1, 2)
     expect(terminal.sets.at(-1)?.cells.map((cell) => cell.id)).toEqual(["c", "a"])
+    // A type change replaces the cell
+    model.deleteCellRange(0, 1)
+    model.insertCell(0, markdown("c", "z"))
+    expect(terminal.sets.at(-1)?.cells).toEqual([{ id: "c", text: "z", kind: "markdown" }, { id: "a", text: "x", kind: "code" }])
   })
 
-  it("does not send what Neovim has: a markdown edit, a metadata change", () => {
+  it("sends a markdown edit made in the notebook, not a metadata change", () => {
     const { model, terminal } = setup([code("a", "x"), markdown("m", "# t")])
     model.cells[1].updateSource(0, 1, "##")
+    expect(terminal.sets.at(-1)?.cells[1]).toEqual({ id: "m", text: "## t", kind: "markdown" })
     model.setMetadata("k", "v")
-    expect(terminal.sets).toHaveLength(1)
+    expect(terminal.sets).toHaveLength(2)
   })
 
   it("pins the window to the active code cell however it became active, cursor on its first line", () => {
@@ -233,7 +268,7 @@ describe("CellNeovim", () => {
 
   it("runs the cell with the text Neovim ended with, then advances", () => {
     const { controller, model, runAndAdvance } = setup([code("a", "x"), code("b", "y")])
-    controller.listener.run("a", "x = 1")
+    controller.listener.run("a", "x = 1", true)
     expect(model.cells[0].getSource()).toBe("x = 1")
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
@@ -241,7 +276,7 @@ describe("CellNeovim", () => {
   it("activates the cell a run is for when another one is active", () => {
     const { controller, notebook, runAndAdvance } = setup([code("a", "x"), code("b", "y")])
     notebook.activeCellIndex = 1
-    controller.listener.run("a", "x")
+    controller.listener.run("a", "x", true)
     expect(notebook.activeCellIndex).toBe(0)
     expect(runAndAdvance).toHaveBeenCalledTimes(1)
   })
@@ -249,7 +284,7 @@ describe("CellNeovim", () => {
   it("runs on to the next code cell, not the markdown cell between: Neovim has no markdown cell to show", () => {
     const harness = setup([code("a", "x"), markdown("m", "# t"), markdown("n", "text"), code("b", "y")])
     advancing(harness)
-    harness.controller.listener.run("a", "x")
+    harness.controller.listener.run("a", "x", true)
     expect(harness.notebook.activeCellIndex).toBe(3)
     expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
     expect(harness.controller.getSnapshot().id).toBe("b")
@@ -259,7 +294,7 @@ describe("CellNeovim", () => {
   it("lets Jupyter advance onto a code cell that follows directly", () => {
     const harness = setup([code("a", "x"), code("b", "y")])
     advancing(harness)
-    harness.controller.listener.run("a", "x")
+    harness.controller.listener.run("a", "x", true)
     expect(harness.notebook.activeCellIndex).toBe(1)
     expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
   })
@@ -267,7 +302,7 @@ describe("CellNeovim", () => {
   it("stays in the cell when only markdown cells follow, Neovim stays on it", () => {
     const harness = setup([code("a", "x"), markdown("m", "# done")])
     advancing(harness)
-    harness.controller.listener.run("a", "x = 2")
+    harness.controller.listener.run("a", "x = 2", true)
     expect(harness.run).toHaveBeenCalledTimes(1)
     expect(harness.runAndAdvance).not.toHaveBeenCalled()
     expect(harness.notebook.activeCellIndex).toBe(0)
@@ -278,7 +313,7 @@ describe("CellNeovim", () => {
   it("lets Jupyter add the cell after the last one of the notebook, Neovim follows into it", () => {
     const harness = setup([markdown("m", "# t"), code("a", "x")])
     advancing(harness)
-    harness.controller.listener.run("a", "x")
+    harness.controller.listener.run("a", "x", true)
     expect(harness.model.cells.map((cell) => cell.id)).toEqual(["m", "a", "new"])
     expect(harness.notebook.activeCellIndex).toBe(2)
     expect(harness.terminal.focuses.at(-1)).toEqual({ id: "new", cursor: "first" })
@@ -286,8 +321,19 @@ describe("CellNeovim", () => {
 
   it("does not move when Jupyter did not advance, the kernel is not ready", () => {
     const harness = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
-    harness.controller.listener.run("a", "x")
+    harness.controller.listener.run("a", "x", true)
     expect(harness.notebook.activeCellIndex).toBe(0)
+  })
+
+  it("runs the cell in place on Ctrl+Enter: Neovim stays on it", () => {
+    const harness = setup([code("a", "x"), code("b", "y")])
+    advancing(harness)
+    harness.controller.listener.run("a", "x = 3", false)
+    expect(harness.model.cells[0].getSource()).toBe("x = 3")
+    expect(harness.run).toHaveBeenCalledTimes(1)
+    expect(harness.runAndAdvance).not.toHaveBeenCalled()
+    expect(harness.notebook.activeCellIndex).toBe(0)
+    expect(harness.controller.getSnapshot().id).toBe("a")
   })
 
   it("opens a notebook that starts with a markdown cell on its first code cell, without any click", () => {
@@ -403,11 +449,26 @@ describe("CellNeovim", () => {
     expect(terminal.restarts).toBe(1)
   })
 
-  it("reports the shown cell and its line count", () => {
-    const { controller } = setup([code("a", "x")])
-    expect(controller.getSnapshot()).toMatchObject({ id: "a", lines: 1 })
+  it("reports the shown cell and its line count until Neovim tells the screen rows its text takes", () => {
+    const { controller } = setup([code("a", "x"), code("b", "y")])
+    expect(controller.getSnapshot()).toMatchObject({ id: "a", rows: 1 })
     controller.listener.edit("a", "x\ny\nz")
-    expect(controller.getSnapshot().lines).toBe(3)
+    expect(controller.getSnapshot().rows).toBe(3)
+
+    controller.listener.height("a", 5) // a line of it wraps in Neovim's window
+    expect(controller.getSnapshot().rows).toBe(5)
+    controller.listener.height("b", 9) // another cell's rows, kept for when it is shown
+    controller.listener.height("a", 0)
+    expect(controller.getSnapshot()).toMatchObject({ id: "a", rows: 5 })
+  })
+
+  it("sizes a cell entered without its screen rows to the rows of its render", () => {
+    const { controller, notebook } = setup([code("a", "x"), code("b", "y")])
+    controller.listener.render("b", { styles: [{}], lines: [[["y", 0]]], base: {}, rows: [0], height: 4 })
+    notebook.activeCellIndex = 1
+    expect(controller.getSnapshot()).toMatchObject({ id: "b", rows: 4 })
+    controller.listener.height("b", 2)
+    expect(controller.getSnapshot().rows).toBe(2)
   })
 
   it("brings the cell that becomes active into view, the terminal in it too, not a markdown cell", async () => {
@@ -508,6 +569,157 @@ describe("CellNeovim", () => {
     expect(terminal.sets).toHaveLength(1)
     expect(notebook.activeCellChanged.size).toBe(0)
     expect(notebook.stateChanged.size).toBe(0)
+  })
+
+  describe("a markdown cell", () => {
+    /** A double-click on the rendered cell `index`, or Enter on it: the notebook activates and unrenders it. */
+    const edit = async ({ notebook }: ReturnType<typeof setup>, index: number) => {
+      notebook.activeCellIndex = index
+      notebook.widgets[index].rendered = false
+      await settled()
+    }
+
+    it("stays rendered and without the terminal while it is only the active cell", async () => {
+      const { controller, notebook, terminal } = setup([code("a", "x"), markdown("m", "# t")])
+      notebook.activeCellIndex = 1
+      await settled()
+      expect(notebook.widgets[1].rendered).toBe(true)
+      expect(controller.getSnapshot().id).toBeNull()
+      expect(terminal.focuses).toEqual([{ id: "a", cursor: "first" }])
+    })
+
+    it("is edited in Neovim once the notebook unrenders it: the window on it, the keys to the terminal", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t\n\ntext")])
+      await edit(harness, 1)
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "m", cursor: "first" })
+      expect(harness.controller.getSnapshot()).toMatchObject({ id: "m", rows: 3 })
+      expect(harness.notebook.modes.at(-1)).toBe("command")
+    })
+
+    it("keeps the notebook's own editor while Neovim is not running", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t")])
+      harness.terminal.session = null
+      harness.terminal.state = "starting"
+      harness.controller.update(harness.terminal)
+      await edit(harness, 1)
+      expect(harness.terminal.focuses).toHaveLength(1)
+      expect(harness.controller.getSnapshot().id).toBeNull()
+      expect(harness.notebook.widgets[1].rendered).toBe(false)
+    })
+
+    it("takes Neovim's edits", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t")])
+      await edit(harness, 1)
+      harness.controller.listener.edit("m", "# new")
+      expect(harness.model.cells[1].getSource()).toBe("# new")
+      expect(harness.terminal.sets).toHaveLength(1)
+    })
+
+    it("is rendered again on Esc and stays the active cell, the keys on the notebook", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t")])
+      await edit(harness, 1)
+      harness.controller.listener.leave("m")
+      await settled()
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.notebook.activeCellIndex).toBe(1)
+      expect(harness.controller.getSnapshot().id).toBeNull()
+      expect(harness.notebook.widgets[1].focused).toBe(1)
+    })
+
+    it("is rendered in place with Neovim's text on Ctrl+Enter", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
+      advancing(harness)
+      await edit(harness, 1)
+      harness.controller.listener.run("m", "# done", false)
+      await settled()
+      expect(harness.model.cells[1].getSource()).toBe("# done")
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.run).toHaveBeenCalledTimes(1)
+      expect(harness.runAndAdvance).not.toHaveBeenCalled()
+      expect(harness.notebook.activeCellIndex).toBe(1)
+      expect(harness.controller.getSnapshot().id).toBeNull()
+      expect(harness.notebook.widgets[1].focused).toBe(1)
+    })
+
+    it("is rendered on Shift+Enter and the next code cell gets the window", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t"), markdown("n", "text"), code("b", "y")])
+      advancing(harness)
+      await edit(harness, 1)
+      harness.controller.listener.run("m", "# t", true)
+      await settled()
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.notebook.activeCellIndex).toBe(3)
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
+      expect(harness.controller.getSnapshot().id).toBe("b")
+    })
+
+    it("is rendered when another cell becomes active", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t")])
+      await edit(harness, 1)
+      harness.notebook.activeCellIndex = 0
+      await settled()
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "a", cursor: "first" })
+      expect(harness.controller.getSnapshot().id).toBe("a")
+    })
+
+    it("lets the terminal go when the notebook renders it itself", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t")])
+      await edit(harness, 1)
+      harness.notebook.widgets[1].rendered = true
+      await settled()
+      expect(harness.controller.getSnapshot().id).toBeNull()
+      expect(harness.notebook.activeCellIndex).toBe(1)
+    })
+
+    it("follows Neovim into the markdown cell below: that one is edited, the one left is rendered", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t"), markdown("n", "text")])
+      await edit(harness, 1)
+      harness.controller.listener.focus("n")
+      await settled()
+      expect(harness.notebook.activeCellIndex).toBe(2)
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.notebook.widgets[2].rendered).toBe(false)
+      expect(harness.controller.getSnapshot().id).toBe("n")
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "m", cursor: "first" })
+    })
+
+    it("is rendered when Neovim leaves it past its edge, the code cell below gets the window on its first line", async () => {
+      const harness = setup([code("a", "x"), markdown("m", "# t"), code("b", "y\nz")])
+      await edit(harness, 1)
+      harness.controller.listener.exit("m", "down")
+      await settled()
+      expect(harness.notebook.activeCellIndex).toBe(2)
+      expect(harness.notebook.widgets[1].rendered).toBe(true)
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "b", cursor: "first" })
+      expect(harness.controller.getSnapshot().id).toBe("b")
+    })
+
+    it("gives the code cell above the window on its last line when Neovim leaves upward", async () => {
+      const harness = setup([code("a", "x\ny"), markdown("m", "# t")])
+      await edit(harness, 1)
+      harness.controller.listener.exit("m", "up")
+      await settled()
+      expect(harness.notebook.activeCellIndex).toBe(0)
+      expect(harness.terminal.focuses.at(-1)).toEqual({ id: "a", cursor: "last" })
+    })
+  })
+
+  it("moves from a code cell past its edge onto the markdown cell next to it, rendered, the keys on the notebook", async () => {
+    const { controller, notebook } = setup([code("a", "x"), markdown("m", "# t"), code("b", "y")])
+    controller.listener.exit("a", "down")
+    await settled()
+    expect(notebook.activeCellIndex).toBe(1)
+    expect(notebook.widgets[1].rendered).toBe(true)
+    expect(controller.getSnapshot().id).toBeNull()
+    expect(notebook.widgets[1].focused).toBe(1)
+  })
+
+  it("stays at the edge of the notebook", () => {
+    const { controller, notebook } = setup([code("a", "x"), markdown("m", "# t")])
+    controller.listener.exit("a", "up")
+    expect(notebook.activeCellIndex).toBe(0)
+    expect(controller.getSnapshot().id).toBe("a")
   })
 
   it("saves the notebook on :w", () => {

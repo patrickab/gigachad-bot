@@ -34,6 +34,8 @@ export const TOP_BAR_PX = 44
 /** Space around each pane's content. With the split area's own 12 px padding every gap is 24 px, twice the sidebar's inset. */
 const MARGIN_X = 12
 const MARGIN_Y = 12
+/** Where a pane's content starts: below the top bar and the margin. The rendered pages and the notebook scroll on underneath the bar. */
+export const PANE_TOP_PX = TOP_BAR_PX + MARGIN_Y
 
 /**
  * Where Neovim and the rendered file sit in a pane of the split in `areaRef`: same width, same top edge.
@@ -45,7 +47,7 @@ export function usePaneLayout(areaRef: RefObject<HTMLElement | null>, view: Work
   const area = useElementSize(areaRef)
   const paneWidth = view === "split" ? area.width / 2 : area.width
   const width = Math.max(0, Math.floor(Math.min(RENDER_WIDTH, paneWidth - 2 * MARGIN_X)))
-  const top = TOP_BAR_PX + MARGIN_Y
+  const top = PANE_TOP_PX
   return { width, top, bottom: MARGIN_Y, height: Math.max(0, area.height - top - MARGIN_Y) }
 }
 
