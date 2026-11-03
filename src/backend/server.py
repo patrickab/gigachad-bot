@@ -58,6 +58,7 @@ from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
 from lib.postgres_pool import close_postgres_pool
+from lib.process_owner import reap_orphans, stop_owned
 from lib.workbench import mirror_omp
 import config
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
@@ -84,6 +85,8 @@ def widen_default_executor() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
+        log.warning("Stopped %d processes an earlier backend left running: %s", len(reaped), reaped)
     widen_default_executor()
     # Must precede the first LiteLLM call: it teaches the `litellm_proxy/`
     # prefix where the local OMP gateway lives, which is how OMP-sourced
@@ -104,6 +107,8 @@ async def lifespan(app: FastAPI):
     shutdown_client()
     kill_all_mineru_servers()
     await jupyter.shutdown()
+    if stopped := stop_owned():  # what the Jupyter Server and Neovim sessions left running: language servers, programs they ran
+        log.info("Stopped %d processes the backend's children left running: %s", len(stopped), stopped)
     await extract_queue.stop()
     await get_change_broker().stop()
     close_postgres_pool()

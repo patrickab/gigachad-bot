@@ -57,6 +57,7 @@ import subprocess
 import tempfile
 
 from lib.neovim_rpc import SETUP_LUA, NeovimRpc, NeovimRpcError
+from lib.process_owner import owned_environment
 from lib.pty_process import claim_controlling_terminal, set_terminal_size, terminal_environment
 from lib.text_merge import TextMergeError, merge_theirs
 
@@ -250,7 +251,7 @@ class NeovimSession:
                 stdout=child_fd,
                 stderr=child_fd,
                 cwd=cwd,
-                env=terminal_environment(),
+                env=owned_environment(terminal_environment()),
                 start_new_session=True,
                 preexec_fn=claim_controlling_terminal,
             )

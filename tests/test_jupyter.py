@@ -4,10 +4,14 @@ Most tests share one real Jupyter Server (about two seconds to start) with the a
 wrappers around the test interpreter.
 """
 
+import contextlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+import shutil
+import signal
 import stat
 import sys
 import time
@@ -39,11 +43,19 @@ from lib.chat_store import ChatStore
 from lib.disk_files import DiskFiles
 from lib.jupyter import JupyterHost
 from lib.postgres_data_store import PostgresDataStore
+from lib.process_owner import reap_orphans
 from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.references import References
 from lib.upstream import UpstreamContractError, UpstreamRequestFailed, forwardable_headers
-from tests.conftest import create_user_and_device, mounted_roots, request_identity, route_client
+from tests.conftest import (
+    create_user_and_device,
+    mounted_roots,
+    request_identity,
+    requires_proc,
+    route_client,
+    still_running,
+)
 from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope
 
 ORIGIN = "http://localhost:2999"
@@ -78,6 +90,17 @@ def notebook(path: Path, kernelspec: str | None = None) -> Path:
     metadata = {"kernelspec": {"name": kernelspec, "display_name": kernelspec}} if kernelspec else {}
     path.write_text(json.dumps({"cells": [], "metadata": metadata, "nbformat": 4, "nbformat_minor": 5}), encoding="utf-8")
     return path
+
+
+def kernel_processes(kernel_id: str) -> list[int]:
+    """The pids running the kernel *kernel_id*, found by its connection file on their command line."""
+    connection_file = f"kernel-{kernel_id}.json".encode()
+    pids = []
+    for entry in Path("/proc").iterdir():
+        with contextlib.suppress(OSError):
+            if entry.name.isdigit() and connection_file in (entry / "cmdline").read_bytes():
+                pids.append(int(entry.name))
+    return pids
 
 
 def names(specs: jupyter.KernelSpecList) -> list[str]:
@@ -733,21 +756,27 @@ def test_a_server_that_cannot_start_is_unavailable(tmp_path, home, monkeypatch):
     assert client.get("/api/jupyter/kernelspecs", params={"path": str(notebook(home / "a.ipynb"))}).status_code == 503
 
 
+@requires_proc
 def test_a_server_that_died_is_started_again_without_the_kernels_it_took_along(world):
     nb = notebook(world.project / "died.ipynb")
     first = start(world, nb, "python3")
+    kernels = kernel_processes(first["kernel_id"])
     world.host._server.process.kill()
     world.host._server.process.wait()
 
     second = start(world, nb, "python3")
 
+    assert kernels
+    assert still_running(kernels, 5) == []
     assert second["kernel_id"] != first["kernel_id"]
     assert execute(world.client, second["kernel_id"], "1 + 2") == "3"
 
 
-def test_stopping_the_host_ends_the_server_and_its_files(tmp_path, home):
+@requires_proc
+def test_stopping_the_host_ends_the_server_its_kernels_and_its_files(tmp_path, home):
     host = JupyterHost(tmp_path / "jupyter")
-    host.start_kernel(str(notebook(home / "a.ipynb")), "python3")
+    kernel = host.start_kernel(str(notebook(home / "a.ipynb")), "python3")
+    kernels = kernel_processes(kernel.kernel_id)
     process = host._server.process
     scratch = Path(host._server.scratch.name)
     assert scratch.is_dir()
@@ -755,8 +784,52 @@ def test_stopping_the_host_ends_the_server_and_its_files(tmp_path, home):
     host.stop()
 
     assert process.poll() is not None
+    assert kernels
+    assert still_running(kernels, 0) == []
     assert host._server is None
     assert not scratch.exists()
+
+
+@pytest.fixture
+def backend_with_a_kernel(backend_process, tmp_path, home):
+    """A backend-like parent with a Jupyter Server and one kernel: the parent, the server's pid and the kernel's pids."""
+    backend, started = backend_process(f"""
+        import json, time
+        from pathlib import Path
+        from lib.jupyter import JupyterHost
+        host = JupyterHost(Path({str(tmp_path / "jupyter")!r}))
+        kernel = host.start_kernel({str(notebook(home / "a.ipynb"))!r}, "python3")
+        server = host._server
+        print(json.dumps({{"server": server.process.pid, "scratch": server.scratch.name, "kernel_id": kernel.kernel_id}}), flush=True)
+        time.sleep(600)
+    """)
+    yield backend, started["server"], kernel_processes(started["kernel_id"])
+    shutil.rmtree(started["scratch"], ignore_errors=True)  # the runtime folder a killed backend could not delete
+
+
+@requires_proc
+def test_the_server_and_its_kernels_end_when_the_backend_is_killed(backend_with_a_kernel):
+    backend, server, kernels = backend_with_a_kernel
+
+    backend.kill()
+    backend.wait()
+
+    assert kernels
+    assert still_running([server, *kernels], 20) == []
+
+
+@requires_proc
+def test_a_hung_server_a_killed_backend_left_behind_is_reaped_with_its_kernels_by_the_next(backend_with_a_kernel):
+    backend, server, kernels = backend_with_a_kernel
+    os.kill(server, signal.SIGSTOP)
+    backend.kill()
+    backend.wait()
+    assert still_running([server, *kernels], 3) == [server, *kernels]
+
+    reaped = reap_orphans()
+
+    assert {server, *kernels} <= set(reaped)
+    assert still_running([server, *kernels], 5) == []
 
 
 @pytest.fixture

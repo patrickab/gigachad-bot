@@ -1,9 +1,13 @@
 """Shared pytest fixtures."""
 
 from collections.abc import Callable, Mapping
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import textwrap
+import time
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -19,8 +23,11 @@ from lib.changes import UserScope
 from lib.db_schema import upgrade
 from lib.file_roots import FileRoots
 from lib.postgres_data_store import PostgresDataStore
+from lib.process_owner import OWNER_VARIABLE, reap_orphans
 
 TRUNCATE_ALL = "TRUNCATE changes, assets, vault_roots, devices, documents, users, model_reasoning_levels CASCADE"
+SRC = Path(__file__).resolve().parents[1] / "src"
+requires_proc = pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="reads processes from /proc (Linux)")
 
 
 def create_user(pool: ConnectionPool, login: str | None = None) -> UUID:
@@ -140,3 +147,41 @@ def no_enqueue(monkeypatch: pytest.MonkeyPatch):
     )
     return calls
 
+
+def is_running(pid: int) -> bool:
+    """Whether *pid* runs, a zombie waiting for its parent does not."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat[stat.rindex(")") + 2] != "Z"
+
+
+def still_running(pids: list[int], seconds: float) -> list[int]:
+    """The *pids* that still run after waiting up to *seconds* for all of them to end."""
+    deadline = time.monotonic() + seconds
+    while (running := [pid for pid in pids if is_running(pid)]) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return running
+
+
+@pytest.fixture
+def backend_process():
+    """`start(script, env=None)` runs *script* from `src` as an unmarked backend-like parent, killed and reaped at teardown."""
+    started: list[subprocess.Popen] = []
+
+    def start(script: str, env: Mapping[str, str] | None = None) -> tuple[subprocess.Popen, Any]:
+        environment = {name: value for name, value in (env or os.environ).items() if name != OWNER_VARIABLE}
+        process = subprocess.Popen(  # noqa: S603
+            [sys.executable, "-c", textwrap.dedent(script)], cwd=SRC, env=environment, stdout=subprocess.PIPE, text=True
+        )
+        started.append(process)
+        line = process.stdout.readline()
+        assert line, f"the backend exited with {process.wait()} before it printed"
+        return process, json.loads(line)
+
+    yield start
+    for process in started:
+        process.kill()
+        process.wait()
+    reap_orphans()

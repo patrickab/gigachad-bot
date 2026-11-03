@@ -3,7 +3,8 @@
 The backend is the only client of the server, so everything that knows Jupyter lives here.
 
 - **Server**: `python -m jupyter_server` from the app venv on a free loopback port, started on first use, stopped with the backend
-  and started again after it died. The token exists only in the backend and the server's memory (never in its environment, its
+  (also when the backend is killed, kernels with it, see `_BOOTSTRAP`, and marked for `lib.process_owner.reap_orphans`) and
+  started again after it died. The token exists only in the backend and the server's memory (never in its environment, its
   argv or a file its kernels could read), requests the browser sends through the proxy get it injected. Its kernelspecs and log
   live in `jupyter_home()` (private to the user), its runtime files in a temporary folder, and config files are ignored. Kernels
   nobody is connected to are culled after `_KERNEL_CULL_IDLE_SECONDS`, so a reload reattaches by path and a closed browser frees them.
@@ -43,6 +44,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from pydantic import BaseModel
 
+from lib.process_owner import owned_environment
 from lib.upstream import (
     UpstreamContractError,
     UpstreamRequestFailed,
@@ -71,22 +73,37 @@ _LOG_TAIL_BYTES = 2000
 _KERNEL_CULL_IDLE_SECONDS = 2 * 60 * 60
 _KERNEL_CULL_INTERVAL_SECONDS = 60
 
-# Runs in the server process: the server and its kernels end when the backend dies without stopping them (`kill -9`, reload).
+# Runs in the server process, which ends with the backend even when that dies without stopping it (`kill -9`, reload): a thread
+# watches the parent, stops the server like SIGTERM does (kernels end) and exits once the grace period is over. Kernels get SIGKILL
+# whenever the server ends (Linux parent-death signal): ipykernel's own parent check misses a server that died while it started.
 # The token arrives on stdin: not in argv or the environment (every kernel inherits that, and `/proc/<pid>/environ` stays readable).
 _BOOTSTRAP = """
 import os, signal, sys, threading, time
-parent = int(sys.argv[1])
+parent, grace = int(sys.argv[1]), float(sys.argv[2])
+server = os.getpid()
 token = sys.stdin.readline().strip()
 def stop_with_parent():
     while os.getppid() == parent:
         time.sleep(2)
-    os.kill(os.getpid(), signal.SIGTERM)
+    os.kill(server, signal.SIGTERM)
+    time.sleep(grace)
+    os._exit(1)
 threading.Thread(target=stop_with_parent, daemon=True).start()
+if sys.platform == "linux":
+    import ctypes
+    from jupyter_client.provisioning import local_provisioner
+    prctl = ctypes.CDLL(None, use_errno=True).prctl
+    def die_with_server():
+        prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG, kept across exec
+        if os.getppid() != server:
+            os._exit(1)
+    launch = local_provisioner.launch_kernel
+    local_provisioner.launch_kernel = lambda cmd, **kwargs: launch(cmd, preexec_fn=die_with_server, **kwargs)
 from jupyter_server.serverapp import ServerApp
 from traitlets.config import Config
 config = Config()
 config.IdentityProvider.token = token
-ServerApp.launch_instance(sys.argv[2:], config=config)
+ServerApp.launch_instance(sys.argv[3:], config=config)
 """
 
 # What the browser may reach upstream: kernels, kernelspecs and their logos, sessions, events and the status calls of the client.
@@ -298,12 +315,12 @@ class JupyterHost:
         runtime = Path(scratch.name)
         token = secrets.token_urlsafe(32)
         jupyter_path = os.pathsep.join(filter(None, [str(home / "data"), os.environ.get("JUPYTER_PATH")]))
-        environment = {
+        environment = owned_environment({
             **os.environ,
             "JUPYTER_RUNTIME_DIR": str(runtime),
             "JUPYTER_PATH": jupyter_path,
             "JUPYTER_NO_CONFIG": "1",
-        }
+        })  # fmt: skip
         arguments = [
             "--no-browser", "--ServerApp.ip=127.0.0.1", "--ServerApp.port=0", "--ServerApp.port_retries=0",
             f"--ServerApp.base_url={BASE_URL}", "--ServerApp.root_dir=/", "--ServerApp.terminals_enabled=False",
@@ -315,7 +332,7 @@ class JupyterHost:
         log_file = os.fdopen(log_descriptor, "wb")
         try:
             process = subprocess.Popen(  # noqa: S603
-                [sys.executable, "-c", _BOOTSTRAP, str(os.getpid()), *arguments],
+                [sys.executable, "-c", _BOOTSTRAP, str(os.getpid()), str(_SERVER_STOP_SECONDS), *arguments],
                 env=environment,
                 stdin=subprocess.PIPE,
                 stdout=log_file,
