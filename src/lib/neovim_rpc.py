@@ -7,6 +7,8 @@
 - A `BufEnter` autocmd sends a `switched` notification with the id when the window shows another tracked buffer, except for
   the switch `_G.gigachad_open` and `_G.gigachad_show` made. A `BufDelete` autocmd forgets the buffer
 - A `TextYankPost` autocmd sends a `yank` notification with the yanked text
+- Normal-mode `<Esc>` sends a `leave` notification (the browser gives focus back to the app), after running the user's own
+  normal-mode `<Esc>` mapping (`:noh`). Buffer-local `<Esc>` mappings (markdown cells) win over it
 - With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the id and the selected lines
 - `_G.gigachad_buffer_state` reports a buffer's text, modified flag and change tick
 - `_G.gigachad_set_text` rewrites only the changed hunks, for edits made to the file elsewhere, keeping the modified flag
@@ -784,6 +786,25 @@ vim.api.nvim_create_autocmd("TextYankPost", {
     vim.rpcnotify(channel, "yank", text)
   end,
 })
+
+-- `<Esc>` in normal mode hands focus back to the app. The user's mapping of it (read after their config ran) still runs first
+local user_escape = vim.fn.maparg("<Esc>", "n", false, true)
+local function run_user_escape()
+  if vim.tbl_isempty(user_escape) then return end
+  local keys = user_escape.rhs or ""
+  if user_escape.callback ~= nil then
+    local result = user_escape.callback()
+    if user_escape.expr ~= 1 then return end
+    keys = result or ""
+  elseif user_escape.expr == 1 then
+    keys = vim.api.nvim_eval(keys)
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, true, true), user_escape.noremap == 1 and "n" or "m", false)
+end
+vim.keymap.set("n", "<Esc>", function()
+  run_user_escape()
+  vim.rpcnotify(channel, "leave")
+end, { desc = "Give focus back to the app" })
 
 if own_clipboard == true then
   -- What the last copy put in `+` or `*`, pasted when the browser cannot answer so `yy` then `p` works without its clipboard

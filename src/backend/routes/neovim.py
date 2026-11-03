@@ -20,7 +20,8 @@ bytes both ways, text frames carry JSON control messages:
 - server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
   `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
   `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
-  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file,
+  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file, `{"type": "leave"}` on `<Esc>` in normal
+  mode (the browser gives focus back to the app),
   `{"type": "clipboard_read", "id", "path"}` when Neovim pastes from `+` or `*` (`path` names the shown buffer, the browser
   answers with `clipboard`, none within 15 s shows "Clipboard did not answer" and pastes the last copy, so does a closed
   socket) and `{"type": "exit", "code"}` when `nvim` quits
@@ -185,6 +186,9 @@ class _BrowserSaves:
     def switched(self, path: str) -> None:
         self.notice({"type": "switched", "path": path})
 
+    def leave(self) -> None:
+        self.notice({"type": "leave"})
+
     def open_failed(self, path: str, message: str) -> None:
         self.notice({"type": "open_failed", "path": path, "message": message})
 
@@ -320,6 +324,7 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
             saves.switched,
             saves.read_clipboard,
             saves.notice,
+            on_leave=saves.leave,
         )
     )
     try:

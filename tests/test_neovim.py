@@ -239,6 +239,29 @@ async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
 
 
 @requires_nvim
+async def test_escape_in_normal_mode_leaves_after_the_users_own_escape_mapping(neovim_home):
+    (neovim_home / "init.lua").write_text('vim.keymap.set("n", "<Esc>", "<Cmd>let g:user_escapes = get(g:, \'user_escapes\', 0) + 1<CR>")\n')
+    left: asyncio.Queue[None] = asyncio.Queue()
+
+    async def save(path: str, text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn("notes.md", "alpha\n", rows=24, cols=80, cwd=neovim_home)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None, on_leave=lambda: left.put_nowait(None)), 15)
+        session.write_input(b"ibeta\x1b")  # leaves insert mode only
+        await _evaluates_to(session, "mode()", "n")
+        assert left.empty()
+        session.write_input(b"\x1b")
+        await asyncio.wait_for(left.get(), 10)
+        await _evaluates_to(session, "get(g:, 'user_escapes', 0)", 1)
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
 async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_buffer_unmodified(neovim_home):
     async def save(path: str, text: str) -> str:
         return text

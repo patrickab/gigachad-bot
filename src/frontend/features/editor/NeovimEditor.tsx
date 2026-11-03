@@ -82,6 +82,13 @@ interface NeovimOptions {
   onCellSave?: () => void
 }
 
+/** Move focus from the terminal in `host` to the closest focusable element around it (a notebook cell takes its arrow keys again), else to the page. */
+function giveFocusBack(host: HTMLElement) {
+  const around = host.parentElement?.closest<HTMLElement>("[tabindex]")
+  if (around) around.focus({ preventScroll: true })
+  else if (window.document.activeElement instanceof HTMLElement) window.document.activeElement.blur()
+}
+
 /** The PNG a paste carries, null when the clipboard holds none or also plain text (copied spreadsheet cells come with a picture and paste as text). */
 function pastedImage(clipboard: DataTransfer | null): Blob | null {
   if (!clipboard) return null
@@ -94,6 +101,7 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  *
  * - `:w` of any buffer calls `save(text, path)`, whose resolved text replaces that buffer if it differs
  * - Yanks (`y`) are copied to the browser clipboard
+ * - Esc in normal mode gives focus back to the app (`leave`): the closest focusable element around the terminal, else the page
  * - `:q` with exit code 0 calls `onQuit`
  * - `openFile(path)` shows the buffer of another file, loading it from disk when it is not open yet. The buffer shown before
  *   stays loaded with its unsaved edits, nothing is saved. Called while the session connects it waits for the socket and returns true, false without a session
@@ -239,6 +247,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
         if (message.type === "selection") { readOptions().onSelection?.({ path: message.path, start_line: message.start_line, end_line: message.end_line, text: message.text }); return }
         if (message.type === "switched") { readOptions().onSwitched?.(message.path); return }
+        if (message.type === "leave") { giveFocusBack(host); return }
         if (message.type === "open_failed") { readOptions().onOpenFailed?.(message.path, message.message); return }
         if (message.type === "cell_edit") { readOptions().onCellEdit?.(message.id, message.text); return }
         if (message.type === "cell_focus") { readOptions().onCellFocus?.(message.id); return }

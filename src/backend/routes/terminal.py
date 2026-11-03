@@ -3,8 +3,9 @@
 `WS /api/terminal/session` runs the user's login shell in the home directory, one per connection. Binary frames carry
 terminal bytes both ways, text frames carry JSON control messages:
 
-- client -> server: `{"type": "open", "rows", "cols"}` first, then `{"type": "resize", "rows", "cols"}`
-- server -> client: `{"type": "exit", "code"}` when the shell exits
+- client -> server: `{"type": "open", "rows", "cols"}` first, then `{"type": "resize", "rows", "cols"}` and
+  `{"type": "escape"}` (Esc pressed: the shell gets it while a program runs in the foreground, else the browser is told to leave)
+- server -> client: `{"type": "leave"}` for an Esc at the shell's prompt, `{"type": "exit", "code"}` when the shell exits
 
 Leaving hangs up the shell's process group. Host code execution: the origin and host-access gate of `is_allowed_websocket`.
 """
@@ -59,6 +60,11 @@ async def _relay_input(websocket: WebSocket, shell: PtyProcess) -> None:
         control = json.loads(message.get("text") or "{}")
         if control.get("type") == "resize":
             shell.resize(int(control["rows"]), int(control["cols"]))
+        elif control.get("type") == "escape":
+            if shell.is_in_foreground():
+                await websocket.send_json({"type": "leave"})
+            else:
+                shell.write_input(b"\x1b")
 
 
 @router.websocket("/session")

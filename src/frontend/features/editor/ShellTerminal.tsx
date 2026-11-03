@@ -11,6 +11,8 @@ import { isEditableTarget } from "@/lib/utils"
 import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
 
 const POLICY_VIOLATION = 1008
+/** A second Esc this soon hides the window even while a program (vim, less) took the first one. */
+const DOUBLE_ESCAPE_MS = 400
 
 /** A running shell whose xterm host survives the window closing. */
 interface ShellTerminal {
@@ -27,11 +29,21 @@ function isOpenTerminalKey(event: KeyboardEvent): boolean {
   return event.key === "t" && !hasModifier && !event.repeat && !event.isComposing && !event.defaultPrevented && !isEditableTarget(event.target, { includeSelect: true })
 }
 
-/** Run the backend login shell while `sessionKey` is set, a new key starts a new shell. `onExit` follows the shell's `exit`. */
-function useShellSession(sessionKey: number | null, onExit: () => void) {
+/** A bare Esc, the key that leaves the terminal. */
+function isLeaveKey(event: KeyboardEvent): boolean {
+  return event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing
+}
+
+/** Run the backend login shell while `sessionKey` is set, a new key starts a new shell.
+ *
+ * - `onExit` follows the shell's `exit`
+ * - `onLeave` follows an Esc at the shell's prompt, or a double Esc while a program runs (the program gets the first one)
+ */
+function useShellSession(sessionKey: number | null, onExit: () => void, onLeave: () => void) {
   const [terminal, setTerminal] = useState<ShellTerminal | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const exit = useEffectEvent(onExit)
+  const leave = useEffectEvent(onLeave)
 
   useEffect(() => {
     if (sessionKey === null) return
@@ -55,8 +67,10 @@ function useShellSession(sessionKey: number | null, onExit: () => void) {
       const encoder = new TextEncoder()
       socket.onopen = () => send(JSON.stringify({ type: "open", rows: xterm.rows, cols: xterm.cols }))
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
-        if (typeof event.data !== "string") xterm.write(new Uint8Array(event.data))
-        else if (JSON.parse(event.data).type === "exit") exited = true
+        if (typeof event.data !== "string") { xterm.write(new Uint8Array(event.data)); return }
+        const message = JSON.parse(event.data)
+        if (message.type === "exit") exited = true
+        else if (message.type === "leave") leave()
       }
       socket.onclose = (event) => {
         if (disposed) return
@@ -66,6 +80,18 @@ function useShellSession(sessionKey: number | null, onExit: () => void) {
       xterm.onData((data) => send(encoder.encode(data)))
       xterm.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0))))
       xterm.onResize(({ rows, cols }) => send(JSON.stringify({ type: "resize", rows, cols })))
+      // Esc is the backend's call: at the prompt it leaves, while a program runs the program gets it
+      let lastEscape = -Infinity
+      xterm.attachCustomKeyEventHandler((event) => {
+        if (!isLeaveKey(event)) return true
+        event.preventDefault()
+        if (event.type !== "keydown" || event.repeat) return false
+        const isDouble = event.timeStamp - lastEscape < DOUBLE_ESCAPE_MS
+        if (isDouble) leave()
+        else send(JSON.stringify({ type: "escape" }))
+        lastEscape = isDouble ? -Infinity : event.timeStamp
+        return false
+      })
 
       // xterm measures cells on open, so open only once the host is visible. Canvas cannot resolve CSS variables, so the app font is the computed one.
       const fit = () => {
@@ -144,8 +170,9 @@ function ShellTerminalSlot({ terminal, failure, onRestart }: { terminal: ShellTe
 /** Floating login shell on the backend host, for logins with host access.
  *
  * - `t` outside a text field opens it, 2/3 of the screen wide and high
- * - A click beside it hides it, the shell keeps running and `t` shows it again
- * - `exit` ends the shell and closes the window, Escape belongs to the shell
+ * - Esc at the prompt or a click beside it hides it, the shell keeps running and `t` shows it again. While a program runs (vim,
+ *   less) Esc is the program's, a double Esc hides the window
+ * - `exit` ends the shell and closes the window
  */
 export function ShellTerminalWindow() {
   const hostAccess = useHostAccess()
@@ -155,7 +182,8 @@ export function ShellTerminalWindow() {
     setSessionKey(null)
     setVisible(false)
   }, [])
-  const { terminal, failure } = useShellSession(sessionKey, end)
+  const hide = useCallback(() => setVisible(false), [])
+  const { terminal, failure } = useShellSession(sessionKey, end, hide)
 
   useEventListener("document", "keydown", (event) => {
     if (!hostAccess || !isOpenTerminalKey(event)) return
@@ -166,7 +194,7 @@ export function ShellTerminalWindow() {
 
   if (!visible || sessionKey === null) return null
   return (
-    <FloatingWindow onClose={() => setVisible(false)} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3">
+    <FloatingWindow onClose={hide} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3">
       <ShellTerminalSlot terminal={terminal} failure={failure} onRestart={() => setSessionKey((key) => (key ?? 0) + 1)} />
     </FloatingWindow>
   )

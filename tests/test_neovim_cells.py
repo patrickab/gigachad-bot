@@ -987,7 +987,7 @@ async def test_frames_keep_their_order_through_one_queue(neovim_home, tmp_path, 
         # Edits and the run of a quick Shift+Enter arrive in the order they happened, round after round
         digits = ""
         browser.type(ESC)
-        await asyncio.sleep(0.1)
+        assert await browser.frames(1) == [{"type": "leave"}]  # Esc in normal mode gives focus back to the app
         for round_ in range(50):
             browser.type(b"A" + str(round_ % 10).encode() + SHIFT_ENTER)
             digits += str(round_ % 10)

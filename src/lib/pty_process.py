@@ -87,6 +87,13 @@ class PtyProcess:
         if self._terminal_fd >= 0:
             set_terminal_size(self._terminal_fd, rows, cols)
 
+    def is_in_foreground(self) -> bool:
+        """The process itself holds the terminal, no job it started runs in the foreground (a shell at its prompt)."""
+        try:
+            return self._terminal_fd >= 0 and os.tcgetpgrp(self._terminal_fd) == self._process.pid
+        except OSError:
+            return False
+
     async def wait(self) -> int:
         return await asyncio.to_thread(self._process.wait)
 

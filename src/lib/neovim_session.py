@@ -270,6 +270,7 @@ class NeovimSession:
         on_switched: SwitchDocument | None = None,
         read_clipboard: ReadClipboard | None = None,
         on_cell: CellEvents | None = None,
+        on_leave: Callable[[], None] | None = None,
     ) -> None:
         """Route `:w` of every document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*.
 
@@ -285,7 +286,8 @@ class NeovimSession:
         within 15 s ("Clipboard did not answer"), Neovim shows the message and pastes its last copy instead.
         It runs beside every other request, Neovim answers those while it waits.
 
-        *on_cell* receives the events of the notebook buffer (`set_cells`) in the order Neovim sent them.
+        *on_cell* receives the events of the notebook buffer (`set_cells`) in the order Neovim sent them. *on_leave* hears `<Esc>` in
+        normal mode, after the user's own normal-mode `<Esc>` mapping ran.
         """
 
         async def handle_request(method: str, params: list) -> object:
@@ -302,6 +304,8 @@ class NeovimSession:
                 on_selection(params[0])
             elif method == "switched" and on_switched is not None:
                 on_switched(params[0])
+            elif method == "leave" and on_leave is not None:
+                on_leave()
             elif on_cell is not None and method in ("cell_edit", "cell_run"):
                 on_cell({"type": method, "id": params[0], "text": params[1]})
             elif on_cell is not None and method == "cell_focus":
