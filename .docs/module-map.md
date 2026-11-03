@@ -31,7 +31,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- src/
 |   |-- config.py                     Env-derived backend settings (imports nothing from lib)
 |   |-- backend/
-|   |   |-- server.py                 FastAPI composition, lifecycle and shared error mapping
+|   |   |-- server.py                 FastAPI composition, lifecycle (shutdown work in the lifespan, uvicorn keeps its own signal handling) and shared error mapping
 |   |   |-- http_plumbing.py          Exception-to-HTTP mapping, SSE responses, inline image decoding
 |   |   |-- identity.py               Request identity and host-access capability
 |   |   |-- websocket_origin.py       `is_trusted_origin`, `is_allowed_websocket` (origin plus host-access gate of the terminal, file watch and Jupyter WebSockets) and `require_trusted_request` (trusted `Origin` for changing requests, no cross-site reads)
@@ -132,11 +132,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
-|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`, the notebook buffer (`set_cells`/`focus_cell`, virtual name beside the notebook, marker lines, extmarks per cell id)
+|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`, the notebook buffer (`set_cells`/`focus_cell`, virtual name beside the notebook that follows a rename of the notebook, marker lines, extmarks per cell id, renders kept per cell and taken back on `cell_render_drop`)
 |   |   |-- pty_process.py            `PtyProcess` (child on a PTY, output queue, resize, foreground check, hangup on close) and the PTY helpers Neovim shares
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
-|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge, notebook-buffer block (marker protection, window pin, `cell_edit`/`cell_focus`/`cell_run`/`save_notebook` notifications)
+|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, per-buffer save/yank/selection/switch/hunk-apply Lua bridge, notebook-buffer block (marker protection, window pin, code and markdown buffers, `cell_edit`/`cell_focus`/`cell_run`/`cell_exit`/`cell_leave`/`cell_height`/`save_notebook` notifications, the code buffer back in the window when markdown editing ends, `cell_render` of every code cell through `tohtml`, `cell_render_drop` for a failed render and for every cell past 4000 buffer lines, `gigachad_rename_notebook`)
+|   |   |-- neovim_render.py          `tohtml` HTML of a cell -> plain styled runs (`cell_render` frame data, no markup reaches the browser)
 |   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs and venv specs, kernel per resolved path, proxy allowlist and session check, idle cull, `move_kernel`/`shutdown_kernels_under`
+|   |   |-- process_owner.py          Host children never outlive the backend: `owned_environment` mark, `stop_owned` at shutdown, `reap_orphans` at startup
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
 |   |   |-- latex_references.py       `rewrite_references`: repoint `\input`, `\include`, `\includegraphics`, `\bibliography` and `\addbibresource` references of a LaTeX project after a rename
@@ -181,16 +183,16 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- messages/         Tools, research and rich output rendering
 |       |   |   `-- preview/          Attachment previews
 |       |   |-- editor/               Documents, viewers and terminal editors
-|       |   |   |-- DocumentEditor.tsx
+|       |   |   |-- DocumentEditor.tsx Routes a document path to its viewer or editor (image, architecture source, canvas, text), `WorkspaceSurface` shows notebooks in `NotebookWorkbench` instead
 |       |   |   |-- TextDocumentEditor.tsx Markdown/text save and preview owner (EditorShell, EditorViewSwitch, useEditorView)
 |       |   |   |-- useRootFileDocument.ts Load, dirty, remote reload and chained saves of one file, codec-aware
 |       |   |   |-- useDebouncedSave.ts Quiet-time autosave plus unmount and forced flush
 |       |   |   |-- FileViewer.tsx
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
-|       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard, cell-mode frames (`set_cells`/`focus_cell`, `cell_*` notifications) and Shift+Enter, `fitHeightAtOnce` for a terminal whose height follows its text
+|       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard, cell-mode frames (`set_cells`/`focus_cell`, `cell_*` notifications) and Shift+Enter/Ctrl+Enter as CSI-u, `fitHeightAtOnce` for a terminal whose height follows its text
 |       |   |   |-- ShellTerminal.tsx `ShellTerminals`: one floating login shell per tab (host access only), `t` opens the active tab's, Esc at the prompt, a double Esc or a click beside it hides it, `exit` or closing the tab ends it
 |       |   |   |-- terminalTheme.ts  xterm colors and fonts from the app theme, shared by Neovim and the shell
-|       |   |   |-- NotebookNeovim.tsx `NotebookWithNeovim`: one cell-mode Neovim session per notebook tab (the notebook as one buffer), handed to the notebook as a `CellTerminal`
+|       |   |   |-- NotebookNeovim.tsx `NotebookWithNeovim`: one cell-mode Neovim session per notebook a tab shows (keyed `<tab>:<generation>` from `useEditorPath`: another notebook gets a fresh session, a rename keeps it), the code cells as one buffer and the markdown cells as another, handed to the notebook as a `CellTerminal`, `onSelection` for `<leader>a`
 |       |   |   |-- clipboardPaste.ts Browser clipboard read for a paste, and the screenshot store (`imgs/`, `announceFileChange`) behind it
 |       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (local MinerU-grounded chat, or the owner's `renderChat`)
 |       |   |   |-- architecture/     LikeC4 graph/source editing
@@ -220,20 +222,24 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file or LaTeX project folder, menu, New session (`fileLead.ts`: `File:`/`Project:` leads)
 |       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
-|       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, chat drawer, top-bar slots, kinds supply `renderPane`
-|       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`)
+|       |   |   |-- Workbench.tsx     Layout, Neovim, quoting, status slot, kinds supply `renderPane`
+|       |   |   |-- WorkbenchChat.tsx `useWorkbenchChat` and `WorkbenchChat`: the chat drawer (`OmpChatPanel`, 360 px), quotes into its draft, reasoning and model pickers in the `workbenchAgent` slot, shared by `Workbench` and `NotebookWorkbench`
+|       |   |   |-- pages.ts           `EDITOR_PAGE`/`PREVIEW_PAGE`: the panel classes of the Neovim panel and the preview page, shared with the notebook cells
+|       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`, `PANE_TOP_PX` also pads the notebook under the top bar)
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
 |       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames
+|       |   |   |-- NotebookWorkbench.tsx A notebook tab: `NotebookWithNeovim` plus the chat drawer linked to the notebook path (new sessions in its folder)
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- notebook/             Jupyter notebook kind, the only importer of `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*`
-|       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab) and the library notebook
-|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Toolbar with kernelspec picker, kernel start by path, `ServiceManager` through the backend proxy
+|       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab and `useEditorPath` generation) and the library notebook (runs under the top bar, restart revives a dead kernel with a new one)
+|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Run/kernel buttons and kernelspec picker rendered into the top bar's `workbenchStatus` slot, kernel start by path, `ServiceManager` through the backend proxy
 |       |   |   |-- useNotebookFile.ts, notebookSync.ts Load, debounced save and follow over `useRootFileDocument`, pure nbformat serialization and cell diff (merge theirs)
 |       |   |   |-- useKernelShutdown.ts Kernel shutdown when a notebook's last tab closes
 |       |   |   |-- syntaxHighlight.ts Neovim-scheme highlight style and `self`/decorator marks, passed through the fork's `editorExtensions` prop
-|       |   |   |-- cellTerminal.ts, cellNeovim.ts, useActiveCellNeovim.ts The `CellTerminal` seam to `features/editor`, `CellNeovim` (notebook code cells <-> Neovim buffer, window follows the active cell, first code cell active on open, run goes on to the next code cell, scroll and keys back after a hidden tab, height, filetype from `language_info`), its hook over the notebook store
+|       |   |   |-- cellTerminal.ts, cellNeovim.ts, useActiveCellNeovim.ts The `CellTerminal` seam to `features/editor`, `CellNeovim` (notebook code and markdown cells <-> Neovim's two buffers, window follows the active cell, a markdown cell edited in Neovim while unrendered, first code cell active on open, Shift+Enter goes on to the next code cell, Ctrl+Enter runs in place, `cell_exit` activates the neighbor of the other kind, scroll and keys back after a hidden tab, height, filetype from `language_info`, renders by key, dropped by a `cell_render` without lines), its hook over the notebook store
 |       |   |   |-- ActiveCellTerminal.tsx Portal of the terminal into the active cell's input area, key suppression for the notebook's shortcuts
-|       |   |   `-- notebook-theme.css, markdownRenderer.tsx, empty.css App theme through `--jp-*` variables, Markdown cells through `LaTeXMarkdown`, stub for an unused library stylesheet
+|       |   |   |-- CellSnapshots.tsx, cellRender.ts Every other code cell as Neovim draws it (`cell_render`, checked by `readCellRendering`), same page (the split view's Neovim panel) and size as the terminal, a press activates the cell on the pressed source line (`rows`), a cell without a render keeps CodeMirror
+|       |   |   `-- notebook-theme.css, markdownRenderer.tsx, empty.css App theme through `--jp-*` variables, Markdown cells through `LaTeXMarkdown` on the split view's preview page, stub for an unused library stylesheet
 |       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
 |       |   |   |-- useTexProject.ts, LatexRootPicker.tsx Project of the shown file (folder, root, candidates), root choice
 |       |   |   `-- useLatexBuild.ts  Root build queue, rebuilds on any change in the folder
@@ -298,6 +304,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- canvasDocument.ts
 |       |   |   `-- edgeRouting.ts
 |       |   |-- paths.ts              File-kind and path helpers (`isInside`, `relativeIn`, `relativeTo`)
+|       |   |-- utils.ts              Small shared helpers, `isRecord` (plain-object check before reading parsed JSON)
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
@@ -354,7 +361,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 
 - Compose features in `src/frontend/app/_components/`; do not make a feature import the app shell.
 - Put feature behavior under its owner in `features/`. Import another feature only through permitted public files at the feature root or one sub-feature level; concept-folder internals are not a general cross-feature API.
-- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation`, `factory -> editor`, `navigation -> factory/learn/memory/omp`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/omp`, and `omp -> chat/editor/settings`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature. Add shared domain logic below the features rather than bypassing the boundary.
+- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation/notebook`, `notebook -> navigation/workbench`, `factory -> editor`, `navigation -> factory/learn/memory/omp`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/omp`, and `omp -> chat/editor/settings`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature. Add shared domain logic below the features rather than bypassing the boundary.
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
 - Keep all iframe URLs, bridge knowledge and message-protocol imports in `features/omp/`. The canonical protocol lives in `packages/chat-ui/src/protocol.ts`; other shell modules may consume the shared rendering package but not that protocol directly.
