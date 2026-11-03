@@ -66,6 +66,11 @@ export function neovimSessionUrl(): string {
   return apiWsUrl("/neovim/session")
 }
 
+/** WebSocket for one shell terminal session, see `backend/routes/terminal.py`. */
+export function terminalSessionUrl(): string {
+  return apiWsUrl("/terminal/session")
+}
+
 /** WebSocket that pushes the changes of watched disk files, see `backend/routes/file_watch.py`. */
 export function fileWatchUrl(): string {
   return apiWsUrl("/files/watch")

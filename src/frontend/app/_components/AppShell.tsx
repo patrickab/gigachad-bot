@@ -10,6 +10,7 @@ import { BranchProvider, useBranches } from "@/features/navigation/BranchContext
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
 import { FilePanelProvider } from "@/features/editor/FilePanel"
+import { ShellTerminalWindow } from "@/features/editor/ShellTerminal"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
@@ -144,6 +145,7 @@ export function AppShell() {
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />
             <MemoryViewer />
+            <ShellTerminalWindow />
           </MemoryViewerProvider>
         </SidebarProvider>
       </BranchProvider>
