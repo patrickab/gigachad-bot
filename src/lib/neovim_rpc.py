@@ -45,10 +45,13 @@ if TYPE_CHECKING:
 
 _READ_CHUNK = 65536
 
-# Receives (channel, first document's buffer name, its id, optional baseline path, ask_keymap, own_clipboard, notebook). Mirrors
-# Neovim's write rules: empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
+# Receives one options table { channel, first_path (the first document's buffer name), first_id, base_path (optional baseline),
+# ask_keymap, own_clipboard, notebook }. Mirrors Neovim's write rules: empty, otherwise a final newline unless both 'eol' and
+# 'fixeol' are off.
 SETUP_LUA = r"""
-local channel, first_path, first_id, base_path, ask_keymap, own_clipboard, notebook = ...
+local options = ...
+local channel, ask_keymap, own_clipboard = options.channel, options.ask_keymap, options.own_clipboard
+local base_path = options.base_path
 if base_path == vim.NIL then base_path = nil end
 -- A message longer than the command line would stop Neovim at a hit-enter or "more" prompt, and a stopped Neovim answers no request
 -- (an LSP client quitting is such a message). Set after the user's config, the messages wait and go away by themselves
@@ -349,14 +352,14 @@ function _G.gigachad_show(id)
   return true
 end
 
-if notebook == true then
+if options.notebook == true then
   local empty = vim.api.nvim_get_current_buf() -- the empty placeholder file Neovim started on
-  track(first_path, first_id, true)
-  display(first_id)
-  if vim.api.nvim_buf_is_valid(empty) and empty ~= tracked[first_id] then vim.api.nvim_buf_delete(empty, { force = true }) end
+  track(options.first_path, options.first_id, true)
+  display(options.first_id)
+  if vim.api.nvim_buf_is_valid(empty) and empty ~= tracked[options.first_id] then vim.api.nvim_buf_delete(empty, { force = true }) end
 else
-  track(first_path, first_id)
-  display(first_id)
+  track(options.first_path, options.first_id)
+  display(options.first_id)
 end
 
 vim.api.nvim_create_autocmd("BufEnter", {

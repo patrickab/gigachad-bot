@@ -10,14 +10,13 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
 import { PANE_TOP_PX } from "@/features/workbench/WorkbenchSplit"
 import { appMarkdownFactory } from "./markdownRenderer"
-import type { NotebookTextBridge } from "./notebookTextBridge"
+import type { NotebookTextStore } from "./notebookTextStore"
 import { NotebookToolbar } from "./NotebookToolbar"
 import { createNotebookServiceManager } from "./serviceManager"
 import { NOTEBOOK_EDITOR_EXTENSIONS } from "./syntaxHighlight"
 import { useNotebookFile } from "./useNotebookFile"
 import type { SharedNotebookLike } from "./notebookSync"
 import { useNotebookKernel } from "./useNotebookKernel"
-import { useNotebookTextBridge } from "./useNotebookTextBridge"
 import "./notebook-theme.css"
 
 const RENDERERS = [appMarkdownFactory]
@@ -65,8 +64,8 @@ function runCellOf(tabId: string, index: number) {
   void adapter.commands.execute(NotebookCommandIds.run)
 }
 
-/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. `onTextBridge` gets the notebook as text for Neovim. */
-export function NotebookEditor({ path, tabId, onTextBridge }: { path: string; tabId: string; onTextBridge?: (bridge: NotebookTextBridge | null) => void }) {
+/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. Its model is bound into `textStore` for Neovim. */
+export function NotebookEditor({ path, tabId, textStore }: { path: string; tabId: string; textStore: NotebookTextStore }) {
   const file = useNotebookFile(path)
   const kernel = useNotebookKernel(path, file.initial !== null)
   const theme = useThemeName()
@@ -77,17 +76,17 @@ export function NotebookEditor({ path, tabId, onTextBridge }: { path: string; ta
   // The library reads `nbformat` once per model: `initial` never changes, later file changes reach the open model through `bindModel`.
   const initial = file.initial as unknown as INotebookContent | null
 
-  const bindRef = useRef(file.bindModel)
-  useEffect(() => { bindRef.current = file.bindModel })
+  const fileRef = useRef(file)
+  useEffect(() => { fileRef.current = file })
   const modelRef = useRef<NotebookModel | null>(null)
   const [shared, setShared] = useState<SharedNotebookLike | null>(null)
   const onModel = useCallback((model: NotebookModel | null) => {
     modelRef.current = model
     const next = model ? model.sharedModel as unknown as SharedNotebookLike : null
-    bindRef.current(next)
+    fileRef.current.bindModel(next)
     setShared(next)
   }, [])
-  useNotebookTextBridge(shared, file.save, (index) => runCellOf(tabId, index), onTextBridge)
+  useEffect(() => (shared ? textStore.bind(shared, () => fileRef.current.save(), (index) => runCellOf(tabId, index)) : undefined), [shared, textStore, tabId])
 
   const sessionRef = useRef<Session.ISessionConnection | undefined>(undefined)
   const onSession = useCallback((session: Session.ISessionConnection | undefined) => { sessionRef.current = session }, [])

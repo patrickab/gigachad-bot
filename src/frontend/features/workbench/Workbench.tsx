@@ -1,19 +1,17 @@
 "use client"
 
-import { useRef, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
-import { TopBarPill } from "@/features/navigation/TopBar"
-import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { fileLead, projectLead } from "@/features/omp/fileLead"
-import { cn } from "@/lib/utils"
 import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { useFollowBuffers } from "./useFollowBuffers"
 import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
 import { useWorkbenchEditor } from "./useWorkbenchEditor"
-import { WorkbenchViewSwitch, useWorkbenchView, usePaneLayout, type PaneLayout } from "./WorkbenchSplit"
+import { EditorNote, WorkbenchFrame } from "./WorkbenchFrame"
+import type { PaneLayout } from "./WorkbenchSplit"
 
 /** What the rendered pane draws from: where it sits, the synced text, and why it could not load. */
 export interface WorkbenchPane {
@@ -52,8 +50,6 @@ export interface WorkbenchProps extends WorkbenchChatProps {
   quoteLanguage: string
 }
 
-const CENTERED_NOTE = "flex min-h-0 flex-1 items-center justify-center text-xs text-ink-faint"
-
 /**
  * One file, or the files of one LaTeX project, as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
  *
@@ -71,38 +67,18 @@ export function Workbench({ path, cwd, project, onPathChange, onClose, renderPan
   const { content, loadError, notice } = editor
   useFollowBuffers({ synced: editor.synced, paths: editor.openPaths, setContent: editor.setContent })
 
-  const [workbenchView, setWorkbenchView] = useWorkbenchView()
-  const splitRef = useRef<HTMLDivElement>(null)
-  const layout = usePaneLayout(splitRef, workbenchView)
-
-  // Editor and rendered file share the width and line up at the top, rendered pages scroll on below.
-  // A hidden pane stays mounted, so Neovim keeps its session
   return (
-    <div className="flex h-full">
-      {/* The padding sits outside the measured area: `useElementSize` reads the content box */}
-      <div className="flex min-w-0 flex-1 px-3">
-        <div ref={splitRef} className="flex min-w-0 flex-1">
-          <div className={cn("flex min-w-0 flex-1 flex-col items-center", workbenchView === "render" && "hidden")}>
-            <div className="flex flex-col" style={{ marginTop: layout.top, width: layout.width, height: layout.height }}>
-              {loadError ? <div className={CENTERED_NOTE}>{LOAD_MESSAGES[loadError]}</div>
-                : content === null ? <div className={CENTERED_NOTE}>Loading…</div>
-                : !neovim.enabled ? <div className={CENTERED_NOTE}>Neovim is not enabled.</div>
-                : <NeovimEditor terminal={editor.terminal} status={editor.status} onRestart={editor.restart} className={EDITOR_PAGE} />}
-            </div>
-          </div>
-          <div className={cn("min-w-0 flex-1", workbenchView === "editor" && "hidden")}>
-            {renderPane({ layout, text: editor.shownText, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
-          </div>
-        </div>
-      </div>
-      <WorkbenchChat state={chat} {...chatProps} />
-      <InTopBar name="workbenchStatus">
-        <TopBarPill>
-          <WorkbenchViewSwitch view={workbenchView} onChange={setWorkbenchView} />
-          {status}
-          {notice && <span role="alert" className="truncate px-1 text-[11px] text-danger">{notice}</span>}
-        </TopBarPill>
-      </InTopBar>
-    </div>
+    <WorkbenchFrame
+      editor={loadError ? <EditorNote>{LOAD_MESSAGES[loadError]}</EditorNote>
+        : content === null ? <EditorNote>Loading…</EditorNote>
+        : !neovim.enabled ? <EditorNote>Neovim is not enabled.</EditorNote>
+        : <NeovimEditor terminal={editor.terminal} status={editor.status} onRestart={editor.restart} className={EDITOR_PAGE} />}
+      renderPane={(layout) => renderPane({ layout, text: editor.shownText, loadError: loadError ? LOAD_MESSAGES[loadError] : null })}
+      chat={<WorkbenchChat state={chat} {...chatProps} />}
+      status={<>
+        {status}
+        {notice && <span role="alert" className="truncate px-1 text-[11px] text-danger">{notice}</span>}
+      </>}
+    />
   )
 }

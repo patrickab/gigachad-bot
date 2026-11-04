@@ -1101,11 +1101,12 @@ async def test_a_renamed_notebook_text_keeps_its_virtual_name_and_writes_stay_in
         session.write_input(b"2GAx\x1b")
         await _evaluates_to(session, "&modified", 1)
         renamed = notebook.rename(notebook.with_name("report.ipynb"))
+        assert session.is_notebook_text(str(name))
         with pytest.raises(RuntimeError, match="no notebook text"):
             await session.rename(str(name), str(name.with_name("report.md")), None)
 
         new_name = Path(f"{renamed}.py")
-        await session.rename(str(name), str(new_name), None, new_name)
+        await session.rename(str(name), str(new_name), new_name)
         state = "[expand('%:p'), &modified, &filetype, getline(2)]"
         assert await session._rpc.request("nvim_eval", state) == [str(new_name), 1, "python", "import osx"]
         session.write_input(b":e #\r")
@@ -1116,6 +1117,48 @@ async def test_a_renamed_notebook_text_keeps_its_virtual_name_and_writes_stay_in
 
     assert sorted(path.name for path in name.parent.iterdir()) == ["analysis.ipynb.py", "report.ipynb"]
     assert name.read_text() == "stale = 1\n"
+
+
+async def _shows_renamed(browser: _Browser, filename: str) -> None:
+    """Wait until the shown buffer is named *filename*, the rename runs beside the relay."""
+
+    async def renamed() -> bool:
+        browser.type(b":echo 'shown:' . expand('%:t')\r")
+        await asyncio.sleep(0.1)
+        return f"shown:{filename}".encode() in browser.terminal
+
+    await _until(renamed)
+
+
+@requires_nvim
+async def test_renamed_frame_moves_a_file_to_its_new_path_and_merges_with_the_renamed_file(neovim_home, tmp_path, monkeypatch):
+    file = _notes(tmp_path, "a\nb\nc\n")
+    async with _browsing(monkeypatch, file) as browser:
+        renamed = file.rename(file.with_name("ideas.md"))
+        renamed.write_text("a\nb\nc\nd\n")
+        browser.send({"type": "renamed", "from": str(file), "path": str(renamed)})
+        await _shows_renamed(browser, "ideas.md")
+
+        browser.type(b"ggAx\x1b:w\r")
+        save = await browser.next_frame("save")
+        assert (save["path"], save["content"]) == (str(renamed), "ax\nb\nc\nd\n")
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+
+@requires_nvim
+async def test_renamed_frame_gives_a_notebook_text_the_virtual_name_of_the_renamed_notebook(neovim_home, tmp_path, monkeypatch):
+    notebook, name = _notebook(tmp_path)
+    async with _browsing(monkeypatch, notebook, path=str(name), filename=name.name, content=NOTEBOOK_TEXT, notebook=True) as browser:
+        new_name = Path(f"{notebook.rename(notebook.with_name('report.ipynb'))}.py")
+        browser.send({"type": "renamed", "from": str(name), "path": str(new_name)})
+        await _shows_renamed(browser, new_name.name)
+
+        browser.type(b":w\r")
+        save = await browser.next_frame("save")
+        assert (save["path"], save["content"]) == (str(new_name), NOTEBOOK_TEXT)
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+    assert sorted(path.name for path in name.parent.iterdir()) == ["report.ipynb"]
 
 
 @requires_nvim

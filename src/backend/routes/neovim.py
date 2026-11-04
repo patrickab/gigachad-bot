@@ -245,9 +245,9 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
             elif kind == "insert_lines" and isinstance(control.get("text"), str):
                 beside_relay(_guarded("take the inserted lines", session.insert_lines(control["text"])))
             elif kind == "renamed" and all(isinstance(control.get(key), str) for key in ("from", "path")):
-                path = control["path"]
-                rename = session.rename(control["from"], path, disk_file(roots, path), notebook_buffer(roots, path))
-                beside_relay(_guarded("take the renamed file", rename))
+                old_path, path = control["from"], control["path"]
+                resolve = notebook_buffer if session.is_notebook_text(old_path) else disk_file
+                beside_relay(_guarded("take the renamed file", session.rename(old_path, path, resolve(roots, path))))
             elif kind == "background" and isinstance(control.get("light"), bool):
                 await _guarded("take the theme", session.set_background(control["light"]))
             elif kind == "message" and isinstance(control.get("text"), str):

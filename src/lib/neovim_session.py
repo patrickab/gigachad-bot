@@ -113,19 +113,12 @@ async def _read_clipboard(read: ReadClipboard, path: str) -> dict[str, str]:
         return {"error": str(exc)}
 
 
-@dataclass
-class _Document:
-    """A document of the session: its buffer's file and what Neovim and the stored file last agreed on."""
+@dataclass(frozen=True)
+class _PrivateCopy:
+    """A document's own file in the session directory, `:w` merges with later changes of the file at `disk_path`."""
 
-    path: str
-    # The private copy, or the virtual name of a notebook's text (never read from, written to or deleted)
-    copy: Path
-    base: str
+    name: Path
     disk_path: Path | None
-    saves: int = 0
-    virtual: bool = False
-    # Held by `set_text` and by `:w` until `save` answered, so neither runs in the middle of the other
-    sync: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def disk_text(self) -> str | None:
         """Current text at `disk_path`, None without one or once it was deleted. Raises when it cannot be read."""
@@ -139,6 +132,45 @@ class _Document:
             raise RuntimeError(f"{self.disk_path.name} on disk is not UTF-8 text, nothing written") from exc
         except OSError as exc:
             raise RuntimeError(f"cannot read {self.disk_path.name} on disk to merge with it, nothing written: {exc}") from exc
+
+    def renamed(self, path: str, disk_path: Path | None) -> _PrivateCopy:
+        """The copy of the file renamed to *path*, named like it so filetype detection follows."""
+        return _PrivateCopy(self.name.with_name(_document_name(path)), disk_path)
+
+    def discard(self) -> None:
+        self.name.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class _NotebookText:
+    """The virtual name of a notebook's text beside the notebook, never read from, written to or deleted."""
+
+    name: Path
+
+    def disk_text(self) -> str | None:
+        return None
+
+    def renamed(self, path: str, name: Path | None) -> _NotebookText:
+        """The text under the virtual name *name* of the renamed notebook, refused without one."""
+        if name is None:
+            raise RuntimeError(f"{_document_name(path)} is no notebook text")
+        # ponytail: a file already at the new virtual name makes Neovim refuse a plain `:w` (E13), `:w!` still saves
+        return _NotebookText(name)
+
+    def discard(self) -> None:
+        """Nothing to delete, the name is not ours."""
+
+
+@dataclass
+class _Document:
+    """A document of the session: its buffer's backing and what Neovim and the stored file last agreed on."""
+
+    path: str
+    backing: _PrivateCopy | _NotebookText
+    base: str
+    saves: int = 0
+    # Held by `set_text` and by `:w` until `save` answered, so neither runs in the middle of the other
+    sync: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class NeovimSession:
@@ -195,20 +227,20 @@ class NeovimSession:
     ) -> NeovimSession:
         """Start `nvim` in *cwd* on a private copy of *content*, diffed against a read-only *base_content* when given.
 
-        *path* names the document in `save`, `selection` and the other calls, default *filename*. *disk_path* is the file *content*
-        was read from, `:w` merges its later changes. With *notebook*, the absolute virtual name of a notebook's percent text beside
-        the notebook, the buffer takes that name instead of a private copy: nothing is read from or written there, *disk_path* is
-        unused, and `<S-CR>`/`<C-CR>` run cells. Call from a running event loop.
+        *path* names the document in `save` and the other calls, default *filename*. `:w` merges later changes of *disk_path*.
+        With *notebook*, the virtual name of a notebook's percent text, the buffer takes that name instead of a private copy and
+        `<S-CR>`/`<C-CR>` run cells, *disk_path* is unused. Call from a running event loop.
         """
         workdir = Path(tempfile.mkdtemp(prefix="gigachad-nvim-"))
         if notebook is None:
-            first = _Document(path or filename, _private_copy(workdir / "0", filename, content), content, disk_path)
-            start = first.copy
+            backing: _PrivateCopy | _NotebookText = _PrivateCopy(_private_copy(workdir / "0", filename, content), disk_path)
+            start = backing.name
         else:
-            first = _Document(path or filename, notebook, content, None, virtual=True)
+            backing = _NotebookText(notebook)
             # Started on a file like any session, a user config would restore a session or show a start screen without one
             start = workdir / "start"
             start.touch()
+        first = _Document(path or filename, backing, content)
         baseline: Path | None = None
         if base_content is not None:
             (workdir / "base").mkdir()
@@ -300,17 +332,16 @@ class NeovimSession:
                 raise TimeoutError("Neovim did not finish starting")
             await asyncio.sleep(0.02)  # config and plugins still loading, FileType handlers not registered yet
         first = next(iter(self._documents.values()))
-        base = str(self._baseline) if self._baseline is not None else None
-        arguments = [
-            channel,
-            str(first.copy),
-            first.path,
-            base,
-            on_selection is not None,
-            read_clipboard is not None,
-            first.virtual,
-        ]
-        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, arguments)
+        options = {
+            "channel": channel,
+            "first_path": str(first.backing.name),
+            "first_id": first.path,
+            "base_path": str(self._baseline) if self._baseline is not None else None,
+            "ask_keymap": on_selection is not None,
+            "own_clipboard": read_clipboard is not None,
+            "notebook": isinstance(first.backing, _NotebookText),
+        }
+        setup = self._rpc.request("nvim_exec_lua", SETUP_LUA, [options])
         await asyncio.wait_for(setup, _STARTUP_SECONDS)
         self._ready.set()
         if self._background is not None:
@@ -329,9 +360,10 @@ class NeovimSession:
             if disk_path is None:
                 raise RuntimeError(f"{_document_name(path)} is not a readable file")
             content = await asyncio.to_thread(_read_for_opening, disk_path)
-            document = _Document(path, _private_copy(self._workdir / str(self._copies), path, content), content, disk_path)
+            copy = _PrivateCopy(_private_copy(self._workdir / str(self._copies), path, content), disk_path)
+            document = _Document(path, copy, content)
             self._copies += 1
-            await self._lua("return _G.gigachad_open(...)", str(document.copy), path)
+            await self._lua("return _G.gigachad_open(...)", str(copy.name), path)
             self._documents[path] = document
 
     async def set_text(self, content: str, path: str) -> None:
@@ -362,31 +394,28 @@ class NeovimSession:
                     return
         raise RuntimeError("Neovim buffer kept changing, the changed file was not applied")
 
-    async def rename(self, old_path: str, path: str, disk_path: Path | None, notebook: Path | None = None) -> None:
-        """Continue the document *old_path* on the renamed file *path*: the buffer takes its name keeping its text and modified flag.
+    def is_notebook_text(self, path: str) -> bool:
+        """Whether the open document *path* is a notebook's text, whose `rename` takes a virtual name instead of a disk file."""
+        document = self._documents.get(path)
+        return document is not None and isinstance(document.backing, _NotebookText)
 
-        `:w` merges what is read from *disk_path*. A notebook's text takes the virtual name *notebook* instead (`spawn`), it is
-        refused without one.
+    async def rename(self, old_path: str, path: str, target: Path | None) -> None:
+        """Continue the document *old_path* on the renamed file *path*, the buffer keeps its text and modified flag.
 
-        Does nothing when *old_path* is not open. Waits for a running `:w` of it. The private copy is dropped: Neovim refuses
-        to `:w` a renamed buffer onto a name that exists.
+        *target* is the file `:w` merges with, or a notebook text's new virtual name (refused when None). Does nothing when
+        *old_path* is not open. Waits for a running `:w` of it.
         """
         document = self._documents.get(old_path)
         if document is None:
             return
         if path != old_path and path in self._documents:
             raise RuntimeError(f"{_document_name(path)} is already open")
-        if document.virtual and notebook is None:
-            raise RuntimeError(f"{_document_name(path)} is no notebook text")
-        # ponytail: a file already at the new virtual name makes Neovim refuse a plain `:w` (E13), `:w!` still saves
-        renamed = notebook if notebook is not None and document.virtual else document.copy.with_name(_document_name(path))
+        backing = document.backing.renamed(path, target)
         async with document.sync:
-            await self._lua("return _G.gigachad_rename(...)", old_path, path, str(renamed))
-            if renamed != document.copy:
-                if not document.virtual:
-                    document.copy.unlink(missing_ok=True)
-                document.copy = renamed
-            document.disk_path = None if document.virtual else disk_path
+            await self._lua("return _G.gigachad_rename(...)", old_path, path, str(backing.name))
+            if backing.name != document.backing.name:
+                document.backing.discard()  # Neovim refuses to `:w` a renamed buffer onto a name that exists
+            document.backing = backing
             document.path = path
             del self._documents[old_path]
             self._documents[path] = document
@@ -406,7 +435,7 @@ class NeovimSession:
             raise RuntimeError(f"{_document_name(path)} is not open")
         base = document.base  # *text* grew from it, a `set_text` holding the lock may still move `base` on
         async with document.sync:
-            theirs = await asyncio.to_thread(document.disk_text)
+            theirs = await asyncio.to_thread(document.backing.disk_text)
             if theirs is None:
                 theirs = document.base  # no disk file: the last `set_text` is the newest text from elsewhere
             merged = text
@@ -421,9 +450,9 @@ class NeovimSession:
         return {"text": stored, "merged": merged != text}
 
     def _forget(self, path: str) -> None:
-        """Drop the document whose buffer Neovim deleted, its private copy goes with it."""
-        if (document := self._documents.pop(path, None)) is not None and not document.virtual:
-            document.copy.unlink(missing_ok=True)
+        """Drop the document whose buffer Neovim deleted, a private copy goes with it."""
+        if (document := self._documents.pop(path, None)) is not None:
+            document.backing.discard()
 
     async def _lua(self, code: str, *args: object) -> object:
         await asyncio.wait_for(self._ready.wait(), _STARTUP_SECONDS * 2)  # a request that beat the save hook waits for it

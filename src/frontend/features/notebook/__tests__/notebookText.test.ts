@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import type { JsonObject, NotebookCellContent, NotebookContent } from "../notebookSync"
-import { applyNotebookText, cellAtLine, notebookToText, parseNotebookText } from "../notebookText"
-import { createNotebookTextBridge, NOTEBOOK_TEXT_DELAY_MS } from "../useNotebookTextBridge"
+import { applyNotebookText, cellAtLine, modelText, notebookToText, parseNotebookText } from "../notebookText"
 import { FakeNotebook } from "./fakeNotebook"
 
 const stream = (text: string): JsonObject => ({ output_type: "stream", name: "stdout", text })
@@ -14,17 +13,17 @@ const notebook = (cells: NotebookCellContent[], minor = 5): NotebookContent => (
 
 describe("percent text", () => {
   it("writes every kind of cell", () => {
-    const text = notebookToText(notebook([code("a", "import numpy as np"), markdown("b", "# Title\n\nSome *text*"), raw("c", "raw text"), code("d", "")]))
+    const text = notebookToText([code("a", "import numpy as np"), markdown("b", "# Title\n\nSome *text*"), raw("c", "raw text"), code("d", "")])
     expect(text).toBe("# %%\nimport numpy as np\n\n# %% [markdown]\n# # Title\n#\n# Some *text*\n\n# %% [raw]\n# raw text\n\n# %%\n")
   })
 
   it("round trips cells with empty lines", () => {
     const cells = [code("a", "x = 1\n\ny = 2"), markdown("b", "one\n\n  two"), raw("c", ""), code("d", "")]
-    expect(parseNotebookText(notebookToText(notebook(cells)))).toEqual(cells.map(({ cell_type, source }) => ({ cell_type, source })))
+    expect(parseNotebookText(notebookToText(cells))).toEqual(cells.map(({ cell_type, source }) => ({ cell_type, source })))
   })
 
   it("is empty for an empty notebook", () => {
-    expect(notebookToText(notebook([]))).toBe("")
+    expect(notebookToText([])).toBe("")
     expect(parseNotebookText("")).toEqual([])
     expect(parseNotebookText("\n\n")).toEqual([])
   })
@@ -48,7 +47,7 @@ describe("percent text", () => {
 
   it("keeps a markdown or raw line starting with %% inside its cell", () => {
     const cells = [markdown("m", "```mermaid\n%% note\ngraph\n```\n%%"), raw("r", "%%")]
-    const text = notebookToText(notebook(cells))
+    const text = notebookToText(cells)
     expect(text).toBe("# %% [markdown]\n# ```mermaid\n#%% note\n# graph\n# ```\n#%%\n\n# %% [raw]\n#%%\n")
     expect(parseNotebookText(text)).toEqual(cells.map(({ cell_type, source }) => ({ cell_type, source })))
   })
@@ -61,7 +60,7 @@ describe("applying the text to the model", () => {
     describe(`nbformat 4.${minor}`, () => {
       const edited = (edit: (text: string) => string) => {
         const model = new FakeNotebook(notebook(cells(), minor))
-        applyNotebookText(model, edit(notebookToText(model.toJSON())))
+        applyNotebookText(model, edit(modelText(model)))
         return model
       }
       const outputsOf = (model: FakeNotebook) => model.cells.map((cell) => (cell.cell_type === "code" ? cell.outputs.map((output) => output.text).join("") : "-"))
@@ -102,13 +101,13 @@ describe("applying the text to the model", () => {
 
       it("keeps a markdown cell with a %% line one cell on a save", () => {
         const model = new FakeNotebook(notebook([markdown("m", "a\n%% mermaid comment\n%%"), code("a", "a = 1", "A")], minor))
-        applyNotebookText(model, notebookToText(model.toJSON()).replace("a = 1", "a = 2"))
+        applyNotebookText(model, modelText(model).replace("a = 1", "a = 2"))
         expect(model.cells.map((cell) => [cell.cell_type, cell.source])).toEqual([["markdown", "a\n%% mermaid comment\n%%"], ["code", "a = 2"]])
       })
 
       it("keeps the exact source of cells the text did not change", () => {
         const model = new FakeNotebook(notebook([code("x", "x\n", "X"), code("y", "y = 1\n\n\n"), code("a", "a = 1")], minor))
-        const text = notebookToText(model.toJSON())
+        const text = modelText(model)
         applyNotebookText(model, text)
         expect(model.cells.map((cell) => cell.source)).toEqual(["x\n", "y = 1\n\n\n", "a = 1"])
         applyNotebookText(model, text.replace("a = 1", "a = 2"))
@@ -118,80 +117,4 @@ describe("applying the text to the model", () => {
       })
     })
   }
-})
-
-describe("text bridge", () => {
-  afterEach(() => { vi.useRealTimers() })
-
-  it("saves, persists, and reports only changes it did not hand out", async () => {
-    vi.useFakeTimers()
-    const model = new FakeNotebook(notebook([code("a", "a = 1", "A")]))
-    const persist = vi.fn(async () => true)
-    const run = vi.fn()
-    const bridge = createNotebookTextBridge(model, persist, run)
-    const heard: string[] = []
-    bridge.subscribe((text) => heard.push(text))
-    expect(bridge.extension).toBe(".py")
-
-    const saved = await bridge.save(`${bridge.text()}\n# %%\nb = 2\n`)
-    expect(saved).toBe("# %%\na = 1\n\n# %%\nb = 2\n")
-    expect(persist).toHaveBeenCalledTimes(1)
-    expect(model.cells[0].outputs).toEqual([stream("A")])
-    vi.advanceTimersByTime(NOTEBOOK_TEXT_DELAY_MS)
-    expect(heard).toEqual([])
-
-    model.edit(0, "a = 3")
-    vi.advanceTimersByTime(NOTEBOOK_TEXT_DELAY_MS)
-    expect(heard).toEqual(["# %%\na = 3\n\n# %%\nb = 2\n"])
-
-    bridge.runAt(5)
-    expect(run).toHaveBeenCalledWith(1)
-  })
-
-  it("rejects when persisting fails", async () => {
-    const bridge = createNotebookTextBridge(new FakeNotebook(notebook([])), async () => false, () => {})
-    await expect(bridge.save(`${bridge.text()}# %%\nx\n`)).rejects.toThrow("Saving the notebook failed")
-  })
-
-  it("rejects a save while the notebook has changes the text has not, and hands the new text over at once", async () => {
-    vi.useFakeTimers()
-    const model = new FakeNotebook(notebook([code("a", "a = 1"), code("b", "b = 2")]))
-    const persist = vi.fn(async () => true)
-    const bridge = createNotebookTextBridge(model, persist, () => {})
-    const heard: string[] = []
-    bridge.subscribe((text) => heard.push(text))
-    const text = bridge.text()
-
-    model.edit(1, "b = 3")
-    await expect(bridge.save(text.replace("a = 1", "a = 10"))).rejects.toThrow("The notebook changed, write again")
-    expect(heard).toEqual(["# %%\na = 1\n\n# %%\nb = 3\n"])
-    expect(model.cells.map((cell) => cell.source)).toEqual(["a = 1", "b = 3"])
-    expect(persist).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(NOTEBOOK_TEXT_DELAY_MS)
-    expect(heard).toHaveLength(1)
-
-    await expect(bridge.save(heard[0].replace("a = 1", "a = 10"))).resolves.toBe("# %%\na = 10\n\n# %%\nb = 3\n")
-  })
-
-  it("never reports the text being saved while the persist runs", async () => {
-    vi.useFakeTimers()
-    const model = new FakeNotebook(notebook([code("a", "a = 1")]))
-    const persisted = Promise.withResolvers<boolean>()
-    const bridge = createNotebookTextBridge(model, () => persisted.promise, () => {})
-    const heard: string[] = []
-    bridge.subscribe((text) => heard.push(text))
-    const saving = bridge.save(bridge.text().replace("a = 1", "a = 2"))
-    vi.advanceTimersByTime(2 * NOTEBOOK_TEXT_DELAY_MS)
-    expect(heard).toEqual([])
-    persisted.resolve(true)
-    await expect(saving).resolves.toBe("# %%\na = 2\n")
-    expect(heard).toEqual([])
-  })
-
-  it("falls back to .py for an extension the backend refuses", () => {
-    const extensionOf = (file_extension: JsonObject[string]) =>
-      createNotebookTextBridge(new FakeNotebook({ ...notebook([]), metadata: { language_info: { file_extension } } }), async () => true, () => {}).extension
-    expect(extensionOf(".jl")).toBe(".jl")
-    for (const invalid of ["", "py", ".c++", ".toolongext", 3]) expect(extensionOf(invalid)).toBe(".py")
-  })
 })

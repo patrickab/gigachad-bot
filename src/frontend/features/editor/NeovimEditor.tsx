@@ -371,14 +371,19 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
 
   return (
     <div ref={slotRef} data-terminal className={cn("relative min-h-0 flex-1 overflow-hidden bg-page px-2 pt-1", className)}>
-      {status.state === "stopped" && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-page text-xs text-ink-faint">
-          <span>{status.message}</span>
-          <button onClick={onRestart} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-            Restart Neovim
-          </button>
-        </div>
-      )}
+      {status.state === "stopped" && <NeovimStopped message={status.message} action="Restart Neovim" onAction={onRestart} />}
+    </div>
+  )
+}
+
+/** Neovim's stopped page: an optional `message` over one button, filling its positioned parent. */
+export function NeovimStopped({ message, action, onAction }: { message?: string; action: string; onAction: () => void }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-page text-xs text-ink-faint">
+      {message !== undefined && <span>{message}</span>}
+      <button onClick={onAction} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+        {action}
+      </button>
     </div>
   )
 }

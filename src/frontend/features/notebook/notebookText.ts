@@ -8,6 +8,9 @@
  */
 import { applyNotebookOps, diffNotebook, notebookOf, type NotebookCellContent, type NotebookContent, type SharedNotebookLike } from "./notebookSync"
 
+/** A cell `notebookToText` writes: an nbformat cell or a model cell's type and source. */
+type CellSource = { cell_type: string; source: string | readonly string[] }
+
 /** One cell of the text. */
 export interface TextCell {
   cell_type: "code" | "markdown" | "raw"
@@ -17,7 +20,7 @@ export interface TextCell {
 /** A marker line, also the Lua side's (`neovim_rpc.py`). */
 const MARKER = /^# %%(\s.*)?$/
 
-const sourceOf = (cell: NotebookCellContent) => (Array.isArray(cell.source) ? cell.source.join("") : cell.source)
+const joined = (source: string | readonly string[]) => (typeof source === "string" ? source : source.join(""))
 
 function markerOf(cellType: string): string {
   if (cellType === "markdown") return "# %% [markdown]"
@@ -25,20 +28,24 @@ function markerOf(cellType: string): string {
   return "# %%"
 }
 
-function bodyOf(cell: NotebookCellContent): string {
-  const source = sourceOf(cell)
-  if (cell.cell_type === "code" || !source) return source
+function bodyOf(cellType: string, source: string): string {
+  if (cellType === "code" || !source) return source
   return source.split("\n").map((line) => (!line ? "#" : MARKER.test(`# ${line}`) ? `#${line}` : `# ${line}`)).join("\n")
 }
 
-/** The percent text of `content`, its cells without outputs. */
-export function notebookToText(content: NotebookContent): string {
-  if (content.cells.length === 0) return ""
-  const blocks = content.cells.map((cell) => {
-    const body = bodyOf(cell)
-    return body ? `${markerOf(cell.cell_type)}\n${body}` : markerOf(cell.cell_type)
+/** Percent text of `cells` (nbformat cells or model cells, `source` string or string[]). */
+export function notebookToText(cells: readonly CellSource[]): string {
+  if (cells.length === 0) return ""
+  const blocks = cells.map(({ cell_type, source }) => {
+    const body = bodyOf(cell_type, joined(source))
+    return body ? `${markerOf(cell_type)}\n${body}` : markerOf(cell_type)
   })
   return `${blocks.join("\n\n")}\n`
+}
+
+/** Percent text of the live model, from its cells' sources only. */
+export function modelText(model: SharedNotebookLike): string {
+  return notebookToText(model.cells.map((cell) => ({ cell_type: cell.cell_type, source: cell.getSource() })))
 }
 
 function kindOf(marker: string): TextCell["cell_type"] {
@@ -49,6 +56,24 @@ function kindOf(marker: string): TextCell["cell_type"] {
 }
 
 const uncomment = (line: string) => (line.startsWith("# ") ? line.slice(2) : line.startsWith("#") ? line.slice(1) : line)
+
+/** `lines` without their trailing blank lines. */
+function withoutTrailingBlanks(lines: string[]): string[] {
+  let end = lines.length
+  while (end > 0 && !lines[end - 1].trim()) end--
+  return lines.slice(0, end)
+}
+
+/**
+ * The source of a cell as its text reads back: a code cell ends at its first marker-like line and drops trailing blank lines,
+ * a markdown or raw cell reads back unchanged (its commented lines are never blank and never markers).
+ */
+function shownSource(cellType: string, source: string): string {
+  if (cellType !== "code") return source
+  const lines = source.split("\n")
+  const marker = lines.findIndex((line) => MARKER.test(line))
+  return withoutTrailingBlanks(marker < 0 ? lines : lines.slice(0, marker)).join("\n")
+}
 
 /** The cells of `text` with the 1-based line each starts on. */
 function scan(text: string): (TextCell & { line: number })[] {
@@ -63,9 +88,7 @@ function scan(text: string): (TextCell & { line: number })[] {
   })
   if (preamble.some((line) => line.trim())) cells.unshift({ cell_type: "code", source: "", line: 1, body: preamble })
   return cells.map(({ cell_type, line, body }) => {
-    let end = body.length
-    while (end > 0 && !body[end - 1].trim()) end--
-    const kept = body.slice(0, end)
+    const kept = withoutTrailingBlanks(body)
     return { cell_type, line, source: (cell_type === "code" ? kept : kept.map(uncomment)).join("\n") }
   })
 }
@@ -164,11 +187,12 @@ function newCell({ cell_type, source }: TextCell): NotebookCellContent {
  */
 export function applyNotebookText(model: SharedNotebookLike, text: string): void {
   const notebook = notebookOf(model)
-  // Keys of our own for the model's cells: `diffNotebook` matches by id, and below nbformat 4.5 `toJSON` has none. A matched cell is never inserted, so a key never reaches the model
+  // Keys of our own for `diffNotebook`, which matches by id (below nbformat 4.5 `toJSON` has none). They never reach the model:
+  // `diffNotebook` emits no op that writes `id` and a matched cell is never inserted
   const current: NotebookContent = { ...notebook, cells: notebook.cells.map((cell, index) => ({ ...cell, id: `cell-${index}` })) }
   const next = parseNotebookText(text)
   // A cell as the text shows it, so a cell the user did not touch matches exactly
-  const old = current.cells.map((cell) => ({ cell_type: cell.cell_type as TextCell["cell_type"], source: parseNotebookText(notebookToText({ ...current, cells: [cell] }))[0]?.source ?? "" }))
+  const old = current.cells.map((cell) => ({ cell_type: cell.cell_type as TextCell["cell_type"], source: shownSource(cell.cell_type, joined(cell.source)) }))
   const matched = new Map(matchCells(old, next).map(([i, j]) => [j, i]))
   const cells = next.map((cell, index) => {
     const at = matched.get(index)
