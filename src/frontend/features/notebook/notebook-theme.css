@@ -248,11 +248,5 @@ html.light .gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0
 .jp-Completer .jp-Completer-type[data-color-index] { background: var(--surface-elevated); color: var(--ink-muted); }
 .jp-Completer .jp-Completer-typeExtended { color: var(--ink-subtle); }
 
-/* --- Neovim on the code and markdown cells: the active one, or the markdown cell being edited, holds the terminal (ActiveCellTerminal), every other code cell shows how Neovim draws it (CellSnapshots). The cell's editor stays hidden meanwhile --- */
-.gc-nb .jp-Cell.gc-nvim-cell .jp-InputArea-editor,
-.gc-nb .jp-Cell.gc-nvim-snapshot-cell .jp-InputArea-editor { display: none; }
-.gc-nb .gc-nvim-host,
-.gc-nb .gc-nvim-snapshot { flex: 1 1 0; min-width: 0; }
-
 /* --- A markdown cell's text sits on the split view's preview page (markdownRenderer.tsx): JupyterLab's unlayered `.jp-MarkdownOutput` padding would beat the page's Tailwind padding --- */
 .gc-nb .jp-MarkdownCell .gc-nb-markdown.jp-MarkdownOutput { padding: revert-layer; }

@@ -1,6 +1,6 @@
 "use client"
 
-import { JupyterReactTheme, Notebook } from "@datalayer/jupyter-react"
+import { JupyterReactTheme, Notebook, NotebookCommandIds, notebookStore } from "@datalayer/jupyter-react"
 import type { INotebookContent } from "@jupyterlab/nbformat"
 import type { NotebookModel } from "@jupyterlab/notebook"
 import type { ServiceManager, Session } from "@jupyterlab/services"
@@ -10,14 +10,14 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
 import { PANE_TOP_PX } from "@/features/workbench/WorkbenchSplit"
 import { appMarkdownFactory } from "./markdownRenderer"
-import { ActiveCellTerminal } from "./ActiveCellTerminal"
-import type { CellTerminal } from "./cellTerminal"
+import type { NotebookTextBridge } from "./notebookTextBridge"
 import { NotebookToolbar } from "./NotebookToolbar"
 import { createNotebookServiceManager } from "./serviceManager"
 import { NOTEBOOK_EDITOR_EXTENSIONS } from "./syntaxHighlight"
 import { useNotebookFile } from "./useNotebookFile"
 import type { SharedNotebookLike } from "./notebookSync"
 import { useNotebookKernel } from "./useNotebookKernel"
+import { useNotebookTextBridge } from "./useNotebookTextBridge"
 import "./notebook-theme.css"
 
 const RENDERERS = [appMarkdownFactory]
@@ -25,7 +25,7 @@ const RENDERERS = [appMarkdownFactory]
 const NOTEBOOK_TOP = { "--gc-nb-top": `${PANE_TOP_PX}px` } as React.CSSProperties
 
 /** Ctrl or Cmd+S inside `root` saves through the file API: the library's own save command talks to a Jupyter contents API this app does not expose. */
-function useSaveShortcut(root: React.RefObject<HTMLElement | null>, save: () => Promise<void>) {
+function useSaveShortcut(root: React.RefObject<HTMLElement | null>, save: () => Promise<unknown>) {
   const latest = useRef(save)
   useEffect(() => { latest.current = save })
   useEffect(() => {
@@ -55,8 +55,18 @@ function useNotebookServiceManager(): ServiceManager {
   return manager
 }
 
-/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. With a `cellTerminal` the active cell is edited in Neovim. */
-export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; tabId: string; cellTerminal: CellTerminal | null }) {
+/** Make the cell at `index` of the notebook of tab `tabId` active, scroll it into view and run it, without taking the focus. */
+function runCellOf(tabId: string, index: number) {
+  const adapter = notebookStore.getState().notebooks.get(tabId)?.adapter
+  if (!adapter || index >= adapter.notebook.widgets.length) return
+  adapter.notebook.activeCellIndex = index
+  adapter.notebook.deselectAll()
+  void adapter.notebook.scrollToItem(index, "auto")
+  void adapter.commands.execute(NotebookCommandIds.run)
+}
+
+/** One notebook of the file at `path`, shown by the tab `tabId`: JupyterLab's notebook panel on this app's file, kernel and theme. `onTextBridge` gets the notebook as text for Neovim. */
+export function NotebookEditor({ path, tabId, onTextBridge }: { path: string; tabId: string; onTextBridge?: (bridge: NotebookTextBridge | null) => void }) {
   const file = useNotebookFile(path)
   const kernel = useNotebookKernel(path, file.initial !== null)
   const theme = useThemeName()
@@ -70,10 +80,14 @@ export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; ta
   const bindRef = useRef(file.bindModel)
   useEffect(() => { bindRef.current = file.bindModel })
   const modelRef = useRef<NotebookModel | null>(null)
+  const [shared, setShared] = useState<SharedNotebookLike | null>(null)
   const onModel = useCallback((model: NotebookModel | null) => {
     modelRef.current = model
-    bindRef.current(model ? model.sharedModel as unknown as SharedNotebookLike : null)
+    const next = model ? model.sharedModel as unknown as SharedNotebookLike : null
+    bindRef.current(next)
+    setShared(next)
   }, [])
+  useNotebookTextBridge(shared, file.save, (index) => runCellOf(tabId, index), onTextBridge)
 
   const sessionRef = useRef<Session.ISessionConnection | undefined>(undefined)
   const onSession = useCallback((session: Session.ISessionConnection | undefined) => { sessionRef.current = session }, [])
@@ -134,7 +148,6 @@ export function NotebookEditor({ path, tabId, cellTerminal }: { path: string; ta
             </JupyterReactTheme>
           </div>
         ) : <LoadingPlaceholder />}
-        {initial && cellTerminal && <ActiveCellTerminal tabId={tabId} terminal={cellTerminal} save={file.save} />}
       </div>
     </div>
   )

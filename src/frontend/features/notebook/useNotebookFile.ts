@@ -61,7 +61,7 @@ function savedModel(model: SharedNotebookLike, saved: DiskState | null): DiskSta
  * - `initial` is the file's notebook with text as strings, null while loading. A blank file loads as an empty notebook, any other file that does not parse sets `error`
  * - `bindModel` gives the hook the editor's shared model (`null` when it goes away, which saves what is pending). Changes to it save after `NOTEBOOK_SAVE_DELAY_MS` of quiet,
  *   in the file's own style, and a save that would not change the file does not write
- * - `save` writes at once (Ctrl+S). A failed save of either kind sets `saveError` until the next one succeeds
+ * - `save` writes at once (Ctrl+S, Neovim) and resolves false when that failed. A failed save of either kind sets `saveError` until the next one succeeds
  * - Changes written on disk by anyone else are merged into the bound model (`applyIncomingNotebook`), this hook's own writes are ignored when they echo back
  * - A new `path` (rename) moves the reads and writes to it without a reload. `reload` retries a failed load
  *
@@ -107,7 +107,7 @@ export function useNotebookFile(path: string) {
   const save = useCallback(async () => {
     cancel()
     const model = modelRef.current
-    if (model) await runSave(model)
+    return model ? runSave(model) : true
   }, [cancel, runSave])
 
   const detachRef = useRef<(() => void) | null>(null)

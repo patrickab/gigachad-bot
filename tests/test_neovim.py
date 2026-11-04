@@ -1,9 +1,11 @@
 import asyncio
 import contextlib
 import json
+import os
 from pathlib import Path
 import shutil
 
+from pydantic import ValidationError
 import pytest
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
@@ -176,11 +178,14 @@ async def test_empty_base_content_still_opens_diff_and_no_base_means_single_wind
     assert await window_count(None) == 1
 
 
-def test_open_message_base_content_is_optional():
+def test_open_message_needs_a_document_and_base_content_is_optional():
     fields = {"type": "open", "path": "/a", "filename": "a", "content": "x", "rows": 1, "cols": 1}
     assert neovim_route.OpenMessage.model_validate(fields).base_content is None
     assert neovim_route.OpenMessage.model_validate({**fields, "base_content": ""}).base_content == ""
     assert neovim_route.OpenMessage.model_validate({**fields, "base_content": None}).base_content is None
+    assert neovim_route.OpenMessage.model_validate({**fields, "notebook": True}).notebook
+    with pytest.raises(ValidationError):
+        neovim_route.OpenMessage.model_validate({**fields, "content": None, "notebook": True})
 
 
 async def _drain(session: NeovimSession) -> None:
@@ -875,12 +880,13 @@ class _Browser:
         self._incoming: asyncio.Queue[dict] = asyncio.Queue()
         self._frames: asyncio.Queue[dict] = asyncio.Queue()
         self.terminal = bytearray()
+        self.closed: int | None = None
 
     async def accept(self) -> None:
         pass
 
     async def close(self, code: int = 1000) -> None:
-        pass
+        self.closed = code
 
     async def receive_json(self) -> dict:
         return json.loads((await self._incoming.get())["text"])
@@ -932,12 +938,13 @@ class _Browser:
 
 
 @contextlib.asynccontextmanager
-async def _browsing(monkeypatch, file: Path):
-    """The session endpoint serving a browser that opened *file*, with Neovim connected once the body starts."""
+async def _browsing(monkeypatch, file: Path, **opening):
+    """The session endpoint serving a browser that opened *file* (or what *opening* says), Neovim connected once the body starts."""
     monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
     browser = _Browser()
     serving = asyncio.create_task(neovim_route.neovim_session(browser, request_identity(), mounted_roots(file.parent)))
-    browser.send({"type": "open", "path": str(file), "filename": file.name, "content": file.read_text(), "rows": 24, "cols": 80})
+    document = {"path": str(file), "filename": file.name, "content": file.read_text()}
+    browser.send({"type": "open", **document, **opening, "rows": 24, "cols": 80})
     try:
         # A message frame is only shown once Neovim is connected, which is when the clipboard is the browser's
         browser.send({"type": "message", "text": "Connected"})
@@ -971,3 +978,177 @@ async def test_message_frame_shows_its_text_in_neovim(neovim_home, tmp_path, mon
         browser.send({"type": "message", "text": "Image is too large"})
 
         await browser.shows("Image is too large")
+
+
+SHIFT_ENTER, CTRL_ENTER = b"\x1b[13;2u", b"\x1b[13;5u"  # what the browser sends, Neovim reads them as <S-CR> and <C-CR>
+NOTEBOOK_TEXT = "# %%\nimport os\nx = 1\n\n# %% [markdown]\n# # Title\n\n# %%\nprint(os.sep)\n"
+
+
+def _notebook(directory: Path) -> tuple[Path, Path]:
+    """A notebook in a new `project` folder of *directory* and the virtual name of its text beside it."""
+    notebook = directory / "project" / "analysis.ipynb"
+    notebook.parent.mkdir()
+    notebook.write_text("{}")
+    return notebook, Path(f"{notebook}.py")
+
+
+@contextlib.asynccontextmanager
+async def _notebook_text(home: Path, text_name: Path, save=_store, on_run_cell=None):
+    """A connected session on the notebook text *text_name* (path = that name), closed afterwards."""
+    session = NeovimSession.spawn(text_name.name, NOTEBOOK_TEXT, rows=24, cols=80, cwd=home, path=str(text_name), notebook=text_name)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None, None, None, None, on_run_cell), 15)
+        yield session
+    finally:
+        await session.close()
+        await drain
+
+
+@pytest.mark.parametrize(
+    ("path", "named"),
+    [
+        ("project/nb.ipynb.py", "nb.ipynb.py"),
+        ("project/../project/nb.ipynb.jl", "nb.ipynb.jl"),
+        ("project/missing.ipynb.py", None),
+        ("project/sub/../../outside/nb.ipynb.py", None),
+        ("project/nb.ipynb", None),
+        ("project/nb.ipynb.toolongext", None),
+        ("project/nb.ipynb.p y", None),
+        ("project/notes.md.py", None),
+    ],
+)
+def test_only_a_notebook_text_beside_a_notebook_under_the_file_roots_gets_a_buffer_name(tmp_path, path, named):
+    for folder in ("project", "outside"):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "nb.ipynb").write_text("{}")
+    (tmp_path / "project" / "notes.md").write_text("")
+    roots = mounted_roots(tmp_path / "project")
+
+    expected = (tmp_path / "project").resolve() / named if named else None
+    assert neovim_route.notebook_buffer(roots, str(tmp_path / path)) == expected
+    assert neovim_route.notebook_buffer(roots, "project/nb.ipynb.py") is None  # relative
+
+
+@requires_nvim
+async def test_opening_a_notebook_text_without_its_notebook_is_refused(neovim_home, tmp_path, monkeypatch):
+    monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
+    browser = _Browser()
+    serving = asyncio.create_task(neovim_route.neovim_session(browser, request_identity(), mounted_roots(tmp_path)))
+    opening = {"path": str(tmp_path / "missing.ipynb.py"), "filename": "missing.ipynb.py", "content": "", "notebook": True}
+    browser.send({"type": "open", **opening, "rows": 24, "cols": 80})
+
+    await asyncio.wait_for(serving, 10)
+    assert browser.closed == 1003
+
+
+@requires_nvim
+async def test_no_kind_of_write_creates_the_virtual_file_or_reads_one_that_is_there(neovim_home, tmp_path):
+    """`:w`, `:w!`, `:up` and `:sav!` save through the caller, `:1,2w!` and `:1w >>` are refused, `:e!` reloads the saved text.
+
+    `:r` of the virtual name reads nothing, another file still is. `:sav!` gives the text its virtual name back, `:e #` finds no
+    buffer left under that name, a later `:w` writes nothing there (Neovim may ask for `:w!`, the name looks not edited) and
+    `:w!` saves through the caller."""
+    saved: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(path: str, text: str) -> str:
+        await saved.put(text)
+        return text
+
+    _notebook_file, name = _notebook(tmp_path)
+    name.write_text("stale = 1\n")
+    async with _notebook_text(neovim_home, name, save) as session:
+        state = "[expand('%:p'), getline(1, '$'), &filetype, &swapfile, &undofile, &modified, undotree().seq_last]"
+        assert await session._rpc.request("nvim_eval", state) == [str(name), NOTEBOOK_TEXT.splitlines(), "python", 0, 0, 0, 0]
+        # Started on an empty placeholder file like `nvim file`, its buffer is gone
+        assert await session._rpc.request("nvim_eval", "[argc(), map(getbufinfo(), 'v:val.name')]") == [1, [str(name)]]
+
+        session.write_input(b"2GAx\x1b:w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == NOTEBOOK_TEXT.replace("import os", "import osx")
+        session.write_input(b"Ay\x1b:e!\r")
+        await _evaluates_to(session, "[getline(2), &modified]", ["import osx", 0])
+        for command in (b":w!\r", b":up\r", b":1,2w!\r", b":1w >>\r", b":sav! copy.py\r"):
+            session.write_input(command)
+            await asyncio.sleep(0.2)
+        assert [await asyncio.wait_for(saved.get(), 10) for _ in range(2)] == [NOTEBOOK_TEXT.replace("import os", "import osx")] * 2
+        await _evaluates_to(session, "expand('%:p')", str(name))
+
+        (neovim_home / "other.txt").write_text("other = 2\n")  # in Neovim's working directory
+        name_from_cwd = os.path.relpath(name, neovim_home).encode()
+        commands = (b":e #\r", b":r\r", b":r %\r", b":r " + name_from_cwd + b"\r", b":3r other.txt\r", b"2GAz\x1b:w\r", b":w!\r")
+        for command in commands:
+            session.write_input(command)
+            await asyncio.sleep(0.2)
+        text = NOTEBOOK_TEXT.replace("import os", "import osxz").replace("x = 1\n", "x = 1\nother = 2\n")
+        assert await asyncio.wait_for(saved.get(), 10) == text
+        await _evaluates_to(session, "[expand('%:p'), &modified]", [str(name), 0])
+
+    assert sorted(path.name for path in name.parent.iterdir()) == ["analysis.ipynb", "analysis.ipynb.py"]
+    assert name.read_text() == "stale = 1\n"
+
+
+@requires_nvim
+async def test_a_renamed_notebook_text_keeps_its_virtual_name_and_writes_stay_intercepted(neovim_home, tmp_path):
+    saved: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+    async def save(path: str, text: str) -> str:
+        await saved.put((path, text))
+        return text
+
+    notebook, name = _notebook(tmp_path)
+    name.write_text("stale = 1\n")
+    async with _notebook_text(neovim_home, name, save) as session:
+        session.write_input(b"2GAx\x1b")
+        await _evaluates_to(session, "&modified", 1)
+        renamed = notebook.rename(notebook.with_name("report.ipynb"))
+        with pytest.raises(RuntimeError, match="no notebook text"):
+            await session.rename(str(name), str(name.with_name("report.md")), None)
+
+        new_name = Path(f"{renamed}.py")
+        await session.rename(str(name), str(new_name), None, new_name)
+        state = "[expand('%:p'), &modified, &filetype, getline(2)]"
+        assert await session._rpc.request("nvim_eval", state) == [str(new_name), 1, "python", "import osx"]
+        session.write_input(b":e #\r")
+        await asyncio.sleep(0.2)
+        assert await session._rpc.request("nvim_eval", state) == [str(new_name), 1, "python", "import osx"]
+        session.write_input(b":w\r")
+        assert await asyncio.wait_for(saved.get(), 10) == (str(new_name), NOTEBOOK_TEXT.replace("import os", "import osx"))
+
+    assert sorted(path.name for path in name.parent.iterdir()) == ["analysis.ipynb.py", "report.ipynb"]
+    assert name.read_text() == "stale = 1\n"
+
+
+@requires_nvim
+async def test_ctrl_enter_saves_then_runs_the_cell_at_the_cursor_and_a_failed_save_runs_nothing(neovim_home, tmp_path, monkeypatch):
+    notebook, name = _notebook(tmp_path)
+    async with _browsing(monkeypatch, notebook, path=str(name), filename=name.name, content=NOTEBOOK_TEXT, notebook=True) as browser:
+        browser.type(b"3GAz")
+        browser.type(CTRL_ENTER)
+        save = (await browser.frames(1))[0]
+        assert (save["type"], save["path"], save["content"]) == ("save", str(name), NOTEBOOK_TEXT.replace("x = 1", "x = 1z"))
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+        assert await browser.frames(1) == [{"type": "run_cell", "path": str(name), "line": 3}]
+
+        browser.type(CTRL_ENTER)
+        save = await browser.next_frame("save")
+        browser.send({"type": "saved", "id": save["id"], "error": "stale revision"})
+        await browser.silent()
+
+
+@requires_nvim
+async def test_shift_enter_runs_the_cell_and_moves_on_to_the_next_cell_appending_one_after_the_last(neovim_home, tmp_path):
+    runs: asyncio.Queue[tuple[str, int]] = asyncio.Queue()
+    _notebook_file, name = _notebook(tmp_path)
+    async with _notebook_text(neovim_home, name, on_run_cell=lambda path, line: runs.put_nowait((path, line))) as session:
+        session.write_input(b"2G" + SHIFT_ENTER)
+        assert await asyncio.wait_for(runs.get(), 10) == (str(name), 2)
+        await _evaluates_to(session, "line('.')", 6)  # past the markdown marker with its kind
+
+        session.write_input(b"i" + SHIFT_ENTER)
+        assert await asyncio.wait_for(runs.get(), 10) == (str(name), 6)
+        await _evaluates_to(session, "[line('.'), mode()]", [9, "i"])
+
+        session.write_input(SHIFT_ENTER)
+        assert await asyncio.wait_for(runs.get(), 10) == (str(name), 9)
+        lines = [*NOTEBOOK_TEXT.splitlines(), "", "# %%", ""]
+        await _evaluates_to(session, "[getline(1, '$'), line('.'), mode(), &modified]", [lines, 12, "i", 1])

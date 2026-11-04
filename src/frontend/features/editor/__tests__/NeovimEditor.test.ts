@@ -70,10 +70,10 @@ interface FakeItem {
   getAsFile: () => File | null
 }
 
-async function connect(options: Parameters<typeof useNeovimTerminal>[3] = {}, save = vi.fn<(text: string, path: string) => Promise<string>>(async (text) => text)) {
+async function connect(options: Parameters<typeof useNeovimTerminal>[3] = {}, save = vi.fn<(text: string, path: string) => Promise<string>>(async (text) => text), document = firstDocument) {
   const view = renderHook(
     ({ document }: { document: NeovimDocument }) => useNeovimTerminal(document, save, vi.fn(), options),
-    { initialProps: { document: firstDocument } },
+    { initialProps: { document } },
   )
   await waitFor(() => expect(view.result.current.terminal).not.toBeNull())
   return { ...view, socket: FakeSocket.instances[0], save }
@@ -148,58 +148,21 @@ describe("useNeovimTerminal frames", () => {
   })
 })
 
-describe("useNeovimTerminal notebook cells", () => {
-  it("sends the notebook frames, keeping them for after the open frame", async () => {
-    const { result, socket } = await connect()
+describe("useNeovimTerminal notebook", () => {
+  const notebookDocument: NeovimDocument = { key: "nb", path: "/p/a.ipynb.py", filename: "a.ipynb.py", content: "# %%\nx = 1\n", notebook: true }
 
-    expect(result.current.setCells("notebook.py", [{ id: "a", text: "x = 1", kind: "code" }, { id: "m", text: "# t", kind: "markdown" }])).toBe(true)
-    expect(result.current.focusCell("b", "first")).toBe(true)
-    socket.open()
-    expect(result.current.focusCell("a", "keep")).toBe(true)
-
-    expect(socket.frames.slice(1)).toEqual([
-      { type: "set_cells", filename: "notebook.py", cells: [{ id: "a", text: "x = 1", kind: "code" }, { id: "m", text: "# t", kind: "markdown" }] },
-      { type: "focus_cell", id: "b", cursor: "first" },
-      { type: "focus_cell", id: "a", cursor: "keep" },
-    ])
-  })
-
-  it("opens a cell session with its path as the only document data", async () => {
-    const { socket } = await connect({ cellMode: true })
+  it("opens a notebook session as one and hands its run_cell frames to onRunCell", async () => {
+    const onRunCell = vi.fn()
+    const { socket } = await connect({ onRunCell }, undefined, notebookDocument)
     socket.open()
 
-    expect(socket.frames[0]).toEqual({ type: "open", cell_mode: true, path: "/p/main.tex", rows: 24, cols: 80, ask_keymap: false })
+    expect(socket.frames[0]).toMatchObject({ type: "open", path: "/p/a.ipynb.py", content: "# %%\nx = 1\n", notebook: true })
+    socket.receive({ type: "run_cell", path: "/p/a.ipynb.py", line: 2 })
+    expect(onRunCell).toHaveBeenCalledWith("/p/a.ipynb.py", 2)
   })
 
-  it("hands the notifications of Neovim to the cell options in the order they arrive", async () => {
-    const seen: string[] = []
-    const { socket } = await connect({
-      onCellEdit: (id, text) => seen.push(`edit ${id} ${text}`),
-      onCellFocus: (id) => seen.push(`focus ${id}`),
-      onCellRun: (id, text, advance) => seen.push(`run ${id} ${text} ${advance}`),
-      onCellLeave: (id) => seen.push(`leave ${id}`),
-      onCellExit: (id, direction) => seen.push(`exit ${id} ${direction}`),
-      onCellSave: () => seen.push("save"),
-      onCellHeight: (id, rows) => seen.push(`height ${id} ${rows}`),
-    })
-    socket.open()
-
-    socket.receive({ type: "cell_edit", id: "a", text: "x" })
-    socket.receive({ type: "cell_focus", id: "b" })
-    socket.receive({ type: "cell_height", id: "b", rows: 4 })
-    socket.receive({ type: "cell_run", id: "b", text: "xy", advance: true })
-    socket.receive({ type: "cell_run", id: "b", text: "xy", advance: false })
-    socket.receive({ type: "cell_leave", id: "m" })
-    socket.receive({ type: "cell_exit", id: "m", direction: "up" })
-    socket.receive({ type: "cell_exit", id: "b", direction: "down" })
-    socket.receive({ type: "save_notebook" })
-
-    expect(seen).toEqual(["edit a x", "focus b", "height b 4", "run b xy true", "run b xy false", "leave m", "exit m up", "exit b down", "save"])
-    expect(socket.frames).toHaveLength(1)
-  })
-
-  it("sends Shift+Enter and Ctrl+Enter as their CSI-u keys in cell mode only and leaves other keys to xterm", async () => {
-    const cell = await connect({ cellMode: true })
+  it("sends Shift+Enter and Ctrl+Enter as their CSI-u keys for a notebook only and leaves other keys to xterm", async () => {
+    const cell = await connect({}, undefined, notebookDocument)
     const sendKey = (init: KeyboardEventInit, type = "keydown") => {
       const event = new KeyboardEvent(type, { cancelable: true, ...init })
       return { event, handled: xterm.keyHandler?.(event) }

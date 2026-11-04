@@ -3,29 +3,31 @@
 `WS /api/neovim/session` runs one `nvim` per connection. Binary frames carry terminal
 bytes both ways, text frames carry JSON control messages:
 
-- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "ask_keymap"?, "rows", "cols"}` first
-  (the first document, a string `base_content` opens a read-only left diff buffer against the editable document,
-  `ask_keymap` maps visual-mode `<leader>a` to a `selection` frame), then `{"type": "resize", "rows", "cols"}`,
+- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "ask_keymap"?, "notebook"?, "rows", "cols"}`
+  first (the first document, a string `base_content` opens a read-only left diff buffer against the editable document,
+  `ask_keymap` maps visual-mode `<leader>a` to a `selection` frame, `notebook` opens a notebook's text, see below), then
+  `{"type": "resize", "rows", "cols"}`,
   `{"type": "saved", "id", "content" | "error"}`, `{"type": "open_file", "path"}` (show that file's buffer, loading it from
   disk into a private copy of its own when not open yet, other buffers stay loaded with their unsaved edits and nothing is
   saved), `{"type": "set_content", "content", "path"}` (the file changed on disk, the buffer of *path* takes the text
   without moving the cursor, merged into unsaved edits, after a running `:w`),
   `{"type": "renamed", "from", "path"}` (the file of buffer *from* was renamed, the session continues on the new
-  name with its unsaved edits, nothing for a buffer that is not open), `{"type": "insert_lines", "text"}` (lines below the
+  name with its unsaved edits, nothing for a buffer that is not open, a notebook's text needs a valid notebook text *path*),
+  `{"type": "insert_lines", "text"}` (lines below the
   cursor of the shown buffer, the cursor lands on the first one), `{"type": "background", "light"}` (the theme behind
   the terminal, Neovim's 'background' follows it), `{"type": "clipboard", "id", "text" | "error"}` (the answer to
   `clipboard_read`: what to paste, linewise when it ends with a newline and charwise otherwise, an empty text pastes
   nothing, an `error` is shown as an error in Neovim and its last copy is pasted instead) and `{"type": "message", "text"}`
   (Neovim shows *text* as an error, for failures that have no request)
 - server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
-  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines, in a notebook buffer `path` is the
-  buffer's name, `.ipynb.py` or `.ipynb.md`, and the lines count from the active cell's first line),
+  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
   `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
   `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file, `{"type": "leave"}` on `<Esc>` in normal
   mode (the browser gives focus back to the app),
   `{"type": "clipboard_read", "id", "path"}` when Neovim pastes from `+` or `*` (`path` names the shown buffer, the browser
   answers with `clipboard`, none within 15 s shows "Clipboard did not answer" and pastes the last copy, so does a closed
-  socket) and `{"type": "exit", "code"}` when `nvim` quits
+  socket), `{"type": "run_cell", "path", "line"}` after `<S-CR>` or `<C-CR>` in a notebook's text saved it (the 1-based cursor
+  line in the saved text) and `{"type": "exit", "code"}` when `nvim` quits
 
 `nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
 
@@ -33,56 +35,15 @@ The browser persists `:w` through the document's own API, so every save keeps th
 API's validation and side effects. A file-root file changed on disk since Neovim last
 agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved edits.
 
-A notebook session opens with `"cell_mode": true` instead of a document (`filename` and `content` are ignored). `path`, when it
-names an existing notebook file under the file roots (`disk_file`), picks the working directory and names the buffers
-`<path><extension>` (extension of the first `set_cells` filename, `.py` unless the notebook's language says otherwise) and
-`<path>.md`: virtual names beside the notebook that are never written (writes are intercepted, no swap or undo file), so the
-user's LSP finds the notebook's project and `.venv` (a `renamed` of that notebook names the buffers beside the new file). Any other
-path (a logical key, outside the roots, missing) gets private copies. It holds all code cells of one notebook as ONE buffer (a
-`# %%` marker line before each cell, so the user's LSP sees every cell) and all markdown cells as a second one (`<!-- %% -->`
-before each cell). The window shows one of them, pinned to its active cell (every other line is hidden with `conceal_lines`
-extmarks and the window's `conceallevel` is raised to 2, Neovim 0.11 or newer is required), and the browser keeps the notebook:
+With `"notebook": true` the document is a notebook's percent text (`# %%` before each cell) and `path` is
+`<notebook>.ipynb<ext>`: absolute, a short alphanumeric extension, the notebook a readable file under the file roots, else the
+socket closes with 1003. The buffer is named beside the validated notebook, so the user's LSP finds its project and `.venv`,
+and nothing is ever read from or written to that name (no swap or undo file, every write goes to `save`). `<C-CR>` saves the
+text and then sends `run_cell`, `<S-CR>` also moves the cursor to the next cell, appending one after the last. Shift+Enter and
+Ctrl+Enter reach Neovim as CSI-u `ESC [ 13 ; 2 u` and `ESC [ 13 ; 5 u`.
 
-- client -> server: `{"type": "set_cells", "filename", "cells": [{"id", "text", "kind": "code" | "markdown"}]}` (the
-  authoritative list of code and markdown cells in notebook order with ids unique across both, no `kind` is code, *filename* only
-  gives the code buffer's extension and is read when a buffer is created. The first one builds the buffers, later ones replace
-  the text of the cells that differ without a `cell_edit` coming back, and rebuild a buffer when its ids or their order differ,
-  keeping the cursor in its cell where possible) and `{"type": "focus_cell", "id", "cursor": "first" | "last" | "keep" |
-  {"line": n}}` (show the buffer of that cell's kind pinned to the cell, the cursor on its first or last line, where it is when
-  that is inside the cell, or on line n of the cell, 0 is the first; no `cell_focus` comes back). They run in the order they were
-  sent. A malformed frame, a `set_cells` that repeats a cell id or has another kind included, is dropped with a warning in the
-  log, nothing answers it
-- server -> client: `{"type": "cell_edit", "id", "text"}` (the full text of a changed cell, at most every 40 ms, only when it
-  differs from what the browser knows), `{"type": "cell_focus", "id"}` (the cursor moved into another cell of the same buffer:
-  `j`, `k`, `G`, `gg`, a search, an LSP jump), `{"type": "cell_exit", "id", "direction": "up" | "down"}` (`j`, `k`, `<Up>` or
-  `<Down>` on the first or last line of the cell `id` whose neighbor in the notebook that way is a cell of the other kind: the
-  cursor stays, the browser activates that neighbor), `{"type": "cell_run", "id", "text", "advance"}` (`<S-CR>` with `advance`
-  true, `<C-CR>` with false, Shift+Enter and Ctrl+Enter reach Neovim as CSI-u `ESC [ 13 ; 2 u` and `ESC [ 13 ; 5 u`; in a
-  markdown cell the browser renders it), `{"type": "cell_leave", "id"}` (`<Esc>` in normal mode in a markdown cell: the browser
-  renders it) and `{"type": "save_notebook"}` (`:w`, a notification the browser answers with nothing, it saves the
-  notebook). `{"type": "cell_height", "id", "rows"}` is how many screen rows the active cell takes in Neovim's window (wrapped
-  lines, folds, virtual lines), sent when a cell is pinned and whenever that changes: the browser sizes the terminal to it.
-  `{"type": "cell_render", "id", "styles", "lines", "base", "rows", "height", "wrap"?}` is a code cell as Neovim draws it, for the
-  browser to show in place of a cell that is not being edited: `lines` are `[[text, style], ...]` runs (the number column and
-  signs lead each line, diagnostics follow it), `style` indexes `styles` (`fg`/`bg`/`sp` as `#rrggbb`, `bold`, `italic`,
-  `strike`, `underline` as `line` or `curl`), `base` is the colorscheme's `Normal` `fg`/`bg`, `rows` the cell line (0-based) of
-  every line, `height` its screen rows in the window, `wrap` (only when the window wraps lines) the column a wrapped line goes on
-  at (see `lib/neovim_render.py`). It comes for every code cell, 150 ms after the cell, its diagnostics, its semantic tokens (or
-  the tokens its last render lacked), the colorscheme, the number column options, 'wrap', the width or (absolute line numbers)
-  its first line
-  changed (the active cell only for its first), and for a cell just left, ahead of the `cell_focus` that says so (or of the
-  markdown buffer taking the window: renders wait while it has it). Markdown cells get none.
-  `{"type": "cell_render", "id"}` without lines takes the render back (it failed, or the buffer grew past 4000 lines: every
-  cell), the browser shows its own editor there until the next render. Every frame Neovim
-  notifies (these, `yank`, `selection`, `switched`) is delivered in the order Neovim sent it, and `cell_run`, `cell_exit`,
-  `cell_leave` and `save_notebook` come after the `cell_edit`s that brought the cells up to date
-
-Marker lines cannot be changed: an edit that alters, removes or adds one is undone with a short message in Neovim (so a line
-inside a cell that reads `# %%` cannot be edited from Neovim either), and the cursor never rests on one. Lines an edit puts
-above the first marker (an LSP quick fix that adds an import, `:0put`) join the first cell. An edit that replaces the whole
-script is undone. A change of the cells from the browser that adds, removes or moves a cell clears Neovim's undo history, `u`
-only goes back to the last such change. Neovim answers no request while it waits at a prompt, so the session turns `more` off and
-lets messages time out (`messagesopt`) after the user's config ran: what the config itself prints at startup is out of reach.
+Neovim answers no request while it waits at a prompt, so the session turns `more` off and lets messages time out
+(`messagesopt`) after the user's config ran: what the config itself prints at startup is out of reach.
 """
 
 from __future__ import annotations
@@ -92,10 +53,11 @@ import contextlib
 import json
 import logging
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, WebSocket
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError
 from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
@@ -116,22 +78,19 @@ _UNSUPPORTED_DATA = 1003
 
 
 class OpenMessage(BaseModel):
-    """`path` is the document's app path: absolute for file-root files, a logical key otherwise. `cell_mode` has no document."""
+    """`path` is the document's app path: absolute for file-root files, a logical key otherwise, a notebook's text with `notebook`."""
 
-    path: str | None = None
-    filename: str | None = None
-    content: str | None = None
+    path: str
+    filename: str
+    content: str
     base_content: str | None = None
     ask_keymap: bool = False
-    cell_mode: bool = False
+    notebook: bool = False
     rows: int = Field(ge=1, le=1000)
     cols: int = Field(ge=1, le=1000)
 
-    @model_validator(mode="after")
-    def _document_unless_cell_mode(self) -> OpenMessage:
-        if not self.cell_mode and None in (self.path, self.filename, self.content):
-            raise ValueError("a document needs path, filename and content")
-        return self
+
+_NOTEBOOK_TEXT = re.compile(r"(?P<notebook>.+\.ipynb)\.[A-Za-z0-9]{1,8}")
 
 
 def working_directory(roots: FileRoots, path: str) -> Path:
@@ -150,6 +109,15 @@ def disk_file(roots: FileRoots, path: str) -> Path | None:
         return roots.resolve(path)
     except (OSError, ValueError):
         return None
+
+
+def notebook_buffer(roots: FileRoots, path: str) -> Path | None:
+    """The virtual buffer name of the notebook text *path* (`<notebook>.ipynb<ext>`) beside the validated notebook, None if invalid."""
+    match = _NOTEBOOK_TEXT.fullmatch(path)
+    if match is None:
+        return None
+    notebook = disk_file(roots, match["notebook"])
+    return None if notebook is None else notebook.with_name(notebook.name + path[match.end("notebook") :])
 
 
 class SaveFailed(RuntimeError):
@@ -211,6 +179,9 @@ class _BrowserSaves:
     def leave(self) -> None:
         self.notice({"type": "leave"})
 
+    def run_cell(self, path: str, line: int) -> None:
+        self.notice({"type": "run_cell", "path": path, "line": line})
+
     def open_failed(self, path: str, message: str) -> None:
         self.notice({"type": "open_failed", "path": path, "message": message})
 
@@ -243,49 +214,6 @@ async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRo
         saves.open_failed(path, str(exc))
 
 
-_CURSORS = ("first", "last", "keep")
-_CELL_FRAMES = ("set_cells", "focus_cell")
-_CELL_KINDS = ("code", "markdown")
-_CELL_PLACEHOLDER = "gigachad://cell-session"
-
-
-def _cells(value: object) -> list[dict[str, str]] | None:
-    """The `{"id", "text", "kind"}` cells of a `set_cells` frame (no `kind` is code), None when malformed or an id repeats (logged)."""
-    if not isinstance(value, list):
-        return None
-    cells = [
-        {"id": cell.get("id"), "text": cell.get("text"), "kind": cell.get("kind", "code")} for cell in value if isinstance(cell, dict)
-    ]
-    if len(cells) != len(value) or not all(isinstance(cell["id"], str) and isinstance(cell["text"], str) for cell in cells):
-        return None
-    if not all(cell["kind"] in _CELL_KINDS for cell in cells):
-        return None
-    if len({cell["id"] for cell in cells}) != len(cells):
-        log.warning("set_cells repeats a cell id, the frame is dropped and Neovim keeps the cells it has")
-        return None
-    return cells
-
-
-def _cursor(value: object) -> str | int | None:
-    """Where a `focus_cell` puts the cursor: `first`, `last`, `keep`, or the line (0 is the first) of `{"line": n}`, else None."""
-    if value in _CURSORS:
-        return str(value)
-    if isinstance(value, dict) and type(value.get("line")) is int and value["line"] >= 0:
-        return value["line"]
-    return None
-
-
-def _cell_job(session: NeovimSession, control: dict) -> tuple[str, Coroutine[None, None, None]] | None:
-    """The Neovim work a well-formed notebook frame asks for, with what it does for the log, None for a malformed one."""
-    match control["type"]:
-        case "set_cells" if isinstance(control.get("filename"), str) and (cells := _cells(control.get("cells"))) is not None:
-            return "take the cells", session.set_cells(control["filename"], cells)
-        case "focus_cell" if isinstance(control.get("id"), str) and (cursor := _cursor(control.get("cursor"))) is not None:
-            return "show the cell", session.focus_cell(control["id"], cursor)
-    log.warning("Dropped a malformed %s frame", control["type"])
-    return None
-
-
 async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves, roots: FileRoots) -> None:
     # `set_text`, `rename` and the others wait for a running `:w`, whose answer arrives on this socket, or for each other
     # in Neovim, so they run beside the relay
@@ -296,15 +224,6 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
         updates.add(update)
         update.add_done_callback(updates.discard)
 
-    # Cell frames change Neovim one after the other in the order they arrived, so a `focus_cell` never overtakes its `set_cells`
-    cell_jobs: asyncio.Queue[tuple[str, Coroutine[None, None, None]]] = asyncio.Queue()
-
-    async def run_cell_jobs() -> None:
-        while True:
-            what, job = await cell_jobs.get()
-            await _guarded(what, job)
-
-    cells = asyncio.create_task(run_cell_jobs())
     try:
         while True:
             message = await websocket.receive()
@@ -327,18 +246,13 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
                 beside_relay(_guarded("take the inserted lines", session.insert_lines(control["text"])))
             elif kind == "renamed" and all(isinstance(control.get(key), str) for key in ("from", "path")):
                 path = control["path"]
-                rename = session.rename(control["from"], path, disk_file(roots, path))
+                rename = session.rename(control["from"], path, disk_file(roots, path), notebook_buffer(roots, path))
                 beside_relay(_guarded("take the renamed file", rename))
             elif kind == "background" and isinstance(control.get("light"), bool):
                 await _guarded("take the theme", session.set_background(control["light"]))
             elif kind == "message" and isinstance(control.get("text"), str):
                 beside_relay(_guarded("show the message", session.show_error(control["text"])))
-            elif kind in _CELL_FRAMES and (job := _cell_job(session, control)) is not None:
-                cell_jobs.put_nowait(job)
     finally:
-        cells.cancel()
-        while not cell_jobs.empty():
-            cell_jobs.get_nowait()[1].close()
         for update in updates:
             update.cancel()
 
@@ -359,7 +273,7 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
             saves.selection if ask_keymap else None,
             saves.switched,
             saves.read_clipboard,
-            saves.notice,
+            saves.run_cell,
             on_leave=saves.leave,
         )
     )
@@ -390,21 +304,20 @@ async def neovim_session(
     except (ValidationError, ValueError):
         await websocket.close(code=_UNSUPPORTED_DATA)
         return
-    cell_mode = opening.cell_mode
-    # A notebook session has no document, its placeholder is wiped by the first cell
-    path = (opening.path or "") if cell_mode else str(opening.path)
+    notebook = notebook_buffer(roots, opening.path) if opening.notebook else None
+    if opening.notebook and notebook is None:
+        await websocket.close(code=_UNSUPPORTED_DATA)
+        return
     session = NeovimSession.spawn(
-        "placeholder.txt" if cell_mode else str(opening.filename),
-        "" if cell_mode else str(opening.content),
+        opening.filename,
+        opening.content,
         base_content=opening.base_content,
         rows=opening.rows,
         cols=opening.cols,
-        cwd=working_directory(roots, path),
-        disk_path=None if cell_mode else disk_file(roots, path),
-        path=_CELL_PLACEHOLDER if cell_mode else path,
-        cell_session=cell_mode,
-        # The buffer's name comes from the validated file, never from the raw path of the browser
-        notebook_path=disk_file(roots, path) if cell_mode else None,
+        cwd=working_directory(roots, opening.path),
+        disk_path=None if opening.notebook else disk_file(roots, opening.path),
+        path=opening.path,
+        notebook=notebook,
     )
     try:
         await _run(websocket, session, roots, ask_keymap=opening.ask_keymap)
