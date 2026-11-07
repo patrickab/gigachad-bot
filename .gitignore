@@ -37,3 +37,4 @@ src/frontend/public/libavoid.wasm
 .omp/*
 !.omp/agents/
 .wayfinder/
+latex/
