@@ -161,7 +161,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       actions: [{ label: `Upload files to ${owner}`, icon: Upload, onClick: () => void context.uploadFiles(scope) }],
       create: {
         label: `New file in ${owner}`, placeholder: "File name",
-        choice: context.canCreateLatex ? { label: "File type", options: [...NEW_FILE_KINDS], initial: "Markdown" } : undefined,
+        choice: context.canCreateLatex ? { label: "File type", options: [...NEW_FILE_KINDS], initial: "Markdown", floating: true } : undefined,
         onSubmit: (name: string, kind?: string) => context.createFile(scope, name, kind === "LaTeX" ? "LaTeX" : "Markdown"),
       },
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),

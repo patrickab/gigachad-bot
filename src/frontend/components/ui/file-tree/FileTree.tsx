@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type ElementType, type ReactNode } 
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 import { cn, errorMessage, toggled } from "@/lib/utils"
 import { ErrorText } from "@/components/ui/ErrorText"
+import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
@@ -17,6 +18,8 @@ interface FileTreeCreateChoice {
   label: string
   options: string[]
   initial: string
+  /** A window opens first instead of an inline select: Tab cycles the options, Enter picks one and moves on to the name. */
+  floating?: boolean
 }
 
 type FileTreeCreateAction =
@@ -270,17 +273,20 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           {item.meta != null && <span className="ml-auto flex shrink-0 gap-1.5 text-[10px] tabular-nums">{item.meta}</span>}
         </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
-        {!item.rename?.editing && <div className={ACTIONS_CLASS}>
-          {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
-            <action.icon className="h-3 w-3" />
-          </button>)}
+        {!item.rename?.editing && <>
+          <div className={ACTIONS_CLASS}>
+            {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
+              <action.icon className="h-3 w-3" />
+            </button>)}
+            {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
+              <Trash2 className="h-3 w-3" />
+            </button>}
+          </div>
+          {/* Creating is the row's main action, so it stays visible at the row end while the rest appears on hover. */}
           {item.create && <button aria-label={item.create.label} onClick={() => { void startCreate(item.id, item.create!) }} className={ACTION_CLASS}>
             <Plus className="h-3 w-3" />
           </button>}
-          {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
-            <Trash2 className="h-3 w-3" />
-          </button>}
-        </div>}
+        </>}
       </div>
       {renameError?.id === item.id && item.rename?.editing && <div style={{ marginLeft: paddingLeft + 20 }}>
         <ErrorText className="px-1 py-0.5">{renameError.message}</ErrorText>
@@ -358,16 +364,18 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
   const tabActive = useTabActive()
   useEscapeLayer(onCancel, tabActive)
   const [choice, setChoice] = useState(action.choice?.initial)
-  const { run, pending: saving, error } = useAsyncAction(async () => {
-    await action.onSubmit(name.trim(), choice)
+  const [picking, setPicking] = useState(Boolean(action.choice?.floating))
+  const nameInput = useRef<HTMLInputElement>(null)
+  const { run, pending: saving, error } = useAsyncAction(async (chosen: string | undefined) => {
+    await action.onSubmit(name.trim(), chosen)
     onDone()
   }, "Could not create this item")
   const submit = () => {
     if (!name.trim() || saving) return
-    void run()
+    void run(choice)
   }
   return <div style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP + 20 }}>
-    <input autoFocus aria-label={action.placeholder} placeholder={action.placeholder} value={name} disabled={saving}
+    <input ref={nameInput} autoFocus aria-label={action.placeholder} placeholder={action.placeholder} value={name} disabled={saving}
       onChange={(event) => setName(event.target.value)}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
@@ -377,7 +385,16 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
       }}
       className="h-6 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
     />
-    {action.choice && choice != null && <div className="flex items-center gap-1 text-[10px] text-ink-faint">
+    {picking && action.choice && choice != null && <ChoiceWindow choice={action.choice} initial={choice}
+      onCancel={onCancel}
+      onConfirm={(chosen) => {
+        setChoice(chosen)
+        setPicking(false)
+        // The window unmounts after this commit, then focus returns to the name.
+        requestAnimationFrame(() => nameInput.current?.focus())
+      }} />}
+    {action.choice?.floating && !picking && <div className="text-[10px] text-ink-faint">{choice}</div>}
+    {action.choice && !action.choice.floating && choice != null && <div className="flex items-center gap-1 text-[10px] text-ink-faint">
       <span>{action.choice.label}</span>
       <StyledSelect variant="inline" ariaLabel={action.choice.label} value={choice} onChange={setChoice}
         options={action.choice.options.map((option) => ({ value: option, label: option }))}
@@ -385,6 +402,38 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
     </div>}
     <ErrorText className="py-1">{error}</ErrorText>
   </div>
+}
+
+function ChoiceWindow({ choice, initial, onConfirm, onCancel }: {
+  choice: FileTreeCreateChoice
+  initial: string
+  onConfirm: (chosen: string) => void
+  onCancel: () => void
+}) {
+  const [selected, setSelected] = useState(initial)
+  // Window-level keys: the name field behind the window may hold focus, so the list cannot rely on having it.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const backwards = event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
+      const forwards = event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)
+      if (event.key !== "Enter" && !backwards && !forwards) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === "Enter") onConfirm(selected)
+      else setSelected(choice.options[(choice.options.indexOf(selected) + (backwards ? -1 : 1) + choice.options.length) % choice.options.length])
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [choice.options, onConfirm, selected])
+  return <FloatingWindow label={choice.label} onClose={onCancel} panelClassName="h-auto w-60 max-w-full rounded-2xl p-2">
+    <div role="listbox" aria-label={choice.label} className="flex flex-col">
+      {choice.options.map((option) => <div key={option} role="option" aria-selected={option === selected}
+        onClick={() => onConfirm(option)}
+        className={cn("cursor-pointer rounded-lg px-3 py-1.5 text-sm text-ink-muted", option === selected && "bg-hover text-ink")}>
+        {option}
+      </div>)}
+    </div>
+  </FloatingWindow>
 }
 
 /** A row's label while it is renamed: Enter saves, leaving saves a changed name, Escape keeps the old one. */
