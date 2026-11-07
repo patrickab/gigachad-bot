@@ -291,6 +291,33 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
 
 
 @requires_nvim
+async def test_set_text_highlights_each_changed_hunk(neovim_home):
+    async def save(path: str, text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn(
+        "notes.md", "".join(f"line {number}\n" for number in range(1, 21)), rows=24, cols=80, cwd=neovim_home
+    )
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
+
+        lines = [f"line {number}" for number in range(1, 21)]
+        lines[2] = "line THREE"
+        lines[14:15] = ["line FIFTEEN", "inserted"]
+        await session.set_text("\n".join(lines) + "\n", "notes.md")
+
+        rows = await session._lua(
+            "local marks = vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_get_namespaces().gigachad_remote_edit, 0, -1, { details = true })"
+            " return vim.tbl_map(function(mark) return { mark[2], mark[4].line_hl_group } end, marks)"
+        )
+        assert rows == [[2, "DiffText"], [14, "DiffText"], [15, "DiffText"]]
+    finally:
+        await session.close()
+        await drain
+
+
+@requires_nvim
 async def test_set_text_merges_into_a_modified_buffer_which_stays_modified(neovim_home):
     saved: asyncio.Queue[str] = asyncio.Queue()
 
