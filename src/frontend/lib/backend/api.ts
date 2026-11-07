@@ -99,7 +99,8 @@ function patch<T>(path: string, body: unknown): Promise<T> {
 }
 
 function del<T>(path: string): Promise<T> {
-  return request<T>(path, { method: "DELETE" })
+  // keepalive: a deletion committed while the page unloads still reaches the backend
+  return request<T>(path, { method: "DELETE", keepalive: true })
 }
 
 function fileForm(file: File | Blob, filename?: string): FormData {

@@ -60,6 +60,18 @@ export function UndoDeleteProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
+  // Leaving the page (reload, close, another browser tab) commits the pending deletion instead of dropping it with the timer.
+  useEffect(() => {
+    const commitPending = () => { if (current.current) commit(current.current) }
+    const onVisibility = () => { if (document.visibilityState === "hidden") commitPending() }
+    window.addEventListener("pagehide", commitPending)
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.removeEventListener("pagehide", commitPending)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [commit])
+
   const undo = () => {
     current.current?.onUndo?.()
     current.current = null

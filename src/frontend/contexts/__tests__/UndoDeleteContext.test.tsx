@@ -94,3 +94,12 @@ it("reverts an optimistic change on undo and on a refused commit, but not on suc
   await act(async () => { vi.advanceTimersByTime(6000) })
   expect(revert).toHaveBeenCalledTimes(2)
 })
+
+it("commits a pending deletion when the page is left before the undo window ends", async () => {
+  vi.useFakeTimers()
+  const run = vi.fn(async () => {})
+  mount(run)
+  fireEvent.click(screen.getByText("Delete first"))
+  await act(async () => { window.dispatchEvent(new Event("pagehide")) })
+  expect(run).toHaveBeenCalledWith("one")
+})
