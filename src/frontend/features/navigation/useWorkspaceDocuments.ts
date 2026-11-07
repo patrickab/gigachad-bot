@@ -186,9 +186,12 @@ export function useWorkspaceDocuments({
     onDocumentsChanged?.()
   }
 
-  const remove = ({ path, name }: ProjectDocument, scope: string) => {
+  /** Delete `document` after the undo window, with the `alsoRemove` documents that hang under it (a PDF's extraction). */
+  const remove = ({ path, name }: ProjectDocument, scope: string, alsoRemove: ProjectDocument[] = []) => {
     schedule(`document:${scope}:${path}`, name, async () => {
-      for (const removed of await removeDocument(scope, path)) announceFileRemoval(removed)
+      for (const target of [path, ...alsoRemove.map((extra) => extra.path)]) {
+        for (const removed of await removeDocument(scope, target)) announceFileRemoval(removed)
+      }
       await refresh()
       onDocumentsChanged?.()
       onCanvasDeleted?.(path)

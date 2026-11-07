@@ -7,6 +7,7 @@ import { TabList } from "@/features/navigation/TabList"
 import { nextTab } from "@/features/navigation/tabs"
 import { TabContext, useTab } from "@/contexts/TabContext"
 import { onFileChange } from "@/lib/backend/fileEvents"
+import { removeDocument } from "@/lib/backend/api"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
 
@@ -612,6 +613,28 @@ describe("Project navigation", () => {
       fireEvent.click(within(view.getByLabelText("Proj contents")).getByText("plan.md"))
       expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/markdown/proj/plan/plan.md", "proj")
     })
+  })
+
+  it("hides a PDF's extracted Markdown and deletes both together", async () => {
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [
+        { path: "PDFs/Paper.pdf", name: "Paper.pdf", mime: "application/pdf" },
+        { path: "project/proj/document/Paper.md", name: "Paper.md", mime: "text/markdown" },
+      ]
+      : [])
+    vi.mocked(removeDocument).mockResolvedValue([])
+    const view = render(<Sidebar appMode="chat" />)
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    await project.findByText("Paper.pdf")
+    expect(project.queryByText("Paper.md")).toBeNull()
+
+    expect(project.queryByRole("button", { name: "Expand Paper.pdf" })).toBeNull()
+
+    fireEvent.click(project.getByRole("button", { name: "Delete Paper.pdf" }))
+    await undo.schedule.mock.lastCall![2]()
+    expect(removeDocument).toHaveBeenCalledWith("proj", "PDFs/Paper.pdf")
+    expect(removeDocument).toHaveBeenCalledWith("proj", "project/proj/document/Paper.md")
   })
 
   it("creates a LaTeX file on disk and a Markdown file in the project, both opening in the workbench", async () => {

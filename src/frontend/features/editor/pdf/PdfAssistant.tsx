@@ -6,12 +6,14 @@ import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
 import { FilePanel } from "@/features/editor/FilePanel"
 import { SelectionBubble } from "@/components/ui/SelectionBubble"
+import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { usePolling } from "@/hooks/usePolling"
 import { useSelectionAction } from "@/hooks/useSelectionAction"
 import { attachReference } from "@/lib/backend/references"
-import { errorMessage, isModKey } from "@/lib/utils"
+import { baseName } from "@/lib/paths"
+import { cn, errorMessage, isModKey } from "@/lib/utils"
 
 /** Poll interval while MinerU extracts the PDF. */
 const EXTRACTION_POLL_MS = 5000
@@ -38,9 +40,14 @@ const SYS_DOCUMENT = (markdown: string) =>
 const SYS_SELECTION = (markdown: string, selection: string, page: number) =>
   `${SYS_DOCUMENT(markdown)}\n\nThe reader selected this passage on page ${page}:\n\n<selection>\n${selection}\n</selection>\n\nAnswer the reader's question about the selection briefly.`
 
-/** Only mounted files and library PDFs carry a MinerU extraction. */
+/** The path MinerU's extraction is read by: a project's stored PDF shares the extraction of its library copy. */
+function extractionPath(path: string): string {
+  return path.startsWith("project/") ? `PDFs/${baseName(path)}` : path
+}
+
+/** Only mounted files, library PDFs and the project's stored PDFs carry a MinerU extraction. */
 function hasExtraction(path: string): boolean {
-  return path.startsWith("/") || path.startsWith("PDFs/")
+  return path.startsWith("/") || path.startsWith("PDFs/") || path.startsWith("project/")
 }
 
 /** MinerU Markdown of the PDF at `path`, polled while extraction runs. Owners key by `path`, so it never changes. */
@@ -51,7 +58,7 @@ function usePdfMarkdown(path: string): PdfMarkdown {
 
   usePolling(async (signal) => {
     try {
-      const attachment = await attachReference(path)
+      const attachment = await attachReference(extractionPath(path))
       if (signal.aborted) return
       setState(attachment.parsedMd ? { status: "ready", markdown: attachment.parsedMd } : { status: "extracting" })
     } catch (error) {
@@ -88,6 +95,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
   const chat = useAssistantChat(model, SYS_DOCUMENT(markdown))
   const { containerRef, selected, clear: clearSelection } = usePdfSelection()
   const [asking, setAsking] = useState<PdfSelection | null>(null)
+  const [showText, setShowText] = useState(false)
   const closeChat = () => onChatOpenChange(false)
 
   return (
@@ -99,8 +107,11 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
         </FilePanel>
       ))}
       {/* No scrollbar between the pages and the open chat, wheel and keys still scroll. Important: the global `* { scrollbar-width }` is unlayered */}
+      {pdfText.status === "ready" && <InTopBar name="pdf"><PdfTextSwitch showText={showText} onChange={setShowText} /></InTopBar>}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
-        {children}
+        {showText && pdfText.status === "ready"
+          ? <pre aria-label="Extracted text" className="h-full overflow-auto whitespace-pre-wrap break-words px-6 pb-6 pt-14 font-mono text-xs text-ink">{pdfText.markdown}</pre>
+          : children}
       </div>
       {selected && (
         <SelectionBubble
@@ -122,6 +133,18 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
       )}
     </div>
   )
+}
+
+/** Switch between the PDF pages and their extracted Markdown, for copying text. */
+function PdfTextSwitch({ showText, onChange }: { showText: boolean; onChange: (showText: boolean) => void }) {
+  return <div role="group" aria-label="Show" className="flex items-center gap-px rounded-md p-0.5">
+    {([[false, "PDF"], [true, "Text"]] as const).map(([value, label]) => (
+      <button key={label} type="button" aria-pressed={showText === value} onClick={() => onChange(value)}
+        className={cn("rounded px-2 py-0.5 text-[10px] font-medium transition-colors", showText === value ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink")}>
+        {label}
+      </button>
+    ))}
+  </div>
 }
 
 interface PdfSelection {

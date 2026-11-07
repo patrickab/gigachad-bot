@@ -125,6 +125,14 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
   const prefix = project ? `project:${scope}` : "shared"
   const docs = (project ? context.documents[scope] ?? [] : context.notes)
     .filter((doc) => !pending(`document:${scope}:${doc.path}`))
+  const files = docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path))
+  const extractions = extractionsOf(files, scope)
+  /** The Markdown of an extracted PDF is its text view in the PDF's top bar, so it has no row of its own. */
+  const hidden = new Set([...extractions.values()].map((extraction) => extraction.path))
+  /** `row`, deleting the PDF's extraction with it. */
+  const withExtraction = (doc: ProjectDocument, row: FileTreeItem<string>, extraction?: ProjectDocument): FileTreeItem<string> => extraction
+    ? { ...row, onDelete: () => remove(doc, scope, [extraction]) }
+    : row
   const chats = project ? projectChats(project, branchMeta) : context.visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
   return [
     {
@@ -167,7 +175,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
       onMoveHere: (path: string) => move(path, scope),
       accepts: [PROJECT_FILE_DRAG_KIND],
-      children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => doc.children ? {
+      children: files.filter((doc) => !hidden.has(doc.path)).map((doc): FileTreeItem<string> => doc.children ? {
         // A promoted LaTeX project: its folder on disk, shown and edited like a mounted folder.
         id: doc.path, label: doc.name, type: "folder",
         onDelete: () => remove(doc, scope),
@@ -175,7 +183,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         onMoveHere: (path) => context.moveToFolder(path, doc.path),
         accepts: [PROJECT_FILE_DRAG_KIND],
         children: rootFileItems(context, doc.children),
-      } : {
+      } : withExtraction(doc, {
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
         draggable: isStoredProjectFile(doc.path), dragKind: PROJECT_FILE_DRAG_KIND,
         onSelect: () => context.selectDocument(doc.path, scope),
@@ -186,9 +194,22 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         rename: isRenamableFile(doc.path)
           ? context.renameOf(`file:${scope}:${doc.path}`, (name) => context.renameFile({ path: doc.path, name: doc.name, scope }, name), true)
           : undefined,
-      }),
+      }, extractions.get(doc.path))),
     }] : []),
   ]
+}
+
+/** Each PDF of `files` with the Markdown MinerU extracted from it, keyed by the PDF's path. That is `<stem>.md` stored in the project, or where opening it moved it on disk. */
+function extractionsOf(files: ProjectDocument[], scope: string): Map<string, ProjectDocument> {
+  const pairs = files.flatMap((pdf) => {
+    if (!pdf.name.toLowerCase().endsWith(".pdf")) return []
+    const stem = pdf.name.slice(0, -4)
+    const stored = `project/${scope}/document/${stem}.md`
+    const moved = `/workbench/markdown/${scope}/${stem}/${stem}.md`
+    const extraction = files.find((doc) => doc.path === stored || doc.path.endsWith(moved))
+    return extraction ? [[pdf.path, extraction] as const] : []
+  })
+  return new Map(pairs)
 }
 
 /** Root chats of `project` from the branch metadata, labelled by their project tab. */
