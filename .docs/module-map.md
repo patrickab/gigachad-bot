@@ -1,4 +1,4 @@
-Generated from 2bfaf7e on 2026-11-01
+Generated from f12a654 on 2026-11-09
 
 # Module map
 
@@ -9,7 +9,6 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Resolve paths below from the repository root unless a section explicitly gives another root. In Python, `backend`, `lib`, and `config` resolve under `src/`; frontend `@/` imports resolve under `src/frontend/`.
 - Distinguish `src/lib/` (Python services/storage/adapters), `src/frontend/lib/` (browser contracts/utilities), and `src/frontend/packages/chat-ui/` (a separately distributed shared package).
 - Read this as a selective ASCII tree: listed leaves are representative real files, not an exhaustive inventory. Omitted siblings are not implied absent.
-- Exclude dependency trees, lockfile contents, build outputs, caches, runtime data, copied browser workers/WASM, and packaged binaries from the module map.
 
 ```text
 .
@@ -27,16 +26,19 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- 0004_canvas_mutation_log.sql
 |       |-- 0005_canvas_shares.sql
 |       |-- 0007_model_reasoning_levels.sql
-|       `-- 0010_memory_topics.sql    Memory topics migration
+|       |-- 0010_memory_topics.sql    Memory topics migration
+|       |-- 0014_change_moved_to.sql  `changes.moved_to` for renames
+|       `-- 0015_change_operation.sql `changes.operation` (`write`, `move`, `delete`)
 |-- src/
 |   |-- config.py                     Env-derived backend settings (imports nothing from lib)
 |   |-- backend/
 |   |   |-- server.py                 FastAPI composition, lifecycle (shutdown work in the lifespan, uvicorn keeps its own signal handling) and shared error mapping
 |   |   |-- http_plumbing.py          Exception-to-HTTP mapping, SSE responses, inline image decoding
 |   |   |-- identity.py               Request identity and host-access capability
-|   |   |-- websocket_origin.py       `is_trusted_origin`, `is_allowed_websocket` (origin plus host-access gate of the terminal, file watch and Jupyter WebSockets) and `require_trusted_request` (trusted `Origin` for changing requests, no cross-site reads)
+|   |   |-- websocket_origin.py       `is_trusted_origin`, `is_allowed_websocket`, `require_trusted_request`: origin and host-access gates of WebSockets and changing requests
 |   |   |-- sync.py                   PostgreSQL notification broker
-|   |   |-- omp_web_gate.py           Identity-checking frame proxy
+|   |   |-- omp_web_gate.py           Identity-checking omp-web frame proxy
+|   |   |-- learnharness_gate.py      Identity-checking LearnHarness frame proxy, refuses its credential routes
 |   |   |-- reverse_proxy.py          Streaming proxy plumbing shared by the omp-web and LearnHarness gates and the Jupyter proxy route
 |   |   |-- install_deps.py           gigachad-install entry point
 |   |   |-- sidecar.py                Desktop (Tauri) entry: prints `{"event":"ready","port":…}` once FastAPI listens
@@ -59,12 +61,12 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- models.py             Models, providers, usage, defaults and prompts
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
-|   |       |-- neovim.py             Terminal WebSocket, document-save bridge, selection/switched/open_failed/background frames, `open_file`/`insert_lines`/`set_content`/`renamed` input (`renamed` resolves only the target its document's kind needs: `notebook_buffer` or `disk_file`), notebook text (`notebook` open flag validated by `notebook_buffer`, 1003 when invalid, `run_cell` out), every notification through one ordered queue
+|   |       |-- neovim.py             Neovim terminal WebSocket: typed control frames in, browser notifications out through one ordered queue, notebook text validation
 |   |       |-- terminal.py           `WS /api/terminal/session`: login shell on a PTY, `open`/`resize`/`escape` in, `leave`/`exit` out
 |   |       |-- jupyter.py            Kernelspecs, `POST`/`DELETE /api/jupyter/kernel`, HTTP and WebSocket proxy `/api/jupyter/server/` (trusted-request and host-access gates)
 |   |       |-- file_watch.py         `WS /api/files/watch`: replaceable watch set in, `changed`/`refused` frames out
 |   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, promote a `.tex` to a folder entry, pasted images, chat-key session links
-|   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files
+|   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files, SyncTeX search and slide gaps, template sets and primitive previews
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- omp.py                omp-web API boundary
@@ -132,18 +134,20 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
-|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, several buffers per session, `base` tracking, merge on set_text and `:w`, one typed backing per document (`_PrivateCopy` or a notebook text's virtual name `_NotebookText`, named beside the notebook, never read, written or deleted, kept on rename), `is_notebook_text`, `rename`, `on_run_cell`
+|   |   |-- neovim_session.py         Neovim PTY/process lifecycle, buffers per session, `base` tracking and merges, one typed backing per document (`_PrivateCopy`, `_NotebookText`)
 |   |   |-- pty_process.py            `PtyProcess` (child on a PTY, output queue, resize, foreground check, hangup on close) and the PTY helpers Neovim shares
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
-|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client, setup from one named options table, per-buffer save/yank/selection/switch/hunk-apply Lua bridge, notebook text buffer (`BufReadCmd` from the `base` request, `FileWriteCmd`/`FileAppendCmd` refused, no swap or undo file, `<C-CR>`/`<S-CR>` save then `run_cell`)
-|   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs and venv specs, kernel per resolved path, proxy allowlist and session check, idle cull, `move_kernel`/`shutdown_kernels_under`
+|   |   |-- neovim_rpc.py             Neovim msgpack-RPC client and Lua bridge (saves, yanks, selections, buffer switches, hunk apply, notebook text buffer)
+|   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs, kernel per path, proxy allowlist, `move_kernel`/`shutdown_kernels_under`
 |   |   |-- process_owner.py          Host children never outlive the backend: `owned_environment` mark, `stop_owned` at shutdown, `reap_orphans` at startup
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
 |   |   |-- latex_references.py       `rewrite_references`: repoint `\input`, `\include`, `\includegraphics`, `\bibliography` and `\addbibresource` references of a LaTeX project after a rename
+|   |   |-- latex_templates.py        `TemplateSet`s of `templates/latex/`: presentation detection (`presentation_theme`), primitives, document population, image macro
+|   |   |-- synctex.py                `synctex edit`/`view` wrappers: inverse and forward search, beamer frame refinement, `slide_end` for slide insertion
+|   |   |-- tex_source.py             Plain-text TeX helpers: comment stripping, beamer frame bounds and new-frame insertion point, image placeholder fill
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner
-|   |   |-- workbench/                Workbench kinds, folders, omp prompt mirror, rename folder moves
-|   |   |   `-- omp/                  Committed prompts: `latex.md`, `markdown.md`, `pdf.md`, `config.yml` (source of truth)
+|   |   |-- workbench/                Workbench kinds, folders, omp prompt and template-set mirror, rename folder moves
 |   |   `-- prompts/                  Internal, non-user-facing prompts
 |   |       `-- non_user_prompts.py
 |   |-- c4/                           Separate stateless TypeScript LikeC4 service
@@ -164,6 +168,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- vitest.config.ts          Browser unit/component test configuration
 |       |-- app/
 |       |   |-- layout.tsx            Root providers, font and styles
+|       |   |-- present/page.tsx      Presenter/audience popup route of a built LaTeX deck (`features/latex/present/`)
 |       |   |-- page.tsx              Client shell entry
 |       |   |-- globals.css           Shell theme and application styles
 |       |   `-- _components/
@@ -188,8 +193,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- useDebouncedSave.ts Quiet-time autosave plus unmount and forced flush
 |       |   |   |-- FileViewer.tsx    File and document picker on `FloatingPicker`: fuzzy search, folder drill-down, file preview window
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
-|       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard, `notebook` documents (Shift+Enter/Ctrl+Enter as CSI-u, `run_cell` to `onRunCell`), `NeovimStopped` (the one stopped page: message and a restart or start button)
-|       |   |   |-- ShellTerminal.tsx `ShellTerminals`: one floating login shell per tab (host access only), `t` opens the active tab's, Esc at the prompt, a double Esc or a click beside it hides it, `exit` or closing the tab ends it
+|       |   |   |-- NeovimEditor.tsx  `useNeovimTerminal`: terminal hook of every Neovim surface, browser clipboard, `NeovimStopped`
+|       |   |   |-- ShellTerminal.tsx `ShellTerminals`: one floating login shell per tab (host access only)
 |       |   |   |-- terminalTheme.ts  xterm colors and fonts from the app theme, shared by Neovim and the shell
 |       |   |   |-- clipboardPaste.ts Browser clipboard read for a paste, and the screenshot store (`imgs/`, `announceFileChange`) behind it
 |       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (local MinerU-grounded chat, or the owner's `renderChat`)
@@ -223,26 +228,29 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Neovim, quoting, status slot and editor notes on `WorkbenchFrame`, kinds supply `renderPane`
-|       |   |   |-- WorkbenchFrame.tsx `WorkbenchFrame`: the one layout of `Workbench` and `NotebookWorkbench` (editor page, rendered pane, chat drawer, view switch and status in `workbenchStatus`, `editor: null` drops the editor pane), `EditorNote`
-|       |   |   |-- WorkbenchChat.tsx `useWorkbenchChat` and `WorkbenchChat`: the chat drawer (`OmpChatPanel`, 360 px), quotes into its draft, reasoning and model pickers in the `workbenchAgent` slot, shared by `Workbench` and `NotebookWorkbench`
+|       |   |   |-- WorkbenchFrame.tsx `WorkbenchFrame`: the one layout of `Workbench` and `NotebookWorkbench`, `EditorNote`
+|       |   |   |-- WorkbenchChat.tsx `useWorkbenchChat` and `WorkbenchChat`: the omp chat drawer shared by `Workbench` and `NotebookWorkbench`
 |       |   |   |-- pages.ts           `EDITOR_PAGE`/`PREVIEW_PAGE`: the panel classes of the Neovim panel and the preview page, shared with `NotebookWorkbench` and the notebook's markdown cells
-|       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and top-bar switch, shared page box (`usePaneLayout`, `PANE_TOP_PX` also pads the notebook under the top bar)
+|       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and switch, shared page box (`usePaneLayout`, `PANE_TOP_PX`)
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
 |       |   |   |-- useWorkbenchEditor.ts One Neovim session over several buffers: `openFile`, saves per path, renames
-|       |   |   |-- NotebookWorkbench.tsx A notebook tab on `WorkbenchFrame`: Neovim on the notebook's percent text left (`notebook` session over its `NotebookTextStore`, one per session key, "Start Neovim" after `:q`), the notebook right, the chat drawer linked to the notebook path (new sessions in its mount root, else its folder)
+|       |   |   |-- NotebookWorkbench.tsx A notebook tab on `WorkbenchFrame`: Neovim on the notebook text, the notebook, the chat drawer
 |       |   |   `-- MarkdownWorkbench.tsx Markdown kind
 |       |   |-- notebook/             Jupyter notebook kind, the only importer of `@datalayer/*`, `@jupyterlab/*`, `@jupyter/*` and `@lumino/*`
-|       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`, `ssr: false`, keyed by tab and `useEditorPath` generation) and the library notebook (runs under the top bar, restart revives a dead kernel with a new one)
-|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Run/kernel buttons and kernelspec picker rendered centered into the top bar's `center` slot, kernel start by path, `ServiceManager` through the backend proxy
+|       |   |   |-- NotebookDocument.tsx, NotebookEditor.tsx Public entry (`next/dynamic`) and the library notebook editor
+|       |   |   |-- NotebookToolbar.tsx, useNotebookKernel.ts, serviceManager.ts Run/kernel buttons and kernelspec picker in the top bar's `center` slot, kernel start by path, `ServiceManager` through the backend proxy
 |       |   |   |-- useNotebookFile.ts, notebookSync.ts Load, debounced save and follow over `useRootFileDocument`, pure nbformat serialization and cell diff (merge theirs)
 |       |   |   |-- useKernelShutdown.ts Kernel shutdown when a notebook's last tab closes
-|       |   |   |-- syntaxHighlight.ts Neovim-scheme highlight style and `self`/decorator marks, passed through the fork's `editorExtensions` prop
-|       |   |   |-- notebookText.ts   Percent text (`# %%`) of a notebook and back: `notebookToText`, `modelText` (from the cells' sources, no outputs), `parseNotebookText`, `cellAtLine`, `applyNotebookText` (cells matched to the model's, outputs kept)
-|       |   |   |-- notebookTextStore.ts `NotebookTextStore`: the bound model's text for Neovim (state, debounced follow, `save` that rejects a stale text, `runAt` on the saved text)
+|       |   |   |-- syntaxHighlight.ts Highlight style and `self`/decorator marks, passed through the fork's `editorExtensions` prop
+|       |   |   |-- notebookText.ts   Percent text (`# %%`) of a notebook and back, text applied to the model with outputs kept
+|       |   |   |-- notebookTextStore.ts `NotebookTextStore`: the bound model's text for Neovim, stale-save check, `runAt`
 |       |   |   `-- notebook-theme.css, markdownRenderer.tsx, empty.css App theme through `--jp-*` variables, Markdown cells through `LaTeXMarkdown` on the split view's preview page, stub for an unused library stylesheet
-|       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus
+|       |   |-- latex/                LaTeX kind: LatexWorkbench, LatexPdfPane, LatexBuildStatus, DownloadPdfButton
 |       |   |   |-- useTexProject.ts, LatexRootPicker.tsx Project of the shown file (folder, root, candidates), root choice
-|       |   |   `-- useLatexBuild.ts  Root build queue, rebuilds on any change in the folder
+|       |   |   |-- useLatexBuild.ts  Root build queue, rebuilds on any change in the folder
+|       |   |   |-- useSynctex.ts     Inverse search (PDF double-click), forward search (`<leader>v`), slide-gap insertion
+|       |   |   |-- AddSlide.tsx, useLatexTemplates.ts Primitive picker of a presentation root, template set per root
+|       |   |   `-- present/          PresentButton, presenter and audience windows over one `BroadcastChannel`, slide notes from PDF annotations
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
@@ -272,7 +280,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), preview in a floating window clear of the list
 |       |   |   |-- MenuPopover.tsx   Trigger plus popover menu, closed by outside press or Escape
 |       |   |   |-- PillTabs.tsx, BoardColumn.tsx, Field.tsx
-|       |   |   |-- IconButton.tsx, StatusDot.tsx Quiet square icon button with focus ring, status tone dot (`StatusTone`)
+|       |   |   |-- IconButton.tsx, StatusDot.tsx Icon button, status tone dot (`StatusTone`)
 |       |   |   `-- file-tree/        Shared file tree component and hook
 |       |   `-- content/              Markdown, code, PDF and plot rendering
 |       |       |-- LaTeXMarkdown.tsx Markdown renderer shell
@@ -306,6 +314,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- canvasDocument.ts
 |       |   |   `-- edgeRouting.ts
 |       |   |-- paths.ts              File-kind and path helpers (`isInside`, `relativeIn`, `relativeTo`)
+|       |   |-- fuzzy.ts              `fuzzyScore` for picker search
 |       |   |-- utils.ts              Small shared helpers, `isRecord` (plain-object check before reading parsed JSON)
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
@@ -320,10 +329,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               |   `-- palette.css   Canonical role palette
 |               |-- pack.mjs          Build/pack/sync tooling
 |               `-- package.json      Package-local dependencies and distribution contract
-|-- prompts/                          User-selectable seed prompts
-|   |-- _order                        Prompt ordering
-|   |-- tutor.md                      Representative user prompt
-|   `-- _blocks/                      Reusable prompt fragments
+|-- templates/                        Shipped sources read through `config.TEMPLATES` (bundled in frozen builds)
+|   |-- prompts/                      User-selectable seed prompts (`_order`, `_blocks/` fragments, e.g. `tutor.md`)
+|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md` and `config.yml` (source of truth)
+|   `-- latex/                        LaTeX template sets, rules in `templates/latex/AGENTS.md`
+|       |-- render.py                 Primitives -> `example.tex`/`example.pdf` -> preview PNGs
+|       |-- presentation/             Beamer set: theme `.sty`, `skeleton.tex`, `STYLE.md`, `primitives/<group>/`, generated example and previews
+|       `-- letter/                   KOMA-Script letter document set
 |-- tests/                            Python route/service/store/security regressions
 |   |-- conftest.py                    Shared fixtures, Postgres store helpers, `route_client`
 |   |-- fakes.py                       Shared in-memory stores, `RecordingScope`, sandbox and LLM client fakes
@@ -349,8 +361,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- factory.yaml                      Factory hooks, test gate and preview configuration
 `-- deploy/                           Production units and service/ingress helpers
     |-- gigachad-bot.service
-    |-- gigachad-bot-omp-web-gate.service
+    |-- gigachad-bot-omp.service, gigachad-bot-omp-web.service, gigachad-bot-omp-web-host.service, gigachad-bot-omp-web-gate.service
+    |-- gigachad-bot-learnharness*.service/.timer, gigachad-bot-litellm-proxy.service  Learn mode units, see `.docs/integration-learnharness.md`
     |-- gigachad-bot-factory.service
+    |-- run-production-*.sh           Production runners of omp, omp-web and LearnHarness
     |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile)
     |-- install-systemd-service.sh
     |-- load-env.sh                   Literal runtime configuration loader
@@ -409,14 +423,15 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Mount browsing or filesystem access policy | `src/lib/file_roots.py`, `disk_files.py`, `host_access.py`, `file_walk.py`, `src/backend/routes/file_roots.py` | `features/navigation/FileMountPicker.tsx`, `components/ui/file-tree/`; `tests/test_file_roots.py`, `tests/test_disk_files.py` |
 | Git diffs, review drafts or worktree switching | `src/lib/git_diff.py`, `git_worktree.py`; `src/frontend/features/editor/diff/`, `features/navigation/useWorktrees.tsx` | `src/backend/routes/file_git.py`; `tests/test_git_diff.py`, `tests/test_git_worktree.py`, diff `__tests__/` |
 | Neovim editing, terminal save bridge or agent-edit merge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `text_merge.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py` (notebook text too), `tests/test_text_merge.py`; filesystem/identity policy stays with its existing owners |
-| Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `src/lib/workbench/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, buffer routing in `features/navigation/tabs.ts`, rename cascade in `project_rename.py`, `lib/backend/fileEvents.ts`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
+| Workbench layout, sync, routing or a new file kind | `src/frontend/features/workbench/`, a kind wrapper (`MarkdownWorkbench.tsx`, `features/latex/`), `lib/domain/workbench.ts`; backend `src/lib/workbench/`, `routes/workbench.py` | Kind prompt in `templates/omp/`, routing in `TabContent.tsx` / `useWorkspaceDocuments.ts`, buffer routing in `features/navigation/tabs.ts`, rename cascade in `project_rename.py`, `lib/backend/fileEvents.ts`; `tests/test_workbench.py`, `tests/test_project_rename.py`, workbench `__tests__/` |
 | LaTeX build, tex projects or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `file_walk.py` (build output), `routes/workbench.py` (promote, images), `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
+| SyncTeX, presentation templates, slides or present mode | `src/lib/synctex.py`, `tex_source.py`, `latex_templates.py`, `templates/latex/`, `features/latex/useSynctex.ts`, `AddSlide.tsx`, `features/latex/present/` | `templates/latex/AGENTS.md` (re-render after every change), `components/content/pdf/pdfText.ts`, `routes/workbench.py` (create from a set, image references), `neovim_rpc.py` (slide/image insertion); `tests/test_synctex.py`, `tests/test_tex_source.py`, `tests/test_latex_templates.py`, present `__tests__/` |
 | Jupyter notebooks (editor, kernels, proxy, file sync) | `src/lib/jupyter.py`, `src/backend/routes/jupyter.py`, `src/frontend/features/notebook/` | `src/backend/reverse_proxy.py`, `websocket_origin.py` (`require_trusted_request`), rename/delete hooks in `routes/documents.py`, `lib/domain/jupyter.ts`, `hooks/useRootFileDocument.ts`, `lib/backend/fileEvents.ts` (`announceFileClosed`), `next.config.mjs`, `AGENTS.md` "Jupyter notebooks"; Neovim on the notebook: `features/workbench/NotebookWorkbench.tsx`, `WorkbenchFrame.tsx`, `features/notebook/notebookText.ts`, `notebookTextStore.ts`, `NeovimEditor.tsx`, `routes/neovim.py`, `tests/test_neovim.py`; `tests/test_jupyter.py`, notebook and workbench `__tests__/` |
 | File chat sidebar (omp sessions per file or LaTeX project folder) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `fileLead.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
 | Learn mode | `src/lib/learnharness.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
-| Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
+| Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or OMP model gateway | `src/lib/provider_usage.py`, `omp_source.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `run-omp.sh`; `tests/test_provider_usage.py`, `tests/test_omp_source.py` |
 | OMP sessions, embed composer or shared protocol | `src/lib/omp_web.py`, `src/backend/routes/omp.py`, `src/frontend/features/omp/` | `packages/chat-ui/src/protocol.ts`, `AGENTS.md` integration rules; `tests/test_omp_web.py`, omp `__tests__/` |
 | Factory tasks, review submission or preview UI | `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/frontend/features/editor/diff/review.ts`, `app/_components/deepLink.ts`, `factory.yaml`; `tests/test_factory.py`, factory/diff `__tests__/` |
@@ -431,10 +446,9 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 - Use `tests/` for Python route/service/store and access-policy coverage. `tests/conftest.py` and `pyproject.toml` own fixture/test setup: Postgres fixtures (`database_url`, `postgres_pool`, `clean_database`, `data_store`, `asset_store`) and the `route_client` app builder live only in `conftest.py`, in-memory fakes in `tests/fakes.py`. PostgreSQL integration behavior is represented by `test_postgres_mode_end_to_end.py` and store conformance tests.
 - Use colocated `src/frontend/**/__tests__/` for browser logic/components, including shared package tests. Configuration lives at `src/frontend/vitest.config.ts` and `vitest.setup.ts`.
 - Use `src/c4/operations.test.ts` for LikeC4 source-edit/layout regressions; this service has its own `package.json`, separate from the frontend package.
-- Use `factory.yaml` to locate the repository-wide factory gate and preview process configuration, not to infer factory engine internals. Keep generated factory output and runtime worktrees out of source ownership documentation.
+- Use `factory.yaml` to locate the repository-wide factory gate and preview process configuration, not to infer factory engine internals.
 
 ## Refresh evidence and scope
 
-- Refresh with Repomix 1.18.0 compressed, parsable XML, default ignore filtering and security scanning enabled. The inventory contains 791 files (about 1.1M tokens) across backend routes/services, browser features/shared layers/package, LikeC4, both overlays, schemas, launchers, deployment, prompts, maintained docs, and Python/browser/service regressions. The 2026-11-01 refresh checked coverage against the pack and original source for the workbench, LaTeX, Neovim merge and learn-mode entries. Other sections come from the commits since `9f773d5` that updated these docs themselves and were not re-verified line by line.
-- Exclude only these three generated context docs from documentation inputs. Retain maintained guidance through the [repository documentation index](../AGENTS.md#documentation). Exclude dependencies, lockfile bodies, public assets, fonts, images, caches and Tauri build output. The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.
-- Treat compressed declarations as navigation evidence, not proof of behavior. Check original implementations for persistence authority, revision conflicts, access precedence, capability flags, integration defaults/errors, environment loading, and sandbox checkpoints. External engine/fork internals and deployed service behavior are outside this source refresh.
+- The 2026-11-09 refresh checked every referenced path against the tracked tree and source for the moved `templates/` sources, the LaTeX template/SyncTeX/present modules, the PDF Text view and deferred-delete unload commit. Other sections come from the commits since `2bfaf7e` that updated these docs themselves and were not re-verified line by line. External engine/fork internals and deployed service behavior are outside this refresh.
+- The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.
