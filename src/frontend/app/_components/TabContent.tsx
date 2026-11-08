@@ -112,7 +112,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       <Sidebar
         onFileSelect={(path, scope) => onOpenItem({ kind: opensWorkbench && opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: scope, rootFile: true })}
         onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
-        onRootsChanged={filePicker.refreshFileList}
+        onRootsChanged={filePicker.refreshRoots}
         onDocumentsChanged={docs.refreshDocuments}
         {...canvas.sidebarProps}
         onProjectSelect={onOpenProject}
@@ -181,11 +181,11 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
       {isActive && filePicker.filePickerOpen && filePicker.rootFiles.enabled && (
         <FileViewer
-          files={filePicker.rootFiles.files.map((f) => f.path)}
+          files={(filePicker.rootFiles.files ?? []).map((f) => f.path)}
           onSelect={filePicker.handleFileSelect}
           onClose={() => filePicker.setFilePickerOpen(false)}
           placeholder="Search files…"
-          emptyLabel="No files"
+          emptyLabel={filePicker.rootFiles.files ? "No files" : "Loading…"}
         />
       )}
       {isActive && docs.documentOpen && (

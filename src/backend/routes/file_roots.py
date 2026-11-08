@@ -24,8 +24,11 @@ from lib.host_access import list_directories
 router = APIRouter(prefix="/api/fileroots", tags=["fileroots"])
 
 
-class RootFileListResponse(BaseModel):
+class RootsEnabledResponse(BaseModel):
     enabled: bool
+
+
+class RootFileListResponse(RootsEnabledResponse):
     files: list[RootFile]
 
 
@@ -60,6 +63,12 @@ class DirectoryListing(BaseModel):
 @router.get("/files", response_model=RootFileListResponse)
 def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListResponse:
     return RootFileListResponse(enabled=roots.enabled, files=roots.list_files())
+
+
+@router.get("/enabled", response_model=RootsEnabledResponse)
+def roots_enabled(roots: FileRoots = Depends(get_file_roots)) -> RootsEnabledResponse:
+    """Whether any root is mounted, without walking it: the file list loads when the picker opens."""
+    return RootsEnabledResponse(enabled=roots.enabled)
 
 
 @router.get("/tree", response_model=FileTreeResponse)

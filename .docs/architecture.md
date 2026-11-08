@@ -57,6 +57,7 @@ Every long-lived process the backend starts ends with it, also when the backend 
 - Abort timed-out or disposed requests and ignore obsolete responses. Do not add automatic retries to these startup reads.
 - Keep streams, uploads, writes, and explicit post-mutation refreshes unchanged. OMP retains focus and interval polling through the bounded read, only for host-access logins.
 - `ProjectProvider` keeps the project list's identity when a refresh returns it unchanged, so startup refreshes (change-feed replay, first branch metadata) do not re-run reads keyed on it, such as the sidebar's per-project document lists.
+- Startup reads only what the first view needs. Each chat tab's mounted-file picker reads `GET /api/fileroots/enabled` (no walk) at startup and lists every root's files (`/fileroots/files`) only when it opens: walking the roots in the startup burst competes with the sidebar tree and other reads for the backend's CPU.
 
 ## Identity and filesystem policy
 

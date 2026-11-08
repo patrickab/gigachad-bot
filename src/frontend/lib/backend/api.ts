@@ -281,6 +281,11 @@ export async function listRootFiles(signal?: AbortSignal): Promise<{ enabled: bo
   return request("/fileroots/files", { signal })
 }
 
+/** Whether any file root is mounted, without listing its files. */
+export async function fileRootsEnabled(signal?: AbortSignal): Promise<{ enabled: boolean }> {
+  return request("/fileroots/enabled", { signal })
+}
+
 type RootTree = { enabled: boolean; tree: FileTreeNode[] }
 
 /** Every mount's tree, a mount listed with one of its `worktrees` shows that worktree instead. */

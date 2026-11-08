@@ -20,6 +20,7 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
     impls.attachReference = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
   listRootFiles: (...a: unknown[]) => impls.listRootFiles(...a),
+  fileRootsEnabled: async () => ({ enabled: false }),
 }))
 
 vi.mock("@/lib/backend/references", () => ({
