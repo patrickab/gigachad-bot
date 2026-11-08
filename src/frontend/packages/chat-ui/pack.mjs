@@ -30,10 +30,11 @@ const tsc = createRequire(join(packageDir, "pack.mjs")).resolve("typescript/bin/
 const staging = mkdtempSync(join(tmpdir(), "gigachad-chat-ui-"))
 try {
   execFileSync(process.execPath, [tsc, "-p", join(packageDir, "tsconfig.build.json"), "--outDir", join(staging, "dist")], { stdio: "inherit" })
-  // tsc rewrites `./x.tsx` to `./x.js` in the emitted JS but not in the declarations, which a consumer could not resolve.
-  for (const file of readdirSync(join(staging, "dist")).filter((name) => name.endsWith(".d.ts"))) {
+  // tsc rewrites `from "./x.tsx"` to `./x.js` in the emitted JS, but neither in the declarations nor in a dynamic `import("./x.ts")`,
+  // which a consumer could not resolve.
+  for (const file of readdirSync(join(staging, "dist")).filter((name) => name.endsWith(".js") || name.endsWith(".d.ts"))) {
     const path = join(staging, "dist", file)
-    writeFileSync(path, readFileSync(path, "utf8").replace(/(from "\.\/[^"]+)\.tsx?"/g, '$1.js"'))
+    writeFileSync(path, readFileSync(path, "utf8").replace(/((?:from |import\()"\.\/[^"]+)\.tsx?"/g, '$1.js"'))
   }
   // Stylesheets ship as-is, `@gigachad/chat-ui/<name>.css`. The shell imports the same files from src/.
   for (const stylesheet of readdirSync(join(packageDir, "src")).filter((name) => name.endsWith(".css"))) {
