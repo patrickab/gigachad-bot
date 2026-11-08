@@ -98,7 +98,7 @@ describe("ArchitectureWindow", () => {
   afterEach(() => { vi.useRealTimers() })
 
   it("opens on the first system and moves through its tree", async () => {
-    const { button, createSystem, getByLabelText, findByRole, getByTestId } = await open()
+    const { button, createSystem, getByLabelText, getByRole, findByRole, getByTestId } = await open()
     api.deleteArchitectureSources.mockResolvedValue(workspace)
     const path = () => getByTestId("path").textContent
 
@@ -132,7 +132,7 @@ describe("ArchitectureWindow", () => {
     act(() => { button("Text").click() })
     expect(getByTestId("text-editor").textContent).toBe("graph/proj/backend/backend.c4")
     vi.useFakeTimers()
-    act(() => { getByLabelText("Delete Backend").click() })
+    act(() => { getByRole("button", { name: "Delete Backend" }).click() })
     expect(api.deleteArchitectureSources).not.toHaveBeenCalled()
     expect(button("Undo")).toBeTruthy()
     // The system and its modules leave the tree at once.

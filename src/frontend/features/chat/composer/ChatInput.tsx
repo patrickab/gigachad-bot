@@ -9,7 +9,8 @@ import type { Attachment } from "@/lib/domain/types"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, InactiveAttachments, type ContextAttachment } from "./AttachmentChip"
 import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
-import { AttachMenu, ICON_BUTTON, SendButton, ToolsMenu } from "./ComposerControls"
+import { COMPOSER_ICON_BUTTON } from "@/components/ui/Composer"
+import { AttachMenu, SendButton, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
 import { useDraftAttachments } from "./useDraftAttachments"
 
@@ -184,7 +185,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>
       )}
 
-      <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
+      <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
           {picker ? (
             <CompletionMenu
               label={picker.label}
@@ -230,7 +231,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <button aria-label={isListening ? "Stop listening" : "Start listening"}
                 onClick={toggleListening}
                 disabled={disabled}
-                className={cn(ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
+                className={cn(COMPOSER_ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
               >
                 <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>

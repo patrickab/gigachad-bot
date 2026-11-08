@@ -42,7 +42,7 @@ function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open:
   )
 }
 
-/** Track sits one level below the panel (paper under surface-elevated) in both themes. */
+/** Off: a recessed track (paper under surface-elevated). On: a filled ink track with a paper knob, readable in both themes. */
 function Switch({ label, checked, onToggle }: { label: string; checked: boolean; onToggle: () => void }) {
   return (
     <button
@@ -51,12 +51,18 @@ function Switch({ label, checked, onToggle }: { label: string; checked: boolean;
       aria-label={label}
       aria-checked={checked}
       onClick={onToggle}
-      className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", checked ? "border-divider-strong" : "border-divider")}
+      className={cn("relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200 ease-out focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted motion-reduce:transition-none",
+        checked ? "border-ink-muted bg-ink-muted" : "border-divider bg-paper shadow-[var(--inner-highlight)]")}
     >
-      <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", checked ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
+      <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-transform duration-200 ease-out motion-reduce:transition-none",
+        checked ? "translate-x-4 bg-paper" : "translate-x-0 bg-ink-faint")} />
     </button>
   )
 }
+
+const ROW_CLASS = "flex h-7 items-center justify-between"
+const ROW_LABEL_CLASS = "flex items-center gap-2 text-xs font-medium text-ink-subtle"
+const SECTION_CLASS = "border-t border-divider/50 pt-2"
 
 export function SettingsMenu({
   prompts,
@@ -87,27 +93,26 @@ export function SettingsMenu({
       <button aria-label="Settings"
         onClick={toggle}
         className={cn(
-          "w-full flex items-center justify-start gap-3 p-2 rounded-lg transition-colors text-ink-muted hover:bg-surface-elevated/60 hover:text-ink",
+          "flex h-8 w-full items-center justify-start gap-2 rounded-lg px-2 text-ink-subtle transition-colors hover:bg-surface-elevated/60 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
           open && "bg-surface-elevated/60 text-ink",
         )}
       >
-        <Settings className="h-4 w-4 shrink-0" />
-        <span className="flex-1 text-left text-sm font-medium truncate">Settings</span>
-        <ChevronUp className={cn("h-3.5 w-3.5 text-ink-faint transition-transform", open && "rotate-180")} />
+        <Settings className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1 truncate text-left text-xs font-medium">Settings</span>
+        <ChevronUp className={cn("h-3 w-3 text-ink-faint transition-transform", open && "rotate-180")} />
       </button>
     )}>
       {(open, close) => <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 4, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute inset-x-1 bottom-full mb-1 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-elevated p-3 shadow-[var(--shadow-md)] flex flex-col gap-4"
+            // MenuPopover animates the entrance, framer-motion only the exit.
+            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+            className="absolute inset-x-1 bottom-full mb-1 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-elevated px-3 py-2 shadow-[var(--shadow-md)] flex flex-col gap-2"
           >
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+            <div>
+              <div className={ROW_CLASS}>
+                <div className={ROW_LABEL_CLASS}>
                   <BookOpen className="h-3.5 w-3.5" />
                   System Prompt
                   <ChevronToggle ariaLabel="System Prompt" open={promptOpen} onToggle={() => setPromptOpen((o) => !o)} />
@@ -119,7 +124,7 @@ export function SettingsMenu({
                 )}
               </div>
               {promptOpen && (
-                <div role="listbox" aria-label="System Prompt" className="mt-2 flex flex-col gap-0.5">
+                <div role="listbox" aria-label="System Prompt" className="mt-1 mb-1 flex flex-col gap-0.5">
                   {Object.keys(prompts).map((name) => (
                     <button
                       key={name}
@@ -141,14 +146,14 @@ export function SettingsMenu({
             </div>
 
             {researchEnabled && (
-              <div className="space-y-1.5 pt-2 border-t border-divider/50">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+              <div className={SECTION_CLASS}>
+                <div className={cn(ROW_CLASS, "justify-start", ROW_LABEL_CLASS)}>
                   <Telescope className="h-3.5 w-3.5" />
                   Deep Research
                   <ChevronToggle ariaLabel="Deep Research" open={researchOpen} onToggle={() => setResearchOpen((o) => !o)} />
                 </div>
                 {researchOpen && (
-                  <div className="space-y-3 pt-3">
+                  <div className="space-y-3 pt-2 pb-1">
                     <ParamSlider
                       label="Depth"
                       value={config.researchDepth}
@@ -219,37 +224,36 @@ export function SettingsMenu({
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-2 border-t border-divider/50">
-              <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
-                <ImageDown className="h-3.5 w-3.5" />
-                Downscale images
+            <div className={cn(SECTION_CLASS, "flex flex-col")}>
+              <div className={ROW_CLASS}>
+                <div className={ROW_LABEL_CLASS}>
+                  <ImageDown className="h-3.5 w-3.5" />
+                  Downscale images
+                </div>
+                <Switch label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
               </div>
-              <Switch label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
+
+              {neovim.available && (
+                <div className={ROW_CLASS}>
+                  <div className={ROW_LABEL_CLASS}>
+                    <SquareTerminal className="h-3.5 w-3.5" />
+                    Neovim editor
+                  </div>
+                  <Switch label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
+                </div>
+              )}
             </div>
 
-            {neovim.available && (
-              <div className="flex items-center justify-between pt-2 border-t border-divider/50">
-                <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
-                  <SquareTerminal className="h-3.5 w-3.5" />
-                  Neovim editor
-                </div>
-                <Switch label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
-              </div>
-            )}
-
             {hostAccess && (
-              <div className="flex items-center justify-between pt-2 border-t border-divider/50">
-                <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
-                  <Rocket className="h-3.5 w-3.5" />
-                  Redeploy
-                </div>
+              <div className={SECTION_CLASS}>
                 <button
                   type="button"
                   onClick={() => void redeploy.run()}
                   disabled={redeploy.pending || redeployStarted}
-                  className="rounded px-2 py-1 text-xs text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
+                  className={cn(ROW_CLASS, ROW_LABEL_CLASS, "-mx-2 w-[calc(100%+1rem)] justify-start rounded-md px-2 transition-colors hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-ink-subtle")}
                 >
-                  {redeploy.pending ? "Starting…" : redeployStarted ? "Started" : "Redeploy"}
+                  <Rocket className="h-3.5 w-3.5" />
+                  {redeploy.pending ? "Starting redeploy…" : redeployStarted ? "Redeploy started" : "Redeploy"}
                 </button>
               </div>
             )}

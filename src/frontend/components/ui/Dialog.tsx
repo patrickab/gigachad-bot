@@ -3,7 +3,7 @@
 import { useEffect, type ElementType, type ReactNode, type RefObject } from "react"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion"
 
 const DEFAULT_PANEL_CLASS = "rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)]"
 
@@ -21,8 +21,9 @@ interface DialogProps {
   children: ReactNode
 }
 
-/** Centered modal shell: backdrop, animated card with icon + title header, Escape and backdrop-click close. */
+/** Centered modal shell: backdrop, animated card with icon + title header, Escape and backdrop-click close. The card fades and grows in, instantly under reduced motion. */
 export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, panelClassName = DEFAULT_PANEL_CLASS, widthClassName = "max-w-sm", children }: DialogProps) {
+  const reduceMotion = useReducedMotion()
   useEffect(() => {
     if (!open) return
     // Wait for the enter animation to mount the input before focusing
@@ -37,10 +38,10 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
       {open && (
         <ModalBackdrop onClose={onClose} className="z-[100]">
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            initial={{ opacity: 0, scale: 0.97, y: 4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
+            exit={{ opacity: 0, scale: 0.98, y: 2, transition: { duration: reduceMotion ? 0 : 0.12, ease: "easeIn" } }}
+            transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
             className={`w-full ${widthClassName} mx-4 overflow-hidden ${panelClassName}`}
           >

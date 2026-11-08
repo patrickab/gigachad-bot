@@ -1,16 +1,15 @@
 "use client";
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
-import { ChatInput as UpstreamChatInput, type AttachedImage, type AttachedTextFile, type ChatInputHandle } from "../../../components/ChatInput";
-import { useComposerSubmit, type ComposerSubmit } from "@/components/ChatInput-submit";
+import { ChatInput as UpstreamChatInput, type AttachedImage, type ChatInputHandle } from "../../../components/ChatInput";
 import { toast } from "@/components/ui/toast";
-import { getSubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import { clearDraft, subscribeDraftRecovery } from "@/lib/draft-store";
 import { selectableThinkingLevels } from "@/lib/thinking-levels";
 import { isEmbedded } from "../../components/EmbedMode";
 import { useIsEmbedded } from "../../components/useIsEmbedded";
 import { isShellConnected, onShellMessage, postToShell } from "../../embed/channel";
 import { fileCompletions } from "../../embed/completions";
+import { submitShellMessage } from "../../embed/submit";
 import { useShellCommands } from "../../embed/slash-commands";
 import type { Completion, ComposerImage } from "@gigachad/chat-ui/protocol";
 
@@ -27,24 +26,6 @@ function toAttachedImage(image: ComposerImage): AttachedImage {
   return { ...image, previewUrl: `data:${image.mimeType};base64,${image.data}` };
 }
 
-/** A shell message being submitted: upstream's submit path clears the input once it dispatched it, else the text stays the user's. */
-interface ShellSubmission {
-  text: string;
-  images: ComposerImage[];
-  attachedImages: AttachedImage[];
-  cleared: boolean;
-  /** Builtin command started for it; `/btw` decides after the submit call returned. */
-  builtin?: Promise<unknown>;
-}
-
-const NO_TEXT_FILES: AttachedTextFile[] = [];
-/** The shell owns the draft: submissions always pass their text as `overrideText`, `valueRef` holds the one being submitted. */
-const NO_DRAFT_TEXT = "";
-
-function showAttachError(error: string | null) {
-  if (error) toast.error(error);
-}
-
 /** `@` completions for the shell's draft. No `cwd` (new session without a directory): none, like upstream. */
 async function completionsFor(props: Props, text: string, caret: number): Promise<Completion[]> {
   if (!props.cwd) return [];
@@ -56,7 +37,7 @@ async function completionsFor(props: Props, text: string, caret: number): Promis
  *
  * - Out: `composer` state (session, busy, model, thinking level) on change. `composer-restore` for what omp hands back to the input box
  * - In: `composer-abort`, `composer-set-model`, `composer-set-thinking`, through the same props upstream's own controls call
- * - `composer-send` goes through upstream's `useComposerSubmit` like its Enter key: a follow-up (or steer, per Settings) while busy.
+ * - `composer-send` goes through `submitShellMessage` like upstream's Enter key: a follow-up (or steer, per Settings) while busy.
  *   Text the submit path keeps (refused, `/btw` with images, failed builtin) returns as `composer-restore`, as do rejected prompts
  * - `composer-complete` is answered with `composer-completions` (`@` files), `/` commands go out as `composer-commands` state
  * - Standalone: upstream unchanged
@@ -85,76 +66,25 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     postToShell({ type: "composer", sessionId, streaming: isStreaming, model, thinkingLevel, thinkingLevels, contextTokens });
   }, [sessionId, isStreaming, provider, modelId, thinkingLevel, thinkingLevels, contextTokens]);
 
-  const valueRef = useRef(NO_DRAFT_TEXT);
-  const imagesRef = useRef<AttachedImage[]>([]);
-  const textFilesRef = useRef(NO_TEXT_FILES);
-  const draftKeyRef = useRef(props.draftKey);
-  const submissionBlockedRef = useRef(Boolean(props.submissionBlocked));
-  const submissionRef = useRef<ShellSubmission | null>(null);
-  useEffect(() => {
-    draftKeyRef.current = props.draftKey;
-    submissionBlockedRef.current = Boolean(props.submissionBlocked);
-  });
+  /** One shell message at a time, as upstream's composer holds a second Enter while one is stored. */
+  const submittingRef = useRef(false);
 
-  /** Points the hook's shared refs back at `submission`, for a submit path resuming after an await. */
-  const resume = useCallback((submission: ShellSubmission) => {
-    submissionRef.current = submission;
-    valueRef.current = submission.text;
-    imagesRef.current = submission.attachedImages;
-  }, []);
-  const clearInput = useCallback(() => {
-    if (submissionRef.current) submissionRef.current.cleared = true;
-  }, []);
-  const { onBuiltinCommand } = props;
-  const runBuiltinCommand = useMemo(() => onBuiltinCommand && (async (message: string) => {
-    const submission = submissionRef.current;
-    const pending = onBuiltinCommand(message);
-    if (submission) submission.builtin = pending;
-    try {
-      return await pending;
-    } finally {
-      if (submission) resume(submission);
-    }
-  }), [onBuiltinCommand, resume]);
-
-  const submit = useComposerSubmit({
-    value: NO_DRAFT_TEXT,
-    valueRef,
-    imagesRef,
-    textFilesRef,
-    draftKeyRef,
-    submissionBlockedRef,
-    isStreaming: props.isStreaming,
-    advisorEnabled: props.advisorEnabled,
-    clearInput,
-    setAttachError: showAttachError,
-    onSend: props.onSend,
-    onSteer: props.onSteer,
-    onFollowUp: props.onFollowUp,
-    onPromptWithStreamingBehavior: props.onPromptWithStreamingBehavior,
-    onBuiltinCommand: runBuiltinCommand,
-    onAudioUnlock: props.onAudioUnlock,
-  });
-  const submitRef = useRef<ComposerSubmit>(submit);
-  useEffect(() => { submitRef.current = submit; });
-
-  /** Submit a shell message through upstream's submit path the way its Enter key does; text it keeps goes back to the shell. */
+  /** Submit a shell message like upstream's Enter key; text it keeps goes back to the shell. */
   const submitFromShell = useCallback(async (sessionId: string | null, text: string, images: ComposerImage[]) => {
-    const submission: ShellSubmission = { text, images, attachedImages: images.map(toAttachedImage), cleared: false };
-    resume(submission);
-    const { isStreaming: busy, onSteer, onFollowUp } = propsRef.current;
-    const { handleSend, sendQueued } = submitRef.current;
-    try {
-      if (busy && (onSteer || onFollowUp)) sendQueued(getSubmitDuringRunBehavior() === "steer" && onSteer ? "steer" : "followup", text);
-      else await handleSend(text);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+    let outcome: "cleared" | "kept" = "kept";
+    if (!submittingRef.current) {
+      submittingRef.current = true;
+      try {
+        outcome = await submitShellMessage(propsRef.current, text, images.map(toAttachedImage));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        submittingRef.current = false;
+      }
     }
-    await submission.builtin?.catch(() => undefined);
-    if (submissionRef.current === submission) submissionRef.current = null;
-    if (submission.cleared || (!text && images.length === 0)) return;
+    if (outcome === "cleared" || (!text && images.length === 0)) return;
     postToShell({ type: "composer-restore", sessionId, text, replace: null, images });
-  }, [resume]);
+  }, []);
 
   useEffect(() => {
     if (!isEmbedded()) return;

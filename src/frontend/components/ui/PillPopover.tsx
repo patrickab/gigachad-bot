@@ -1,12 +1,17 @@
 "use client"
 
-import { AnimatePresence, motion } from "framer-motion"
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { useCallback, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { cn } from "@/lib/utils"
 
 /** Raised card look shared by the panel and anything shown beside it. */
 export const surfaceClass = "rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]"
+
+/** Popover motion: fades in and grows out of its trigger, leaves faster; instant under reduced motion. */
+const POPOVER_ENTER = { duration: 0.16, ease: "easeOut" } as const
+const POPOVER_EXIT = { duration: 0.1, ease: "easeIn" } as const
+const INSTANT = { duration: 0 } as const
 
 interface PillPopoverState {
   open: boolean
@@ -66,6 +71,9 @@ export function PillPopover({
   children: ReactNode
 }) {
   const { open, show, close, rootRef, triggerRef, panelRef } = popover
+  const reduceMotion = useReducedMotion()
+  // Rises from the trigger: up when shown above it, down when shown below it
+  const hidden = { opacity: 0, y: placement === "below" ? -4 : 4, scale: 0.98 }
   return <div ref={rootRef} onKeyDown={onKeyDown} className="relative min-w-0">
     <button
       ref={triggerRef}
@@ -82,15 +90,15 @@ export function PillPopover({
       ref={panelRef}
       role="dialog"
       aria-label={label}
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 4 }}
-      transition={{ duration: 0.15 }}
+      initial={hidden}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ ...hidden, transition: reduceMotion ? INSTANT : POPOVER_EXIT }}
+      transition={reduceMotion ? INSTANT : POPOVER_ENTER}
       onAnimationComplete={onAnimationComplete}
       className={cn(
         "absolute left-0 z-50 flex w-64 flex-col",
         surfaceClass,
-        placement === "below" ? "top-full mt-2" : "bottom-full mb-2",
+        placement === "below" ? "top-full mt-2 origin-top" : "bottom-full mb-2 origin-bottom",
         panelClassName,
       )}
     >{children}</motion.div>}</AnimatePresence>

@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useId, useRef, useState, type ElementType, type ReactNode } from "react"
-import { ChevronRight, Plus, Trash2 } from "lucide-react"
+import { useEffect, useId, useRef, useState, type ElementType, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
+import { ChevronRight, Ellipsis, Plus, Trash2 } from "lucide-react"
 import { cn, errorMessage, toggled } from "@/lib/utils"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
+import { MenuPopover } from "@/components/ui/MenuPopover"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
@@ -68,10 +69,16 @@ export interface FileTreeItem<T = unknown> {
   /** Shown under the row, e.g. an inline confirmation. */
   detail?: ReactNode
   create?: FileTreeCreateAction
+  /** The first shows inline on hover (beside `create` only when it is the row's sole other action), the rest go into the "…" menu. */
   actions?: {
+    /** Accessible name, e.g. "Archive gigachad-bot"; the inline button's only name. */
     label: string
+    /** Short visible text in the "…" menu, e.g. "Archive". Default `label`. */
+    menuLabel?: string
     icon: ElementType
     onClick: () => void
+    /** Destructive: listed last in the menu, with delete. */
+    danger?: boolean
   }[]
   onMoveHere?: (id: string) => Promise<void>
   /** Drag kinds `onMoveHere` takes. Default ["item"]. */
@@ -104,8 +111,29 @@ const carriesKind = (types: readonly string[], accepted: string[] = [DEFAULT_DRA
   accepted.some((kind) => types.includes(DRAG_KIND_TYPE_PREFIX + kind))
 const INDENT_BASE = 8
 const INDENT_STEP = 16
-const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-32 group-hover/row:opacity-100 group-focus-within/row:max-w-32 group-focus-within/row:opacity-100"
+// An open "…" menu inside keeps the actions shown and lets the menu overflow the row. Touch screens, which cannot hover, always show them.
+const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-32 group-hover/row:opacity-100 group-focus-within/row:max-w-32 group-focus-within/row:opacity-100 has-[[aria-expanded=true]]:max-w-32 has-[[aria-expanded=true]]:overflow-visible has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:max-w-32 [@media(hover:none)]:opacity-100"
 const ACTION_CLASS = "shrink-0 rounded p-1 text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+const MENU_ITEM_CLASS = "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink focus:bg-hover focus:text-ink focus:outline-none"
+
+/** Rows under a nested branch (depth 2+, e.g. a project's files) sit tighter, so a group reads as one. */
+function rowHeight(depth: number): string {
+  return depth >= 2 ? "h-6" : "h-7"
+}
+
+type RowAction = NonNullable<FileTreeItem["actions"]>[number]
+
+/**
+ * A row's hover actions: its first action inline, the rest in the "…" menu. Delete (`onDelete`) stays its own inline button.
+ *
+ * - Beside `create` the first action stays inline only when the menu would hold nothing else
+ * - Destructive actions never show inline
+ */
+function splitActions<T>(item: FileTreeItem<T>): { inline?: RowAction; menu: RowAction[] } {
+  const actions = item.actions ?? []
+  const inline = actions[0] && !actions[0].danger && (!item.create || actions.length === 1) ? actions[0] : undefined
+  return { inline, menu: inline ? actions.slice(1) : actions }
+}
 
 /** Children `item` renders: up to `childLimit` unless `uncapped`, plus any later child holding the active item. */
 function visibleChildren<T>(item: FileTreeItem<T>, uncapped: boolean): FileTreeItem<T>[] {
@@ -222,12 +250,13 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     const disclosure = item.icon
       ? <item.icon className={cn("h-3 w-3 shrink-0 transition-colors", expanded ? "text-ink" : "text-ink-faint")} />
       : <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
-    return <div key={item.id} className={cn(item.type === "root" && "mt-2 first:mt-0", item.gapAfter && "mb-2")}>
+    const { inline, menu } = splitActions(item)
+    return <div key={item.id} className={cn(item.gapAfter && "mb-2")}>
       {!branch && renderBeforeItem && <div style={{ paddingLeft: paddingLeft + 20 }}>
         {renderBeforeItem(item)}
       </div>}
       <div
-        className={cn("group/row flex h-6 min-w-0 items-center gap-2 rounded-md pr-1 transition-colors duration-160 motion-reduce:transition-none",
+        className={cn("group/row flex min-w-0 items-center gap-2 rounded-md pr-1 transition-colors duration-160 motion-reduce:transition-none", rowHeight(depth),
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
           item.multiSelect && "select-none")}
         style={{ marginLeft: paddingLeft }}
@@ -246,9 +275,9 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`}
           aria-expanded={expanded}
           onClick={() => controller.toggleBranch(item.id)}
-          className="flex h-6 w-3 shrink-0 items-center text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+          className={cn("flex w-3 shrink-0 items-center text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted", rowHeight(depth))}
         >{disclosure}</button>}
-        {item.rename?.editing ? <div className="flex h-6 min-w-0 flex-1 items-center gap-2">
+        {item.rename?.editing ? <div className={cn("flex min-w-0 flex-1 items-center gap-2", rowHeight(depth))}>
           {!(branch && item.onSelect) && (branch ? disclosure : <span className="w-3 shrink-0" />)}
           <RenameInput label={item.label} rename={item.rename}
             onError={(message) => setRenameError(message ? { id: item.id, message } : null)} />
@@ -260,8 +289,8 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           onDragStart={(event) => handleDragStart(event, item)}
           onClick={(event) => handleSelect(item, event)}
           onDoubleClick={item.rename?.start}
-          className={cn("flex h-6 min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
-            item.isActive ? "font-medium text-ink" : item.type === "root" ? "font-medium text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
+          className={cn("flex min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted", rowHeight(depth),
+            item.isActive ? "font-medium text-ink" : item.type === "root" || (branch && depth === 0) ? "text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
         >
           {!(branch && item.onSelect) && (branch ? disclosure : <span className="w-3 shrink-0" />)}
           <span
@@ -277,14 +306,15 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
         {!item.rename?.editing && <>
-          <div className={ACTIONS_CLASS}>
-            {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
-              <action.icon className="h-3 w-3" />
-            </button>)}
+          {(inline || menu.length > 0 || item.onDelete) && <div className={ACTIONS_CLASS}>
+            {inline && <button aria-label={inline.label} onClick={inline.onClick} className={ACTION_CLASS}>
+              <inline.icon className="h-3 w-3" />
+            </button>}
+            {menu.length > 0 && <RowMenu label={item.label} actions={menu} />}
             {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
               <Trash2 className="h-3 w-3" />
             </button>}
-          </div>
+          </div>}
           {/* Creating is the row's main action, so it stays visible at the row end while the rest appears on hover. */}
           {item.create && <button aria-label={item.create.label} onClick={() => { void startCreate(item.id, item.create!) }} className={ACTION_CLASS}>
             <Plus className="h-3 w-3" />
@@ -297,6 +327,8 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`}>
         {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1)}
+        {item.children?.length === 0 && creation?.parentId !== item.id && <div
+          style={{ marginLeft: INDENT_BASE + (depth + 1) * INDENT_STEP + 20 }} className={cn("flex items-center px-1 text-xs text-ink-faint", rowHeight(depth + 1))}>Empty</div>}
         <CapToggle item={item} depth={depth + 1} uncapped={uncappedIds.has(item.id)} onToggle={() => toggleCap(item.id)} />
         {creation?.parentId === item.id && <InlineCreateForm
           action={creation.action} depth={depth + 1}
@@ -309,7 +341,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
 
   const collapsed = labelAction?.expanded === false
   return <div aria-label={label} data-file-tree>
-    <div className={cn("group/row flex h-6 items-center justify-between px-2", !collapsed && "mb-2")}>
+    <div className={cn("group/row flex h-7 items-center justify-between px-2", !collapsed && "mb-1")}>
       <div className="flex items-center gap-1.5">
         {labelAction
           ? <button type="button" aria-label={labelAction.label} aria-expanded={labelAction.expanded} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
@@ -352,9 +384,54 @@ function CapToggle<T>({ item, depth, uncapped, onToggle }: {
   const hidden = total - visibleChildren(item, false).length
   if (!uncapped && hidden === 0) return null
   return <button type="button" onClick={onToggle} style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP + 20 }}
-    className="flex h-6 items-center rounded px-1 text-xs text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+    className="flex h-7 items-center rounded px-1 text-xs text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
     {uncapped ? "Show less" : `Show ${hidden} more`}
   </button>
+}
+
+/** A row's "…" button and its menu of secondary actions, the destructive ones last and set apart. */
+function RowMenu({ label, actions }: { label: string; actions: RowAction[] }) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  return <MenuPopover className="flex" trigger={(open, toggle) => <button ref={trigger} type="button" aria-label={`More actions for ${label}`}
+    aria-haspopup="menu" aria-expanded={open} onClick={toggle} className={cn(ACTION_CLASS, open && "text-ink")}>
+    <Ellipsis className="h-3 w-3" />
+  </button>}>
+    {(open, close) => open && <RowMenuList label={label} actions={actions} trigger={trigger} close={close} />}
+  </MenuPopover>
+}
+
+function RowMenuList({ label, actions, trigger, close }: {
+  label: string
+  actions: RowAction[]
+  trigger: RefObject<HTMLButtonElement | null>
+  close: () => void
+}) {
+  const list = useRef<HTMLDivElement>(null)
+  useEffect(() => { list.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus() }, [])
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // The menu closes on Escape by itself, focus goes back to its button.
+    if (event.key === "Escape") trigger.current?.focus()
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+    event.preventDefault()
+    const items = [...(list.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])]
+    const at = items.indexOf(document.activeElement as HTMLElement)
+    items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus()
+  }
+  const safe = actions.filter((action) => !action.danger)
+  const destructive = actions.filter((action) => action.danger)
+  const item = (action: RowAction) => <button key={action.label} type="button" role="menuitem"
+    aria-label={action.menuLabel && action.label}
+    onClick={() => { close(); action.onClick() }}
+    className={cn(MENU_ITEM_CLASS, action.danger && "hover:text-danger focus-visible:text-danger")}>
+    <action.icon aria-hidden="true" className="h-3 w-3 shrink-0" />
+    <span className="truncate">{action.menuLabel ?? action.label}</span>
+  </button>
+  return <div ref={list} role="menu" aria-label={`${label} actions`} onKeyDown={onKeyDown}
+    className="absolute right-0 top-full z-20 mt-1 w-max min-w-36 max-w-56 rounded-lg bg-surface-elevated p-1 shadow-[var(--shadow-md)]">
+    {safe.map(item)}
+    {safe.length > 0 && destructive.length > 0 && <div role="separator" className="mx-1 my-1 border-t border-divider/50" />}
+    {destructive.map(item)}
+  </div>
 }
 
 function InlineCreateForm({ action, depth, onDone, onCancel }: {
@@ -403,7 +480,7 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
           submit()
         }
       }}
-      className="h-6 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
+      className="h-7 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
     />
     {openChoice && <ChoiceWindow key={picking} choice={openChoice}
       initial={(picking === "choice" ? choice : subchoice) ?? openChoice.initial}

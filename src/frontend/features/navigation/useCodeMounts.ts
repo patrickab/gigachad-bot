@@ -35,6 +35,7 @@ export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions)
     onOpen: onItemOpen,
     workspaceActions: (directory, label, reportError) => !hostAccess ? [] : [{
       label: `Open factory for ${label}`,
+      menuLabel: "Open factory",
       icon: Factory,
       onClick: async () => {
         reportError("")

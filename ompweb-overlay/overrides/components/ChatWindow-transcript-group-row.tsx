@@ -30,13 +30,13 @@ function skillQuestion(messages: readonly AgentMessage[], userIndex: number, inv
  */
 export function renderTranscriptGroupRow(row: TranscriptGroupRow, context: TranscriptGroupRowContext): ReactNode[] {
   const rendered = renderUpstreamTranscriptGroupRow(row, context);
-  const { messages, live } = context;
+  const { messages, flat } = context;
   if (!isEmbedded() || !isQaTurn(messages, row.userIndex)) return rendered;
   const [upstreamQuestion, ...answer] = rendered;
   const invocation = skillInvocation(messages[row.userIndex]);
   const question = invocation === null ? upstreamQuestion : skillQuestion(messages, row.userIndex, invocation);
   return [
-    <QaTurn key={`turn-${qaTurnId(messages, row.userIndex)}`} messages={messages} userIndex={row.userIndex} endIndex={row.endIndex} live={live} question={question}>
+    <QaTurn key={`turn-${qaTurnId(messages, row.userIndex)}`} messages={messages} userIndex={row.userIndex} endIndex={row.endIndex} live={flat} question={question}>
       {answer}
     </QaTurn>,
   ];

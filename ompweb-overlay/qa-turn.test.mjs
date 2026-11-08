@@ -45,7 +45,7 @@ function card(overrides = {}) {
 
 function groupContext(transcript, live = false) {
   const renderMessage = (idx, options = {}) => React.createElement("div", { key: `${options.keyPrefix ?? "message"}-${idx}`, "data-rendered": idx }, `message ${idx}`);
-  return { messages: transcript, renderMessage, live, messageRefs: { current: [] }, visibleRefIndexByMessage: new Map() };
+  return { messages: transcript, renderMessage, flat: live, messageRefs: { current: [] }, visibleRefIndexByMessage: new Map() };
 }
 
 test("embedded, plain question/answer turns stay indivisible at history page boundaries", () => {
@@ -187,7 +187,7 @@ function transcriptWithStream(transcript) {
   const context = groupContext(transcript);
   const committed = row.kind === "group" ? renderTranscriptGroupRow(row, context) : context.renderMessage(row.index);
   const tail = React.createElement(ChatLiveTail, {
-    key: "tail", streamingMessage: streamingReply, pendingToolHeaders: [{ id: "edit-1", name: "edit" }], pendingBash: null,
+    key: "tail", streamingMessage: streamingReply, pendingToolHeaders: [{ id: "edit-1", name: "edit" }], deferredBash: [], pendingBash: null,
     toolResults: new Map(), modelNames: {}, cwd: undefined, sessionId: undefined,
     toolCallsDefaultCollapsed: true, expandThinkingByDefault: false, hideThinking: false,
   });

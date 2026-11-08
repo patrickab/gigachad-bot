@@ -17,6 +17,12 @@ const render = (element: ReactElement) => testingRender(
   </TabContext.Provider>,
 )
 
+/** The entry `name` of row `row`'s "…" menu, opened in `scope`. */
+const rowMenuItem = (scope: Pick<RenderResult, "getByRole">, row: string, name: string) => {
+  fireEvent.click(scope.getByRole("button", { name: `More actions for ${row}` }))
+  return within(scope.getByRole("menu", { name: `${row} actions` })).getByRole("menuitem", { name })
+}
+
 const fixtures = vi.hoisted(() => ({
   projects: [{ slug: "proj", name: "Proj", tabs: [], file_names: { "project/proj/document/plan.md": "Roadmap.md" } }, { slug: "empty", name: "Empty project", tabs: [] }],
   renameProject: vi.fn<(slug: string, name: string) => Promise<string>>(),
@@ -552,7 +558,7 @@ describe("Project navigation", () => {
     const project = within(view.getByLabelText("Proj contents"))
     fireEvent.click(await project.findByText("board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj")
-    fireEvent.click(view.getByRole("button", { name: "Open architecture for Proj" }))
+    fireEvent.click(rowMenuItem(view, "Proj", "Open architecture for Proj"))
     expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
     fireEvent.click(await project.findByText("notes.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
@@ -715,7 +721,8 @@ describe("Project navigation", () => {
     const onArchitectureSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onArchitectureSelect={onArchitectureSelect} />)
 
-    fireEvent.click(await view.findByRole("button", { name: "Create architecture for Empty project" }))
+    await view.findByRole("button", { name: "More actions for Empty project" })
+    fireEvent.click(rowMenuItem(view, "Empty project", "Create architecture for Empty project"))
 
     await waitFor(() => expect(onArchitectureSelect).toHaveBeenCalledWith("empty"))
     expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
@@ -813,7 +820,7 @@ describe("Project navigation", () => {
       const section = within(view.getByLabelText("Code"))
       await section.findByRole("button", { name: "source" })
 
-      fireEvent.click(section.getByRole("button", { name: "Archive source" }))
+      fireEvent.click(rowMenuItem(section, "source", "Archive source"))
       fireEvent.click(section.getByRole("button", { name: "Archive tool" }))
       expect(section.queryByRole("button", { name: "source" })).not.toBeInTheDocument()
       expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
@@ -842,19 +849,19 @@ describe("Project navigation", () => {
       await waitFor(() => expect(api.fetchFactoryRepos).toHaveBeenCalled())
       await act(async () => {})
 
-      fireEvent.click(view.getByRole("button", { name: "Open factory for known" }))
+      fireEvent.click(rowMenuItem(view, "known", "Open factory for known"))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "known-repo", projectSlug: null }))
       expect(api.registerFactoryRepo).not.toHaveBeenCalled()
 
-      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
+      fireEvent.click(rowMenuItem(view, "fresh", "Open factory for fresh"))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "fresh", projectSlug: null }))
       expect(api.registerFactoryRepo).toHaveBeenCalledWith("/git/fresh")
 
-      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
+      fireEvent.click(rowMenuItem(view, "fresh", "Open factory for fresh"))
       await waitFor(() => expect(onItemOpen).toHaveBeenCalledTimes(3))
       expect(api.registerFactoryRepo).toHaveBeenCalledTimes(1)
 
-      fireEvent.click(view.getByRole("button", { name: "Open factory for broken" }))
+      fireEvent.click(rowMenuItem(view, "broken", "Open factory for broken"))
       expect(await view.findByRole("alert")).toHaveTextContent("Not a git checkout: /git/broken")
       expect(onItemOpen).toHaveBeenCalledTimes(3)
 
@@ -893,7 +900,7 @@ describe("Project navigation", () => {
       // A project without learn sessions shows no learn folder, only the action starting one.
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "learn" })).not.toBeInTheDocument()
-      expect(view.getByRole("button", { name: "New learn session in Proj" })).toBeInTheDocument()
+      expect(rowMenuItem(view, "Proj", "New learn session in Proj")).toBeInTheDocument()
     } finally {
       login.hostAccess = false
     }
@@ -916,7 +923,7 @@ describe("Project navigation", () => {
       expect(project.getByRole("button", { name: "learn" })).toHaveAttribute("aria-expanded", "true")
       fireEvent.click(project.getByRole("button", { name: "Fourier series" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "session", sessionId: "chat_a" } })
-      fireEvent.click(view.getByRole("button", { name: "New learn session in Proj" }))
+      fireEvent.click(rowMenuItem(view, "Proj", "New learn session in Proj"))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "new" } }, true)
 
       const section = within(view.getByLabelText("Learn"))
@@ -1046,11 +1053,12 @@ describe("Project navigation", () => {
       const section = within(view.getByLabelText("Learn"))
       const menu = () => {
         fireEvent.click(section.getByRole("button", { name: "More actions for Eigenvalues" }))
-        return within(view.getByRole("menu", { name: "Session actions" }))
+        return within(view.getByRole("menu", { name: "Eigenvalues actions" }))
       }
       expect(menu().getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Plan", "Coverage", "Export as Markdown", "Delete with graph traces"])
+      expect(section.getByRole("button", { name: "Delete Eigenvalues" })).toBeInTheDocument()
       fireEvent.keyDown(document, { key: "Escape" })
-      expect(view.queryByRole("menu", { name: "Session actions" })).not.toBeInTheDocument()
+      expect(view.queryByRole("menu", { name: "Eigenvalues actions" })).not.toBeInTheDocument()
 
       const eigenvalues = learn.sessions.sessions[1]
       for (const panel of ["Plan", "Coverage"]) fireEvent.click(menu().getByRole("menuitem", { name: panel }))
@@ -1070,7 +1078,7 @@ describe("Project navigation", () => {
       // No plan reported: no Plan entry.
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       fireEvent.click(view.getByRole("button", { name: "More actions for Fourier series" }))
-      expect(within(view.getByRole("menu", { name: "Session actions" })).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument()
+      expect(within(view.getByRole("menu", { name: "Fourier series actions" })).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument()
     } finally {
       login.hostAccess = false
       learn.sessions.sessions = []

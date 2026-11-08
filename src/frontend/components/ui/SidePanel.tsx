@@ -1,24 +1,25 @@
 "use client"
 
 import { ReactNode, useCallback, useEffect, useRef } from "react"
-import { motion, useMotionValue, useTransform, animate } from "framer-motion"
+import { motion, useMotionValue, useTransform, animate, useReducedMotion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
 const MIN_SIDEBAR_WIDTH = 200
 export const MAX_SIDEBAR_WIDTH = 600
 
-/** Spring-animated width of a right-anchored panel, plus a drag handler for its left edge. */
+/** Width of a right-anchored panel easing to external changes in 200ms (instantly under reduced motion), plus a drag handler for its left edge. */
 function useResizableWidth(width: number, onWidthChange: (w: number) => void, maxWidth: number) {
   /** Ends the running drag's listeners and body styles, null while not dragging. */
   const stopDrag = useRef<(() => void) | null>(null)
   const motionWidth = useMotionValue(width)
+  const reduceMotion = useReducedMotion()
 
-  // Spring to external width changes, but never fight an active drag
+  // Ease to external width changes, but never fight an active drag
   useEffect(() => {
     if (stopDrag.current) return
-    const controls = animate(motionWidth, width, { type: "spring", stiffness: 400, damping: 40, mass: 0.6 })
+    const controls = animate(motionWidth, width, { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" })
     return controls.stop
-  }, [width, motionWidth])
+  }, [width, motionWidth, reduceMotion])
 
   const widthStyle = useTransform(motionWidth, (v) => `${v}px`)
   // A drag cut short by unmounting (e.g. closing the tab) must not leave the app unselectable
@@ -69,14 +70,14 @@ interface SidePanelFrameProps {
   children: ReactNode
 }
 
-/** Right-anchored panel with a draggable left edge; callers own the width and the surface styling. */
+/** Right-anchored panel with a draggable left edge, fading in on mount; callers own the width and the surface styling. */
 export function SidePanelFrame({ width, onWidthChange, maxWidth = MAX_SIDEBAR_WIDTH, className, children }: SidePanelFrameProps) {
   const { widthStyle, handlePointerDown } = useResizableWidth(width, onWidthChange, maxWidth)
   return (
     <motion.aside
       initial={false}
       style={{ width: widthStyle }}
-      className={cn("shrink-0 flex flex-col overflow-hidden relative", className)}
+      className={cn("motion-fade-in shrink-0 flex flex-col overflow-hidden relative", className)}
     >
       <div
         role="separator"

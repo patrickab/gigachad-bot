@@ -98,9 +98,10 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
       rename: context.renameOf(`project:${project.slug}`, (name) => context.renameProjectTo(project, name)),
       onDelete: () => context.removeProject(project),
       actions: [
-        { label: `Archive ${project.name}`, icon: Archive, onClick: () => context.changeArchive(project.slug, true) },
-        { label: `New document in ${project.name}`, icon: FilePlus, onClick: () => context.setCreateTarget(project.slug) },
-        { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`, icon: ArchitectureIcon,
+        { label: `New document in ${project.name}`, menuLabel: "New document", icon: FilePlus, onClick: () => context.setCreateTarget(project.slug) },
+        { label: `Archive ${project.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.changeArchive(project.slug, true) },
+        { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`,
+          menuLabel: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture`, icon: ArchitectureIcon,
           onClick: () => context.openArchitecture(project.slug) },
       ],
       onMoveHere: (path) => move(path, project.slug),
@@ -246,8 +247,8 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
         // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
         multiSelect: node.path === mount,
         actions: [
-          { label: `Archive ${node.name}`, icon: Archive, onClick: () => context.setArchived(mount, true) },
-          { label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => context.onDiffSelect?.(node.path) },
+          { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, onClick: () => context.onDiffSelect?.(node.path) },
+          { label: `Archive ${node.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.setArchived(mount, true) },
           ...omp.directoryActions(mount, node.name),
         ],
         onDelete: () => context.removeMount(mount, node.name),
@@ -297,7 +298,7 @@ function unmountedItems({ unmounted, archived, omp, setArchived }: CodeTreeConte
         label: workspace.label,
         type: "folder",
         actions: [
-          { label: `Archive ${workspace.label}`, icon: Archive, onClick: () => setArchived(workspace.path, true) },
+          { label: `Archive ${workspace.label}`, menuLabel: "Archive", icon: Archive, onClick: () => setArchived(workspace.path, true) },
           ...omp.directoryActions(workspace.path, workspace.label),
         ],
         children: code ? [code] : [],

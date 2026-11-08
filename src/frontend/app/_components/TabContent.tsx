@@ -55,7 +55,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const canvas = useCanvasView()
   const {
-    chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
+    chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems, onBranch,
   } = useTabChat({ focus, onOpenChat, onOpenItem })
   const { models, prompts, setPrompts } = chat
@@ -67,6 +67,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       chatId={chatId}
       onChatColumnChange={setChatColumn}
       messages={chat.messages}
+      historyLoading={historyLoading}
       isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
       extracting={extracting}

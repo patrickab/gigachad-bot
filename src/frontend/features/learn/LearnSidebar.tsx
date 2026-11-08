@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
-import { Activity, Dumbbell, Ellipsis, GraduationCap, Network, Pencil, Plus, Search, Settings2 } from "lucide-react"
+import { Activity, Download, Dumbbell, GraduationCap, ListChecks, Network, Pencil, Plus, Search, Settings2, Target, Trash2 } from "lucide-react"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
@@ -24,9 +24,6 @@ import { useLearnPanels } from "./useLearnPanels"
 // The FileTree's own hover-revealed row actions, for the section's extra header actions.
 const HEADER_ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-40 group-hover/row:opacity-100 group-focus-within/row:max-w-40 group-focus-within/row:opacity-100"
 const HEADER_ACTION_CLASS = "shrink-0 rounded p-1 text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-// The session menu's entries, InlineConfirm's answer buttons.
-const MENU_ACTION_CLASS = "rounded px-1 text-ink-muted hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-
 type SessionMeta = LearnFrameMessageOf<"session-meta">
 
 /** LearnHarness's sidebar kind filter, kept across reloads like upstream's (`lh:session-kind-filter`). */
@@ -150,21 +147,6 @@ export interface LearnSidebarFrame {
   toggle: () => void
 }
 
-/** A session's menu under its row: upstream's hidden session menu and title bar entries. */
-function SessionMenu({ entries, onClose }: { entries: readonly { label: string; run: () => void }[]; onClose: () => void }) {
-  const first = useRef<HTMLButtonElement>(null)
-  useEffect(() => { first.current?.focus() }, [])
-  useEscapeLayer(onClose)
-  return <div role="menu" aria-label="Session actions" className="flex flex-wrap items-center gap-1 py-0.5 text-[11px]">
-    {entries.map(({ label, run }, index) => (
-      <button key={label} ref={index === 0 ? first : undefined} role="menuitem" className={MENU_ACTION_CLASS}
-        onClick={() => { onClose(); run() }}>
-        {label}
-      </button>
-    ))}
-  </div>
-}
-
 /**
  * The learn parts of the sidebar, LearnHarness's own sidebar and title bar being hidden in the frame.
  *
@@ -194,7 +176,6 @@ export function useLearnSidebar({ open, projects, sidebar }: {
   const kind: LearnKindFilter = KIND_FILTERS.some((filter) => filter.value === storedKind) ? storedKind as LearnKindFilter : "all"
   const [walk, setWalk] = useState<number | null>(null)
   const [focusRequest, setFocusRequest] = useState(0)
-  const [menuFor, setMenuFor] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const { renameOf, start: startRenaming } = useInlineRename()
 
@@ -253,13 +234,6 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     }
   }
 
-  const menuEntries = (session: LearnSession) => [
-    ...hasPlan(session.id) ? [{ label: "Plan", run: panel(session, "plan") }] : [],
-    { label: "Coverage", run: panel(session, "coverage") },
-    { label: "Export as Markdown", run: () => void exportMarkdown(session) },
-    { label: "Delete with graph traces", run: () => schedule(`learn:${session.id}`, `${session.title} and its graph traces`, () => sessions.remove(session.id, "delete-nodes")) },
-  ]
-
   const sessionRow = (session: LearnSession, options: { place: "project" | "section"; prefix?: string; walked?: boolean }): FileTreeItem<string> => {
     const chip = sessionChip(session, metas[session.id])
     const key = renameKey(session, options.place)
@@ -269,18 +243,22 @@ export function useLearnSidebar({ open, projects, sidebar }: {
       meta: chip ? <span className="text-ink-faint">{chip}</span> : undefined,
       onSelect: () => open(learnItem({ kind: "session", sessionId: session.id }, session.project_slug)),
       rename: renameOf(key, (title) => sessions.rename(session.id, title)),
+      // Rename inline, upstream's hidden session menu and title bar entries in the row's "…" menu.
       actions: [
-        { label: `Rename ${session.title}`, icon: Pencil, onClick: () => startRenaming(key) },
-        { label: `More actions for ${session.title}`, icon: Ellipsis, onClick: () => setMenuFor((current) => current === session.id ? null : session.id) },
+        { label: `Rename ${session.title}`, menuLabel: "Rename", icon: Pencil, onClick: () => startRenaming(key) },
+        ...hasPlan(session.id) ? [{ label: "Plan", icon: ListChecks, onClick: panel(session, "plan") }] : [],
+        { label: "Coverage", icon: Target, onClick: panel(session, "coverage") },
+        { label: "Export as Markdown", icon: Download, onClick: () => void exportMarkdown(session) },
+        { label: "Delete with graph traces", icon: Trash2, danger: true,
+          onClick: () => schedule(`learn:${session.id}`, `${session.title} and its graph traces`, () => sessions.remove(session.id, "delete-nodes")) },
       ],
       onDelete: () => schedule(`learn:${session.id}`, session.title, () => sessions.remove(session.id)),
-      detail: menuFor === session.id ? <SessionMenu entries={menuEntries(session)} onClose={() => setMenuFor(null)} /> : undefined,
     }
   }
 
   const withProjectLearn = (root: FileTreeItem<string>, project: { slug: string; name: string }): FileTreeItem<string> => {
     const own = listed.filter((session) => session.project_slug === project.slug)
-    const action = { label: `New learn session in ${project.name}`, icon: GraduationCap, onClick: () => open(learnItem({ kind: "new" }, project.slug), true) }
+    const action = { label: `New learn session in ${project.name}`, menuLabel: "New learn session", icon: GraduationCap, onClick: () => open(learnItem({ kind: "new" }, project.slug), true) }
     const folder: FileTreeItem<string> = {
       id: `project:${project.slug}:learn`, label: "learn", type: "folder", children: own.map((session) => sessionRow(session, { place: "project" })),
     }

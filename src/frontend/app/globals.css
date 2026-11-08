@@ -704,6 +704,32 @@ code {
   }
 }
 
+/* Overlay entrance, mount only. A MenuPopover menu (the element after its trigger) fades and rises
+   4px from the trigger: up for a `bottom-full` menu, down otherwise. `backwards` hands the settled
+   state back to the element, so a menu also animated by framer-motion keeps its own exit.
+   .motion-fade-in: plain fade, e.g. a side panel mounting. */
+@keyframes motion-popover {
+  from { opacity: 0; transform: translateY(var(--motion-popover-shift, -4px)) scale(0.98); }
+}
+
+@keyframes motion-fade {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-menu-popover] > :not(:first-child) {
+    transform-origin: top;
+    animation: motion-popover 160ms ease-out backwards;
+  }
+  [data-menu-popover] > .bottom-full:not(:first-child) {
+    --motion-popover-shift: 4px;
+    transform-origin: bottom;
+  }
+  .motion-fade-in {
+    animation: motion-fade 200ms ease-out backwards;
+  }
+}
+
 /* PDF pages render on an opaque white canvas. Every theme clamps the page between
    two theme colors, so it reads like the app: paper → --page (a faint step
    above --paper), text → --ink-subtle (sidebar tree text color).

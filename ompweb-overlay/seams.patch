@@ -19,18 +19,18 @@ index a988daa..f547aa4 100644
          <LoginForm initialPassword={typedPassword} />
        ) : (
 diff --git i/scripts/build-client.ts w/scripts/build-client.ts
-index 8caf3c9..a2417cc 100644
+index 3bfa318..fedcad6 100644
 --- i/scripts/build-client.ts
 +++ w/scripts/build-client.ts
-@@ -5,6 +5,7 @@ import path from "node:path";
+@@ -6,6 +6,7 @@ import path from "node:path";
  import type { BunPlugin } from "bun";
  import { bundledPackageDirs } from "./licenses";
  import tailwind from "./tailwind-plugin";
 +import { customOverrides } from "../custom/overrides-plugin";
- import { clientEnv } from "../server/client-env";
+ import { buildEventStreamWorker, clientEnv } from "../server/client-env";
  import { stylesheetFirst } from "../server/http";
  
-@@ -39,7 +40,7 @@ const result = await Bun.build({
+@@ -41,7 +42,7 @@ const result = await Bun.build({
    sourcemap: "none",
    publicPath: "/",
    naming: { entry: "[name].[ext]", chunk: "assets/[name]-[hash].[ext]", asset: "assets/[name]-[hash].[ext]" },
@@ -38,20 +38,20 @@ index 8caf3c9..a2417cc 100644
 +  plugins: [tailwind, emitFonts, customOverrides(root)],
    define: {
      "process.env.NODE_ENV": JSON.stringify("production"),
-     ...Object.fromEntries(Object.entries(clientEnv(root)).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)])),
+     ...Object.fromEntries(Object.entries(clientEnv(root, worker)).map(([key, value]) => [`process.env.${key}`, JSON.stringify(value)])),
 diff --git i/server/http.ts w/server/http.ts
-index 1267540..20cac0b 100644
+index 29792c8..e2316fb 100644
 --- i/server/http.ts
 +++ w/server/http.ts
-@@ -1,6 +1,7 @@
- import { realpathSync, statSync, type Stats } from "node:fs";
+@@ -2,6 +2,7 @@ import { realpathSync, statSync, type Stats } from "node:fs";
  import path from "node:path";
  import { getInstallName } from "@/lib/install-name";
+ import { manifestHref, THEME_COLOR_COOKIE } from "@/lib/manifest-theme";
 +import { framedHeaders } from "../custom/framing";
  
  const SECURITY_HEADERS = {
    "X-Content-Type-Options": "nosniff",
-@@ -41,7 +42,7 @@ function acceptsGzip(header: string | null): boolean {
+@@ -42,7 +43,7 @@ function acceptsGzip(header: string | null): boolean {
  export function finalizeResponse(request: Request, response: Response): Response {
    const { pathname } = new URL(request.url);
    const headers = new Headers(response.headers);

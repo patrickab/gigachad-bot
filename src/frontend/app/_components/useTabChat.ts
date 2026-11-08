@@ -48,7 +48,10 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
   const [chatId, setChatId] = useState(() => tab.chatId)
   const [loadedBranch, setLoadedBranch] = useState<{ historyFile: string | undefined; messageIdx: number | null }>({ historyFile: undefined, messageIdx: null })
   // Index where this chat branched off its parent, null for a main chat or while its history loads.
-  const branchMessageIdx = loadedBranch.historyFile === tab.historyFile ? loadedBranch.messageIdx : null
+  const historyLoaded = loadedBranch.historyFile === tab.historyFile
+  const branchMessageIdx = historyLoaded ? loadedBranch.messageIdx : null
+  // A saved chat whose history has not arrived yet, so its empty messages do not mean an empty chat. A failed load stays here.
+  const historyLoading = !!tab.historyFile && !historyLoaded
   const { busy: extracting, track } = useBusyCount()
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -175,7 +178,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
   }, [tab.historyFile, createBranch, onOpenChat])
 
   return {
-    chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
+    chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems,
     onBranch: tab.historyFile ? handleBranch : undefined,
   }

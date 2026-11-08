@@ -85,8 +85,8 @@ export function ProviderUsage() {
     return window && (least == null || window.percent < least) ? window.percent : least
   }, null)
 
-  return <section aria-label="Provider usage" className="group/usage mx-2 shrink-0 border-t border-divider/50 py-2">
-    <div className="relative flex h-6 items-center px-2">
+  return <section aria-label="Provider usage" className="motion-fade-in group/usage mx-2 shrink-0 border-t border-divider/50 py-2">
+    <div className="relative flex h-7 items-center px-2">
       <button
         aria-expanded={open}
         onClick={() => setOpen(String(!open))}
@@ -97,7 +97,7 @@ export function ProviderUsage() {
       </button>
       <button
         aria-label="Refresh usage" disabled={loading} onClick={() => void refresh()}
-        className="absolute left-12 top-0.5 rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted group-hover/usage:opacity-100 disabled:opacity-100"
+        className="absolute left-12 top-1 rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted group-hover/usage:opacity-100 disabled:opacity-100"
       >
         <RefreshCw className={cn("h-3 w-3", loading && "animate-spin motion-reduce:animate-none")} />
       </button>

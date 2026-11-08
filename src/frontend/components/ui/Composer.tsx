@@ -11,6 +11,11 @@ export const COMPOSER_ICON_BUTTON = "rounded-full p-1.5 text-ink-faint transitio
 const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
 const SEND_READY = "border-divider bg-surface-elevated text-ink hover:border-divider-strong active:scale-[0.96]"
 const SEND_IDLE = "border-divider/50 text-ink-faint"
+
+/** Class of the composer's send/stop circle, raised when `ready`. */
+export function composerSendButton(ready: boolean): string {
+  return cn(SEND_BUTTON, ready ? SEND_READY : SEND_IDLE)
+}
 const MAX_TEXTAREA_HEIGHT_PX = 200
 
 /**
@@ -75,7 +80,7 @@ export function Composer({
   }
 
   return (
-    <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
+    <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
       {children}
       <textarea
         ref={textarea}
@@ -109,15 +114,15 @@ export function Composer({
             <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
           </button>
           {isStreaming ? (
-            <button aria-label="Stop generating" onClick={onStop} className={cn(SEND_BUTTON, SEND_READY)}>
+            <button aria-label="Stop generating" onClick={onStop} className={composerSendButton(true)}>
               <Square className="h-3 w-3 fill-current" />
             </button>
           ) : busy ? (
-            <button aria-label="Extracting attachment" disabled className={cn(SEND_BUTTON, SEND_IDLE)}>
+            <button aria-label="Extracting attachment" disabled className={composerSendButton(false)}>
               <Loader2 className="h-4 w-4 animate-spin" />
             </button>
           ) : (
-            <button aria-label="Send message" onClick={onSubmit} disabled={!sendable} className={cn(SEND_BUTTON, sendable ? SEND_READY : SEND_IDLE)}>
+            <button aria-label="Send message" onClick={onSubmit} disabled={!sendable} className={composerSendButton(sendable)}>
               <ArrowUp className="h-4 w-4" />
             </button>
           )}

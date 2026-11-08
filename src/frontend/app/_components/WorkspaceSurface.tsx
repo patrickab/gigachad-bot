@@ -68,6 +68,8 @@ interface Surface {
   right: ReactNode
   /** Scrolling surfaces run on under the floating TopBar. The rest start below it. */
   runsUnderTopBar: boolean
+  /** Pills one level above the page, for busy content (canvas, PDF pages) */
+  raised?: boolean
   body: ReactNode
 }
 
@@ -175,6 +177,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         {filePanelToggle}
       </>,
       runsUnderTopBar: canvas.view.kind !== "architecture",
+      raised: true,
       body: canvas.view.kind === "architecture"
         ? <ArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
         : <CanvasWorkspace
@@ -219,6 +222,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
             : filePanelToggle}
         </>,
         runsUnderTopBar: isPdfDocument,
+        raised: isPdfDocument,
         body: diffItem ? <DiffViewer key={diffItem.path} root={diffItem.path} />
           : !documentItem ? chatBody
           : isPdfDocument ? (
@@ -279,6 +283,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         ...workbenchBar,
         center: workbenchItem && workbenchKindOf(workbenchItem.path) === "latex" ? centerSlot : undefined,
         runsUnderTopBar: true,
+        raised: !!workbenchItem && workbenchKindOf(workbenchItem.path) === "latex",
         body: workbenchItem ? (
           <WorkbenchItemBody
             item={workbenchItem}
@@ -328,6 +333,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{surface.left}</>}
       center={surface.center}
       right={surface.right}
+      raised={surface.raised}
     />
     <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
       {surface.body}

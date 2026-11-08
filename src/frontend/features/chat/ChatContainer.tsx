@@ -19,6 +19,9 @@ import { InTopBar } from "@/features/navigation/TopBarSlots"
 const CHAT_COLUMN_MAX_PX = 960
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
+/** An empty chat centers the composer this far above the column's middle, as a share of its height. */
+const EMPTY_LIFT = 0.05
+const EMPTY_GREETING = "What's on your mind?"
 
 /** Asks the chat to expand and scroll to one question; a new `key` re-fires the request for the same index. */
 export interface ChatFocus {
@@ -38,6 +41,8 @@ export interface AttachmentActions {
 interface ChatContainerProps {
   chatId: string
   messages: Message[]
+  /** The chat's saved history is still loading: its empty `messages` must not show the empty state. */
+  historyLoading?: boolean
   isStreaming: boolean
   onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
@@ -62,6 +67,7 @@ interface ChatContainerProps {
 export function ChatContainer({
   chatId,
   messages,
+  historyLoading = false,
   isStreaming,
   onSend,
   onCancel,
@@ -80,8 +86,11 @@ export function ChatContainer({
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [isWideMode, setIsWideMode] = useState(false)
+  // The chat whose first message was sent here: only that move to the bottom animates, a loading history jumps
+  const [launchedChatId, setLaunchedChatId] = useState<string | null>(null)
   const [previewTarget, setPreviewTarget] = useState<{ messageIndex: number; name: string } | null>(null)
   const previewAttachment = previewTarget ? findAttachment(messages[previewTarget.messageIndex], previewTarget.name) ?? null : null
 
@@ -94,6 +103,13 @@ export function ChatContainer({
   const inputAreaSize = useElementSize(inputAreaRef)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
   if (inputAreaSize.height > 0 && inputAreaSize.height !== inputAreaHeight) setInputAreaHeight(inputAreaSize.height)
+  const columnHeight = useElementSize(columnRef).height
+
+  // A chat known to be empty lifts the composer from the bottom to slightly above the column's middle. A loading one keeps it at the bottom
+  const isEmpty = messages.length === 0 && !historyLoading
+  const emptyLift = isEmpty && columnHeight > 0 ? Math.max(0, columnHeight * (0.5 + EMPTY_LIFT) - inputAreaHeight / 2) : 0
+  // The greeting waits for the measured, centered composer, so it never flashes at the bottom
+  const showGreeting = emptyLift > 0 && inputAreaHeight > 0
 
   // Neovim starts from the text it is given, so a text preview waits for the fresh file. PDFs and images open at once and update.
   const onPreviewOpen = attachmentActions?.onPreviewOpen
@@ -106,8 +122,9 @@ export function ChatContainer({
   // Sending re-pins to bottom so the new answer streams into view
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
     pin()
+    if (messages.length === 0) setLaunchedChatId(chatId)
     onSend(text, attachments)
-  }, [pin, onSend])
+  }, [pin, onSend, messages.length, chatId])
 
   const context = useMemo<ChatContext | undefined>(
     () => attachmentActions && {
@@ -124,7 +141,7 @@ export function ChatContainer({
 
   return (
     <div className="absolute inset-0 flex">
-      <div className="flex-1 min-w-0 flex flex-col relative">
+      <div ref={columnRef} className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
           tabIndex={-1}
@@ -166,8 +183,17 @@ export function ChatContainer({
           <div ref={bottomRef} />
           </div>
         </div>
-        <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/40 via-30% to-transparent pointer-events-none" />
+        <div
+          ref={inputAreaRef}
+          className={`absolute bottom-0 left-0 right-0 z-10 pointer-events-none ${launchedChatId === chatId ? "transition-transform duration-200 ease-out motion-reduce:transition-none" : ""}`}
+          style={{ transform: `translateY(${-emptyLift}px)` }}
+        >
+          <p
+            aria-hidden={!showGreeting}
+            className={`absolute inset-x-0 bottom-full mb-5 text-center text-lg text-ink-subtle transition-opacity duration-200 ease-out motion-reduce:transition-none ${showGreeting ? "opacity-100" : "opacity-0"}`}
+          >
+            {EMPTY_GREETING}
+          </p>
           <div className="relative px-4 pb-6 pointer-events-auto">
             <ChatInput
               ref={chatInputRef}

@@ -1,7 +1,8 @@
 "use client"
 
-import { ArrowUp, LayoutGrid, Loader2, Plus, Square } from "lucide-react"
+import { LayoutGrid, Loader2, Plus, Square, ArrowUp } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { COMPOSER_ICON_BUTTON, composerSendButton } from "@/components/ui/Composer"
 import { MenuPopover } from "@/components/ui/MenuPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
@@ -9,19 +10,14 @@ import { availableTools } from "@/features/chat/tools"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 import type { AttachMenuItem } from "./ChatInput"
 
-export const ICON_BUTTON = "rounded-full p-1.5 text-ink-faint transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-30"
-/** Send and stop share one circle: raised surface when actionable, outlined when not. */
-const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
-const SEND_READY = "border-divider bg-surface-elevated text-ink hover:border-divider-strong active:scale-[0.96]"
-const SEND_IDLE = "border-divider/50 text-ink-faint"
-const MENU = "rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]"
+const MENU = "rounded-xl border border-divider bg-surface-elevated p-1 shadow-[var(--shadow-lg)]"
 
 /** The composer's "+" menu; picking an entry closes it first. */
 export function AttachMenu({ items, disabled }: { items: (AttachMenuItem & { iconClassName?: string })[]; disabled?: boolean }) {
   return (
     <MenuPopover
       trigger={(open, toggle) => (
-        <button aria-label="Add attachment" onClick={toggle} disabled={disabled} className={cn(ICON_BUTTON, open && "bg-surface-elevated text-ink")}>
+        <button aria-label="Add attachment" onClick={toggle} disabled={disabled} className={cn(COMPOSER_ICON_BUTTON, open && "bg-surface-elevated text-ink")}>
           <Plus className="h-4 w-4" />
         </button>
       )}
@@ -32,9 +28,9 @@ export function AttachMenu({ items, disabled }: { items: (AttachMenuItem & { ico
             <button
               key={label}
               onClick={() => { close(); onClick() }}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-ink transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ink-muted"
             >
-              <Icon className={`h-3.5 w-3.5 ${iconClassName}`} />{label}
+              <Icon className={`h-3.5 w-3.5 shrink-0 ${iconClassName}`} />{label}
             </button>
           ))}
         </div>
@@ -50,7 +46,7 @@ export function ToolsMenu({ disabled }: { disabled?: boolean }) {
   return (
     <MenuPopover
       trigger={(open, toggle) => (
-        <button aria-label="Toggle tools" onClick={toggle} disabled={disabled} className={cn(ICON_BUTTON, open && "bg-surface-elevated text-ink")}>
+        <button aria-label="Toggle tools" onClick={toggle} disabled={disabled} className={cn(COMPOSER_ICON_BUTTON, open && "bg-surface-elevated text-ink")}>
           <LayoutGrid className="h-4 w-4" />
         </button>
       )}
@@ -80,20 +76,20 @@ export function SendButton({ isStreaming, extracting, ready, disabled, onCancel,
 }) {
   if (isStreaming) {
     return (
-      <button onClick={onCancel} className={cn(SEND_BUTTON, SEND_READY)} aria-label="Stop generating">
+      <button onClick={onCancel} className={composerSendButton(true)} aria-label="Stop generating">
         <Square className="h-3 w-3 fill-current" />
       </button>
     )
   }
   if (extracting) {
     return (
-      <button aria-label="Extracting attachment" disabled className={cn(SEND_BUTTON, SEND_IDLE)}>
+      <button aria-label="Extracting attachment" disabled className={composerSendButton(false)}>
         <Loader2 className="h-4 w-4 animate-spin" />
       </button>
     )
   }
   return (
-    <button aria-label="Send message" onClick={onSend} disabled={disabled || !ready} className={cn(SEND_BUTTON, ready && !disabled ? SEND_READY : SEND_IDLE)}>
+    <button aria-label="Send message" onClick={onSend} disabled={disabled || !ready} className={composerSendButton(ready && !disabled)}>
       <ArrowUp className="h-4 w-4" />
     </button>
   )
