@@ -84,3 +84,12 @@ export function useTab(): TabContextValue {
 export function useTabActive(): boolean {
   return useContext(TabContext)?.isActive ?? true
 }
+
+/** Id of the tab the tab picker previews, null while it previews none. */
+export const TabPeekContext = createContext<string | null>(null)
+
+/** Whether the tab picker previews the enclosing tab, never the frontmost one. */
+export function useIsPeeked(): boolean {
+  const { tab } = useTab()
+  return useContext(TabPeekContext) === tab.id
+}

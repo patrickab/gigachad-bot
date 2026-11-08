@@ -2,7 +2,7 @@
 
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { useTab } from "@/contexts/TabContext"
+import { useIsPeeked, useTab } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { LearnView } from "@/lib/domain/types"
 import { learnTitle } from "./items"
@@ -38,7 +38,7 @@ function FrameModalScrim({ frameBox, onClose }: { frameBox: HTMLElement; onClose
 }
 
 /**
- * One learn tab: the slot the shared LearnHarness frame is laid over while the tab is frontmost.
+ * One learn tab: the slot the shared LearnHarness frame is laid over while the tab is frontmost or previewed in the tab picker.
  *
  * - A session the user opens or starts in a tab opened from a project joins that project, unless it already belongs to one
  * - LearnHarness's own composer and stats bar work inside the frame, the shell drives its model selector and chrome
@@ -56,10 +56,11 @@ export function LearnSurface({ view, onViewChange }: { view: LearnView; onViewCh
     if (next.kind === "session" && tab.projectSlug) void sessions.claim(next.sessionId, tab.projectSlug)
   })
 
+  const peeked = useIsPeeked()
   useEffect(() => {
-    if (!isActive || !slot || !learnUrl) return
-    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next) })
-  }, [isActive, slot, view, learnUrl, attachFrame])
+    if (!(isActive || peeked) || !slot || !learnUrl) return
+    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next), peek: peeked })
+  }, [isActive, peeked, slot, view, learnUrl, attachFrame])
 
   const title = learnTitle(view, sessions.sessions)
   useEffect(() => {

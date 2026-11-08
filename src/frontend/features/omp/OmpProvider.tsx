@@ -1,11 +1,13 @@
 "use client"
 
-import { createContext, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "framer-motion"
 import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useFrameOverSlot } from "@/hooks/useFrameOverSlot"
+import { useFrameAttachment } from "@/hooks/useFrameAttachment"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { useFrameThemeName } from "@/hooks/useFrameThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
@@ -47,6 +49,8 @@ export interface FrameAttachment {
   onViewChange: (view: OmpView) => void
   /** The user clicked a local file link inside the frame, `path` is absolute. */
   onOpenFile: (path: string) => void
+  /** The tab is previewed in the tab picker, it holds the frame over the frontmost tab until the preview ends. */
+  peek?: boolean
 }
 
 /** Pixels of shell chrome over the frame's top and bottom edge, and the shell surface behind it (default paper). */
@@ -62,6 +66,8 @@ interface OmpContextValue {
   branchTree: BranchTree | null
   selectLeaf: (sessionId: string, leafId: string | null) => void
   attachFrame: (attachment: FrameAttachment) => () => void
+  /** A previewed tab holds the frame, the frontmost tab's insets wait until it hands it back. */
+  framePeeked: boolean
   /** Shell chrome laid over the frame, its transcript scrolls beneath it. */
   setFrameInsets: (insets: FrameInsets) => void
   reloadFrame: () => void
@@ -134,35 +140,6 @@ function useOverviewPolling(enabled: boolean): { overview: OmpOverview | null; r
   return { overview, refreshOverview }
 }
 
-/**
- * Lay the fixed `frame` over `slot` and keep it there. The frame never moves in the DOM, moving an iframe reloads it.
- *
- * - Writes the frame's style directly, so it follows a resizing slot in the same paint (a render would trail it)
- * - Without a slot it parks as a zero box at the viewport origin: Chrome throttles an off-screen
- *   cross-origin frame, then omp-web never hydrates and never reports ready
- */
-function useFrameOverSlot(frame: HTMLIFrameElement | null, slot: HTMLElement | null) {
-  useLayoutEffect(() => {
-    if (!frame) return
-    const place = () => {
-      const { top, left, width, height } = slot?.getBoundingClientRect() ?? { top: 0, left: 0, width: 0, height: 0 }
-      Object.assign(frame.style, { top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
-    }
-    place()
-    if (!slot) return
-    const observer = new ResizeObserver(place)
-    observer.observe(slot)
-    observer.observe(document.body)
-    window.addEventListener("resize", place)
-    document.addEventListener("transitionend", place, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", place)
-      document.removeEventListener("transitionend", place, true)
-    }
-  }, [frame, slot])
-}
-
 /** z-index of `FloatingWindow`'s backdrop, the frame rises above it while its dialog is open. */
 const FLOATING_WINDOW_Z = "z-[90]"
 
@@ -189,7 +166,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl, hostAccess } = useSettings()
   const { overview, refreshOverview } = useOverviewPolling(hostAccess)
   const theme = useFrameThemeName()
-  const [attachment, setAttachment] = useState<FrameAttachment | null>(null)
+  const { attachment, peeked: framePeeked, attach } = useFrameAttachment<FrameAttachment>()
   /** View the frame (re)loaded with, null until the first omp tab attached. */
   const [loadedView, setLoadedView] = useState<OmpView | null>(null)
   const [frameStatus, setFrameStatus] = useState<FrameStatus>("loading")
@@ -323,10 +300,9 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [loadedView, frameStatus, frameKey])
 
   const attachFrame = useCallback((next: FrameAttachment) => {
-    setAttachment(next)
     setLoadedView((current) => current ?? next.view)
-    return () => setAttachment((current) => (current === next ? null : current))
-  }, [])
+    return attach(next)
+  }, [attach])
 
   const reloadFrame = useCallback(() => {
     readyRef.current = false
@@ -353,9 +329,9 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [pendingSelect, post])
 
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, composerCommands, sendToComposer: post, onComposerEvent,
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, framePeeked, setFrameInsets, reloadFrame, composer, composerCommands, sendToComposer: post, onComposerEvent,
     pendingSelect, answerSelect,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, composerCommands, post, onComposerEvent, pendingSelect, answerSelect])
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, framePeeked, setFrameInsets, reloadFrame, composer, composerCommands, post, onComposerEvent, pendingSelect, answerSelect])
 
   const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {

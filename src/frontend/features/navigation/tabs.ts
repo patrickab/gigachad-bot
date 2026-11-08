@@ -150,15 +150,24 @@ export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: Sho
   return tab.name ?? (modeLabel || "Chat")
 }
 
-/** Tab state and actions shared by the sidebar's tab list. */
+/** The tab the tab picker previews and the box in its card the tab is scaled into. */
+export interface TabPeek {
+  id: string
+  slot: HTMLElement
+}
+
+/** Tab state and actions shared by the top bar's tab picker. */
 export interface TabStripValue {
   tabs: Tab[]
   activeTabId: string
-  /** Activity description exposed on each tab's sidebar row. */
+  /** Activity description shown in each tab's preview. */
   labelOf: (tab: Tab) => string
   isLoading: (tab: Tab) => boolean
   select: (id: string) => void
   close: (id: string) => void
-  add: () => void
+  /** Open a fresh chat tab in the current one's project, frontmost unless `activate` is false. Returns its id. */
+  add: (options?: { activate?: boolean }) => string
+  /** Preview a background tab scaled into `slot`, null ends the preview. */
+  peek: (peek: TabPeek | null) => void
 }
 export const TabStripContext = createContext<TabStripValue | null>(null)

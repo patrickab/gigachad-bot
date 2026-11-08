@@ -22,7 +22,6 @@ import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { FileMountPicker } from "./FileMountPicker"
 import { ProviderUsage } from "./ProviderUsage"
 import { useSidebar } from "./SidebarContext"
-import { TabList } from "./TabList"
 import { useCodeMounts } from "./useCodeMounts"
 import { useDeleteChat } from "./useDeleteChat"
 import { useFileRename } from "./useFileRename"
@@ -135,8 +134,6 @@ export function Sidebar(props: SidebarProps) {
         <PanelToggleButton side="left" open onClick={toggleCollapsed} openLabel="Open sidebar" closeLabel="Close sidebar" />
       </div>
       <nav aria-label="Workspace" className="motion-fade-in min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        <TabList />
-        <div role="separator" className="my-3 border-t border-divider/50" />
         <FileTree label="Projects" items={items} controller={controller} loading={branches.historiesLoading}
           headerActions={<ArchiveSelector
             noun="projects"

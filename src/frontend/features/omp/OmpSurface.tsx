@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useEffectEvent, useRef, useState } from "react"
-import { useTab } from "@/contexts/TabContext"
+import { useIsPeeked, useTab } from "@/contexts/TabContext"
 import { useOpenFile } from "@/features/editor/FilePanel"
 import { useElementSize } from "@/hooks/useElementSize"
 import type { OmpView } from "@/lib/domain/types"
@@ -14,7 +14,7 @@ import { viewTitle } from "./sessions"
 const TOP_BAR_PX = 44
 
 /**
- * One omp tab: the slot the shared frame is laid over while the tab is frontmost.
+ * One omp tab: the slot the shared frame is laid over while the tab is frontmost or previewed in the tab picker.
  *
  * - Sessions run under the top bar and gigachad's composer like a chat, the frame pads its transcript by these insets
  * - Settings keep the plain layout below the top bar (`WorkspaceSurface`)
@@ -35,16 +35,17 @@ export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_B
   onLeadSent?: () => void
 }) {
   const { tab, isActive, setTitle } = useTab()
-  const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
+  const peeked = useIsPeeked()
+  const { attachFrame, framePeeked, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
   const openFile = useOpenFile()
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
   const title = viewTitle(view, overview)
   const adoptView = useEffectEvent((next: OmpView) => onViewChange(next))
 
   useEffect(() => {
-    if (!isActive || !slot) return
-    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next), onOpenFile: openFile })
-  }, [isActive, slot, view, attachFrame, openFile])
+    if (!(isActive || peeked) || !slot) return
+    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next), onOpenFile: openFile, peek: peeked })
+  }, [isActive, peeked, slot, view, attachFrame, openFile])
 
   useEffect(() => {
     if (adoptTitle) setTitle(title)
@@ -53,11 +54,13 @@ export function OmpSurface({ view, onViewChange, shellCommands, topInset = TOP_B
   const hasComposer = view.kind !== "settings"
   const composerRef = useRef<HTMLDivElement>(null)
   const composerHeight = useElementSize(composerRef).height
+  // The frame's insets follow the tab it lies over: the previewed one, else the frontmost
+  const showsFrame = peeked || (isActive && !framePeeked)
   useEffect(() => {
-    if (!isActive) return
+    if (!showsFrame) return
     if (hasComposer && composerHeight === 0) return // hidden tab measures 0, keep the last insets
     setFrameInsets(hasComposer ? { top: topInset, bottom: composerHeight, backdrop } : { top: 0, bottom: 0, backdrop })
-  }, [isActive, hasComposer, composerHeight, topInset, backdrop, setFrameInsets])
+  }, [showsFrame, hasComposer, composerHeight, topInset, backdrop, setFrameInsets])
 
   return (
     <div className="relative h-full w-full">

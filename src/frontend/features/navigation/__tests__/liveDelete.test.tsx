@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRef, type RefObject } from "react"
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
+import { TabPicker } from "@/features/navigation/TabPicker"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { nextTab } from "@/features/navigation/tabs"
 import type { WorkspaceItem } from "@/contexts/TabContext"
@@ -77,6 +78,7 @@ function renderWorkspace(openTabs = true) {
   const view = render(
     <UndoDeleteProvider>
       <TabManager ref={manager}>
+        <TabPicker />
         <Sidebar appMode="chat" onFileSelect={(path, scope) => manager.current!.showItem({
           kind: path.endsWith(".tex") ? "workbench" : "document", path, projectSlug: scope, rootFile: true,
         })} />
@@ -174,15 +176,24 @@ describe("deleting a folder entry", () => {
 })
 
 describe("tab crumbs", () => {
+  /** Whether the frontmost tab's picker lists `file` under `project`, opening the picker with Space first. */
+  const pickerLists = (view: RenderResult, project: string, file: string) => {
+    if (!view.queryByRole("listbox", { name: "Tabs" })) {
+      fireEvent.keyDown(document.body, { key: " ", code: "Space" })
+      fireEvent.keyUp(document.body, { key: " ", code: "Space" })
+    }
+    const group = within(view.getByRole("listbox", { name: "Tabs" })).getByRole("group", { name: project })
+    return within(group).getAllByRole("option").some((option) => option.firstElementChild!.firstElementChild!.textContent === file)
+  }
+
   it("name the project that lists the file, also for files inside a folder entry", async () => {
-    localStorage.setItem("sidebar_tabs_expanded", "true")
     const { view } = renderWorkspace(false)
     fireEvent.click(await sidebar(view).findByRole("button", { name: "paper" }))
 
     fireEvent.click(sidebar(view).getByRole("button", { name: "paper.tex" }))
-    expect(view.getByRole("button", { name: "Proj / latex / paper.tex" })).toBeInTheDocument()
+    expect(pickerLists(view, "Proj", "paper.tex")).toBe(true)
     fireEvent.click(sidebar(view).getByRole("button", { name: "imgs" }))
     fireEvent.click(sidebar(view).getByRole("button", { name: "figure.png" }))
-    expect(view.getByRole("button", { name: "Proj / files / figure.png" })).toBeInTheDocument()
+    expect(pickerLists(view, "Proj", "figure.png")).toBe(true)
   })
 })

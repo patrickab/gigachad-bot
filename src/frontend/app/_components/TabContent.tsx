@@ -11,13 +11,14 @@ import { PromptEditor } from "@/features/settings/PromptEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
+import { TabPicker } from "@/features/navigation/TabPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
-import { itemOf, useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { itemOf, useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { opensInWorkbench } from "@/lib/domain/workbench"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
@@ -51,6 +52,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const opensWorkbench = neovimEnabled && hostAccess
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const contentAreaRef = useContentAreaRef()
+  const peeked = useIsPeeked()
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const canvas = useCanvasView()
@@ -108,7 +110,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
         )}
         appMode={appMode}
       />
-      <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative bg-paper">
+      {/* Previewed in the tab picker, the paper comes from the card behind: a shared frame laid under this tab must show through */}
+      <main ref={contentAreaRef} className={`flex-1 min-w-0 flex flex-col relative ${peeked ? "" : "bg-paper"}`}>
         <WorkspaceSurface
           sidebarToggle={sidebarCollapsed && <PanelToggleButton side="left" open={false} onClick={toggleSidebar} openLabel="Open sidebar" closeLabel="Close sidebar" />}
           canvas={canvas}
@@ -173,6 +176,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
         />
       )}
       <MemoryCommandLayer bar={memory} items={menuItems} onRun={runMenuCommand} />
+      <TabPicker />
     </div>
   )
 }

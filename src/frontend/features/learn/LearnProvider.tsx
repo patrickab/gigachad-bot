@@ -3,6 +3,8 @@
 import { createContext, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { useFrameOverSlot } from "@/hooks/useFrameOverSlot"
+import { useFrameAttachment } from "@/hooks/useFrameAttachment"
 import { useFrameThemeName } from "@/hooks/useFrameThemeName"
 import type { LearnSession, LearnView } from "@/lib/domain/types"
 import type { LearnEventType, LearnFrameMessageOf, LearnStateType } from "@gigachad/chat-ui/learn-protocol"
@@ -20,6 +22,8 @@ export interface LearnFrameAttachment {
   view: LearnView
   /** The user navigated inside the frame (opened a session, went home). */
   onViewChange: (view: LearnView) => void
+  /** The tab is previewed in the tab picker, it holds the frame over the frontmost tab until the preview ends. */
+  peek?: boolean
 }
 
 interface LearnContextValue {
@@ -104,32 +108,6 @@ function useReportedTitles(bridge: LearnBridge, sessions: LearnSessions) {
 }
 
 /**
- * Lay the fixed `frame` over `slot` and keep it there, like the omp frame: moving an iframe in the DOM reloads it.
- * Without a slot it parks as a zero box, Chrome throttles an off-screen cross-origin frame until it never hydrates.
- */
-function useFrameOverSlot(frame: HTMLIFrameElement | null, slot: HTMLElement | null) {
-  useLayoutEffect(() => {
-    if (!frame) return
-    const place = () => {
-      const { top, left, width, height } = slot?.getBoundingClientRect() ?? { top: 0, left: 0, width: 0, height: 0 }
-      Object.assign(frame.style, { top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
-    }
-    place()
-    if (!slot) return
-    const observer = new ResizeObserver(place)
-    observer.observe(slot)
-    observer.observe(document.body)
-    window.addEventListener("resize", place)
-    document.addEventListener("transitionend", place, true)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", place)
-      document.removeEventListener("transitionend", place, true)
-    }
-  }, [frame, slot])
-}
-
-/**
  * Own LearnHarness's single frame, shared by every learn tab.
  *
  * - Mounted on the first attach and laid over the active learn tab's slot, tabs switch it by message (`bridge.ts`), never by reload
@@ -141,7 +119,7 @@ export function LearnProvider({ onOpenItem, children }: { onOpenItem: OpenItem; 
   const { learnharnessUrl, hostAccess } = useSettings()
   const learnUrl = hostAccess ? learnharnessUrl : null
   const theme = useFrameThemeName()
-  const [attachment, setAttachment] = useState<LearnFrameAttachment | null>(null)
+  const { attachment, attach } = useFrameAttachment<LearnFrameAttachment>()
   const sessions = useLearnSessions(learnUrl !== null, attachment !== null)
   const [mounted, setMounted] = useState(false)
   const [frameStatus, setFrameStatus] = useState<LearnFrameStatus>("loading")
@@ -180,10 +158,9 @@ export function LearnProvider({ onOpenItem, children }: { onOpenItem: OpenItem; 
   }, [mounted, frameStatus, frameKey])
 
   const attachFrame = useCallback((next: LearnFrameAttachment) => {
-    setAttachment(next)
     setMounted(true)
-    return () => setAttachment((current) => (current === next ? null : current))
-  }, [])
+    return attach(next)
+  }, [attach])
 
   const reloadFrame = useCallback(() => {
     bridge.reset()

@@ -186,7 +186,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- TextDocumentEditor.tsx Markdown/text save and preview owner (EditorShell, EditorViewSwitch, useEditorView)
 |       |   |   |-- useRootFileDocument.ts Load, dirty, remote reload and chained saves of one file, codec-aware
 |       |   |   |-- useDebouncedSave.ts Quiet-time autosave plus unmount and forced flush
-|       |   |   |-- FileViewer.tsx
+|       |   |   |-- FileViewer.tsx    File and document picker on `FloatingPicker`: fuzzy search, folder drill-down, file preview window
 |       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
 |       |   |   |-- NeovimEditor.tsx  Terminal hook of every Neovim surface, answers the session's `clipboard_read` from the browser clipboard, `notebook` documents (Shift+Enter/Ctrl+Enter as CSI-u, `run_cell` to `onRunCell`), `NeovimStopped` (the one stopped page: message and a restart or start button)
 |       |   |   |-- ShellTerminal.tsx `ShellTerminals`: one floating login shell per tab (host access only), `t` opens the active tab's, Esc at the prompt, a double Esc or a click beside it hides it, `exit` or closing the tab ends it
@@ -211,7 +211,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- Sidebar.tsx       Composition of the hooks below
 |       |   |   |-- workspaceTree.ts  Pure Projects and Code tree builders, promoted LaTeX project folders, new-file action
 |       |   |   |-- useWorkspaceDocuments.ts, useCodeMounts.ts, useProjectActions.ts
-|       |   |   |-- TabManager.tsx    Tab state provider; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabList.tsx (sidebar Tabs section)
+|       |   |   |-- TabManager.tsx    Tab state provider, live preview of a background tab scaled into the picker card; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabPicker.tsx (tab picker, opened by Space)
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
@@ -266,7 +266,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- components/
 |       |   |-- ui/                   Reusable interaction primitives
 |       |   |   |-- Dialog.tsx
-|       |   |   |-- FloatingWindow.tsx
+|       |   |   |-- FloatingWindow.tsx Modal floating window, `FloatingPanel` its panel look shared with the picker preview
+|       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), preview in a floating window clear of the list
 |       |   |   |-- MenuPopover.tsx   Trigger plus popover menu, closed by outside press or Escape
 |       |   |   |-- PillTabs.tsx, BoardColumn.tsx, Field.tsx
 |       |   |   |-- IconButton.tsx, StatusDot.tsx Quiet square icon button with focus ring, status tone dot (`StatusTone`)
@@ -283,6 +284,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- useEventListener.ts, useEscapeLayer.ts, useOutsidePress.ts
 |       |   |-- useFollowFiles.ts     Follow absolute files and folders on disk, `onChange(path)`
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
+|       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the shared omp/learn frame over a tab's slot, previewed tab first
 |       |-- lib/
 |       |   |-- backend/              HTTP, URL, runtime API base and stream clients
 |       |   |   |-- api.ts                Resource endpoints over one fetch core

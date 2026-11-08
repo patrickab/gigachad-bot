@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { createRef, type ReactElement } from "react"
+import { createContext, createRef, useContext, useEffect, type ReactElement, type ReactNode } from "react"
 import { act, cleanup, render as testingRender, fireEvent, waitFor, within, type RenderResult } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
-import { TabList } from "@/features/navigation/TabList"
+import { TabPicker } from "@/features/navigation/TabPicker"
 import { nextTab } from "@/features/navigation/tabs"
-import { TabContext, useTab } from "@/contexts/TabContext"
+import { TabContext, useIsPeeked, useTab } from "@/contexts/TabContext"
+import { useFrameAttachment } from "@/hooks/useFrameAttachment"
 import { onFileChange } from "@/lib/backend/fileEvents"
 import { removeDocument } from "@/lib/backend/api"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
@@ -358,8 +359,7 @@ describe("Project navigation", () => {
 
   it("switches an open LaTeX project's tab to another of its files, and opens files outside in the current tab", () => {
     const manager = createRef<TabManagerHandle>()
-    render(<TabManager ref={manager}><TabList /></TabManager>)
-    localStorage.setItem("sidebar_tabs_expanded", "true")
+    render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const project = {
       ...nextTab(), appMode: "workbench" as const,
       workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
@@ -381,7 +381,7 @@ describe("Project navigation", () => {
 
   it("opens an image from a LaTeX project tab in a new tab and leaves the workbench in place", () => {
     const manager = createRef<TabManagerHandle>()
-    render(<TabManager ref={manager}><TabList /></TabManager>)
+    render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const project = {
       ...nextTab(), appMode: "workbench" as const,
       workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
@@ -1339,52 +1339,102 @@ describe("Project navigation", () => {
   })
 })
 
-describe("Sidebar tab list", () => {
-  const activeRow = (view: RenderResult) => view.getByRole("button", { current: "page" }).textContent
-  const rowNames = (view: RenderResult) => view.getAllByRole("button", { name: /^(?!Close ).* \/ / }).map((button) => button.textContent)
-  beforeEach(() => localStorage.setItem("sidebar_tabs_expanded", "true"))
+describe("Tab picker", () => {
+  const tapSpace = (target: Element = document.body) => {
+    fireEvent.keyDown(target, { key: " ", code: "Space" })
+    fireEvent.keyUp(target, { key: " ", code: "Space" })
+  }
+  /** The frontmost tab's picker rows as `project / category / file` crumbs, opening the picker with Space first. */
+  const tabRows = (view: RenderResult) => {
+    if (!view.queryByRole("listbox", { name: "Tabs" })) tapSpace()
+    // The open list sits in a portal, one at a time
+    return within(view.getByRole("listbox", { name: "Tabs" })).getAllByRole("group").flatMap((group) =>
+      within(group).getAllByRole("option").map((option) => {
+        const [file, category] = [...option.firstElementChild!.children].map((span) => span.textContent!)
+        const current = category.endsWith(" · current")
+        return { crumb: `${group.firstElementChild!.textContent} / ${category.replace(" · current", "")} / ${file}`, current, option }
+      }))
+  }
+  const activeRow = (view: RenderResult) => tabRows(view).find((row) => row.current)?.crumb
+  const rowNames = (view: RenderResult) => tabRows(view).map((row) => row.crumb)
+  const tabRow = (view: RenderResult, crumb: string) => tabRows(view).find((row) => row.crumb === crumb)!.option
 
-  it("starts collapsed with the open tab count and shares expansion across tabs", () => {
-    const stored = new Map<string, string>()
-    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value) } })
+  it("opens on a tapped Space outside text fields and controls, not on a Space held through a pointer press", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
-    const first = manager.current!.getTabs()[0]
-    act(() => manager.current!.openTab({ ...nextTab(), name: "Other" }))
-    expect(view.getByRole("button", { name: "Tabs, 2 open" })).toHaveAttribute("aria-expanded", "false")
-    expect(view.queryByRole("button", { name: "general / chats / Other" })).not.toBeInTheDocument()
+    const view = render(<TabManager ref={manager}><TabPicker /><input aria-label="Draft" /><button type="button">Act</button></TabManager>)
+    const listbox = () => view.queryByRole("listbox", { name: "Tabs" })
 
-    fireEvent.click(view.getByRole("button", { name: "Tabs, 2 open" }))
-    act(() => manager.current!.switchToTab(first.id))
-    expect(view.getByRole("button", { name: "Tabs, 2 open" })).toHaveAttribute("aria-expanded", "true")
-    expect(activeRow(view)).toBe("general / chats / New chat")
+    tapSpace(view.getByRole("textbox", { name: "Draft" }))
+    tapSpace(view.getByRole("button", { name: "Act" }))
+    fireEvent.keyDown(document.body, { key: " ", code: "Space" })
+    fireEvent.pointerDown(document.body)
+    fireEvent.keyUp(document.body, { key: " ", code: "Space" })
+    expect(listbox()).toBeNull()
+
+    tapSpace()
+    expect(listbox()).toBeInTheDocument()
+    expect(view.getByRole("combobox", { name: "Search tabs…" })).toHaveFocus()
   })
 
-  it("switches on click, closes other tabs and never closes the last tab", () => {
+  it("closes the highlighted background tab with Delete or Alt+W and opens one with Alt+T, the picker stays open, the current tab stays", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
+    act(() => { for (const name of ["Alpha", "Beta", "Gamma"]) manager.current!.openTab({ ...nextTab(), name }) })
+    const search = () => view.getByRole("combobox", { name: "Search tabs…" })
+    tapSpace()
+    const highlightedRow = () => tabRows(view).find((row) => row.option.getAttribute("aria-selected") === "true")?.crumb
+
+    fireEvent.mouseMove(tabRow(view, "general / chats / Alpha"), { clientX: 1, clientY: 0 })
+    fireEvent.keyDown(search(), { key: "Delete" })
+    expect(rowNames(view)).not.toContain("general / chats / Alpha")
+    expect(highlightedRow()).toBe("general / chats / Beta")
+
+    fireEvent.keyDown(search(), { key: "w", altKey: true })
+    expect(rowNames(view)).not.toContain("general / chats / Beta")
+    expect(search()).toHaveFocus()
+
+    // Gamma is the current tab: neither key closes it, nor does `TabManager`'s own Alt+W
+    fireEvent.mouseMove(tabRow(view, "general / chats / Gamma"), { clientX: 2, clientY: 0 })
+    fireEvent.keyDown(search(), { key: "Delete" })
+    fireEvent.keyDown(search(), { key: "w", altKey: true })
+    expect(rowNames(view)).toContain("general / chats / Gamma")
+    expect(manager.current!.getTabs()).toHaveLength(2)
+
+    fireEvent.keyDown(search(), { key: "t", altKey: true })
+    expect(manager.current!.getTabs()).toHaveLength(3)
+    expect(activeRow(view)).toBe("general / chats / Gamma")
+    expect(highlightedRow()).toBe(`general / chats / New chat`)
+    expect(highlightedRow()).not.toBe(activeRow(view))
+    expect(search()).toHaveFocus()
+  })
+
+  it("switches on pick, closes other tabs and never closes the last tab", () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
+    tabRows(view)
     expect(view.queryByRole("button", { name: /^Close / })).not.toBeInTheDocument()
     act(() => manager.current!.openTab({ ...nextTab(), name: "Other" }))
     expect(activeRow(view)).toBe("general / chats / Other")
 
-    fireEvent.click(view.getByRole("button", { name: "general / chats / New chat" }))
+    fireEvent.click(tabRow(view, "general / chats / New chat"))
     expect(activeRow(view)).toBe("general / chats / New chat")
     fireEvent.click(view.getByRole("button", { name: "Close general / chats / Other" }))
     expect(manager.current!.getTabs()).toHaveLength(1)
     expect(view.queryByRole("button", { name: /^Close / })).not.toBeInTheDocument()
   })
 
-  it("keeps Tab key focus traversal within the tree from switching workspaces", () => {
+  it("keeps the Tab key in its search field from switching workspaces", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     act(() => manager.current!.openTab({ ...nextTab(), name: "Other" }))
-    expect(fireEvent.keyDown(view.getByRole("button", { current: "page" }), { key: "Tab" })).toBe(true)
+    tabRows(view)
+    expect(fireEvent.keyDown(view.getByRole("combobox", { name: "Search tabs…" }), { key: "Tab" })).toBe(true)
     expect(activeRow(view)).toBe("general / chats / Other")
   })
 
   it("reuses the selected tab for chats and items without disturbing background tabs", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /><WorkspaceDraft /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /><WorkspaceDraft /></TabManager>)
     act(() => manager.current!.showChat("proj/first.json"))
     const background = manager.current!.getTabs()[0]
     const selected = nextTab()
@@ -1411,7 +1461,7 @@ describe("Sidebar tab list", () => {
 
   it("tracks the visible surface across project, shared, and scratch workspaces", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const canvas = { ...nextTab(), appMode: "canvas" as const, projectSlug: "proj", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" } }
     const architecture = { ...nextTab(), appMode: "canvas" as const, projectSlug: "proj", workspaceItem: { kind: "architecture" as const, path: "graph/proj/", projectSlug: "proj" } }
     const file = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "/source/notes.md", projectSlug: null, rootFile: true } }
@@ -1421,7 +1471,7 @@ describe("Sidebar tab list", () => {
     })
     expect(activeRow(view)).toBe("Proj / canvases / new.canvas")
     for (const breadcrumb of ["Proj / canvases / board.canvas", "Proj / architecture / System overview", "general / files / notes.md"]) {
-      fireEvent.click(view.getByRole("button", { name: breadcrumb }))
+      fireEvent.click(tabRow(view, breadcrumb))
       expect(activeRow(view)).toBe(breadcrumb)
     }
     act(() => manager.current!.showChat("proj/session.json"))
@@ -1430,17 +1480,17 @@ describe("Sidebar tab list", () => {
 
   it("names a project file's tab after its display name, other projects' tabs after the file", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const named = { ...nextTab(), appMode: "document" as const, projectSlug: "proj", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "proj" } }
     const unnamed = { ...nextTab(), appMode: "document" as const, projectSlug: "empty", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "empty" } }
     act(() => { for (const tab of [named, unnamed]) manager.current!.openTab(tab) })
-    expect(view.getByRole("button", { name: "Proj / files / Roadmap.md" })).toBeInTheDocument()
-    expect(view.getByRole("button", { name: "Empty project / files / plan.md" })).toBeInTheDocument()
+    expect(rowNames(view)).toContain("Proj / files / Roadmap.md")
+    expect(rowNames(view)).toContain("Empty project / files / plan.md")
   })
 
-  it("sorts by project, category and natural filename order without reordering on selection", () => {
+  it("groups by project, general last, sorted by category and natural filename order without reordering on selection", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const tabs = [
       { ...nextTab(), projectSlug: "proj", appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "alpha.md", projectSlug: "proj" } },
       { ...nextTab(), projectSlug: "proj", appMode: "canvas" as const, workspaceItem: { kind: "canvas" as const, path: "board10.canvas", projectSlug: "proj" } },
@@ -1460,15 +1510,15 @@ describe("Sidebar tab list", () => {
       "general / chats / New chat",
     ]
     expect(rowNames(view)).toEqual(expected)
-    fireEvent.click(view.getByRole("button", { name: expected[3] }))
+    fireEvent.click(tabRow(view, expected[3]))
     expect(rowNames(view)).toEqual(expected)
     fireEvent.click(view.getByRole("button", { name: "Close Proj / files / alpha.md" }))
     expect(rowNames(view)).toEqual(expected.filter((label) => label !== "Proj / files / alpha.md"))
   })
 
-  it("creates chats in the active workspace's project or general scope", () => {
+  it("opens new tabs in the active workspace's project or general scope", () => {
     const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabList /></TabManager>)
+    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const projectTab = { ...nextTab(), name: "Project chat", projectSlug: "proj" }
     const sharedTab = { ...nextTab(), name: "Shared chat" }
     act(() => {
@@ -1477,9 +1527,66 @@ describe("Sidebar tab list", () => {
     })
     for (const tab of [projectTab, sharedTab]) {
       act(() => manager.current!.switchToTab(tab.id))
-      fireEvent.click(view.getByRole("button", { name: "New chat" }))
+      tabRows(view)
+      fireEvent.click(view.getByRole("button", { name: "New tab" }))
       expect(manager.current!.getTabs().at(-1)?.projectSlug).toBe(tab.projectSlug)
     }
+  })
+
+  it("shows the highlighted background tab live in the preview and hands it the shared frame only while it holds one", () => {
+    type Attachment = { name: string; peek?: boolean }
+    const AttachContext = createContext<(attachment: Attachment) => () => void>(() => () => {})
+    function FrameHost({ children }: { children: ReactNode }) {
+      const { attachment, attach } = useFrameAttachment<Attachment>()
+      return <AttachContext.Provider value={attach}>{children}<output data-testid="frame-holder">{attachment?.name}</output></AttachContext.Provider>
+    }
+    // Tabs named "Frame …" stand in for omp tabs, they lay the shared frame over their slot
+    function FrameSurface() {
+      const { tab, isActive } = useTab()
+      const peeked = useIsPeeked()
+      const attach = useContext(AttachContext)
+      useEffect(() => {
+        if (!tab.name?.startsWith("Frame") || !(isActive || peeked)) return
+        return attach({ name: tab.name, peek: peeked })
+      }, [tab.name, isActive, peeked, attach])
+      return null
+    }
+    const manager = createRef<TabManagerHandle>()
+    const view = render(<FrameHost><TabManager ref={manager}><TabPicker /><FrameSurface /></TabManager></FrameHost>)
+    act(() => {
+      for (const name of ["Plain", "Frame B", "Frame A"]) manager.current!.openTab({ ...nextTab(), name })
+    })
+    const peeked = () => document.querySelector<HTMLElement>(".workspace-tab[data-phase='peek']")
+    const card = () => document.body.querySelector("[aria-hidden].fixed")
+    const holder = () => view.getByTestId("frame-holder").textContent
+    // Each highlight is a fresh pointer position, CommandPicker ignores a pointer that did not move
+    let pointer = 0
+    const highlight = (crumb: string) => fireEvent.mouseMove(tabRow(view, crumb), { clientX: ++pointer, clientY: 0 })
+
+    highlight("general / chats / Plain")
+    // Tabs render in opening order: the first chat, then Plain
+    expect(peeked()).toBe(document.querySelectorAll(".workspace-tab")[1])
+    expect(peeked()).not.toHaveStyle({ display: "none" })
+    expect(peeked()).toHaveAttribute("inert")
+    expect(card()).toBeInTheDocument()
+    expect(holder()).toBe("Frame A")
+
+    highlight("general / chats / Frame B")
+    expect(holder()).toBe("Frame B")
+
+    highlight("general / chats / Frame A")
+    expect(peeked()).toBeNull()
+    expect(card()).toBeNull()
+    expect(holder()).toBe("Frame A")
+
+    highlight("general / chats / Frame B")
+    fireEvent.keyDown(view.getByRole("combobox", { name: "Search tabs…" }), { key: "Enter" })
+    expect(peeked()).toBeNull()
+    expect(holder()).toBe("Frame B")
+    // Reopening the picker highlights the current tab, it previews nothing and keeps the frame
+    expect(activeRow(view)).toBe("general / chats / Frame B")
+    expect(peeked()).toBeNull()
+    expect(holder()).toBe("Frame B")
   })
 
   it("preserves drafts and exposes only the current workspace during interrupted transitions", () => {

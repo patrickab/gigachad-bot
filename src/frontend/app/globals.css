@@ -173,6 +173,20 @@
   z-index: 1;
 }
 
+/* Picker layers (components/ui/CommandPicker.tsx), bottom to top:
+   55 the dimmed page (top bar included) and the preview window, 56 a shared frame over a previewed tab's slot (hooks/useFrameOverSlot.ts),
+   57 the previewed tab, scaled into the window at full layout size (TabManager), 60 the list, portaled out of the top bar */
+.workspace-tab[data-phase="peek"] {
+  z-index: 57;
+  pointer-events: none;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+iframe[data-peek] {
+  pointer-events: none !important;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .workspace-tab[data-phase="outgoing"] [data-workspace-surface] {
     visibility: visible;

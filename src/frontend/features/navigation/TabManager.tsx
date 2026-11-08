@@ -1,14 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { isEditableTarget } from "@/lib/utils"
+import { PICKER_PANEL_RADIUS_PX } from "@/components/ui/CommandPicker"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { TabContext, TabPeekContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
 import { announceFileClosed, onFileRemoval } from "@/lib/backend/fileEvents"
-import { TabStripContext, filesOfTabs, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabsAfterRemoval, texBufferShown, texProjectTab, type TabStripValue } from "./tabs"
+import { TabStripContext, filesOfTabs, nextTab, opensBesideWorkbench, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabsAfterRemoval, texBufferShown, texProjectTab, type TabPeek, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -41,6 +42,38 @@ interface TabMode {
 
 const INITIAL_TAB: Tab = nextTab()
 
+/** Corner radius inside the preview window's 1px border, the peeked tab is clipped to it. */
+const PEEK_RADIUS_PX = PICKER_PANEL_RADIUS_PX - 1
+
+/**
+ * Lay the peeked tab container inside `root` over `slot`, scaled from its full size, every animation frame until the peek ends.
+ *
+ * - The tab keeps its layout size, so it renders exactly as it would frontmost, only smaller
+ * - Follows the slot as the preview card moves to the highlighted row
+ */
+function usePeekOverSlot(root: React.RefObject<HTMLDivElement | null>, peekedTabId: string | null, slot: HTMLElement | null) {
+  useLayoutEffect(() => {
+    const container = root.current?.querySelector<HTMLElement>(":scope > [data-phase='peek']")
+    if (!peekedTabId || !slot || !container || !root.current) return
+    const host = root.current
+    let request = 0
+    const follow = () => {
+      const box = slot.getBoundingClientRect()
+      const origin = host.getBoundingClientRect()
+      const scale = host.offsetWidth > 0 ? box.width / host.offsetWidth : 1
+      container.style.transform = `translate(${box.left - origin.left}px, ${box.top - origin.top}px) scale(${scale})`
+      container.style.borderRadius = `${PEEK_RADIUS_PX / scale}px`
+      request = requestAnimationFrame(follow)
+    }
+    follow()
+    return () => {
+      cancelAnimationFrame(request)
+      container.style.transform = ""
+      container.style.borderRadius = ""
+    }
+  }, [root, peekedTabId, slot])
+}
+
 /** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
 function TabScope({ tab, isActive, updateTab, setMode, children }: {
   tab: Tab
@@ -72,6 +105,8 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const { activeTab, setActiveTab, phaseOf, isShown, onAnimationEnd } = useWorkspaceSwitch(INITIAL_TAB.id)
   const [modes, setModes] = useState<Record<string, TabMode>>({})
+  const [peek, setPeek] = useState<TabPeek | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
   // What the state holds, kept ahead of it by removals so several in one tick each see the previous one's result.
@@ -164,11 +199,12 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     if (selected) onActiveTabChange?.(selected)
   }, [tabs, activeTab, onActiveTabChange])
 
-  const addTab = useCallback(() => {
+  const addTab = useCallback(({ activate = true }: { activate?: boolean } = {}) => {
     const tab = nextTab(defaultConfig)
     tab.projectSlug = tabs.find((current) => current.id === activeTab)?.projectSlug ?? null
     setTabs((prev) => [...prev, tab])
-    setActiveTab(tab.id)
+    if (activate) setActiveTab(tab.id)
+    return tab.id
   }, [defaultConfig, tabs, activeTab, setActiveTab])
 
   const closeTab = useCallback((id: string) => {
@@ -203,6 +239,9 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   })
 
   const shownName = useDisplayName()
+  // The frontmost tab shows itself, a closed one nothing
+  const peekedTabId = peek && peek.id !== activeTab && tabs.some((tab) => tab.id === peek.id) ? peek.id : null
+  usePeekOverSlot(rootRef, peekedTabId, peek?.slot ?? null)
   const setMode = useCallback((id: string, label: string, loading = false) => {
     setModes((prev) => (prev[id]?.label === label && prev[id].loading === loading ? prev : { ...prev, [id]: { label, loading } }))
   }, [])
@@ -215,27 +254,30 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     select: setActiveTab,
     close: closeTab,
     add: addTab,
+    peek: setPeek,
   }), [tabs, activeTab, modes, shownName, closeTab, addTab, setActiveTab])
 
   return (
     <TabStripContext.Provider value={strip}>
-      <div className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className="workspace-tab absolute inset-0 h-full"
-            data-phase={phaseOf(tab.id)}
-            aria-hidden={tab.id !== activeTab}
-            inert={tab.id !== activeTab}
-            onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
-            style={{ display: isShown(tab.id) ? undefined : "none" }}
-          >
-            <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
-              {children}
-            </TabScope>
-          </div>
-        ))}
-      </div>
+      <TabPeekContext.Provider value={peekedTabId}>
+        <div ref={rootRef} className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className="workspace-tab absolute inset-0 h-full"
+              data-phase={tab.id === peekedTabId ? "peek" : phaseOf(tab.id)}
+              aria-hidden={tab.id !== activeTab}
+              inert={tab.id !== activeTab}
+              onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
+              style={{ display: isShown(tab.id) || tab.id === peekedTabId ? undefined : "none" }}
+            >
+              <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
+                {children}
+              </TabScope>
+            </div>
+          ))}
+        </div>
+      </TabPeekContext.Provider>
     </TabStripContext.Provider>
   )
 }

@@ -1,13 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { CommandPicker } from "@/components/ui/CommandPicker"
+import { CommandPicker, pickerLayout } from "@/components/ui/CommandPicker"
 
 const GROUPS = [
   { key: "fruit", label: "Fruit", items: ["Apple", "Pear"] },
   { key: "vegetables", label: "Vegetables", items: ["Leek"] },
 ]
 
-/** The picker over `GROUPS`, opened by a click, with `onPick` succeeding by default and an optional preview card. */
+/** The picker over `GROUPS`, opened by a click, with `onPick` succeeding by default and an optional preview window. */
 function renderPicker({ onPick = vi.fn(() => true), renderPreview }: {
   onPick?: (item: string) => boolean
   renderPreview?: (item: string) => string | null
@@ -130,7 +130,7 @@ describe("CommandPicker", () => {
     expect(search).toHaveFocus()
   })
 
-  it("previews the highlighted row beside the panel from the moment it opens, until it closes", async () => {
+  it("previews the highlighted row in a floating window outside the list from the moment it opens, until it closes", async () => {
     const { search } = renderPicker({ renderPreview: (item) => `Preview of ${item}` })
 
     expect(card()).toHaveTextContent("Preview of Apple")
@@ -146,12 +146,31 @@ describe("CommandPicker", () => {
     expect(card()).toBeNull()
   })
 
-  it("shows no card for a row without a preview", () => {
+  it("shows no window for a row without a preview", () => {
     const { search } = renderPicker({ renderPreview: (item) => item === "Pear" ? null : `Preview of ${item}` })
 
     expect(card()).toHaveTextContent("Preview of Apple")
     fireEvent.keyDown(search, { key: "ArrowDown" })
 
     expect(card()).toBeNull()
+  })
+})
+
+describe("pickerLayout", () => {
+  const landscape = { width: 1400, height: 850 }
+
+  it.each([
+    ["the window's own aspect", landscape.width / landscape.height],
+    ["16:9", 16 / 9],
+    ["a tall window's aspect", 0.8],
+  ])("centers the preview exactly on the window at %s, the finder inside its top left corner", (_name, aspect) => {
+    const { preview, finder } = pickerLayout(landscape, aspect)
+    expect(preview.left + preview.width / 2).toBeCloseTo(landscape.width / 2)
+    expect(preview.top + preview.height / 2).toBeCloseTo(landscape.height / 2)
+    expect(preview.width / preview.height).toBeCloseTo(aspect)
+    expect(preview.top).toBeGreaterThanOrEqual(44)
+    expect(finder.left).toBeGreaterThan(preview.left)
+    expect(finder.top).toBeGreaterThan(preview.top)
+    expect(finder.top + finder.maxHeight).toBeLessThan(preview.top + preview.height)
   })
 })
