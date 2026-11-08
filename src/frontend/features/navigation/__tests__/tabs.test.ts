@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { WorkspaceItem } from "@/contexts/TabContext"
-import { nextTab, relocatedTab, renamedTab, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
+import { blankChatTab, nextTab, parseSavedTabs, relocatedTab, renamedTab, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
@@ -97,6 +97,11 @@ describe("tabsAfterRemoval", () => {
     expect(tabsAfterRemoval(tabs, FOLDER, note.id, fresh)).toEqual({ tabs, activeId: note.id })
     expect(tabsAfterRemoval(tabs, FOLDER, note.id, fresh).tabs).toBe(tabs)
   })
+
+  it("keeps every tab for an empty or root path", () => {
+    const tabs = [workbench, image]
+    for (const path of ["", "/"]) expect(tabsAfterRemoval(tabs, path, workbench.id, fresh).tabs).toBe(tabs)
+  })
 })
 
 describe("texProjectTab", () => {
@@ -132,5 +137,45 @@ describe("texBufferShown", () => {
       kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: "proj", texFolder: "/repo/paper", omp: { kind: "new", cwd: "/data" }, sessionKey: "/repo/paper/main.tex",
     })
     expect(texBufferShown(shown, "/repo/paper/other.tex").workspaceItem?.sessionKey).toBe("/repo/paper/main.tex")
+  })
+})
+
+describe("tabShowingItem", () => {
+  const canvas: WorkspaceItem = { kind: "canvas", path: "project/proj/document/board.canvas", projectSlug: "proj" }
+  const first = tabWith(canvas)
+  const second = tabWith(canvas)
+
+  it("finds a tab showing the file, the active one first", () => {
+    expect(tabShowingItem([nextTab(), first, second], canvas, "")).toBe(first)
+    expect(tabShowingItem([first, second], canvas, second.id)).toBe(second)
+  })
+
+  it("ignores other files and non-file items that share a path", () => {
+    expect(tabShowingItem([first], { ...canvas, path: "project/proj/document/other.canvas" }, "")).toBeUndefined()
+    const omp: WorkspaceItem = { kind: "omp", path: "/repo", projectSlug: null }
+    expect(tabShowingItem([tabWith(omp)], omp, "")).toBeUndefined()
+  })
+})
+
+describe("blankChatTab", () => {
+  it("takes an untitled chat without messages or item, the active one first", () => {
+    const [blank, active, saved] = [nextTab(), nextTab(), { ...nextTab(), historyFile: "chat/proj/a.json" }]
+    const withItem = tabWith({ kind: "canvas", path: "b.canvas", projectSlug: null })
+    const tabs = [saved, withItem, blank, active]
+    expect(blankChatTab(tabs, active.id, () => true)).toBe(active)
+    expect(blankChatTab(tabs, active.id, (id) => id !== active.id)).toBe(blank)
+    expect(blankChatTab([saved, { ...withItem, appMode: "chat" as const }], "", () => true)).toBeUndefined()
+  })
+})
+
+describe("parseSavedTabs", () => {
+  it("restores tabs with current config defaults and falls back to the first tab", () => {
+    const tab = nextTab()
+    const saved = parseSavedTabs(JSON.stringify({ tabs: [{ ...tab, config: undefined }], activeId: "gone" }))
+    expect(saved).toEqual({ tabs: [tab], activeId: tab.id })
+  })
+
+  it("rejects missing, empty and malformed saves", () => {
+    for (const raw of [null, "", "{", "{}", JSON.stringify({ tabs: [] })]) expect(parseSavedTabs(raw)).toBeNull()
   })
 })

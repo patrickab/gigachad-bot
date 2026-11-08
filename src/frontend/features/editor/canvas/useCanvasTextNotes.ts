@@ -73,8 +73,8 @@ export function useCanvasTextNotes({ liveRef, snapshot, applyChange, endGesture,
   }, [liveRef, applyChange, endGesture])
 
   const handleCanvasKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Only a single printable character starts a note (named keys like "Enter" are longer).
-    if (isModKey(e) || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
+    // Only a single printable, non-blank character starts a note (named keys like "Enter" are longer). Space stays the tab picker's and the pan's.
+    if (isModKey(e) || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1 || e.key.trim() === "") return
     // Only the bare canvas surface should turn typing into a new text note.
     // Any nested editable (architecture diagram fields, modals, contenteditable) keeps its keystrokes.
     if (isEditableTarget(e.target, { includeSelect: true })) return

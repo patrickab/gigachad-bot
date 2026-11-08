@@ -455,6 +455,19 @@ describe("keyboard text entry", () => {
     expect(latest(seen).texts).toHaveLength(0)
   })
 
+  it("leaves Space and Tab to the tab picker and tab switching", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
+    let spaceKept = true
+    act(() => {
+      spaceKept = fireEvent.keyDown(surface, { key: " ", code: "Space" })
+      fireEvent.keyDown(surface, { key: "Tab" })
+    })
+    expect(spaceKept).toBe(true)
+    expect(container.querySelector("textarea")).toBeNull()
+  })
+
   it("centres the note in the view when the pointer has not moved yet", () => {
     // A container that is not at the page origin: the fallback must not confuse its size with screen coordinates.
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800)

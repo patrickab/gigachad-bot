@@ -71,6 +71,35 @@ export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceIte
   return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
+/** The tab already showing file `item`, the active one first: opening it again switches there instead of duplicating it. */
+export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: string): Tab | undefined {
+  if (!FILE_ITEM_KINDS.includes(item.kind)) return undefined
+  const shows = ({ workspaceItem }: Tab) => workspaceItem?.kind === item.kind && workspaceItem.path === item.path
+  return tabs.find((tab) => tab.id === activeId && shows(tab)) ?? tabs.find(shows)
+}
+
+/** An untouched chat tab a new chat takes over instead of opening another tab, the active one first; `isBlank` tells whether a tab's chat has no messages. */
+export function blankChatTab(tabs: Tab[], activeId: string, isBlank: (id: string) => boolean): Tab | undefined {
+  const blank = (tab: Tab) => tab.appMode === "chat" && !tab.historyFile && !tab.workspaceItem && isBlank(tab.id)
+  return tabs.find((tab) => tab.id === activeId && blank(tab)) ?? tabs.find(blank)
+}
+
+/** Open tabs saved across a reload of this browser tab. */
+export interface SavedTabs { tabs: Tab[]; activeId: string }
+
+/** The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed. */
+export function parseSavedTabs(raw: string | null): SavedTabs | null {
+  if (!raw) return null
+  try {
+    const saved = JSON.parse(raw) as Partial<SavedTabs>
+    if (!Array.isArray(saved.tabs) || saved.tabs.length === 0) return null
+    const tabs = saved.tabs.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config } }))
+    return { tabs, activeId: tabs.some((tab) => tab.id === saved.activeId) ? saved.activeId! : tabs[0].id }
+  } catch {
+    return null
+  }
+}
+
 /** The paths of the files `tabs` hold: a tab holds its file item's file whether or not its editor is open, until the tab closes or takes another item. */
 export function filesOfTabs(tabs: readonly Tab[]): Set<string> {
   const files = new Set<string>()
@@ -92,6 +121,8 @@ export function showsRemoved(tab: Tab, path: string): boolean {
  * Every tab gone leaves `fresh` alone.
  */
 export function tabsAfterRemoval(tabs: Tab[], path: string, activeId: string, fresh: () => Tab): { tabs: Tab[]; activeId: string } {
+  // An empty or root path names no file, every tab would close
+  if (path.replace(/\/+$/, "") === "") return { tabs, activeId }
   const remaining = tabs.filter((tab) => !showsRemoved(tab, path))
   if (remaining.length === tabs.length) return { tabs, activeId }
   if (remaining.length === 0) {
@@ -171,3 +202,6 @@ export interface TabStripValue {
   peek: (peek: TabPeek | null) => void
 }
 export const TabStripContext = createContext<TabStripValue | null>(null)
+
+/** Reports whether tab `id`'s chat is blank (no messages), so a new chat can take that tab over. */
+export const BlankChatContext = createContext<((id: string, blank: boolean) => void) | null>(null)
