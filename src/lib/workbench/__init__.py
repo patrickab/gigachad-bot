@@ -1,6 +1,7 @@
 """Disk layout of workbench documents: one omp session directory per kind, one folder per document inside it.
 
 - `<root>/<kind>/.omp/` holds the kind's omp prompt and config, mirrored from `omp/` on every backend start
+- `<root>/latex/.templates/<set>/` holds every LaTeX template set without its `example.pdf` and `previews/`, mirrored on every backend start too
 - `<root>/<kind>/<slug>/<stem>/<stem>.<ext>` is a document of project `slug`
 - PDFs are only read, never moved: `pdf` sessions run in `<root>/pdf` and read the PDF where it is
 """
@@ -11,8 +12,11 @@ from contextlib import contextmanager
 from itertools import takewhile
 import logging
 from pathlib import Path
+import shutil
 from typing import TYPE_CHECKING, Literal, get_args
 
+import config
+from lib import latex_templates
 from lib.naming import segment
 
 if TYPE_CHECKING:
@@ -21,9 +25,10 @@ if TYPE_CHECKING:
 Kind = Literal["latex", "markdown", "pdf"]
 KINDS: tuple[Kind, ...] = get_args(Kind)
 OMP_DIRECTORY = ".omp"
+TEMPLATE_DIRECTORY = ".templates"
 # `.tex` first, it is the suffix of a new latex document. The others are the supporting files of a LaTeX project.
 _SUFFIXES: dict[str, Kind] = {".tex": "latex", ".bib": "latex", ".sty": "latex", ".cls": "latex", ".md": "markdown", ".pdf": "pdf"}
-_PROMPTS = Path(__file__).parent / "omp"
+_PROMPTS = config.TEMPLATES / "omp"
 
 log = logging.getLogger(__name__)
 
@@ -50,17 +55,14 @@ def document_folder(root: Path, kind: Kind, slug: str, stem: str) -> Path:
 
 @contextmanager
 def new_folder(folder: Path) -> Iterator[Path]:
-    """Create *folder* with its missing parents, removing the ones still empty when the block raises."""
+    """Create *folder* with its missing parents. When the block raises, the topmost folder it created is removed with everything inside, a folder that existed before never is."""
     created = list(takewhile(lambda directory: not directory.exists(), (folder, *folder.parents)))
     folder.mkdir(parents=True, exist_ok=True)
     try:
         yield folder
     except BaseException:
-        for directory in created:
-            try:
-                directory.rmdir()
-            except OSError:
-                break
+        if created:
+            shutil.rmtree(created[-1], ignore_errors=True)
         raise
 
 
@@ -70,7 +72,7 @@ def _write_changed(path: Path, content: bytes) -> None:
 
 
 def mirror_omp(root: Path) -> None:
-    """Make `.omp/SYSTEM.md` and `.omp/config.yml` of every kind directory equal the committed prompt files.
+    """Make `.omp/SYSTEM.md` and `.omp/config.yml` of every kind directory equal the committed prompt files, `latex/.templates/` the template sets.
 
     - A file already equal is left untouched, so its mtime stays and file sync uploads nothing
     - A kind that fails is logged and skipped, the others are still mirrored
@@ -83,6 +85,28 @@ def mirror_omp(root: Path) -> None:
             _write_changed(directory / "config.yml", (_PROMPTS / "config.yml").read_bytes())
         except OSError:
             log.exception("Could not mirror the %s omp prompt into %s", kind, root)
+    try:
+        _mirror_template_sets(kind_directory(root, "latex") / TEMPLATE_DIRECTORY)
+    except OSError:
+        log.exception("Could not mirror the LaTeX template sets into %s", root)
+
+
+def _mirror_template_sets(directory: Path) -> None:
+    """Make *directory* hold the agent files of every template set (`TemplateSet.agent_files`), removing the files the sets no longer have."""
+    wanted = {
+        Path(template.name) / relative: path
+        for template in latex_templates.template_sets()
+        for relative, path in template.agent_files()
+    }
+    for relative, path in wanted.items():
+        (directory / relative).parent.mkdir(parents=True, exist_ok=True)
+        _write_changed(directory / relative, path.read_bytes())
+    for path in sorted(directory.rglob("*"), reverse=True):
+        if path.is_dir() and not path.is_symlink():
+            if not any(path.iterdir()):
+                path.rmdir()
+        elif path.relative_to(directory) not in wanted:
+            path.unlink()
 
 
 def project_directories(root: Path, slug: str) -> list[Path]:

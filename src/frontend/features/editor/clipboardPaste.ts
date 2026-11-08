@@ -1,4 +1,5 @@
 import { storeWorkbenchImage } from "@/lib/backend/api"
+import type { StoredImage } from "@/lib/domain/latex"
 import { announceFileChange } from "@/lib/backend/fileEvents"
 import { errorMessage } from "@/lib/utils"
 
@@ -7,13 +8,13 @@ function takesImages(path: string): boolean {
   return path.startsWith("/") && /\.(tex|md)$/i.test(path)
 }
 
-/** Store the PNG in `imgs/` next to the document at *path*, announce what changed, resolve to the line referencing it. Rejects with a readable message. */
-export async function storeClipboardImage(path: string, image: Blob): Promise<string> {
+/** Store the PNG in `imgs/` next to the document at *path*, announce what changed, resolve to the stored image. Rejects with a readable message. */
+export async function storeClipboardImage(path: string, image: Blob): Promise<StoredImage> {
   if (!takesImages(path)) throw new Error("Images paste only into LaTeX or Markdown files on disk")
   try {
     const stored = await storeWorkbenchImage(path, image)
     for (const changed of [stored.path, ...stored.changed]) announceFileChange(changed)
-    return stored.reference
+    return stored
   } catch (cause) {
     throw new Error(errorMessage(cause, "Could not store the image"))
   }
@@ -30,5 +31,5 @@ export async function readClipboardForPaste(path: string): Promise<string> {
   const text = items.find((item) => item.types.includes("text/plain"))
   if (text) return await (await text.getType("text/plain")).text()
   const image = items.find((item) => item.types.includes("image/png"))
-  return image ? `${await storeClipboardImage(path, await image.getType("image/png"))}\n` : ""
+  return image ? `${(await storeClipboardImage(path, await image.getType("image/png"))).reference}\n` : ""
 }

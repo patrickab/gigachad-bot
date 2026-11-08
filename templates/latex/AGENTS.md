@@ -1,0 +1,16 @@
+# LaTeX templates
+
+Each folder here is a template set: `template.toml` and `skeleton.tex` (the `main.tex` of a new document). A presentation set adds a Beamer theme sty, `STYLE.md` and `primitives/`, a document set such as `letter/` has no primitives.
+
+- **template.toml**: `label` (the set's name in the app), `files` (the files a new document gets beside `main.tex`, e.g. the theme sty or `sender.lco`), for presentations `image_macro` (the sty macro a pasted image is referenced by, `\<image_macro>{imgs/...}`) and one `[[groups]]` table per group with `key` (the folder in `primitives/`) and `label` (its heading in the app and its `\section` in `example.tex`). The app (`src/lib/latex_templates.py`) and `render.py` read it
+- **Letter**: KOMA-Script `scrlttr2` with the `DIN` letter option (DIN 5008, window envelope). The design (one sans font, the sender block top right, one left edge at 25 mm) lives only in `letter/layout.lco`, the sender (name, address, phone, mail, place, signature) only in `letter/sender.lco`, the skeleton holds recipient, subject and text. `render.py` builds presentation sets only, check a letter change with `latexmk -pdf` on a copy of `skeleton.tex` and both `.lco` files
+- **Primitive file**: `primitives/<group>/<NN>-<name>.tex`. Line 1 is `% <Label>: <one-line purpose>`, then exactly one `\begin{frame}...\end{frame}`, nothing else, a file that breaks this is skipped with a warning by the app and `render.py`. Placeholder text says what goes there. A primitive uses only macros from the sty, images use mwe's `example-image*`
+- **Theme interface**: a new primitive macro follows the convention in `STYLE.md` (environment plus item macros, tunable `\gc` lengths and beamer fonts, internals `\gc@`)
+- **Ids**: a primitive is referred to as `<group>/<name>`, without the NN prefix. NN sets the order inside its group
+- **Groups**: the `[[groups]]` of `template.toml`, in that order. A new group needs an entry there, a folder without one comes last
+- **Generated**: `example.tex`, `example.pdf` and `previews/<group>/<NN>-<name>.png` (the "Add slide" picker's preview of each primitive, its fully revealed page of `example.pdf`) are written by `render.py`, never edit them by hand
+- **After any change** to the sty, a primitive or the skeleton: run `python templates/latex/render.py`, check `example.pdf` page by page, commit `example.tex`, `example.pdf` and `previews/`
+- **STYLE.md**: keep its primitive table in sync with `primitives/`
+- **Accent**: `\definecolor{accent}{HTML}{...}` near the top of the sty is the one line a project edits. Everything that marks focus uses `accent`, never a hard-coded color
+- **Skeleton**: title, agenda (`\tableofcontents`), two `\section`s with one `\subsection` and one placeholder frame each, closing statement. Title, agenda and closing frames belong here, not in primitives. `render.py` replaces everything from the first `\section` up to the closing frame with the rendered groups
+- **Example structure**: each group becomes a `\section`. `SUBSECTIONS` in `render.py` maps a primitive id to the `\subsection` that opens before it, so a group shows one or two subsections. A primitive that starts a new subsection needs an entry there, ids that match no primitive stop the build

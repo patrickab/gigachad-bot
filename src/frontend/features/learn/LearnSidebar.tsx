@@ -14,6 +14,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { useStoredString } from "@/hooks/useStoredString"
 import { exportLearnSession } from "@/lib/backend/api"
 import type { LearnSession, LearnView } from "@/lib/domain/types"
+import { saveBlob } from "@/lib/download"
 import { errorMessage } from "@/lib/utils"
 import type { LearnChromeKey, LearnFrameMessageOf, LearnPanel, LearnSessionStatus } from "@gigachad/chat-ui/learn-protocol"
 import { learnItem, type OpenItem } from "./items"
@@ -105,16 +106,6 @@ export function filterSessions(sessions: readonly LearnSession[], query: string,
     .filter((entry): entry is { session: LearnSession; score: number } => entry.score !== null)
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.session)
-}
-
-/** Save `file` under `filename`, like LearnHarness's own "Export as Markdown" anchor. */
-function download(file: Blob, filename: string) {
-  const url = URL.createObjectURL(file)
-  const anchor = Object.assign(document.createElement("a"), { href: url, download: filename })
-  document.body.append(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
 }
 
 /** The title filter: its query, kind and the walked match Enter opens. */
@@ -256,7 +247,7 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     setActionError(null)
     try {
       const { filename, markdown } = await exportLearnSession(session.id)
-      download(new Blob([markdown], { type: "text/markdown" }), filename)
+      saveBlob(new Blob([markdown], { type: "text/markdown" }), filename)
     } catch (cause) {
       setActionError(errorMessage(cause, "Could not export this session"))
     }

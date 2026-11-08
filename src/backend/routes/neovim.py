@@ -1,46 +1,28 @@
 """Neovim terminal sessions for logins with host access (`backend.identity.HOST_CAPABILITY`).
 
-`WS /api/neovim/session` runs one `nvim` per connection. Binary frames carry terminal
-bytes both ways, text frames carry JSON control messages:
+`WS /api/neovim/session` runs one `nvim` per connection, in the mounted root holding a file-root document, else in the home
+directory. Binary frames carry terminal bytes both ways, text frames carry JSON control messages, `type` names each:
 
-- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "ask_keymap"?, "notebook"?, "rows", "cols"}`
-  first (the first document, a string `base_content` opens a read-only left diff buffer against the editable document,
-  `ask_keymap` maps visual-mode `<leader>a` to a `selection` frame, `notebook` opens a notebook's text, see below), then
-  `{"type": "resize", "rows", "cols"}`,
-  `{"type": "saved", "id", "content" | "error"}`, `{"type": "open_file", "path"}` (show that file's buffer, loading it from
-  disk into a private copy of its own when not open yet, other buffers stay loaded with their unsaved edits and nothing is
-  saved), `{"type": "set_content", "content", "path"}` (the file changed on disk, the buffer of *path* takes the text
-  without moving the cursor, merged into unsaved edits, after a running `:w`),
-  `{"type": "renamed", "from", "path"}` (the file of buffer *from* was renamed, the session continues on the new
-  name with its unsaved edits, nothing for a buffer that is not open, a notebook's text needs a valid notebook text *path*),
-  `{"type": "insert_lines", "text"}` (lines below the
-  cursor of the shown buffer, the cursor lands on the first one), `{"type": "background", "light"}` (the theme behind
-  the terminal, Neovim's 'background' follows it), `{"type": "clipboard", "id", "text" | "error"}` (the answer to
-  `clipboard_read`: what to paste, linewise when it ends with a newline and charwise otherwise, an empty text pastes
-  nothing, an `error` is shown as an error in Neovim and its last copy is pasted instead) and `{"type": "message", "text"}`
-  (Neovim shows *text* as an error, for failures that have no request)
-- server -> client: `{"type": "save", "id", "path", "content"}` on `:w` of the buffer of file *path*, `{"type": "yank", "content"}`,
-  `{"type": "selection", "path", "start_line", "end_line", "text"}` (1-based inclusive lines),
-  `{"type": "switched", "path"}` when Neovim itself shows another file's buffer (`:bnext`, not after `open_file`),
-  `{"type": "open_failed", "path", "message"}` when `open_file` could not load the file, `{"type": "leave"}` on `<Esc>` in normal
-  mode (the browser gives focus back to the app),
-  `{"type": "clipboard_read", "id", "path"}` when Neovim pastes from `+` or `*` (`path` names the shown buffer, the browser
-  answers with `clipboard`, none within 15 s shows "Clipboard did not answer" and pastes the last copy, so does a closed
-  socket), `{"type": "run_cell", "path", "line"}` after `<S-CR>` or `<C-CR>` in a notebook's text saved it (the 1-based cursor
-  line in the saved text) and `{"type": "exit", "code"}` when `nvim` quits
+- client -> server: `open` first (`OpenMessage`), then `resize`, `saved` and `clipboard` (answers by `id`), `set_content`,
+  `open_file`, `renamed`, `insert_lines`, `insert_frame`, `insert_image`, `background` and `message` (the `_Control` models
+  below). A frame that fits none of them is ignored
+- server -> client: `save {id, path, content}` on `:w`, `clipboard_read {id, path}` when Neovim pastes from `+` or `*` (no
+  answer within 15 s, or a closed socket, shows "Clipboard did not answer" and pastes the last copy), `yank {content}`,
+  `selection {path, start_line, end_line, text}` (visual-mode `<leader>a` with `ask_keymap`), `switched {path}` (Neovim
+  itself showed another file's buffer, not after `open_file`), `open_failed {path, message}`, `leave` (normal-mode `<Esc>`,
+  the browser gives focus back to the app), `run_cell {path, line}`, `forward_search {path, line}` (normal-mode `<leader>v`
+  in a `.tex` file) and `exit {code}` when `nvim` quits. Lines are 1-based
 
-`nvim` starts in the mounted root holding a file-root document, in the home directory otherwise.
-
-The browser persists `:w` through the document's own API, so every save keeps that
-API's validation and side effects. A file-root file changed on disk since Neovim last
-agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved edits.
+The browser persists `:w` through the document's own API, so every save keeps that API's validation and side effects. A
+file-root file changed on disk since Neovim last agreed with it saves merged (`NeovimSession`). Disconnecting discards unsaved
+edits.
 
 With `"notebook": true` the document is a notebook's percent text (`# %%` before each cell) and `path` is
 `<notebook>.ipynb<ext>`: absolute, a short alphanumeric extension, the notebook a readable file under the file roots, else the
-socket closes with 1003. The buffer is named beside the validated notebook, so the user's LSP finds its project and `.venv`,
-and nothing is ever read from or written to that name (no swap or undo file, every write goes to `save`). `<C-CR>` saves the
-text and then sends `run_cell`, `<S-CR>` also moves the cursor to the next cell, appending one after the last. Shift+Enter and
-Ctrl+Enter reach Neovim as CSI-u `ESC [ 13 ; 2 u` and `ESC [ 13 ; 5 u`.
+socket closes with 1003. The buffer is named beside the notebook, so the user's LSP finds its project and `.venv`, and nothing
+is read from or written to that name. `<C-CR>` saves the text and then sends `run_cell` with the cursor line, `<S-CR>` also
+moves the cursor to the next cell, appending one after the last. Shift+Enter and Ctrl+Enter reach Neovim as CSI-u
+`ESC [ 13 ; 2 u` and `ESC [ 13 ; 5 u`.
 
 Neovim answers no request while it waits at a prompt, so the session turns `more` off and lets messages time out
 (`messagesopt`) after the user's config ran: what the config itself prints at startup is out of reach.
@@ -50,24 +32,23 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, WebSocket
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 from lib.file_roots import FileRoots
-from lib.neovim_session import ClipboardError, NeovimSession, Selection, is_neovim_installed
+from lib.neovim_session import ClipboardError, NeovimSession, is_neovim_installed
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +59,11 @@ _UNSUPPORTED_DATA = 1003
 
 
 class OpenMessage(BaseModel):
-    """`path` is the document's app path: absolute for file-root files, a logical key otherwise, a notebook's text with `notebook`."""
+    """The first frame, the document to edit.
+
+    `path` is the document's app path: absolute for file-root files, a logical key otherwise, a notebook's text with `notebook`.
+    A string `base_content` opens a read-only left diff against it, `ask_keymap` maps visual-mode `<leader>a` to `selection`.
+    """
 
     path: str
     filename: str
@@ -88,6 +73,124 @@ class OpenMessage(BaseModel):
     notebook: bool = False
     rows: int = Field(ge=1, le=1000)
     cols: int = Field(ge=1, le=1000)
+
+
+class _Control(BaseModel):
+    """A control message after `open`, checked strictly: one that fits no model is ignored."""
+
+    model_config = ConfigDict(strict=True)
+
+
+class ResizeMessage(_Control):
+    type: Literal["resize"]
+    rows: int
+    cols: int
+
+
+class ReplyMessage(_Control):
+    """The answer to question `id`: `saved` with `content` or `error`, `clipboard` with `text` or `error`.
+
+    A clipboard text ending in a newline pastes linewise, an empty one pastes nothing, an `error` is shown in Neovim, which
+    pastes its last copy instead.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["saved", "clipboard"]
+    id: int
+
+
+class SetContentMessage(_Control):
+    """File *path* changed on disk: its buffer takes `content` keeping the cursor, merged into unsaved edits, after a running `:w`."""
+
+    type: Literal["set_content"]
+    content: str
+    path: str
+
+
+class OpenFileMessage(_Control):
+    """Show the file *path*, loaded into a private copy of its own when not open yet, nothing is saved.
+
+    A positive `line` then puts the cursor on that line at the 0-based byte `column` (both clamped), centred.
+    """
+
+    type: Literal["open_file"]
+    path: str
+    line: int | None = None
+    column: int = 0
+
+    @field_validator("line", mode="before")
+    @classmethod
+    def _positive_line(cls, line: object) -> int | None:
+        return line if type(line) is int and line > 0 else None
+
+    @field_validator("column", mode="before")
+    @classmethod
+    def _positive_column(cls, column: object) -> int:
+        return column if type(column) is int and column > 0 else 0
+
+
+class RenamedMessage(_Control):
+    """The file of buffer `from` is now *path*, the buffer keeps its unsaved edits. A notebook's text needs a notebook text *path*."""
+
+    type: Literal["renamed"]
+    old_path: str = Field(alias="from")
+    path: str
+
+
+class InsertLinesMessage(_Control):
+    """Put the lines of `text` below the cursor of the shown buffer, the cursor lands on the first one."""
+
+    type: Literal["insert_lines"]
+    text: str
+
+
+class InsertFrameMessage(_Control):
+    """Put the beamer frame `text` after the frame enclosing the cursor, else below it, never after the end of the document."""
+
+    type: Literal["insert_frame"]
+    text: str
+
+
+class InsertImageMessage(_Control):
+    """Put *path* in the cursor line's first `example-image` placeholder, else the lines of `reference` below the cursor."""
+
+    type: Literal["insert_image"]
+    path: str
+    reference: str
+
+
+class BackgroundMessage(_Control):
+    """The theme behind the terminal, Neovim's 'background' follows it."""
+
+    type: Literal["background"]
+    light: bool
+
+
+class ShowErrorMessage(_Control):
+    """`message`: Neovim shows `text` as an error, for failures that have no request."""
+
+    type: Literal["message"]
+    text: str
+
+
+_CONTROL_MESSAGES: TypeAdapter[_Control] = TypeAdapter(
+    Annotated[
+        ResizeMessage
+        | ReplyMessage
+        | SetContentMessage
+        | OpenFileMessage
+        | RenamedMessage
+        | InsertLinesMessage
+        | InsertFrameMessage
+        | InsertImageMessage
+        | BackgroundMessage
+        | ShowErrorMessage,
+        Field(discriminator="type"),
+    ]
+)
+# Applied before the next message is read, so a later theme wins
+_IN_ORDER = (BackgroundMessage,)
 
 
 _NOTEBOOK_TEXT = re.compile(r"(?P<notebook>.+\.ipynb)\.[A-Za-z0-9]{1,8}")
@@ -159,35 +262,17 @@ class _BrowserSaves:
         text = reply.get("text")
         return text if isinstance(text, str) else ""
 
-    def notice(self, frame: dict) -> None:
-        """Queue *frame* for the browser, behind the notices queued before it."""
-        self._notices.put_nowait(frame)
+    def notify(self, event_type: str, **fields: object) -> None:
+        """Queue the frame of *event_type* for the browser, behind the notices queued before it."""
+        self._notices.put_nowait({"type": event_type, **fields})
 
     async def relay_notices(self) -> None:
         while True:
             await self._websocket.send_json(await self._notices.get())
 
-    def yank(self, text: str) -> None:
-        self.notice({"type": "yank", "content": text})
-
-    def selection(self, selection: Selection) -> None:
-        self.notice({"type": "selection", **selection})
-
-    def switched(self, path: str) -> None:
-        self.notice({"type": "switched", "path": path})
-
-    def leave(self) -> None:
-        self.notice({"type": "leave"})
-
-    def run_cell(self, path: str, line: int) -> None:
-        self.notice({"type": "run_cell", "path": path, "line": line})
-
-    def open_failed(self, path: str, message: str) -> None:
-        self.notice({"type": "open_failed", "path": path, "message": message})
-
-    def resolve(self, reply: dict) -> None:
-        """The browser's `saved` or `clipboard` answer to the question with the same id."""
-        pending = self._pending.get(reply.get("id"))
+    def resolve(self, request_id: int, reply: dict) -> None:
+        """Hand the browser's `saved` or `clipboard` *reply* to the question *request_id*."""
+        pending = self._pending.get(request_id)
         if pending is not None and not pending.done():
             pending.set_result(reply)
 
@@ -206,17 +291,23 @@ async def _guarded(what: str, work: Coroutine[None, None, None]) -> None:
         log.warning("Neovim could not %s: %s", what, exc)
 
 
-async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRoots, path: str) -> None:
+async def _open_file(session: NeovimSession, saves: _BrowserSaves, roots: FileRoots, path: str, line: int | None, column: int) -> None:
     try:
-        await session.open_file(path, disk_file(roots, path))
+        await session.open_file(path, disk_file(roots, path), line, column)
     except (RuntimeError, ConnectionError, TimeoutError) as exc:
         log.warning("Neovim could not open %s: %s", path, exc)
-        saves.open_failed(path, str(exc))
+        saves.notify("open_failed", path=path, message=str(exc))
+
+
+def _renaming(session: NeovimSession, roots: FileRoots, old_path: str, path: str) -> Coroutine[None, None, None]:
+    """Move document *old_path* to *path*, whose target is a notebook text's virtual name or the renamed file."""
+    resolve = notebook_buffer if session.is_notebook_text(old_path) else disk_file
+    return _guarded("take the renamed file", session.rename(old_path, path, resolve(roots, path)))
 
 
 async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _BrowserSaves, roots: FileRoots) -> None:
     # `set_text`, `rename` and the others wait for a running `:w`, whose answer arrives on this socket, or for each other
-    # in Neovim, so they run beside the relay
+    # in Neovim, so the work a control message returns runs beside the relay, except `_IN_ORDER` messages
     updates: set[asyncio.Task] = set()
 
     def beside_relay(work: Coroutine[None, None, None]) -> None:
@@ -224,6 +315,18 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
         updates.add(update)
         update.add_done_callback(updates.discard)
 
+    handlers: dict[type[BaseModel], Callable[[Any], Coroutine[None, None, None] | None]] = {
+        ResizeMessage: lambda message: session.resize(message.rows, message.cols),
+        ReplyMessage: lambda message: saves.resolve(message.id, message.model_extra or {}),
+        SetContentMessage: lambda message: _guarded("take the changed file", session.set_text(message.content, message.path)),
+        OpenFileMessage: lambda message: _open_file(session, saves, roots, message.path, message.line, message.column),
+        RenamedMessage: lambda message: _renaming(session, roots, message.old_path, message.path),
+        InsertLinesMessage: lambda message: _guarded("take the inserted lines", session.insert_lines(message.text)),
+        InsertFrameMessage: lambda message: _guarded("take the inserted slide", session.insert_frame(message.text)),
+        InsertImageMessage: lambda message: _guarded("take the image", session.insert_image(message.path, message.reference)),
+        BackgroundMessage: lambda message: _guarded("take the theme", session.set_background(message.light)),
+        ShowErrorMessage: lambda message: _guarded("show the message", session.show_error(message.text)),
+    }
     try:
         while True:
             message = await websocket.receive()
@@ -232,26 +335,17 @@ async def _relay_input(websocket: WebSocket, session: NeovimSession, saves: _Bro
             if message.get("bytes") is not None:
                 session.write_input(message["bytes"])
                 continue
-            control = json.loads(message.get("text") or "{}")
-            kind = control.get("type")
-            if kind == "resize":
-                session.resize(int(control["rows"]), int(control["cols"]))
-            elif kind in ("saved", "clipboard"):
-                saves.resolve(control)
-            elif kind == "set_content" and isinstance(control.get("content"), str) and isinstance(control.get("path"), str):
-                beside_relay(_guarded("take the changed file", session.set_text(control["content"], control["path"])))
-            elif kind == "open_file" and isinstance(control.get("path"), str):
-                beside_relay(_open_file(session, saves, roots, control["path"]))
-            elif kind == "insert_lines" and isinstance(control.get("text"), str):
-                beside_relay(_guarded("take the inserted lines", session.insert_lines(control["text"])))
-            elif kind == "renamed" and all(isinstance(control.get(key), str) for key in ("from", "path")):
-                old_path, path = control["from"], control["path"]
-                resolve = notebook_buffer if session.is_notebook_text(old_path) else disk_file
-                beside_relay(_guarded("take the renamed file", session.rename(old_path, path, resolve(roots, path))))
-            elif kind == "background" and isinstance(control.get("light"), bool):
-                await _guarded("take the theme", session.set_background(control["light"]))
-            elif kind == "message" and isinstance(control.get("text"), str):
-                beside_relay(_guarded("show the message", session.show_error(control["text"])))
+            try:
+                control = _CONTROL_MESSAGES.validate_json(message.get("text") or "")
+            except ValidationError:
+                continue
+            work = handlers[type(control)](control)
+            if work is None:
+                continue
+            if isinstance(control, _IN_ORDER):
+                await work
+            else:
+                beside_relay(work)
     finally:
         for update in updates:
             update.cancel()
@@ -268,13 +362,14 @@ async def _run(websocket: WebSocket, session: NeovimSession, roots: FileRoots, *
     # Input flows while connecting, so a startup prompt from the user's config can be answered.
     connecting = asyncio.create_task(
         session.connect(
-            saves.save,
-            saves.yank,
-            saves.selection if ask_keymap else None,
-            saves.switched,
-            saves.read_clipboard,
-            saves.run_cell,
-            on_leave=saves.leave,
+            save=saves.save,
+            on_yank=lambda text: saves.notify("yank", content=text),
+            on_selection=(lambda selection: saves.notify("selection", **selection)) if ask_keymap else None,
+            on_switched=lambda path: saves.notify("switched", path=path),
+            read_clipboard=saves.read_clipboard,
+            on_run_cell=lambda path, line: saves.notify("run_cell", path=path, line=line),
+            on_leave=lambda: saves.notify("leave"),
+            on_forward_search=lambda path, line: saves.notify("forward_search", path=path, line=line),
         )
     )
     try:

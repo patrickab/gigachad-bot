@@ -10,6 +10,7 @@
   elsewhere merge into unsaved ones (`lib.text_merge.merge_theirs`, a conflict takes the other side's text)
 - A `TextYankPost` autocmd notifies the caller's `on_yank` with the yanked text
 - With an `on_selection` callback, visual-mode `<leader>a` reports the selected lines and their document
+- With an `on_forward_search` callback, normal-mode `<leader>v` in a `.tex` document reports the document and its cursor line
 - `on_switched` hears of a document Neovim itself put on screen (`:bnext`, `:b`), not of one `open_file` showed
 - `set_text` takes edits made to the file elsewhere without moving the cursor: an unmodified buffer shows them,
   a modified one merges them and stays modified. It works on hidden buffers too
@@ -18,6 +19,9 @@
 - `rename` moves a document to the file's new path: the buffer is renamed keeping text, cursor and unsaved state,
   and `:w` merges with the new `disk_path`
 - `insert_lines` puts lines below the cursor of the shown document
+- `insert_frame` puts a beamer frame after the frame around the cursor, `insert_image` an image path into the cursor line's
+  placeholder, else a reference below it. `lib.tex_source` works the edit out from the buffer's lines and Neovim applies it
+  unless keystrokes changed the buffer meanwhile, then it is worked out once more before failing
 - `show_error` shows a message in Neovim as an error
 - With a `read_clipboard` callback, `+` and `*` are the clipboard it reads (the browser's, not the machine's Neovim runs on)
   and replace the provider of the user's config: a paste asks `read_clipboard(path)` with the path of the shown document,
@@ -40,6 +44,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import partial
 import os
 from pathlib import Path
 import shutil
@@ -49,6 +54,7 @@ import tempfile
 from lib.neovim_rpc import SETUP_LUA, NeovimRpc, NeovimRpcError
 from lib.process_owner import owned_environment
 from lib.pty_process import claim_controlling_terminal, set_terminal_size, terminal_environment
+from lib.tex_source import fill_placeholder, frame_insertion
 from lib.text_merge import TextMergeError, merge_theirs
 
 SaveDocument = Callable[[str, str], Awaitable[str]]
@@ -58,6 +64,14 @@ SelectLines = Callable[[Selection], None]
 SwitchDocument = Callable[[str], None]
 ReadClipboard = Callable[[str], Awaitable[str]]
 RunCell = Callable[[str, int], None]
+ForwardSearch = Callable[[str, int], None]
+
+# Keys that send a notification from the documents whose path ends in `suffix` (all without one), installed when the
+# notification has a callback. A visual-mode keymap sends the selected lines, any other the document's path and cursor line.
+_KEYMAPS = (
+    {"mode": "x", "lhs": "<leader>a", "event": "selection"},
+    {"mode": "n", "lhs": "<leader>v", "event": "forward_search", "suffix": ".tex"},
+)
 
 _STARTUP_SECONDS = 15
 _RPC_SECONDS = 10
@@ -65,6 +79,8 @@ _SHUTDOWN_SECONDS = 2
 _READ_CHUNK = 65536
 # `set_text` retries while keystrokes change the buffer between reading and merging it.
 _SET_TEXT_ATTEMPTS = 5
+# An insert at the cursor works out its edit once more when keystrokes changed the buffer meanwhile, then fails.
+_INSERT_ATTEMPTS = 2
 # How long a paste waits for the browser, which may be asking the user for permission first.
 _CLIPBOARD_SECONDS = 15
 
@@ -79,6 +95,11 @@ def _document_name(filename: str) -> str:
     """Basename for the private copy; keeps the extension so filetype detection works."""
     name = Path(filename).name
     return name if name not in {"", ".", ".."} else "document.md"
+
+
+def _buffer_lines(text: str) -> list[str]:
+    """The lines Neovim makes of *text*: a final newline ends the last line instead of starting an empty one."""
+    return text.removesuffix("\n").split("\n")
 
 
 def _private_copy(directory: Path, filename: str, content: str) -> Path:
@@ -276,6 +297,7 @@ class NeovimSession:
         read_clipboard: ReadClipboard | None = None,
         on_run_cell: RunCell | None = None,
         on_leave: Callable[[], None] | None = None,
+        on_forward_search: ForwardSearch | None = None,
     ) -> None:
         """Route `:w` of every document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*.
 
@@ -293,28 +315,35 @@ class NeovimSession:
 
         *on_run_cell* receives the path and cursor line (1-based) of `<S-CR>` or `<C-CR>` in a notebook's text, after the save it
         made. *on_leave* hears `<Esc>` in normal mode, after the user's own normal-mode `<Esc>` mapping ran.
+
+        Giving *on_forward_search* also installs the normal-mode `<leader>v` mapping in `.tex` documents (a rename adds or
+        removes it), it receives the document's path and cursor line (1-based).
         """
 
+        notifications: dict[str, Callable[..., None]] = {
+            event: callback
+            for event, callback in (
+                ("yank", on_yank),
+                ("selection", on_selection),
+                ("switched", on_switched),
+                ("leave", on_leave),
+                ("run_cell", on_run_cell),
+                ("forward_search", on_forward_search),
+            )
+            if callback is not None
+        }
+        requests: dict[str, Callable[..., Awaitable[object]]] = {"save": partial(self._save, save), "base": self._base}
+        if read_clipboard is not None:
+            requests["paste"] = partial(_read_clipboard, read_clipboard)
+
         async def handle_request(method: str, params: list) -> object:
-            if method == "save":
-                return await self._save(save, params[0], params[1])
-            if method == "base" and params[0] in self._documents:
-                return self._documents[params[0]].base
-            if method == "paste" and read_clipboard is not None:
-                return await _read_clipboard(read_clipboard, params[0])
-            raise NeovimRpcError(f"Unknown request {method!r}")
+            if (answer := requests.get(method)) is None:
+                raise NeovimRpcError(f"Unknown request {method!r}")
+            return await answer(*params)
 
         def handle_notification(method: str, params: list) -> None:
-            if method == "yank":
-                on_yank(params[0])
-            elif method == "selection" and on_selection is not None:
-                on_selection(params[0])
-            elif method == "switched" and on_switched is not None:
-                on_switched(params[0])
-            elif method == "leave" and on_leave is not None:
-                on_leave()
-            elif method == "run_cell" and on_run_cell is not None:
-                on_run_cell(params[0], params[1])
+            if (callback := notifications.get(method)) is not None:
+                callback(*params)
 
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
@@ -337,7 +366,7 @@ class NeovimSession:
             "first_path": str(first.backing.name),
             "first_id": first.path,
             "base_path": str(self._baseline) if self._baseline is not None else None,
-            "ask_keymap": on_selection is not None,
+            "keymaps": [keymap for keymap in _KEYMAPS if keymap["event"] in notifications],
             "own_clipboard": read_clipboard is not None,
             "notebook": isinstance(first.backing, _NotebookText),
         }
@@ -347,24 +376,26 @@ class NeovimSession:
         if self._background is not None:
             await self._apply_background()
 
-    async def open_file(self, path: str, disk_path: Path | None) -> None:
+    async def open_file(self, path: str, disk_path: Path | None, line: int | None = None, column: int = 0) -> None:
         """Show the document *path*, first loading *disk_path* into a new private copy when it is not open yet.
 
-        The document shown before stays loaded with its unsaved edits, nothing is saved. Raises `RuntimeError` when there is
-        no readable *disk_path* or it is not UTF-8 text.
+        With *line* the cursor then goes to that 1-based line and 0-based byte *column* (both clamped), centred. The document
+        shown before stays loaded with its unsaved edits, nothing is saved. Raises `RuntimeError` when there is no readable
+        *disk_path* or it is not UTF-8 text.
         """
         async with self._opening:
-            if path in self._documents and await self._lua("return _G.gigachad_show(...)", path):
-                return
-            self._forget(path)  # Neovim lost the buffer (`:bdelete`), the copy is stale
-            if disk_path is None:
-                raise RuntimeError(f"{_document_name(path)} is not a readable file")
-            content = await asyncio.to_thread(_read_for_opening, disk_path)
-            copy = _PrivateCopy(_private_copy(self._workdir / str(self._copies), path, content), disk_path)
-            document = _Document(path, copy, content)
-            self._copies += 1
-            await self._lua("return _G.gigachad_open(...)", str(copy.name), path)
-            self._documents[path] = document
+            if not (path in self._documents and await self._lua("return _G.gigachad_show(...)", path)):
+                self._forget(path)  # Neovim lost the buffer (`:bdelete`), the copy is stale
+                if disk_path is None:
+                    raise RuntimeError(f"{_document_name(path)} is not a readable file")
+                content = await asyncio.to_thread(_read_for_opening, disk_path)
+                copy = _PrivateCopy(_private_copy(self._workdir / str(self._copies), path, content), disk_path)
+                document = _Document(path, copy, content)
+                self._copies += 1
+                await self._lua("return _G.gigachad_open(...)", str(copy.name), path)
+                self._documents[path] = document
+            if line is not None:
+                await self._lua("return _G.gigachad_goto_line(...)", line, column)
 
     async def set_text(self, content: str, path: str) -> None:
         """Show *content* (now on disk) in the buffer of *path*, keeping cursor and view.
@@ -424,9 +455,44 @@ class NeovimSession:
         """Insert *text* as lines below the cursor of the shown document, the cursor lands on the first inserted line."""
         await self._lua("return _G.gigachad_insert_lines(...)", text)
 
+    async def insert_frame(self, text: str) -> None:
+        """Insert the beamer frame *text* where `frame_insertion` places it for the shown document's cursor, which lands on
+        its begin line."""
+        for _ in range(_INSERT_ATTEMPTS):
+            state = await self._lua("return _G.gigachad_cursor_state()")
+            frame = frame_insertion(state["lines"], state["row"], _buffer_lines(text))
+            if await self._lua(
+                "return _G.gigachad_insert_at(...)", frame.row, frame.lines, frame.cursor_row, state["buffer"], state["tick"]
+            ):
+                return
+        raise RuntimeError("Neovim buffer kept changing, the slide was not inserted")
+
+    async def insert_image(self, path: str, reference: str) -> None:
+        """Put the image *path* in the cursor line's first `example-image` placeholder, else insert *reference* below the cursor."""
+        for _ in range(_INSERT_ATTEMPTS):
+            state = await self._lua("return _G.gigachad_cursor_state()")
+            row, buffer, tick = state["row"], state["buffer"], state["tick"]
+            filled = fill_placeholder(state["lines"][row - 1], path)
+            if filled is None:
+                inserted = await self._lua(
+                    "return _G.gigachad_insert_at(...)", row, _buffer_lines(reference), row + 1, buffer, tick
+                )
+            else:
+                inserted = await self._lua("return _G.gigachad_set_line(...)", row, filled, buffer, tick)
+            if inserted:
+                return
+        raise RuntimeError("Neovim buffer kept changing, the image was not inserted")
+
     async def show_error(self, text: str) -> None:
         """Show *text* in Neovim's message area as an error."""
         await self._lua("return _G.gigachad_show_error(...)", text)
+
+    async def _base(self, path: str) -> str:
+        """Answer the `base` request: the text Neovim and the stored file last agreed on for document *path*."""
+        document = self._documents.get(path)
+        if document is None:
+            raise RuntimeError(f"{_document_name(path)} is not open")
+        return document.base
 
     async def _save(self, save: SaveDocument, path: str, text: str) -> dict[str, str | bool]:
         """Store *text* of document *path* merged with the edits made elsewhere since its `base`, `merged` tells if they changed it."""

@@ -54,7 +54,7 @@ const neovim = vi.hoisted(() => ({ enabled: false, setContent: vi.fn() }))
 vi.mock("@/contexts/SettingsContext", () => ({ useNeovimSetting: () => ({ available: true, enabled: neovim.enabled, setPreferred: () => {} }) }))
 vi.mock("../NeovimEditor", () => ({
   NeovimEditor: () => <div>neovim</div>,
-  useNeovimTerminal: () => ({ terminal: null, status: { state: "running" }, restart: () => {}, setContent: neovim.setContent }),
+  useNeovimTerminal: () => ({ terminal: null, status: { state: "running" }, restart: () => {}, send: (command: { type: string; content?: string; path?: string }) => command.type === "set_content" && neovim.setContent(command.content, command.path) }),
 }))
 vi.mock("../AssistedConsoleEditor", () => ({
   AssistedConsoleEditor: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (

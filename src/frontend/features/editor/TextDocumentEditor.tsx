@@ -69,7 +69,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const { value: content, loadedPath, loadError, dirty, reload: loadFromServer, setValue: handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
     path, codec: TEXT_CODEC, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
     // While Neovim runs it holds the text, so a change on disk is merged into its buffer
-    onFollowed: (text, changed) => { neovimSession.setContent(text, changed) },
+    onFollowed: (text, changed) => { neovimSession.send({ type: "set_content", content: text, path: changed }) },
   })
   const [view, setView] = useEditorView(path, content, loadedPath)
 

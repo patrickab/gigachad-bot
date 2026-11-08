@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useLatestRequest } from "@/hooks/useLatestRequest"
 import { chooseTexRoot, loadTexProject } from "@/lib/backend/api"
 import type { TexProject } from "@/lib/domain/latex"
 import { errorMessage } from "@/lib/utils"
@@ -17,27 +18,24 @@ export function useTexProject(path: string) {
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   // Only the newest request may set the project: a read in flight when the user chooses a root must not undo the choice
-  const latest = useRef(0)
+  const { run } = useLatestRequest()
 
   useEffect(() => {
-    const request = ++latest.current
-    loadTexProject(path).then(
+    void run(
+      loadTexProject(path),
       (loaded) => {
-        if (request !== latest.current) return
         setProject(loaded)
         setError(null)
       },
-      (cause: unknown) => { if (request === latest.current) setError(errorMessage(cause, "Could not read this LaTeX project")) },
+      (cause) => setError(errorMessage(cause, "Could not read this LaTeX project")),
     )
-  }, [path, attempt])
+  }, [path, attempt, run])
 
   const reload = useCallback(() => setAttempt((count) => count + 1), [])
 
   const choose = useCallback(async (root: string) => {
-    const request = ++latest.current
-    const chosen = await chooseTexRoot(path, root)
-    if (request === latest.current) setProject(chosen)
-  }, [path])
+    await run(chooseTexRoot(path, root), setProject)
+  }, [path, run])
 
   return { project, error, reload, choose }
 }

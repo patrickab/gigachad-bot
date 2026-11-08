@@ -17,13 +17,17 @@ from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 import pytest
 
-from backend.identity import RequestIdentity
+from backend.identity import RequestIdentity, get_request_identity
+from backend.routes import latex as latex_route
+from backend.routes.deps import get_file_roots, get_user_scope
+from lib import latex_templates
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
 from lib.db_schema import upgrade
 from lib.file_roots import FileRoots
 from lib.postgres_data_store import PostgresDataStore
 from lib.process_owner import OWNER_VARIABLE, reap_orphans
+from tests.fakes import RecordingScope
 
 TRUNCATE_ALL = "TRUNCATE changes, assets, vault_roots, devices, documents, users, model_reasoning_levels CASCADE"
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -185,3 +189,108 @@ def backend_process():
         process.kill()
         process.wait()
     reap_orphans()
+
+
+@pytest.fixture
+def scope():
+    return RecordingScope()
+
+
+@pytest.fixture
+def vault(tmp_path):
+    """The only mount of `tex_client`."""
+    path = tmp_path / "vault"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def tex_client(vault, scope):
+    """A host-access client whose only mount is `vault`."""
+    return route_client(
+        latex_route.router,
+        overrides={
+            get_request_identity: request_identity(),
+            get_file_roots: mounted_roots(vault),
+            get_user_scope: scope,
+        },
+    )
+
+
+@pytest.fixture
+def document(vault):
+    source = vault / "paper" / "main.tex"
+    source.parent.mkdir(parents=True)
+    source.write_text("\\documentclass{article}\n", encoding="utf-8")
+    return source
+
+
+PRIMITIVE_FRAME = "\\begin{frame}{Title}\n  Body\n\\end{frame}"
+PRESENTATION_SOURCE = "\\documentclass{beamer}\n\\usetheme[progress]{demo}\n\\begin{document}\n\\end{document}\n"
+PREVIEW_PNG = b"\x89PNG\r\n\x1a\npreview"
+_DEMO_MANIFEST = 'label = "Demo deck"\nfiles = ["beamerthemedemo.sty"]\nimage_macro = "demoimage"\n' + "".join(
+    f'\n[[groups]]\nkey = "{key}"\nlabel = "{key.capitalize()}"\n' for key in ("text", "numbers", "tables", "figures", "process")
+)
+_COMPACT_MANIFEST = """label = "Compact"
+files = ["beamerthemecompact.sty"]
+image_macro = "photo"
+
+[[groups]]
+key = "figures"
+label = "Pictures"
+
+[[groups]]
+key = "text"
+label = "Words"
+"""
+
+
+@pytest.fixture
+def template_sets(tmp_path, monkeypatch) -> Path:
+    """Template sets in `<tmp_path>/sets` standing in for `templates/latex`.
+
+    - `demo`: primitives in every order, malformed ones and previews
+    - `compact`: its own label, image macro and group order
+    - `letter`: a document template without primitives, its `sender.lco` copied into new documents
+    - not sets: `bare` without `template.toml` and `skeleton.tex`, `broken` whose `files` names a missing file
+    """
+    base = tmp_path / "sets"
+    files = {
+        "demo/template.toml": _DEMO_MANIFEST,
+        "demo/skeleton.tex": "\\documentclass{beamer}\n\\usetheme{demo}\n",
+        "demo/beamerthemedemo.sty": "\\RequirePackage{tikz}\n",
+        "demo/STYLE.md": "Style\n",
+        "demo/example.tex": "% Generated\n",
+        "demo/primitives/text/01-bullets.tex": f"% Bullets: points with one message\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/text/02-statement.tex": (
+            "% Statement: a \\emph{thesis} \\hfill  or quote, short\n\\begin{frame}[plain]\\statement{A}{B}\\end{frame}\n"
+        ),
+        "demo/primitives/text/03-headless.tex": f"{PRIMITIVE_FRAME}\n",
+        "demo/primitives/text/04-twice.tex": f"% Twice: two frames\n{PRIMITIVE_FRAME}\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/text/unnumbered.tex": f"% Unnumbered: no number\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/appendix/01-extra.tex": f"% Extra: an unknown group\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/numbers/10-late.tex": f"% Late: tenth\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/numbers/2-early.tex": f"% Key figures: second\n{PRIMITIVE_FRAME}\n",
+        "demo/primitives/figures/01-figrow.tex": f"% Figure row: images side by side\n{PRIMITIVE_FRAME}\n",
+        "compact/template.toml": _COMPACT_MANIFEST,
+        "compact/skeleton.tex": "\\documentclass{beamer}\n\\usetheme{compact}\n",
+        "compact/beamerthemecompact.sty": "\\RequirePackage{xcolor}\n",
+        "compact/primitives/text/01-quote.tex": f"% Quote: a quote\n{PRIMITIVE_FRAME}\n",
+        "compact/primitives/figures/01-photo.tex": f"% Photo: one photo\n{PRIMITIVE_FRAME}\n",
+        "letter/template.toml": 'label = "Letter"\nfiles = ["sender.lco"]\n',
+        "letter/skeleton.tex": "\\documentclass{scrlttr2}\n\\LoadLetterOption{sender}\n",
+        "letter/sender.lco": "\\setkomavar{fromname}{Me}\n",
+        "bare/primitives/text/01-quote.tex": f"% Quote: a quote\n{PRIMITIVE_FRAME}\n",
+        "broken/template.toml": 'label = "Broken"\nfiles = ["missing.sty"]\n',
+        "broken/skeleton.tex": "\\documentclass{beamer}\n",
+        "broken/primitives/text/01-quote.tex": f"% Quote: a quote\n{PRIMITIVE_FRAME}\n",
+    }
+    for name, content in files.items():
+        (base / name).parent.mkdir(parents=True, exist_ok=True)
+        (base / name).write_text(content, encoding="utf-8")
+    (base / "demo" / "example.pdf").write_bytes(b"%PDF-1")
+    for name in ("previews/text/01-bullets.png", "previews/text/03-headless.png", "secret.png"):
+        (base / "demo" / name).parent.mkdir(parents=True, exist_ok=True)
+        (base / "demo" / name).write_bytes(PREVIEW_PNG)
+    monkeypatch.setattr(latex_templates, "TEMPLATE_SETS", base)
+    return base

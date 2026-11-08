@@ -5,10 +5,9 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes import latex as latex_route
-from backend.routes.deps import get_file_roots, get_user_scope
+from backend.routes.deps import get_file_roots
 from lib import latex
 from tests.conftest import mounted_roots, request_identity, route_client
-from tests.fakes import RecordingScope
 
 PDFLATEX_FAILURE = r"""This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex)
  restricted \write18 enabled.
@@ -39,40 +38,6 @@ l.3 \usepackage{foo}
 
 ./main.tex:42: Undefined control sequence.
 """
-
-
-@pytest.fixture
-def scope():
-    return RecordingScope()
-
-
-@pytest.fixture
-def vault(tmp_path):
-    """The only mount of `tex_client`."""
-    path = tmp_path / "vault"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
-def tex_client(vault, scope):
-    """A host-access client whose only mount is `vault`."""
-    return route_client(
-        latex_route.router,
-        overrides={
-            get_request_identity: request_identity(),
-            get_file_roots: mounted_roots(vault),
-            get_user_scope: scope,
-        },
-    )
-
-
-@pytest.fixture
-def document(vault):
-    source = vault / "paper" / "main.tex"
-    source.parent.mkdir(parents=True)
-    source.write_text("\\documentclass{article}\n", encoding="utf-8")
-    return source
 
 
 def fake_latexmk(directory, monkeypatch, script: str) -> None:
@@ -192,6 +157,7 @@ def test_build_runs_latexmk_in_the_files_directory_with_the_engine_from_the_magi
     assert arguments == (
         f"-g -pdfxe -interaction=nonstopmode -halt-on-error -file-line-error -synctex=1 -outdir={document.parent}/.latex-build main.tex"
     )
+
 
 
 def test_errors_raised_inside_a_package_are_reported_with_the_package_file():

@@ -58,7 +58,7 @@ uv run --with pyinstaller pyinstaller \
   --name gigachad-sidecar \
   --paths "$root_dir" \
   --paths "$root_dir/src" \
-  --add-data "$root_dir/prompts:prompts" \
+  --add-data "$root_dir/templates:templates" \
   --collect-all gpt_researcher \
   --collect-all langchain_community \
   --collect-all langchain_litellm \

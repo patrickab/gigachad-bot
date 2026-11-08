@@ -8,6 +8,7 @@ import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
+import { QUEUES_WHILE_CONNECTING, dispatchNeovimEvent, wireFrame, type NeovimCommand, type NeovimEvent, type NeovimEventHandlers, type NeovimSessionFrame } from "./neovimProtocol"
 
 const POLICY_VIOLATION = 1008
 /** Quiet time after the last size change before the terminal refits. */
@@ -50,28 +51,18 @@ export interface NeovimDocument {
 }
 
 /** Lines picked in visual mode with the ask keymap, 1-based and inclusive, `text` is those full lines of the file at `path`. */
-export interface NeovimSelection {
-  path: string
-  start_line: number
-  end_line: number
-  text: string
-}
+export type NeovimSelection = Omit<Extract<NeovimEvent, { type: "selection" }>, "type">
 
-/** Sends a control frame to the backend session. `queue` keeps it for the open frame while the socket connects. */
-type SendFrame = (frame: Record<string, unknown>, queue: boolean) => boolean
+/** Sends a command to the backend session. While the socket connects it waits for the open frame when its queue rule says so. */
+type SendCommand = (command: NeovimCommand) => boolean
 
 interface NeovimOptions {
-  /** Install visual-mode `<leader>a`, which reports the selected lines to `onSelection`. */
+  /** Install visual-mode `<leader>a`, which reports the selected lines as a `selection` event. */
   askKeymap?: boolean
-  onSelection?: (selection: NeovimSelection) => void
-  /** Neovim itself (`:bnext`) put the buffer of another open file on screen. Not called for `openFile`. */
-  onSwitched?: (path: string) => void
-  /** `openFile(path)` could not load the file, the buffer shown did not change. */
-  onOpenFailed?: (path: string, message: string) => void
   /** The path of the buffer on screen, what a pasted image is stored next to. The document's own path without it, right while the session shows one buffer. */
   shownPath?: () => string
-  /** The notebook buffer `path` ran the cell holding its 1-based `line` (`<S-CR>`/`<C-CR>`), after the save before it resolved. */
-  onRunCell?: (path: string, line: number) => void
+  /** Handlers for the app events the session reports. */
+  on?: NeovimEventHandlers
 }
 
 /** Move focus from the terminal in `host` to the closest focusable element around it, else to the page. */
@@ -95,17 +86,18 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
  * - Yanks (`y`) are copied to the browser clipboard
  * - Esc in normal mode gives focus back to the app (`leave`): the closest focusable element around the terminal, else the page
  * - `:q` with exit code 0 calls `onQuit`
- * - `openFile(path)` shows the buffer of another file, loading it from disk when it is not open yet. The buffer shown before
- *   stays loaded with its unsaved edits, nothing is saved. Called while the session connects it waits for the socket and returns true, false without a session
- * - `setContent(text, path)` hands text that is already on disk to the buffer of `path`, hidden or
- *   shown. While the session is opening the latest text per path waits for the open frame and the call returns true, false without a session
- *   - An unmodified buffer is replaced (one undo step) and stays unmodified
- *   - A modified buffer gets the text merged into its unsaved edits, the agent's lines win where both changed, and stays modified
- * - `renameFile(from, to)` renames the buffer of `from` (kept while connecting too), keeping its text and unsaved edits. A changed `document.path` under the same `key` renames the buffer of the previous path
- * - `insertLines(text)` inserts lines below the cursor of the shown buffer, false while the session is not open
- * - Neovim's `p` and `"+p` ask the browser clipboard (`clipboard_read`). A screenshot is stored in `imgs/` next to the shown LaTeX or Markdown file and pasted as its reference, text as text, a failure is shown in Neovim. Ctrl+Shift+V of a screenshot does the same through `insert_lines`
+ * - `send(command)` sends a `NeovimCommand`, true when the session took it, false without a session
+ *   - `open_file` shows the buffer of another file, loading it from disk when it is not open yet. With `line` the cursor goes to that 1-based line and 0-based UTF-8 byte `column` (0 without one), also when the file is already shown. The buffer shown before
+ *     stays loaded with its unsaved edits, nothing is saved. Sent while the session connects it waits for the socket
+ *   - `set_content` hands text that is already on disk to the buffer of `path`, hidden or shown. While the session is opening the latest text per path waits for the open frame
+ *     - An unmodified buffer is replaced (one undo step) and stays unmodified
+ *     - A modified buffer gets the text merged into its unsaved edits, the agent's lines win where both changed, and stays modified
+ *   - `renamed` renames the buffer of `from` (kept while connecting too), keeping its text and unsaved edits. A changed `document.path` under the same `key` renames the buffer of the previous path
+ *   - `insert_lines` inserts lines below the cursor of the shown buffer, `insert_frame` a Beamer frame after the frame under the cursor (at the cursor outside one), cursor on its title. Both false while the session is not open
+ * - Neovim's `p` and `"+p` ask the browser clipboard (`clipboard_read`). A screenshot is stored in the image folder next to the shown LaTeX or Markdown file and pasted as its reference, text as text, a failure is shown in Neovim. Ctrl+Shift+V of a screenshot is stored the same way and sent as `insert_image` with its placeholder path, filling an `example-image` placeholder on the cursor line
  * - Unmounting or a new `document.key` discards unsaved edits
- * - A `notebook` document's buffer is virtual (never read from or written to disk), `:w` still calls `save`. Shift+Enter and Ctrl+Enter are sent as `<S-CR>` and `<C-CR>`, the cell they ran arrives as `onRunCell`
+ * - A `notebook` document's buffer is virtual (never read from or written to disk), `:w` still calls `save`. Shift+Enter and Ctrl+Enter are sent as `<S-CR>` and `<C-CR>`, the cell they ran arrives as `run_cell`
+ * - App events (`NeovimEvent`) go to their handler in `options.on`
  */
 export function useNeovimTerminal(document: NeovimDocument | null, save: (text: string, path: string) => Promise<string>, onQuit: () => void, options: NeovimOptions = {}) {
   const [terminal, setTerminal] = useState<NeovimTerminal | null>(null)
@@ -115,27 +107,24 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   const readOptions = useEffectEvent(() => options)
   const saveText = useEffectEvent(save)
   const quit = useEffectEvent(onQuit)
-  const sendFrameRef = useRef<SendFrame | null>(null)
+  const sendRef = useRef<SendCommand | null>(null)
   const shownRef = useRef<{ key: string; path: string } | null>(null)
-  // The text `setContent` took while the session was opening, by path. Null when no session is opening
+  // The text `set_content` took while the session was opening, by path. Null when no session is opening
   const pendingContentRef = useRef<Map<string, string> | null>(null)
-  const setContent = useCallback((text: string, path: string) => {
-    if (sendFrameRef.current?.({ type: "set_content", content: text, path }, false)) return true
-    if (!pendingContentRef.current) return false
-    pendingContentRef.current.set(path, text)
+  const send = useCallback((command: NeovimCommand) => {
+    if (sendRef.current?.(command)) return true
+    if (command.type !== "set_content" || !pendingContentRef.current) return false
+    pendingContentRef.current.set(command.path, command.content)
     return true
   }, [])
-  const openFile = useCallback((path: string) => sendFrameRef.current?.({ type: "open_file", path }, true) ?? false, [])
-  const renameFile = useCallback((from: string, to: string) => sendFrameRef.current?.({ type: "renamed", from, path: to }, true) ?? false, [])
-  const insertLines = useCallback((text: string) => sendFrameRef.current?.({ type: "insert_lines", text }, false) ?? false, [])
 
   const documentKey = document?.key ?? null
   const documentPath = document?.path ?? null
   useEffect(() => {
     const previous = shownRef.current
     shownRef.current = documentKey === null || documentPath === null ? null : { key: documentKey, path: documentPath }
-    if (previous && previous.key === documentKey && documentPath !== null && previous.path !== documentPath) renameFile(previous.path, documentPath)
-  }, [documentKey, documentPath, renameFile])
+    if (previous && previous.key === documentKey && documentPath !== null && previous.path !== documentPath) send({ type: "renamed", from: previous.path, path: documentPath })
+  }, [documentKey, documentPath, send])
 
   useEffect(() => {
     const opened = readDocument()
@@ -160,26 +149,26 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       socket.binaryType = "arraybuffer"
       let exitCode: number | null = null
       const send = (data: string | Uint8Array<ArrayBuffer>) => { if (socket.readyState === WebSocket.OPEN) socket.send(data) }
+      const sendSessionFrame = (frame: NeovimSessionFrame) => send(JSON.stringify(frame))
       const encoder = new TextEncoder()
       let sentSize = ""
       const sendSize = (rows: number, cols: number) => {
         if (`${rows}x${cols}` === sentSize) return
         sentSize = `${rows}x${cols}`
-        send(JSON.stringify({ type: "resize", rows, cols }))
+        sendSessionFrame({ type: "resize", rows, cols })
       }
 
-      // Control frames wait for the open frame when the socket is still connecting and `queue` is set, so a file opened or
-      // renamed meanwhile is not lost. False when the frame was not taken.
+      // Commands wait for the open frame when the socket is still connecting and their queue rule says so. False when the frame was not taken.
       const queued: string[] = []
-      const sendFrame: SendFrame = (frame, queue) => {
-        const text = JSON.stringify(frame)
+      const sendCommand: SendCommand = (command) => {
+        const text = JSON.stringify(wireFrame(command))
         if (socket.readyState === WebSocket.OPEN) send(text)
-        else if (socket.readyState === WebSocket.CONNECTING && queue) queued.push(text)
+        else if (socket.readyState === WebSocket.CONNECTING && QUEUES_WHILE_CONNECTING[command.type]) queued.push(text)
         else return false
         return true
       }
 
-      // A pasted PNG (Ctrl+Shift+V) is stored next to the shown file and its reference inserted below the cursor instead of pasted as text.
+      // A pasted PNG (Ctrl+Shift+V) is stored next to the shown file and fills an `example-image` placeholder on the cursor line, else its reference is inserted below the cursor.
       // Capturing at the host stops the paste before xterm's own handler on its textarea
       host.addEventListener("paste", (event) => {
         const image = pastedImage(event.clipboardData)
@@ -187,8 +176,8 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         event.preventDefault()
         event.stopPropagation()
         storeClipboardImage(readOptions().shownPath?.() ?? readDocument()?.path ?? "", image).then(
-          (reference) => sendFrame({ type: "insert_lines", text: reference }, false),
-          (error) => sendFrame({ type: "message", text: errorMessage(error, "Could not store the image") }, false),
+          (stored) => sendCommand({ type: "insert_image", path: stored.placeholder_path, reference: stored.reference }),
+          (error) => sendCommand({ type: "message", text: errorMessage(error, "Could not store the image") }),
         )
       }, true)
 
@@ -212,10 +201,9 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
 
       socket.onopen = () => {
         sentSize = `${xterm.rows}x${xterm.cols}`
-        const rowsAndCols = { rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap }
-        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, notebook: opened.notebook, ...rowsAndCols }))
+        sendSessionFrame({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, notebook: opened.notebook, rows: xterm.rows, cols: xterm.cols, ask_keymap: withAskKeymap })
         queued.splice(0).forEach(send)
-        for (const [path, content] of pendingContent) send(JSON.stringify({ type: "set_content", content, path }))
+        for (const [path, content] of pendingContent) sendCommand({ type: "set_content", content, path })
         pendingContent.clear()
         pendingContentRef.current = null
         if (backgroundIsLight !== null) sendBackground(backgroundIsLight)
@@ -233,24 +221,21 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         const message = JSON.parse(event.data)
         if (message.type === "exit") exitCode = message.code
         if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
-        if (message.type === "selection") { readOptions().onSelection?.({ path: message.path, start_line: message.start_line, end_line: message.end_line, text: message.text }); return }
-        if (message.type === "switched") { readOptions().onSwitched?.(message.path); return }
         if (message.type === "leave") { giveFocusBack(host); return }
-        if (message.type === "open_failed") { readOptions().onOpenFailed?.(message.path, message.message); return }
-        if (message.type === "run_cell") { readOptions().onRunCell?.(message.path, message.line); return }
+        if (dispatchNeovimEvent(readOptions().on ?? {}, message)) return
         if (message.type === "clipboard_read") {
           try {
-            send(JSON.stringify({ type: "clipboard", id: message.id, text: await readClipboardForPaste(message.path) }))
+            sendSessionFrame({ type: "clipboard", id: message.id, text: await readClipboardForPaste(message.path) })
           } catch (error) {
-            send(JSON.stringify({ type: "clipboard", id: message.id, error: errorMessage(error, "Could not read the clipboard") }))
+            sendSessionFrame({ type: "clipboard", id: message.id, error: errorMessage(error, "Could not read the clipboard") })
           }
           return
         }
         if (message.type !== "save") return
         try {
-          send(JSON.stringify({ type: "saved", id: message.id, content: await saveText(message.content, message.path) }))
+          sendSessionFrame({ type: "saved", id: message.id, content: await saveText(message.content, message.path) })
         } catch (error) {
-          send(JSON.stringify({ type: "saved", id: message.id, error: errorMessage(error, "Save failed") }))
+          sendSessionFrame({ type: "saved", id: message.id, error: errorMessage(error, "Save failed") })
         }
       }
       socket.onclose = (event) => {
@@ -297,7 +282,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       // Neovim's 'background' follows the theme behind the terminal, set by the backend over RPC. Its own startup
       // query (OSC 11) races the slot's styling and misses a theme picked before reconnecting
       let backgroundIsLight: boolean | null = null
-      const sendBackground = (light: boolean) => send(JSON.stringify({ type: "background", light }))
+      const sendBackground = (light: boolean) => sendSessionFrame({ type: "background", light })
       const applyTheme = (parent: HTMLElement) => {
         const { theme, isLight } = terminalTheme(parent)
         xterm.options.theme = theme
@@ -313,8 +298,8 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         restyle: () => { if (host.parentElement) applyTheme(host.parentElement) },
         focus: () => xterm.focus(),
       })
-      sendFrameRef.current = sendFrame
-      dispose = () => { sendFrameRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
+      sendRef.current = sendCommand
+      dispose = () => { sendRef.current = null; if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
     })()
 
     return () => {
@@ -326,7 +311,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   }, [documentKey, generation])
 
   const restart = useCallback(() => setGeneration((value) => value + 1), [])
-  return { terminal, status, restart, setContent, openFile, renameFile, insertLines }
+  return { terminal, status, restart, send }
 }
 
 function stoppedMessage(exitCode: number | null, closeCode: number): string {

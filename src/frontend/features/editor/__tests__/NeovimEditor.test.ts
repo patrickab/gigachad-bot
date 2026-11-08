@@ -26,7 +26,7 @@ vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {}; proposeDimensio
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss() {}; dispose() {} } }))
 vi.mock("@/lib/backend/urls", () => ({ neovimSessionUrl: () => "ws://backend/neovim/session" }))
 const api = vi.hoisted(() => ({
-  storeWorkbenchImage: vi.fn<(path: string, image: Blob) => Promise<{ path: string; reference: string; changed: string[] }>>(),
+  storeWorkbenchImage: vi.fn<(path: string, image: Blob) => Promise<{ path: string; placeholder_path: string; reference: string; changed: string[] }>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
 
@@ -92,12 +92,12 @@ afterEach(() => {
 })
 
 describe("useNeovimTerminal frames", () => {
-  it("keeps openFile and renameFile called while connecting for after the open frame, the others need an open socket", async () => {
+  it("keeps open_file and renamed sent while connecting for after the open frame, the others need an open socket", async () => {
     const { result, socket } = await connect()
 
-    expect(result.current.openFile("/p/chapter.tex")).toBe(true)
-    expect(result.current.renameFile("/p/main.tex", "/p/paper.tex")).toBe(true)
-    expect(result.current.insertLines("x")).toBe(false)
+    expect(result.current.send({ type: "open_file", path: "/p/chapter.tex" })).toBe(true)
+    expect(result.current.send({ type: "renamed", from: "/p/main.tex", path: "/p/paper.tex" })).toBe(true)
+    expect(result.current.send({ type: "insert_lines", text: "x" })).toBe(false)
     socket.open()
 
     expect(socket.frames.map((frame) => frame.type)).toEqual(["open", "open_file", "renamed"])
@@ -108,12 +108,12 @@ describe("useNeovimTerminal frames", () => {
   it("sends the latest text of each path pushed while the session opens once it is open, then sends at once", async () => {
     const { result, socket } = await connect()
 
-    expect(result.current.setContent("first", "/p/main.tex")).toBe(true)
-    expect(result.current.setContent("second", "/p/main.tex")).toBe(true)
-    expect(result.current.setContent("chapter", "/p/chapter.tex")).toBe(true)
+    expect(result.current.send({ type: "set_content", content: "first", path: "/p/main.tex" })).toBe(true)
+    expect(result.current.send({ type: "set_content", content: "second", path: "/p/main.tex" })).toBe(true)
+    expect(result.current.send({ type: "set_content", content: "chapter", path: "/p/chapter.tex" })).toBe(true)
     expect(socket.frames).toEqual([])
     socket.open()
-    expect(result.current.setContent("third", "/p/main.tex")).toBe(true)
+    expect(result.current.send({ type: "set_content", content: "third", path: "/p/main.tex" })).toBe(true)
 
     expect(socket.frames.slice(1)).toEqual([
       { type: "set_content", content: "second", path: "/p/main.tex" },
@@ -125,7 +125,7 @@ describe("useNeovimTerminal frames", () => {
   it("takes no text without a session", () => {
     const { result } = renderHook(() => useNeovimTerminal(null, vi.fn(), vi.fn()))
 
-    expect(result.current.setContent("text", "/p/main.tex")).toBe(false)
+    expect(result.current.send({ type: "set_content", content: "text", path: "/p/main.tex" })).toBe(false)
   })
 
   it("renames the buffer of the previous path when the path of the document changes under the same key", async () => {
@@ -137,6 +137,20 @@ describe("useNeovimTerminal frames", () => {
     expect(socket.frames.at(-1)).toEqual({ type: "renamed", from: "/p/main.tex", path: "/p/other.tex" })
   })
 
+  it("sends the line and column open_file is given, and none without one", async () => {
+    const { result, socket } = await connect()
+    socket.open()
+
+    expect(result.current.send({ type: "open_file", path: "/p/main.tex", line: 42 })).toBe(true)
+    expect(socket.frames.at(-1)).toEqual({ type: "open_file", path: "/p/main.tex", line: 42 })
+    result.current.send({ type: "open_file", path: "/p/main.tex", line: 42, column: 17 })
+    expect(socket.frames.at(-1)).toEqual({ type: "open_file", path: "/p/main.tex", line: 42, column: 17 })
+    result.current.send({ type: "open_file", path: "/p/main.tex", line: 42, column: 0 })
+    expect(socket.frames.at(-1)).toEqual({ type: "open_file", path: "/p/main.tex", line: 42 })
+    result.current.send({ type: "open_file", path: "/p/chapter.tex" })
+    expect(socket.frames.at(-1)).toEqual({ type: "open_file", path: "/p/chapter.tex" })
+  })
+
   it("saves with the path the save frame names", async () => {
     const { save, socket } = await connect()
     socket.open()
@@ -146,19 +160,29 @@ describe("useNeovimTerminal frames", () => {
     await waitFor(() => expect(socket.frames.at(-1)).toEqual({ type: "saved", id: 7, content: "body" }))
     expect(save).toHaveBeenCalledWith("body", "/p/chapter.tex")
   })
+
+  it("hands forward_search frames to the forward_search handler", async () => {
+    const onForwardSearch = vi.fn()
+    const { socket } = await connect({ on: { forward_search: onForwardSearch } })
+    socket.open()
+
+    socket.receive({ type: "forward_search", path: "/p/chapter.tex", line: 12 })
+
+    expect(onForwardSearch).toHaveBeenCalledExactlyOnceWith({ type: "forward_search", path: "/p/chapter.tex", line: 12 })
+  })
 })
 
 describe("useNeovimTerminal notebook", () => {
   const notebookDocument: NeovimDocument = { key: "nb", path: "/p/a.ipynb.py", filename: "a.ipynb.py", content: "# %%\nx = 1\n", notebook: true }
 
-  it("opens a notebook session as one and hands its run_cell frames to onRunCell", async () => {
+  it("opens a notebook session as one and hands its run_cell frames to the run_cell handler", async () => {
     const onRunCell = vi.fn()
-    const { socket } = await connect({ onRunCell }, undefined, notebookDocument)
+    const { socket } = await connect({ on: { run_cell: onRunCell } }, undefined, notebookDocument)
     socket.open()
 
     expect(socket.frames[0]).toMatchObject({ type: "open", path: "/p/a.ipynb.py", content: "# %%\nx = 1\n", notebook: true })
     socket.receive({ type: "run_cell", path: "/p/a.ipynb.py", line: 2 })
-    expect(onRunCell).toHaveBeenCalledWith("/p/a.ipynb.py", 2)
+    expect(onRunCell).toHaveBeenCalledWith({ type: "run_cell", path: "/p/a.ipynb.py", line: 2 })
   })
 
   it("sends Shift+Enter and Ctrl+Enter as their CSI-u keys for a notebook only and leaves other keys to xterm", async () => {
@@ -191,7 +215,7 @@ describe("useNeovimTerminal notebook", () => {
 describe("clipboard paste", () => {
   const screenshot = new File(["png"], "shot.png", { type: "image/png" })
   const reference = "\\includegraphics[width=\\linewidth]{imgs/img-20260101-120000.png}"
-  const stored = { path: "/p/imgs/img-20260101-120000.png", reference, changed: ["/p/main.tex"] }
+  const stored = { path: "/p/imgs/img-20260101-120000.png", placeholder_path: "imgs/img-20260101-120000.png", reference, changed: ["/p/main.tex"] }
   const item = (kind: string, type: string, file: File | null = null) => ({ kind, type, getAsFile: () => file })
   const clipboardItem = (parts: Record<string, Blob>) => ({ types: Object.keys(parts), getType: async (type: string) => parts[type] })
 
@@ -259,12 +283,12 @@ describe("clipboard paste", () => {
       return { event, socket }
     }
 
-    it("stores a pasted PNG and inserts its reference below the cursor", async () => {
+    it("stores a pasted PNG and sends it as an image for the cursor line", async () => {
       api.storeWorkbenchImage.mockResolvedValueOnce(stored)
       const { event, socket } = await paste([item("file", "image/png", screenshot)])
 
       expect(event.defaultPrevented).toBe(true)
-      await waitFor(() => expect(socket.frames.at(-1)).toEqual({ type: "insert_lines", text: reference }))
+      await waitFor(() => expect(socket.frames.at(-1)).toEqual({ type: "insert_image", path: "imgs/img-20260101-120000.png", reference }))
       expect(api.storeWorkbenchImage).toHaveBeenCalledExactlyOnceWith("/p/main.tex", screenshot)
     })
 
@@ -280,7 +304,7 @@ describe("clipboard paste", () => {
       const { socket } = await paste([item("file", "image/png", screenshot)])
 
       await waitFor(() => expect(socket.frames.at(-1)).toEqual({ type: "message", text: "Image is too large" }))
-      expect(socket.frames.map((frame) => frame.type)).not.toContain("insert_lines")
+      expect(socket.frames.map((frame) => frame.type)).not.toContain("insert_image")
     })
 
     it.each([

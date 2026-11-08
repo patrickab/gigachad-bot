@@ -9,13 +9,17 @@
 - A `TextYankPost` autocmd sends a `yank` notification with the yanked text
 - Normal-mode `<Esc>` sends a `leave` notification (the browser gives focus back to the app), after running the user's own
   normal-mode `<Esc>` mapping (`:noh`)
-- With `ask_keymap`, visual-mode `<leader>a` sends a `selection` notification with the id and the selected lines
+- Each of the `keymaps` sends its `event` notification from every tracked buffer whose id ends in its `suffix` (any without one),
+  a rename re-evaluates that: a visual-mode keymap sends the id and the selected lines, any other the id and the cursor line
 - `_G.gigachad_buffer_state` reports a buffer's text, modified flag and change tick
 - `_G.gigachad_set_text` rewrites only the changed hunks, for edits made to the file elsewhere, keeping the modified flag
   (or setting it when the text differs from the stored file)
 - `_G.gigachad_rename` gives the buffer the file's new name and id, keeping its text, cursor and modified flag
 - `_G.gigachad_insert_lines` inserts lines below the cursor of the shown document
-- `_G.gigachad_show_error` shows a message as an error
+- `_G.gigachad_cursor_state` reports the shown document's lines, cursor row and change tick, `_G.gigachad_insert_at` inserts
+  lines at a row and moves the cursor, `_G.gigachad_set_line` replaces a line. Both refuse when the buffer moved past that
+  tick, so the caller can work out an edit from the lines without racing the user's typing
+- `_G.gigachad_show_error` shows a message as an error, `_G.gigachad_goto_line` moves the shown document's cursor to a line and column
 - With `own_clipboard`, `+` and `*` are the caller's clipboard (the browser's, not the machine's Neovim runs on): a paste
   is a `paste` request with the path of the current buffer, answered `{ text }` or `{ error }`. An error is shown and the
   last copy is pasted instead (`yy` then `p` works without the browser's clipboard), a copy stays in Neovim's registers.
@@ -46,11 +50,11 @@ if TYPE_CHECKING:
 _READ_CHUNK = 65536
 
 # Receives one options table { channel, first_path (the first document's buffer name), first_id, base_path (optional baseline),
-# ask_keymap, own_clipboard, notebook }. Mirrors Neovim's write rules: empty, otherwise a final newline unless both 'eol' and
-# 'fixeol' are off.
+# keymaps ({ mode, lhs, event, suffix? } each), own_clipboard, notebook }. Mirrors Neovim's write rules: empty, otherwise a final
+# newline unless both 'eol' and 'fixeol' are off.
 SETUP_LUA = r"""
 local options = ...
-local channel, ask_keymap, own_clipboard = options.channel, options.ask_keymap, options.own_clipboard
+local channel, own_clipboard = options.channel, options.own_clipboard
 local base_path = options.base_path
 if base_path == vim.NIL then base_path = nil end
 -- A message longer than the command line would stop Neovim at a hit-enter or "more" prompt, and a stopped Neovim answers no request
@@ -178,6 +182,39 @@ local function rename_buffer(buffer, new_path)
   vim.bo[buffer].modified = modified
 end
 
+-- Sends the event of a keymap pressed in `buffer`: from visual mode with the id and the selected lines (leaving visual mode),
+-- else with the id and the cursor line.
+local function notify_keymap(buffer, keymap)
+  local id = ids[buffer]
+  if id == nil then return end
+  if keymap.mode ~= "x" then
+    vim.rpcnotify(channel, keymap.event, id, vim.api.nvim_win_get_cursor(0)[1])
+    return
+  end
+  local first, last = vim.fn.line("v"), vim.fn.line(".")
+  if first > last then first, last = last, first end
+  vim.cmd("normal! \27")
+  local lines = vim.api.nvim_buf_get_lines(buffer, first - 1, last, false)
+  vim.rpcnotify(channel, keymap.event, { path = id, start_line = first, end_line = last, text = table.concat(lines, "\n") })
+end
+
+local mapped = {} -- per buffer, the indexes of the keymaps installed in it
+
+-- Installs the keymaps whose `suffix` (if any) ends `buffer`'s id and removes the ones a rename made stop applying.
+local function install_keymaps(buffer)
+  mapped[buffer] = mapped[buffer] or {}
+  for index, keymap in ipairs(options.keymaps) do
+    local id = ids[buffer]
+    local applies = keymap.suffix == nil or (id ~= nil and vim.endswith(id, keymap.suffix))
+    if applies then
+      vim.keymap.set(keymap.mode, keymap.lhs, function() notify_keymap(buffer, keymap) end, { buffer = buffer })
+    elseif mapped[buffer][index] then
+      vim.keymap.del(keymap.mode, keymap.lhs, { buffer = buffer })
+    end
+    mapped[buffer][index] = applies
+  end
+end
+
 -- Renames the buffer for a file that was renamed, `:w` and the saved message follow the new name.
 function _G.gigachad_rename(id, new_id, new_path)
   local buffer = buffer_of(id)
@@ -187,6 +224,7 @@ function _G.gigachad_rename(id, new_id, new_path)
   tracked[new_id] = buffer
   ids[buffer] = new_id
   if current_id == id then current_id = new_id end
+  install_keymaps(buffer)
 end
 
 -- The window the documents show in: the current one, else the first window showing a document.
@@ -219,22 +257,57 @@ function _G.gigachad_insert_lines(text)
   vim.api.nvim_win_set_cursor(window, { row + 1, 0 })
 end
 
+-- The lines of the shown document, its 1-based cursor row, its buffer and its change tick, which `gigachad_insert_at` and
+-- `gigachad_set_line` check.
+function _G.gigachad_cursor_state()
+  local window = work_window()
+  local buffer = vim.api.nvim_win_get_buf(window)
+  return {
+    lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false),
+    row = vim.api.nvim_win_get_cursor(window)[1],
+    buffer = buffer,
+    tick = vim.api.nvim_buf_get_changedtick(buffer),
+  }
+end
+
+-- Whether the work window still shows `buffer` at change tick `tick`; the handle is compared first, so a wiped buffer's
+-- tick is never read.
+local function unchanged(window, buffer, tick)
+  return vim.api.nvim_win_get_buf(window) == buffer and vim.api.nvim_buf_get_changedtick(buffer) == tick
+end
+
+-- Inserts `lines` below line `row` (0: above the first) of the shown document and puts the cursor on line `cursor_row`,
+-- false without a change when the work window no longer shows `buffer` or it moved past `tick`.
+function _G.gigachad_insert_at(row, lines, cursor_row, buffer, tick)
+  local window = work_window()
+  if not unchanged(window, buffer, tick) then return false end
+  vim.api.nvim_buf_set_lines(buffer, row, row, false, lines)
+  vim.api.nvim_win_set_cursor(window, { cursor_row, 0 })
+  return true
+end
+
+-- Replaces line `row` of the shown document with `text`, false without a change when the work window no longer shows
+-- `buffer` or it moved past `tick`.
+function _G.gigachad_set_line(row, text, buffer, tick)
+  if not unchanged(work_window(), buffer, tick) then return false end
+  vim.api.nvim_buf_set_lines(buffer, row - 1, row, false, { text })
+  return true
+end
+
 -- Shows `text` as an error message.
 function _G.gigachad_show_error(text)
   vim.api.nvim_echo({ { text, "ErrorMsg" } }, true, {})
 end
 
--- With `ask_keymap`, visual-mode `<leader>a` in `buffer` tells the caller the selected lines (`selection`).
-local function install_ask(buffer)
-  if ask_keymap ~= true then return end
-  vim.keymap.set("x", "<leader>a", function()
-    local first, last = vim.fn.line("v"), vim.fn.line(".")
-    if first > last then first, last = last, first end
-    vim.cmd("normal! \27")
-    local lines = vim.api.nvim_buf_get_lines(buffer, first - 1, last, false)
-    local selection = { path = ids[buffer], start_line = first, end_line = last, text = table.concat(lines, "\n") }
-    vim.rpcnotify(channel, "selection", selection)
-  end, { buffer = buffer })
+-- Moves the cursor of the shown document to `line` (clamped to the buffer) and 0-based byte `column` (clamped to the line,
+-- 0 without one), centred like `zz`.
+function _G.gigachad_goto_line(line, column)
+  local window = work_window()
+  local buffer = vim.api.nvim_win_get_buf(window)
+  local row = math.max(1, math.min(line, vim.api.nvim_buf_line_count(buffer)))
+  local text = vim.api.nvim_buf_get_lines(buffer, row - 1, row, false)[1] or ""
+  vim.api.nvim_win_set_cursor(window, { row, math.max(0, math.min(column or 0, #text - 1)) })
+  vim.api.nvim_win_call(window, function() vim.cmd("normal! zz") end)
 end
 
 -- Set by a `:w` the caller stored, so `<C-CR>` runs a cell only after a save that went through
@@ -329,7 +402,7 @@ local function track(name, id, virtual)
       vim.api.nvim_echo({ { message } }, false, {})
     end,
   })
-  install_ask(buffer)
+  install_keymaps(buffer)
   if virtual then virtualize(buffer, name) end
 end
 

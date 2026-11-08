@@ -4,10 +4,12 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import type { FileTreeCreateChoice } from "@/components/ui/file-tree/FileTree"
+import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, loadTemplateSets, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
 import { announceFileRemoval, onFileChange, onFileRemoval } from "@/lib/backend/fileEvents"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { isNewFileIn } from "@/lib/domain/files"
+import type { TemplateSetInfo } from "@/lib/domain/latex"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { opensInWorkbench } from "@/lib/domain/workbench"
@@ -39,8 +41,10 @@ function withoutRemoved(documents: ProjectDocument[], path: string): ProjectDocu
 }
 
 /** Kinds the files folder's `+` creates. */
-export const NEW_FILE_KINDS = ["Markdown", "LaTeX"] as const
-export type NewFileKind = (typeof NEW_FILE_KINDS)[number]
+const FILE_KINDS = ["Markdown", "LaTeX"]
+
+/** The LaTeX template choice for a plain `.tex` file, listed before the server's template sets. */
+const BLANK_TEMPLATE = "Blank"
 
 /** `name` as a LaTeX file name: `.tex` appended unless it has it. */
 const latexName = (name: string) => (name.toLowerCase().endsWith(".tex") ? name : `${name}.tex`)
@@ -73,6 +77,22 @@ export function useWorkspaceDocuments({
   /** Project whose create-document panel is open. */
   const [createTarget, setCreateTarget] = useState<string | null>(null)
   const [fileError, setFileError] = useState("")
+  const [templateSets, setTemplateSets] = useState<TemplateSetInfo[]>([])
+
+  // The LaTeX templates come from the template sets on the server, none when they fail to load.
+  useEffect(() => {
+    if (!onWorkbenchSelect) return
+    let cancelled = false
+    loadTemplateSets().then((sets) => { if (!cancelled) setTemplateSets(sets) }, () => {})
+    return () => { cancelled = true }
+  }, [onWorkbenchSelect])
+  const templateNames = useMemo(() => new Map(templateSets.map((set) => [set.label, set.name])), [templateSets])
+  /** The `+` choice of the files folder: the file type, then the template for LaTeX. Absent without the workbench, files are Markdown then. */
+  const newFileChoice = useMemo((): FileTreeCreateChoice | undefined => {
+    if (!onWorkbenchSelect) return undefined
+    const templates = { label: "Template", options: [BLANK_TEMPLATE, ...templateNames.keys()], initial: BLANK_TEMPLATE, floating: true }
+    return { label: "File type", options: FILE_KINDS, initial: "Markdown", floating: true, then: templateNames.size ? { LaTeX: templates } : undefined }
+  }, [onWorkbenchSelect, templateNames])
 
   const loadProjectDocuments = useCallback(async (signal?: AbortSignal) => {
     const entries = await Promise.all(projects.map(async (project) =>
@@ -125,10 +145,15 @@ export function useWorkspaceDocuments({
     else onDocumentSelect?.(path, scope)
   }
 
-  /** Create a `kind` file `name` in project `scope` and open it. LaTeX lives on disk, Markdown in the project until the workbench opens it. */
-  const createFile = async (scope: string, name: string, kind: NewFileKind) => {
-    if (kind === "LaTeX" && onWorkbenchSelect) {
-      const path = await createWorkbenchDocument(scope, latexName(name))
+  /**
+   * Create a `kind` file `name` in project `scope` and open it, a LaTeX file from the template set labelled `template`.
+   *
+   * - LaTeX lives on disk: a plain `.tex` for `BLANK_TEMPLATE` or no template, a folder with `main.tex` for a template set
+   * - Markdown and unknown kinds live in the project until the workbench opens them
+   */
+  const createFile = async (scope: string, name: string, kind: string, template?: string) => {
+    if (onWorkbenchSelect && kind === "LaTeX") {
+      const path = await createWorkbenchDocument(scope, latexName(name), template && templateNames.get(template))
       await refresh()
       onWorkbenchSelect(path, scope)
     } else {
@@ -235,7 +260,7 @@ export function useWorkspaceDocuments({
   }
 
   return {
-    documents, notes, refresh, createAndOpen, selectDocument, createFile, canCreateLatex: !!onWorkbenchSelect, move, moveToFolder, promote, remove, importFiles,
+    documents, notes, refresh, createAndOpen, selectDocument, createFile, newFileChoice, move, moveToFolder, promote, remove, importFiles,
     uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
   }
 }

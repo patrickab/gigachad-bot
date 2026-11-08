@@ -6,6 +6,18 @@ import { mapCanvasToDevicePixels, releaseCanvas, renderPlaceholder, showPlacehol
 import { PAGE_GAP, type PdfDocument, type PdfPage } from "./pdfLayout"
 import { collectImageRects, collectLinkRects, rectMask, type PageRegions } from "./pdfPageRegions"
 
+/** PDF annotation flags that keep an annotation off screen: Hidden and NoView. */
+const UNSHOWN_ANNOTATION_FLAGS = 2 | 32
+
+/** Removes, in place, the annotations the annotation layer must not draw: hidden ones, which pdf.js draws anyway, and Text notes, whose icons the app does not serve. */
+export function dropUnshownAnnotations(annotations: { subtype?: string; annotationFlags?: number }[]): void {
+  // react-pdf draws the very array it hands to `onGetAnnotationsSuccess`, so pruning it there keeps them off the page
+  for (let index = annotations.length - 1; index >= 0; index--) {
+    const { subtype, annotationFlags = 0 } = annotations[index]
+    if (subtype === "Text" || (annotationFlags & UNSHOWN_ANNOTATION_FLAGS) !== 0) annotations.splice(index, 1)
+  }
+}
+
 /** One page's box at its final size, its live canvas exists only while `mounted`.
  *
  * - `rasterWidth` is the canvas' render width, CSS-scaled to `width` while a zoom settles
@@ -158,6 +170,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
               onRenderSuccess={onRenderSuccess}
               onRenderError={onRenderFailed}
               renderTextLayer
+              onGetAnnotationsSuccess={dropUnshownAnnotations}
             />
           </div>
         )}

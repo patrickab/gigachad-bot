@@ -15,13 +15,13 @@ from backend.routes.deps import (
     get_relocate,
 )
 import config
-from lib import latex, workbench
+from lib import latex, latex_templates, workbench
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 from lib.disk_files import DiskFiles
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
-from tests.conftest import mounted_roots, request_identity, route_client
+from tests.conftest import PRESENTATION_SOURCE, mounted_roots, request_identity, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope, StoredAsset
 
 
@@ -170,6 +170,30 @@ def test_mirror_continues_past_a_failing_kind(tmp_path):
     (tmp_path / "latex" / ".omp").write_text("not a directory", encoding="utf-8")
     workbench.mirror_omp(tmp_path)
     assert "Markdown" in (tmp_path / "markdown" / ".omp" / "SYSTEM.md").read_text(encoding="utf-8")
+
+
+def test_mirror_copies_the_template_sets_without_their_example_pdf_and_previews_and_prunes_the_rest(tmp_path, template_sets):
+    mirror = tmp_path / "workbench" / "latex" / workbench.TEMPLATE_DIRECTORY
+    (mirror / "demo" / "primitives" / "old").mkdir(parents=True)
+    (mirror / "demo" / "primitives" / "old" / "01-gone.tex").write_text("stale", encoding="utf-8")
+    (mirror / "demo" / "STYLE.md").write_text("hand edit", encoding="utf-8")
+    (mirror / "removed").mkdir()
+    (mirror / "removed" / "skeleton.tex").write_text("stale", encoding="utf-8")
+
+    workbench.mirror_omp(tmp_path / "workbench")
+
+    def files(base):
+        return {path.relative_to(base): path.read_bytes() for path in base.rglob("*") if path.is_file()}
+
+    expected = {
+        path: content for path, content in files(template_sets).items()
+        if path.parts[0] in {"demo", "compact", "letter"} and path.name != "example.pdf" and path.parts[1] != "previews"
+    }
+    assert files(mirror) == expected
+    assert sorted(path.name for path in mirror.iterdir()) == ["compact", "demo", "letter"]
+    assert not (mirror / "demo" / "primitives" / "old").exists()
+
+
 
 
 def test_project_directories_lists_existing_ones_only(tmp_path):
@@ -357,6 +381,71 @@ def test_create_removes_the_file_when_listing_it_fails(client, root, projects, m
     with pytest.raises(StorageConflictError):
         client.post("/api/workbench/create", json={"slug": "thesis", "name": "paper.tex"})
     assert not (root / "latex").exists()
+
+
+def test_create_with_a_template_writes_a_presentation_folder_and_lists_the_folder(client, root, projects, template_sets):
+    response = client.post("/api/workbench/create", json={"slug": "thesis", "name": "deck.tex", "template": "demo"})
+
+    folder = root / "latex" / "thesis" / "deck"
+    assert response.json() == {"path": str(folder / "main.tex")}
+    assert sorted(path.name for path in folder.iterdir()) == ["beamerthemedemo.sty", "imgs", "main.tex"]
+    assert (folder / "main.tex").read_bytes() == (template_sets / "demo" / "skeleton.tex").read_bytes()
+    assert (folder / "beamerthemedemo.sty").read_bytes() == (template_sets / "demo" / "beamerthemedemo.sty").read_bytes()
+    assert list((folder / "imgs").iterdir()) == []
+    assert projects.list_files("thesis") == [str(folder)]
+
+
+def test_create_with_the_shipped_presentation_template_starts_from_its_skeleton(client, root):
+    theme = latex_templates.template_set("presentation").name
+    path = client.post("/api/workbench/create", json={"slug": "thesis", "name": "deck.tex", "template": theme}).json()["path"]
+
+    assert path == str(root / "latex" / "thesis" / "deck" / "main.tex")
+    assert latex_templates.presentation_theme(root / "latex" / "thesis" / "deck" / "main.tex").name == theme
+
+
+def test_create_with_a_document_template_copies_its_files_and_is_no_presentation(client, root, projects, template_sets):
+    response = client.post("/api/workbench/create", json={"slug": "thesis", "name": "offer.tex", "template": "letter"})
+
+    folder = root / "latex" / "thesis" / "offer"
+    assert response.json() == {"path": str(folder / "main.tex")}
+    assert sorted(path.name for path in folder.iterdir()) == ["imgs", "main.tex", "sender.lco"]
+    assert latex_templates.presentation_theme(folder / "main.tex") is None
+
+
+@pytest.mark.parametrize("body", [
+    {"slug": "thesis", "name": "deck.tex", "template": "broken"},
+    {"slug": "thesis", "name": "deck.tex", "template": "../sets/demo"},
+    {"slug": "thesis", "name": "deck.tex", "template": ""},
+    {"slug": "thesis", "name": "deck.md", "template": "demo"},
+])
+def test_create_refuses_unknown_templates_and_templates_for_markdown(client, root, projects, template_sets, body):
+    assert client.post("/api/workbench/create", json=body).status_code == 400
+    assert not root.exists()
+    assert projects.list_files("thesis") == []
+
+
+def test_create_with_a_template_removes_everything_when_listing_fails(client, root, projects, template_sets, monkeypatch):
+    def fail(slug: str, path: str) -> None:
+        raise StorageConflictError(slug)
+
+    monkeypatch.setattr(projects, "add_file", fail)
+    with pytest.raises(StorageConflictError):
+        client.post("/api/workbench/create", json={"slug": "thesis", "name": "deck.tex", "template": "demo"})
+    assert not (root / "latex").exists()
+
+
+def test_a_failed_create_keeps_the_folders_that_existed_before(client, root, projects, template_sets, monkeypatch):
+    project = root / "latex" / "thesis"
+    project.mkdir(parents=True)
+    (project / "other.tex").write_text("mine", encoding="utf-8")
+
+    def fail(slug: str, path: str) -> None:
+        raise StorageConflictError(slug)
+
+    monkeypatch.setattr(projects, "add_file", fail)
+    with pytest.raises(StorageConflictError):
+        client.post("/api/workbench/create", json={"slug": "thesis", "name": "deck.tex", "template": "demo"})
+    assert [path.name for path in project.iterdir()] == ["other.tex"]
 
 
 def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(client, docs):
@@ -586,7 +675,7 @@ def test_a_pasted_image_goes_into_imgs_of_the_project_folder_whatever_file_it_is
     stored = paste(client, folder / "sections" / "intro.tex")
 
     image = folder / "imgs" / clock
-    assert stored.json() == {"path": str(image), "reference": rf"\includegraphics[width=\linewidth]{{imgs/{clock}}}", "changed": []}
+    assert stored.json() == {"path": str(image), "placeholder_path": f"imgs/{clock}", "reference": rf"\includegraphics[width=\linewidth]{{imgs/{clock}}}", "changed": []}
     assert image.read_bytes() == PNG
     assert scope.changes == [{"kind": "document", "key": str(image), "operation": "write"}]
 
@@ -607,6 +696,18 @@ def test_pasting_into_a_root_without_graphicx_adds_it_and_reports_the_root(clien
     ]
 
 
+def test_a_presentation_references_a_pasted_image_by_its_theme_and_keeps_its_root(client, root, scope, clock, template_sets):
+    folder = root / "latex" / "thesis" / "deck"
+    folder.mkdir(parents=True)
+    (folder / "main.tex").write_text(PRESENTATION_SOURCE, encoding="utf-8")
+
+    stored = paste(client, folder / "main.tex").json()
+
+    assert stored == {"path": str(folder / "imgs" / clock), "placeholder_path": f"imgs/{clock}", "reference": rf"\demoimage{{imgs/{clock}}}", "changed": []}
+    assert (folder / "main.tex").read_text(encoding="utf-8") == PRESENTATION_SOURCE
+    assert scope.changes == [{"kind": "document", "key": str(folder / "imgs" / clock), "operation": "write"}]
+
+
 def test_a_pasted_image_of_a_markdown_file_sits_next_to_it_with_a_markdown_reference(client, root, vault, clock):
     plan = root / "markdown" / "thesis" / "plan" / "plan.md"
     plan.parent.mkdir(parents=True)
@@ -614,7 +715,7 @@ def test_a_pasted_image_of_a_markdown_file_sits_next_to_it_with_a_markdown_refer
 
     stored = paste(client, plan)
 
-    assert stored.json() == {"path": str(plan.parent / "imgs" / clock), "reference": f"![](imgs/{clock})", "changed": []}
+    assert stored.json() == {"path": str(plan.parent / "imgs" / clock), "placeholder_path": f"imgs/{clock}", "reference": f"![](imgs/{clock})", "changed": []}
     assert (plan.parent / "imgs" / clock).read_bytes() == PNG
 
 

@@ -1,0 +1,44 @@
+% New presentation: copy as main.tex next to the sty, fill the frames from primitives/. Build: latexmk -pdf
+\documentclass[aspectratio=169,11pt]{beamer}
+\usetheme[progress]{presentation}% [progress]: chapter progress bar in the footer
+
+\title{Deck title}
+\subtitle{One sentence that says what this talk gives you}
+\author{Author}
+\institute{Team or institution}% optional
+\date{Venue \textperiodcentered{} Year}
+
+\begin{document}
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Agenda}{The question this talk answers in one line}
+  \tableofcontents
+  \note{What you say to frame the talk: the question it answers and why the chapters come in this order.}
+\end{frame}
+
+% Every \section opens a chapter slide, its subsections become that chapter's agenda
+\section{First chapter}
+\subsection{First step}
+
+\begin{frame}{Claim as a full sentence}{Italic context in one line}
+  Placeholder: replace this frame with one copied from a primitive.
+  \note{Why this claim matters and what the audience should take from it.}
+\end{frame}
+
+\section{Second chapter}
+\subsection{Second step}
+
+\begin{frame}{Claim as a full sentence}{Italic context in one line}
+  Placeholder: replace this frame with one copied from a primitive.
+  \note{How this chapter builds on the first one.}
+\end{frame}
+
+\begin{frame}[plain,c]
+  \statement[Reference or link]{The one sentence\\to remember.}
+  \note{What you say to close: the one sentence again in your own words, then the next step for the audience.}
+\end{frame}
+
+\end{document}

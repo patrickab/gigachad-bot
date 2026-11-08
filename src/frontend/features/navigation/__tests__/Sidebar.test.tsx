@@ -37,7 +37,9 @@ const api = vi.hoisted(() => ({
     path: `project/${scope}/document/${name}`, name, mime: "text/plain",
   })),
   addRootFilesToProject: vi.fn<typeof import("@/lib/backend/api").addRootFilesToProject>(async () => []),
-  createWorkbenchDocument: vi.fn<typeof import("@/lib/backend/api").createWorkbenchDocument>(async (slug, name) => `/data/workbench/latex/${slug}/${name.replace(/\.tex$/, "")}/${name}`),
+  createWorkbenchDocument: vi.fn<typeof import("@/lib/backend/api").createWorkbenchDocument>(async (slug, name, template) =>
+    `/data/workbench/latex/${slug}/${name.replace(/\.tex$/, "")}/${template ? "main.tex" : name}`),
+  loadTemplateSets: vi.fn<typeof import("@/lib/backend/api").loadTemplateSets>(async () => [{ name: "deck-set", label: "Deck" }]),
   fileRootTree: vi.fn<typeof import("@/lib/backend/api").fileRootTree>(async () => ({ enabled: true, tree: [{
     path: "/source", name: "source", type: "root", children: [
       { path: "/source/first.md", name: "first.md", type: "file" },
@@ -637,29 +639,76 @@ describe("Project navigation", () => {
     expect(removeDocument).toHaveBeenCalledWith("proj", "project/proj/document/Paper.md")
   })
 
-  it("creates a LaTeX file on disk and a Markdown file in the project, both opening in the workbench", async () => {
+  it("creates a blank LaTeX file and a LaTeX file from a template on disk and a Markdown file in the project, all opening in the workbench", async () => {
     const onWorkbenchSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
 
     fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
     const types = within(await view.findByRole("listbox", { name: "File type" }))
+    expect(types.getAllByRole("option").map((option) => option.textContent)).toEqual(["Markdown", "LaTeX"])
     expect(types.getByRole("option", { name: "Markdown" })).toHaveAttribute("aria-selected", "true")
     fireEvent.keyDown(view.getByRole("listbox", { name: "File type" }), { key: "Tab" })
-    expect(types.getByRole("option", { name: "LaTeX" })).toHaveAttribute("aria-selected", "true")
     fireEvent.keyDown(view.getByRole("listbox", { name: "File type" }), { key: "Enter" })
+    const templates = within(await view.findByRole("listbox", { name: "Template" }))
+    expect(templates.getAllByRole("option").map((option) => option.textContent)).toEqual(["Blank", "Deck"])
+    expect(templates.getByRole("option", { name: "Blank" })).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(view.getByRole("listbox", { name: "Template" }), { key: "Enter" })
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "paper" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
     await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj"))
-    expect(api.createWorkbenchDocument).toHaveBeenCalledWith("proj", "paper.tex")
+    expect(api.createWorkbenchDocument).toHaveBeenCalledWith("proj", "paper.tex", undefined)
+
+    fireEvent.click(project.getByRole("button", { name: "New file in Proj" }))
+    fireEvent.click(within(await view.findByRole("listbox", { name: "File type" })).getByRole("option", { name: "LaTeX" }))
+    fireEvent.click(within(await view.findByRole("listbox", { name: "Template" })).getByRole("option", { name: "Deck" }))
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "deck" } })
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/deck/main.tex", "proj"))
+    expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "deck.tex", "deck-set")
 
     fireEvent.click(project.getByRole("button", { name: "New file in Proj" }))
     fireEvent.keyDown(await view.findByRole("listbox", { name: "File type" }), { key: "Enter" })
+    expect(view.queryByRole("listbox", { name: "Template" })).not.toBeInTheDocument()
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "draft" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
     await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/draft.md", "proj"))
     expect(api.writeDocument).toHaveBeenCalledWith("proj", "draft.md")
+  })
+
+  it("lists every template set under its label after LaTeX and creates from the picked set", async () => {
+    api.loadTemplateSets.mockResolvedValueOnce([{ name: "presentation", label: "Presentation" }, { name: "letter", label: "Letter" }])
+    const onWorkbenchSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
+
+    fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
+    fireEvent.click(within(await view.findByRole("listbox", { name: "File type" })).getByRole("option", { name: "LaTeX" }))
+    const templates = within(await view.findByRole("listbox", { name: "Template" }))
+    expect(templates.getAllByRole("option").map((option) => option.textContent)).toEqual(["Blank", "Presentation", "Letter"])
+    fireEvent.click(templates.getByRole("option", { name: "Letter" }))
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "cover" } })
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "cover.tex", "letter"))
+  })
+
+  it("creates a blank LaTeX file without a template choice when the template sets fail to load", async () => {
+    api.loadTemplateSets.mockRejectedValueOnce(new Error("offline"))
+    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={vi.fn()} />)
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
+
+    fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
+    fireEvent.click(within(await view.findByRole("listbox", { name: "File type" })).getByRole("option", { name: "LaTeX" }))
+    expect(view.queryByRole("listbox", { name: "Template" })).not.toBeInTheDocument()
+    fireEvent.change(project.getByLabelText("File name"), { target: { value: "notes" } })
+    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
+    await waitFor(() => expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "notes.tex", undefined))
   })
 
   it("creates the architecture of a project without one when its icon is used", async () => {

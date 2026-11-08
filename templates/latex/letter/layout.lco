@@ -1,0 +1,23 @@
+% Letter design: one sans font, the sender block top right, no marks or lines. The sender's data lives in sender.lco
+\ProvidesFile{layout.lco}[clean letter layout]
+\RequirePackage[T1]{fontenc}
+\RequirePackage[default]{sourcesanspro}
+\RequirePackage{microtype}
+
+% Head: the sender block in the top right corner, its lines left aligned, the name in bold, phone and mail without labels
+\setkomavar{firsthead}{\hfill\begin{tabular}{@{}l@{}}
+  \textbf{\usekomavar{fromname}}\\
+  \usekomavar{fromaddress}\\
+  \usekomavar{fromphone}\\
+  \usekomavar{fromemail}
+\end{tabular}}
+
+% No fold marks and no return address line: the page stays clean on screen and on paper, the address still fits a window envelope
+\KOMAoptions{foldmarks=false, backaddress=false, subject=untitled}% subject without a "Betreff:" label
+\setplength{sigindent}{0mm}% closing and signature flush left
+\renewcommand*{\raggedsignature}{\raggedright}
+
+% One left edge: address window and text start at the 25 mm text margin (the window spans 20 to 110 mm)
+\setplength{firstheadhpos}{25mm}
+\setplength{firstheadwidth}{165mm}
+\setplength{toaddrhpos}{25mm}

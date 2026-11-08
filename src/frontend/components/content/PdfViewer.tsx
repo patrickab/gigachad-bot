@@ -1,18 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
-import { Document, Page, pdfjs } from "react-pdf"
+import { Document } from "react-pdf"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
 import "react-pdf/dist/esm/Page/TextLayer.css"
 import { useEventListener } from "@/hooks/useEventListener"
 import { PdfPageSlot } from "./pdf/PdfPageSlot"
 import { PdfZoomControls } from "./pdf/PdfZoomControls"
 import { useDevicePixelRatio } from "./pdf/pdfCanvas"
-import { PAGE_GAP, PAGE_SIDE_GAP, readPageAspects, RENDER_WIDTH, scrollTopAfterWidthChange, type PdfDocument } from "./pdf/pdfLayout"
+import { PAGE_GAP, PAGE_SIDE_GAP, pageTop, readPageAspects, RENDER_WIDTH, scrollTopAfterWidthChange, type PdfDocument } from "./pdf/pdfLayout"
+import { clickedWord, doubleClickedWord, revealedY, type PdfWord } from "./pdf/pdfText"
+import "./pdf/pdfjsWorker"
 import { usePdfPageWindow } from "./pdf/usePdfPageWindow"
 import { usePdfZoom } from "./pdf/usePdfZoom"
-
-pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
 
 // React-PDF logs expected text-layer cancellations as errors. Suppress only that message.
 if (typeof window !== "undefined") {
@@ -31,6 +31,14 @@ if (typeof window !== "undefined") {
 /** Page layout set by the parent: page `width`, and the scroller's px above the first page and below the last. */
 export type PdfPageBox = { width: number; top: number; bottom: number }
 
+/** A spot to bring into view: `y` PDF points down from the top of 1-based `page`, or the middle of the first text line of the page holding one of `words`. A new `key` reveals it again. */
+export type PdfReveal = { page: number; y: number; words?: readonly string[]; key: number }
+
+/** Share of the scroller's height above a revealed spot. */
+const REVEAL_SHARE_ABOVE = 1 / 3
+/** How long a revealed spot stays marked, its mark fades out over that time. */
+const REVEAL_MARK_MS = 1500
+
 /** A loaded document, its url and its pages' height / width ratios. */
 type PdfLayout = { url: string; pdf: PdfDocument; aspects: number[] }
 
@@ -40,12 +48,14 @@ function ignore() {}
 /** PDF viewer with zoom and page tracking.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
- * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
+ * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px and the document's page count
  * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
  * - Controls show only while the pointer is near them
  * - `documentKey` names the document apart from its `url`: a new `url` under the same key loads behind the shown pages and swaps in once its pages near the viewport have drawn, keeping zoom and scroll position, while a new key starts over
  * - `onPageRendered` gets the shown url each time one of its pages finished drawing, or failed to, and when a new url swaps in
  * - `pageBox` sets the page width and the space around the pages, e.g. to line them up with a neighboring pane
+ * - `onPageDoubleClick` gets the double-clicked page, the spot on it in PDF points from its top-left corner at any zoom, and the word the double-click selected there, else the page's word nearest the spot (empty when none is near), with the clicked character's offset in it and its occurrence on its rendered line
+ * - `reveal` scrolls its spot to a third of the scroller's height once the document has laid out and marks it briefly, a new `key` repeats it
  * - Only pages near the viewport hold a canvas, the rest are sized placeholders
  */
 export function PdfViewer({
@@ -60,6 +70,8 @@ export function PdfViewer({
   documentKey,
   onPageRendered,
   pageBox,
+  onPageDoubleClick,
+  reveal,
 }: {
   url: string
   // when set, the parent controls width and the viewer sizes its own height to
@@ -69,11 +81,13 @@ export function PdfViewer({
   initialPage?: number
   onPageChange?: (page: number) => void
   topInset?: number
-  renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
+  renderPageOverlay?: (page: number, pageWidth: number, pageCount: number) => ReactNode
   onScrollerChange?: (scroller: HTMLDivElement | null) => void
   documentKey?: string
   onPageRendered?: (url: string) => void
   pageBox?: PdfPageBox
+  onPageDoubleClick?: (page: number, x: number, y: number, word: PdfWord) => void
+  reveal?: PdfReveal
 }) {
   const identity = documentKey ?? url
   // The url on screen. Under the same `documentKey` a new url is the incoming one, loading hidden until it swaps in
@@ -115,11 +129,13 @@ export function PdfViewer({
   const onScrollerChangeRef = useRef(onScrollerChange)
   const onPageRenderedRef = useRef(onPageRendered)
   const onPageAspectRef = useRef(onPageAspect)
+  const onPageDoubleClickRef = useRef(onPageDoubleClick)
   useLayoutEffect(() => {
     onPageChangeRef.current = onPageChange
     onScrollerChangeRef.current = onScrollerChange
     onPageRenderedRef.current = onPageRendered
     onPageAspectRef.current = onPageAspect
+    onPageDoubleClickRef.current = onPageDoubleClick
   })
   const notifyPageRendered = useCallback(() => onPageRenderedRef.current?.(shownUrl), [shownUrl])
   const onIncomingPageRendered = useCallback((pageNumber: number) => {
@@ -291,6 +307,70 @@ export function PdfViewer({
     onPageChangeRef.current?.(page)
   }, [numPages, topInset, slotsRef])
 
+  // The spot's share of the page box in CSS px, which a pinch transform or the canvas' device pixels do not change, scaled to the page's size in points
+  const shownPdf = layout?.pdf
+  const reportPageDoubleClick = useCallback(async (event: React.MouseEvent) => {
+    const slot = (event.target as Element).closest<HTMLElement>(".pdf-page[data-page-number]")
+    if (!onPageDoubleClickRef.current || !slot || !shownPdf) return
+    const page = Number(slot.dataset.pageNumber)
+    const box = slot.getBoundingClientRect()
+    if (box.width <= 0 || box.height <= 0) return
+    const across = (event.clientX - box.left) / box.width
+    const down = (event.clientY - box.top) / box.height
+    // The browser selects the word on the second press, before the dblclick event. A press between lines or words selects only a blank
+    const selected = doubleClickedWord(slot, event.clientX)
+    try {
+      const pdfPage = await shownPdf.getPage(page)
+      const { width, height } = pdfPage.getViewport({ scale: 1 })
+      const [x, y] = [across * width, down * height]
+      onPageDoubleClickRef.current?.(page, x, y, await clickedWord(pdfPage, x, y, selected))
+    } catch {
+      /* the document went away meanwhile */
+    }
+  }, [shownPdf])
+
+  // The revealed spot's mark: its page and its share of the page's height
+  const [revealMark, setRevealMark] = useState<{ key: number; page: number; down: number } | null>(null)
+  const revealedKeyRef = useRef<number | null>(null)
+  // Placeholders have their final heights, so the spot's offset follows from the page sizes whether its page drew yet or not
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!reveal || !ready || !shownPdf || !pageAspects || !el || revealedKeyRef.current === reveal.key) return
+    const page = Math.min(pageAspects.length, Math.max(1, Math.round(reveal.page)))
+    let cancelled = false
+    shownPdf.getPage(page).then(async (pdfPage) => {
+      const y = await revealedY(pdfPage, reveal.y, reveal.words)
+      if (cancelled) return
+      const { height } = pdfPage.getViewport({ scale: 1 })
+      const down = height > 0 ? Math.min(1, Math.max(0, y / height)) : 0
+      const spot = (pageBox?.top ?? topInset) + pageTop(pageAspects, pageWidth, page) + down * Math.round(pageWidth * pageAspects[page - 1])
+      el.scrollTop = Math.max(0, spot - el.clientHeight * REVEAL_SHARE_ABOVE)
+      revealedKeyRef.current = reveal.key
+      setRevealMark({ key: reveal.key, page, down })
+    }, () => {
+      /* the document went away meanwhile */
+    })
+    return () => { cancelled = true }
+  }, [reveal, ready, shownPdf, pageAspects, pageWidth, pageBox?.top, topInset])
+  useEffect(() => {
+    if (!revealMark) return
+    const timer = setTimeout(() => setRevealMark(null), REVEAL_MARK_MS)
+    return () => clearTimeout(timer)
+  }, [revealMark])
+  const pageOverlay = useCallback((page: number, width: number) => (
+    <>
+      {renderPageOverlay?.(page, width, numPages ?? 0)}
+      {revealMark?.page === page && (
+        <span
+          key={revealMark.key}
+          aria-hidden
+          className="pdf-reveal-mark pointer-events-none absolute inset-x-0 h-6 -translate-y-1/2 bg-ink-subtle/25 opacity-0 transition-opacity duration-[1500ms] ease-out starting:opacity-100"
+          style={{ top: `${revealMark.down * 100}%` }}
+        />
+      )}
+    </>
+  ), [renderPageOverlay, revealMark, numPages])
+
   // fitWidth: fill parent width, self-size height to one page. Otherwise fill parent.
   const rootStyle: React.CSSProperties = fitWidth
     ? { width: "100%", height: boxHeight ?? "auto" }
@@ -320,6 +400,7 @@ export function PdfViewer({
           markScrolled()
           trackVisiblePage()
         }}
+        onDoubleClick={(event) => void reportPageDoubleClick(event)}
         // overflow-anchor off: the width-change effect above owns the scroll
         // position; native scroll anchoring would apply a second correction
         style={{
@@ -363,7 +444,7 @@ export function PdfViewer({
                         onPlaceholderChange={incomingLayer ? ignore : onPlaceholderChange}
                         snap={!!fitWidth}
                         registerSlot={incomingLayer ? ignore : registerSlot}
-                        renderPageOverlay={renderPageOverlay}
+                        renderPageOverlay={pageOverlay}
                         onRendered={incomingLayer ? onIncomingPageRendered : notifyPageRendered}
                       />
                     ))}
@@ -375,28 +456,5 @@ export function PdfViewer({
         })}
       </div>
     </div>
-  )
-}
-
-/** Every page of a PDF stacked at `width` px, each at its own aspect ratio, without text or annotation layers. `onFirstPageAspect` gets page 1's height / width. */
-export function PdfPages({ url, width, onFirstPageAspect }: { url: string; width: number; onFirstPageAspect?: (ratio: number) => void }) {
-  const [pageCount, setPageCount] = useState(0)
-  return (
-    <Document file={url} loading={null} error={null} onLoadSuccess={({ numPages }) => setPageCount(numPages)}>
-      <div className="flex flex-col gap-2">
-        {Array.from({ length: pageCount }, (_, index) => (
-          <Page
-            key={index}
-            pageNumber={index + 1}
-            width={width}
-            renderTextLayer={false}
-            renderAnnotationLayer={false}
-            loading={null}
-            onLoadSuccess={index === 0 && onFirstPageAspect ? (page) => onFirstPageAspect(page.originalHeight / page.originalWidth) : undefined}
-            className="overflow-hidden rounded"
-          />
-        ))}
-      </div>
-    </Document>
   )
 }

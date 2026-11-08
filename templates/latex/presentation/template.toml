@@ -1,0 +1,23 @@
+label = "Presentation"
+files = ["beamerthemepresentation.sty"]
+image_macro = "roundimage"
+
+[[groups]]
+key = "text"
+label = "Text"
+
+[[groups]]
+key = "numbers"
+label = "Numbers"
+
+[[groups]]
+key = "tables"
+label = "Tables"
+
+[[groups]]
+key = "figures"
+label = "Figures"
+
+[[groups]]
+key = "process"
+label = "Process"

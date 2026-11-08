@@ -14,7 +14,7 @@ import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
 import type { useProjectActions } from "./useProjectActions"
 import type { useFileRename } from "./useFileRename"
-import { isStoredProjectFile, NEW_FILE_KINDS, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
+import { isStoredProjectFile, type useWorkspaceDocuments } from "./useWorkspaceDocuments"
 
 type CodeMounts = ReturnType<typeof useCodeMounts>
 type Renames = Pick<ReturnType<typeof useInlineRename>, "renameOf"> & Pick<ReturnType<typeof useFileRename>, "renameFile">
@@ -33,7 +33,7 @@ type FolderRowContext =
 
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
-  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "canCreateLatex" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
+  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "newFileChoice" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
   & Pick<ReturnType<typeof useProjectActions>, "renameProjectTo" | "removeProject" | "changeArchive">
   & FolderRowContext
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
@@ -169,8 +169,8 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       actions: [{ label: `Upload files to ${owner}`, icon: Upload, onClick: () => void context.uploadFiles(scope) }],
       create: {
         label: `New file in ${owner}`, placeholder: "File name",
-        choice: context.canCreateLatex ? { label: "File type", options: [...NEW_FILE_KINDS], initial: "Markdown", floating: true } : undefined,
-        onSubmit: (name: string, kind?: string) => context.createFile(scope, name, kind === "LaTeX" ? "LaTeX" : "Markdown"),
+        choice: context.newFileChoice,
+        onSubmit: (name: string, kind?: string, template?: string) => context.createFile(scope, name, kind ?? "Markdown", template),
       },
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
       onMoveHere: (path: string) => move(path, scope),

@@ -546,12 +546,13 @@ def _two_files(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @contextlib.asynccontextmanager
-async def _editing(first: Path, home: Path, save, on_switched=None, read_clipboard=None):
+async def _editing(first: Path, home: Path, save, on_switched=None, read_clipboard=None, on_forward_search=None):
     """A connected session on *first* (path = its absolute path), closed afterwards."""
     session = NeovimSession.spawn(first.name, first.read_text(), rows=24, cols=80, cwd=home, disk_path=first, path=str(first))
     drain = asyncio.create_task(_drain(session))
     try:
-        await asyncio.wait_for(session.connect(save, lambda text: None, None, on_switched, read_clipboard), 15)
+        connecting = session.connect(save, lambda text: None, None, on_switched, read_clipboard, on_forward_search=on_forward_search)
+        await asyncio.wait_for(connecting, 15)
         yield session
     finally:
         await session.close()
@@ -642,6 +643,39 @@ async def test_rename_renames_the_buffer_of_the_old_path_only(neovim_home, tmp_p
 
 
 @requires_nvim
+async def test_leader_v_reports_the_cursor_line_of_tex_documents_only(neovim_home, tmp_path):
+    searches: asyncio.Queue[tuple[str, int]] = asyncio.Queue()
+    tex = tmp_path / "main.tex"
+    tex.write_text("a\nb\nc\n")
+    notes = _notes(tmp_path)
+    async with _editing(tex, neovim_home, _store, on_forward_search=lambda path, line: searches.put_nowait((path, line))) as session:
+        await session._rpc.request("nvim_win_set_cursor", 0, [3, 0])
+        session.write_input(b"\\v")
+        assert await asyncio.wait_for(searches.get(), 10) == (str(tex), 3)
+
+        await session.open_file(str(notes), notes)
+        session.write_input(b"\\v")
+        await _evaluates_to(session, "mode()", "v")  # unmapped, `v` starts a selection
+        session.write_input(b"\x1b")
+        await _evaluates_to(session, "mode()", "n")
+
+        # A rename to a `.tex` file maps it
+        renamed = notes.rename(notes.with_name("ideas.tex"))
+        await session.rename(str(notes), str(renamed), renamed)
+        session.write_input(b"\\v")
+        assert await asyncio.wait_for(searches.get(), 10) == (str(renamed), 1)
+
+        # A rename to another kind of file unmaps it
+        markdown = renamed.rename(renamed.with_name("ideas.md"))
+        await session.rename(str(renamed), str(markdown), markdown)
+        session.write_input(b"\\v")
+        await _evaluates_to(session, "mode()", "v")
+        session.write_input(b"\x1b")
+        await _evaluates_to(session, "mode()", "n")
+    assert searches.empty()
+
+
+@requires_nvim
 async def test_insert_lines_land_below_the_cursor_with_the_cursor_on_the_first_inserted_line(neovim_home, tmp_path):
     file = tmp_path / "main.tex"
     file.write_text("a\nb\nc\n")
@@ -655,6 +689,127 @@ async def test_insert_lines_land_below_the_cursor_with_the_cursor_on_the_first_i
         await session.insert_lines("z")
         assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.')]") == [["a", "b", "x", "z", "y", "c"], 4]
 
+
+SLIDES = [
+    r"\documentclass{beamer}",
+    r"\begin{document}",
+    r"\begin{frame}{One}",
+    "a",
+    r"\end{frame}",
+    "",
+    r"\begin{frame}{Two}",
+    "b",
+    r"\end{frame}",
+    r"\end{document}",
+]
+NEW_FRAME = [r"\begin{frame}{New}", "x", r"\end{frame}"]
+ROUNDIMAGE = r"\roundimage{example-image-16x9}"
+
+
+@requires_nvim
+async def test_insert_frame_lands_after_the_enclosing_frame_with_the_cursor_on_its_begin_line(neovim_home, tmp_path):
+    file = tmp_path / "main.tex"
+    file.write_text("\n".join(SLIDES) + "\n")
+    async with _editing(file, neovim_home, _store) as session:
+        # Over RPC: typed keys arrive later, and waiting for line 1 holds at once (the cursor starts there) so a typed `1G` could
+        # move the cursor after the insert
+        await session._rpc.request("nvim_win_set_cursor", 0, [4, 0])
+
+        await session.insert_frame("\n".join(NEW_FRAME) + "\n")
+        inserted = [*SLIDES[:5], "", *NEW_FRAME, *SLIDES[5:]]
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.')]") == [inserted, 7]
+
+
+@requires_nvim
+@pytest.mark.parametrize(
+    ("cursor", "expected", "landed"),
+    [
+        (1, [r"\roundimage{imgs/100%.png}", "text"], 1),
+        (2, [ROUNDIMAGE, "text", r"\roundimage{imgs/100%.png}"], 3),
+    ],
+)
+async def test_insert_image_fills_the_first_placeholder_on_the_cursor_line_else_inserts_the_reference_below(
+    neovim_home, tmp_path, cursor, expected, landed
+):
+    file = tmp_path / "main.tex"
+    file.write_text(f"{ROUNDIMAGE}\ntext\n")
+    async with _editing(file, neovim_home, _store) as session:
+        await session._rpc.request("nvim_win_set_cursor", 0, [cursor, 0])
+
+        await session.insert_image("imgs/100%.png", "\\roundimage{imgs/100%.png}\n")
+        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.')]") == [expected, landed]
+
+
+@requires_nvim
+@pytest.mark.parametrize(
+    ("edits", "expected", "outcome"),
+    [
+        # Worked out again on the changed lines
+        (1, ["% typed", *SLIDES[:5], "", *NEW_FRAME, *SLIDES[5:]], contextlib.nullcontext()),
+        # Changed again: fails without inserting
+        (2, ["% typed", "% typed", *SLIDES], pytest.raises(RuntimeError, match="kept changing")),
+    ],
+)
+async def test_insert_frame_is_worked_out_once_more_when_the_buffer_changed_before_it_applied(
+    neovim_home, tmp_path, monkeypatch, edits, expected, outcome
+):
+    file = tmp_path / "main.tex"
+    file.write_text("\n".join(SLIDES) + "\n")
+    async with _editing(file, neovim_home, _store) as session:
+        await session._rpc.request("nvim_win_set_cursor", 0, [4, 0])
+        lua, typed = session._lua, 0
+
+        async def typing_after_each_read(code: str, *args: object) -> object:
+            nonlocal typed
+            result = await lua(code, *args)
+            if "gigachad_cursor_state" in code and typed < edits:
+                typed += 1
+                await session._rpc.request("nvim_buf_set_lines", 0, 0, 0, False, ["% typed"])
+            return result
+
+        monkeypatch.setattr(session, "_lua", typing_after_each_read)
+        with outcome:
+            await session.insert_frame("\n".join(NEW_FRAME))
+        assert await session._rpc.request("nvim_eval", "getline(1, '$')") == expected
+
+
+@requires_nvim
+async def test_insert_frame_is_refused_when_another_buffer_with_the_same_tick_is_shown_before_it_applied(
+    neovim_home, tmp_path, monkeypatch
+):
+    file = tmp_path / "main.tex"
+    file.write_text("\n".join(SLIDES) + "\n")
+    async with _editing(file, neovim_home, _store) as session:
+        await session._rpc.request("nvim_win_set_cursor", 0, [4, 0])
+        lua, first_apply = session._lua, None
+
+        async def switching_after_the_first_read(code: str, *args: object) -> object:
+            nonlocal first_apply
+            result = await lua(code, *args)
+            if "gigachad_cursor_state" in code and first_apply is None:
+                # A second loaded buffer brought to the read buffer's tick, then shown in the work window
+                await session._rpc.request(
+                    "nvim_exec_lua",
+                    "local read, other = ..., vim.api.nvim_create_buf(true, false)"
+                    " while vim.api.nvim_buf_get_changedtick(other) < vim.api.nvim_buf_get_changedtick(read) do"
+                    "   vim.api.nvim_buf_set_lines(other, 0, -1, false, { 'other' })"
+                    " end"
+                    " assert(vim.api.nvim_buf_get_changedtick(other) == vim.api.nvim_buf_get_changedtick(read))"
+                    " vim.api.nvim_win_set_buf(0, other)",
+                    [result["buffer"]],
+                )
+            elif "gigachad_insert_at" in code and first_apply is None:
+                lines = await session._rpc.request(
+                    "nvim_exec_lua",
+                    "return { vim.api.nvim_buf_get_lines(..., 0, -1, false), vim.api.nvim_buf_get_lines(0, 0, -1, false) }",
+                    [args[3]],
+                )
+                first_apply = [result, *lines]
+            return result
+
+        monkeypatch.setattr(session, "_lua", switching_after_the_first_read)
+        await session.insert_frame("\n".join(NEW_FRAME))
+        assert first_apply == [False, SLIDES, ["other"]]
 
 @requires_nvim
 async def test_switched_reports_buffer_changes_made_in_neovim_but_not_by_open_file(neovim_home, tmp_path):
@@ -696,6 +851,54 @@ async def test_open_file_loads_a_deleted_buffer_again_from_disk(neovim_home, tmp
         await session.open_file(str(second), second)
 
         assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix, edited", 0]
+
+
+@requires_nvim
+async def test_open_file_with_a_line_moves_the_cursor_there_centred_also_on_the_shown_file(neovim_home, tmp_path):
+    file = tmp_path / "main.tex"
+    file.write_text("".join(f"row {number}\n" for number in range(1, 101)))
+    async with _editing(file, neovim_home, _store) as session:
+        await session._rpc.request("nvim_win_set_cursor", 0, [5, 3])
+        await session.open_file(str(file), file, line=60)
+
+        # `zz` puts the cursor line in the middle of the 24-row terminal's window
+        cursor, top, bottom = await session._rpc.request("nvim_eval", "[getpos('.')[1:2], line('w0'), line('w$')]")
+        assert cursor == [60, 1]
+        assert top < 60 < bottom and abs((60 - top) - (bottom - 60)) <= 1
+
+
+@requires_nvim
+async def test_open_file_with_a_line_lands_there_in_a_freshly_opened_file_and_clamps_past_the_end(neovim_home, tmp_path):
+    first, second = _two_files(tmp_path)
+    second.write_text("one\ntwo\nthree\n")
+    async with _editing(first, neovim_home, _store) as session:
+        await session.open_file(str(second), second, line=2)
+        assert await session._rpc.request("nvim_eval", "[getline('.'), col('.')]") == ["two", 1]
+
+        await session.open_file(str(first), first, line=1)
+        await session.open_file(str(second), second, line=99)
+        assert await session._rpc.request("nvim_eval", "[getline('.'), line('.')]") == ["three", 3]
+
+        await session.open_file(str(first), first)
+        await session.open_file(str(second), second)
+        assert await session._rpc.request("nvim_eval", "line('.')") == 3
+
+
+@requires_nvim
+async def test_open_file_with_a_column_puts_the_cursor_on_that_byte_clamped_to_the_line(neovim_home, tmp_path):
+    file = tmp_path / "main.tex"
+    file.write_text("intro\n\\point{Café note}{See the état.}\n")
+    async with _editing(file, neovim_home, _store) as session:
+        # "état" starts at character 26, byte 27 after the two-byte "é" of "Café"
+        await session.open_file(str(file), file, line=2, column=27)
+        assert await session._rpc.request("nvim_win_get_cursor", 0) == [2, 27]
+        assert await session._rpc.request("nvim_eval", "strcharpart(getline('.'), charcol('.') - 1, 2)") == "ét"
+
+        await session.open_file(str(file), file, line=1, column=99)
+        assert await session._rpc.request("nvim_win_get_cursor", 0) == [1, 4]
+        await session.open_file(str(file), file, line=2)
+        assert await session._rpc.request("nvim_win_get_cursor", 0) == [2, 0]
+
 
 
 def _clipboard_config(home: Path, *lua: str) -> None:
@@ -882,7 +1085,7 @@ async def test_clipboard_read_returns_the_text_the_browser_answers(reply, text):
     saves = neovim_route._BrowserSaves(socket)
     read, read_id = await _asking(saves, socket)
 
-    saves.resolve({"type": "clipboard", "id": read_id, **reply})
+    saves.resolve(read_id, reply)
 
     assert await asyncio.wait_for(read, 5) == text
 
@@ -892,7 +1095,7 @@ async def test_clipboard_read_raises_the_error_the_browser_answers():
     saves = neovim_route._BrowserSaves(socket)
     read, read_id = await _asking(saves, socket)
 
-    saves.resolve({"type": "clipboard", "id": read_id, "error": "Clipboard access denied"})
+    saves.resolve(read_id, {"error": "Clipboard access denied"})
 
     with pytest.raises(ClipboardError, match="Clipboard access denied"):
         await asyncio.wait_for(read, 5)
@@ -1005,6 +1208,68 @@ async def test_message_frame_shows_its_text_in_neovim(neovim_home, tmp_path, mon
         browser.send({"type": "message", "text": "Image is too large"})
 
         await browser.shows("Image is too large")
+
+
+@requires_nvim
+async def test_frames_that_fit_no_message_are_ignored(neovim_home, tmp_path, monkeypatch):
+    file = _notes(tmp_path)
+    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "insert_lines", "text": 5})
+        browser.send({"type": "insert_image", "path": "imgs/cat.png"})
+        browser.send({"type": "teleport"})
+        browser.send({"type": "insert_lines", "text": "kept"})
+        await browser.shows("kept")
+        browser.type(b":w\r")
+
+        save = await browser.next_frame("save")
+        assert save["content"] == "abc\nkept\n"
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+
+@requires_nvim
+async def test_insert_frame_frame_puts_the_slide_into_the_shown_file(neovim_home, tmp_path, monkeypatch):
+    file = _notes(tmp_path)
+    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "insert_frame", "text": "\n".join(NEW_FRAME)})
+        await browser.shows("{New}")
+        browser.type(b":w\r")
+
+        save = await browser.next_frame("save")
+        assert save["content"] == "abc\n\n" + "\n".join(NEW_FRAME) + "\n"
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+
+@requires_nvim
+async def test_insert_image_frame_fills_the_placeholder_of_the_shown_file(neovim_home, tmp_path, monkeypatch):
+    file = _notes(tmp_path, "\\roundimage{example-image}\n")
+    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "insert_image", "path": "imgs/cat.png", "reference": "\\roundimage{imgs/cat.png}"})
+        await browser.shows("imgs/cat.png")
+        browser.type(b":w\r")
+
+        save = await browser.next_frame("save")
+        assert save["content"] == "\\roundimage{imgs/cat.png}\n"
+        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
+
+
+@requires_nvim
+async def test_open_file_frame_with_a_line_scrolls_the_shown_file_to_it(neovim_home, tmp_path, monkeypatch):
+    file = tmp_path / "main.tex"
+    file.write_text("x\n" * 79 + "SYNCTARGET\n" + "x\n" * 20)
+    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "open_file", "path": str(file), "line": 80})
+
+        await browser.shows("SYNCTARGET")
+
+
+@requires_nvim
+async def test_leader_v_in_a_tex_file_sends_a_forward_search_frame_with_the_cursor_line(neovim_home, tmp_path, monkeypatch):
+    file = tmp_path / "main.tex"
+    file.write_text("a\nb\nc\n")
+    async with _browsing(monkeypatch, file) as browser:
+        browser.type(b"2G\\v")
+
+        assert await browser.next_frame("forward_search") == {"type": "forward_search", "path": str(file), "line": 2}
 
 
 SHIFT_ENTER, CTRL_ENTER = b"\x1b[13;2u", b"\x1b[13;5u"  # what the browser sends, Neovim reads them as <S-CR> and <C-CR>

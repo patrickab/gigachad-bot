@@ -764,6 +764,9 @@ code {
 :root:not(.light) .pdf-light-paper .pdf-page-ink,
 :root:not(.light) .pdf-light-paper .pdf-image-mask { display: none; }
 
+/* Presentation slides (SlideView) always show the PDF's true colours, whatever the theme */
+:root:not(.light) .pdf-true-colors :is(.react-pdf__Page__canvas, .pdf-page-backup) { filter: none; }
+
 /* Annotation ink over the pages (AnnotatedPdfViewer). z-index 1 keeps a stroke spilling into the
    margin or the next page above that page's surface.
    - Default black ink shows as the theme text color (--ink), like canvas ink */

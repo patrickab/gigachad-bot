@@ -8,9 +8,10 @@ import { useModeLabel } from "@/hooks/useModeLabel"
 import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { PREVIEW_PAGE } from "./pages"
+import { useWorkbenchNotice } from "./useWorkbenchNotice"
 import { Workbench, type WorkbenchPane, type WorkbenchProps } from "./Workbench"
 
-interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderPane" | "status" | "project" | "onSaved" | "quoteLanguage"> {
+interface MarkdownWorkbenchProps extends Omit<WorkbenchProps, "renderPane" | "status" | "project" | "notices" | "onSaved" | "quoteLanguage"> {
   /** The project the file belongs to, which may give it a display name. */
   projectSlug: string | null
   /** A clicked `#file:<path>` link in the preview. */
@@ -49,10 +50,12 @@ function MarkdownPage({ path, layout, text, loadError, onNavigate }: WorkbenchPa
 export function MarkdownWorkbench({ projectSlug, onNavigate, onModeLabel, ...props }: MarkdownWorkbenchProps) {
   const shownName = useDisplayName()(projectSlug, props.path) ?? baseName(props.path)
   useModeLabel(shownName, true, onModeLabel)
+  const notices = useWorkbenchNotice()
   return (
     <Workbench
       {...props}
       renderPane={(pane) => <MarkdownPage path={props.path} onNavigate={onNavigate} {...pane} />}
+      notices={notices}
       quoteLanguage="markdown"
     />
   )

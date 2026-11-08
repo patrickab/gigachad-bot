@@ -44,7 +44,7 @@ export function useDiffNeovim(root: string, onReturn: () => void) {
     void loadFileViewerText(path).then((text) => {
       if (text === diskText.current) return
       diskText.current = text
-      session.setContent(text, path)
+      session.send({ type: "set_content", content: text, path })
     }).catch(() => {})
   })
 

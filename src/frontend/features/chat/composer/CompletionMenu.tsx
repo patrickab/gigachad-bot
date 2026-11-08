@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useLatestRequest } from "@/hooks/useLatestRequest"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 
 /** One row of the menu above the composer. */
@@ -41,7 +42,7 @@ export function useCompletions(
 ) {
   const [items, setItems] = useState<ComposerCompletion[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
-  const latestRequestRef = useRef(0)
+  const { run: runCompletion, cancel: dropCompletion } = useLatestRequest()
   const timerRef = useRef<number | undefined>(undefined)
   /** Draft of the latest request, null once closed. */
   const openQueryRef = useRef<{ text: string; caret: number } | null>(null)
@@ -49,25 +50,25 @@ export function useCompletions(
   useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   const close = useCallback(() => {
-    latestRequestRef.current += 1
+    dropCompletion()
     openQueryRef.current = null
     window.clearTimeout(timerRef.current)
     setItems([])
-  }, [])
+  }, [dropCompletion])
 
   const request = useCallback((text: string, caret: number) => {
     if (!complete) return
     openQueryRef.current = { text, caret }
-    const requestId = ++latestRequestRef.current
+    // An answer still on its way is dropped from now on, not only once the next request goes out
+    dropCompletion()
     window.clearTimeout(timerRef.current)
     timerRef.current = window.setTimeout(() => {
-      complete(text, caret).then((next) => {
-        if (requestId !== latestRequestRef.current) return
+      void runCompletion(complete(text, caret), (next) => {
         setItems(next)
         setActiveIndex(0)
       }, () => {})
     }, REQUEST_DELAY_MS)
-  }, [complete])
+  }, [complete, dropCompletion, runCompletion])
 
   useEffect(() => {
     const query = openQueryRef.current

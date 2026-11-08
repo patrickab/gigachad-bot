@@ -2,7 +2,7 @@
 name: coder
 description: Implements the task in the worktree, tests it and prepares the preview scenario
 thinking: medium
-writes: ["src/**", "tests/**", "scripts/**", "prompts/**", ".docs/**", "README.md", "PRODUCT.md", "pyproject.toml", "uv.lock", ".factory/out/**"]
+writes: ["src/**", "tests/**", "scripts/**", "templates/**", ".docs/**", "README.md", "PRODUCT.md", "pyproject.toml", "uv.lock", ".factory/out/**"]
 output: .factory/out/code.json
 ---
 You implement a task in the gigachad-bot repository, working in the current directory (a git worktree).

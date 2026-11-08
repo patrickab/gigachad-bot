@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sys
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
@@ -7,6 +8,8 @@ REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).exp
 DOCUMENTS = REMOTE_ROOT / "Documents"
 # File-first workbench documents (Markdown, LaTeX) and the omp session directory of each kind, `lib.workbench`.
 WORKBENCH = REMOTE_ROOT / "workbench"
+# Shipped prompt and template sources (`templates/`), bundled beside the code in a frozen build.
+TEMPLATES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])) / "templates"
 
 # Browser origins allowed to call the API. Defaults to the pre-desktop wildcard; the Tauri
 # shell narrows it to its own webview origins, and server deployments can do the same.

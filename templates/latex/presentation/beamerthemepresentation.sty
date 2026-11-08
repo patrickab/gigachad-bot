@@ -1,0 +1,474 @@
+% presentation: minimalist warm-paper Beamer theme, load with \usetheme[progress]{presentation}. Build with pdfLaTeX.
+% Names: content macros and environments are plain (\hl, keyfigures), tunable lengths start with \gc (\gcgap),
+% everything internal starts with \gc@. Sizes live in beamer fonts (\setbeamerfont{key figure}{...}).
+\ProvidesPackage{beamerthemepresentation}
+% Option progress: a quiet bar in the footer of every content slide, one segment per chapter, filled up to the current slide
+\newif\ifgc@progress
+\DeclareOptionBeamer{progress}{\gc@progresstrue}
+\ProcessOptionsBeamer
+
+% --- Packages ---
+\RequirePackage[T1]{fontenc}
+\RequirePackage{montserrat}% sans body (\sfdefault)
+\RequirePackage[lining]{ebgaramond}% serif headings, subtitles and figures (\rmfamily)
+\RequirePackage[lining]{ebgaramond-maths}% math letters and digits in the heading face
+\RequirePackage{zi4}% mono
+% Computer Modern symbols (\times, \mathcal) scale to any size, key figures use them at 52pt and more
+\DeclareFontShape{OMS}{cmsy}{m}{n}{<->cmsy10}{}
+\DeclareFontShape{OMS}{cmsy}{b}{n}{<->cmbsy10}{}
+\renewcommand{\familydefault}{\sfdefault}
+\RequirePackage{microtype}
+\RequirePackage{array,booktabs,colortbl,tabularx,varwidth}
+\RequirePackage{tikz}
+\RequirePackage{pgfplots}\pgfplotsset{compat=1.18}
+\RequirePackage[skins,raster]{tcolorbox}
+% \note{...}: speaker notes as hidden zero-size PDF text annotations for presenter views, never printed, never a page
+\RequirePackage[overridenote]{pdfpc}
+% pdfpc writes raw bytes under pdfLaTeX, \pdfstringdef turns umlauts and macros into plain Unicode text, \\ breaks the line.
+% \unskip drops the space before a note so it never shifts centered content
+\ifPDFTeX
+  \renewcommand<>{\pdfpcnote}[1]{\only#2{\ifhmode\unskip\fi\pdfstringdefDisableCommands{\def\\{\textLF}}\pdfstringdef\gc@note{#1}%
+    \pdfannot width 0pt height 0pt depth 0pt {/Subtype /Text /Contents (\gc@note) /F 6}}\relax}
+\fi
+
+\mode<presentation>
+
+% --- Accent: the one line a project edits ---
+\definecolor{accent}{HTML}{0065BD}
+
+% --- Ink levels (text), contrast on paper: ink 11:1, inkmuted 6.6:1, inksubtle 4.6:1, inkfaint 2.2:1 ---
+\definecolor{ink}{HTML}{312D27}
+\definecolor{inkmuted}{HTML}{5B5851}
+\definecolor{inksubtle}{HTML}{6E6B65}
+\definecolor{inkfaint}{HTML}{A7A49F}% decoration only, never data or text that must be read
+% --- Paper levels (backgrounds, dark to light) ---
+\definecolor{paper}{HTML}{F5EEE0}
+\definecolor{surface}{HTML}{FAF6EE}
+\definecolor{surfaceelevated}{HTML}{FEFCF7}
+% --- Highlights (from the light syntax scheme) ---
+\definecolor{rose}{HTML}{C61365}
+\definecolor{green}{HTML}{00814F}
+\definecolor{blue}{HTML}{0573AA}
+\definecolor{amber}{HTML}{A56D03}
+\definecolor{violet}{HTML}{8635CC}
+\colorlet{divider}{ink!24!paper}% hairlines and empty bar tracks
+\colorlet{cardshadow}{ink!22!paper}
+\colorlet{accenttint}{accent!8!surfaceelevated}% winner row, the accent's one job
+% Levels: paper (background, darkest) < surface (level 1) < surfaceelevated (level 2, brightest).
+% Two levels on a slide: paper and surfaceelevated. Three only when nesting needs them.
+
+% --- Shared geometry ---
+\newlength{\gcmargin}\setlength{\gcmargin}{0.6cm}% equal padding left, right, top and bottom
+\newlength{\gcgap}\setlength{\gcgap}{0.4cm}% gap between neighbouring cards, figures and columns
+\newlength{\gcarc}\setlength{\gcarc}{7pt}% one corner radius for every box and image
+\newlength{\gcfigheight}\setlength{\gcfigheight}{0.62\textheight}% the tallest a figure gets, any aspect ratio fits
+\newlength{\gc@arcinline}\setlength{\gc@arcinline}{3pt}% inline marks and tags, too small for \gcarc
+\newlength{\gc@hairline}\setlength{\gc@hairline}{0.4pt}
+\newlength{\gc@barheight}\setlength{\gc@barheight}{3pt}% key figure bars
+
+% --- Type scale: title 38, chapter 34, frame title 22, list 15, body and card text 11, eyebrow, footer and location 8 ---
+\setbeamerfont{title}{family=\rmfamily,size=\fontsize{38}{42}\selectfont}
+\setbeamerfont{subtitle}{family=\rmfamily,shape=\itshape,size=\fontsize{19}{23}\selectfont}
+\setbeamerfont{author}{size=\fontsize{11}{14}\selectfont}
+\setbeamerfont{date}{size=\fontsize{11}{14}\selectfont}
+\setbeamerfont{frametitle}{family=\rmfamily,size=\fontsize{22}{26}\selectfont}
+\setbeamerfont{framesubtitle}{family=\rmfamily,shape=\itshape,size=\fontsize{12.5}{15}\selectfont}
+\setbeamerfont{section title}{family=\rmfamily,size=\fontsize{34}{38}\selectfont}
+\setbeamerfont{footline}{size=\fontsize{8}{10}\selectfont}
+\setbeamerfont{caption}{size=\small}
+\setbeamerfont{hero}{family=\rmfamily,size=\fontsize{104}{104}\selectfont}
+\setbeamerfont{key figure}{family=\rmfamily,size=\fontsize{52}{56}\selectfont}
+\setbeamerfont{statement}{family=\rmfamily,size=\fontsize{34}{40}\selectfont}
+\setbeamerfont{lead}{family=\rmfamily,size=\fontsize{18}{22}\selectfont}
+\setbeamerfont{claim}{family=\rmfamily,size=\fontsize{24}{28}\selectfont}
+\setbeamerfont{equation}{size=\fontsize{30}{36}\selectfont}
+\setbeamerfont{card title}{family=\rmfamily,size=\fontsize{16}{19}\selectfont}
+\setbeamerfont{card text}{size=\fontsize{11}{14}\selectfont}
+\setbeamerfont{eyebrow}{series=\bfseries,size=\fontsize{8}{10}\selectfont}
+\setbeamerfont{itemize/enumerate body}{size=\fontsize{15}{20}\selectfont}% a list on its own slide
+\setbeamerfont{itemize/enumerate subbody}{size=\fontsize{13}{17}\selectfont}
+
+% --- Inline helpers ---
+% \hl[color]{text} colors and bolds, \mk[color]{text} marks with a soft tint, \muted and \subtle step down the ink.
+% \leavevmode first: a colour at the top of a table cell or [t] box would otherwise push its baseline down
+\newcommand{\hl}[2][accent]{{\leavevmode\color{#1}\bfseries #2}}
+\newcommand{\mk}[2][accent]{\tcbox[on line,boxrule=0pt,arc=\gc@arcinline,boxsep=1.5pt,left=1pt,right=1pt,top=0pt,bottom=0pt,colback=#1!14!paper]{#2}}
+\newcommand{\muted}[1]{{\leavevmode\color{inkmuted}#1}}
+\newcommand{\subtle}[1]{{\leavevmode\rmfamily\itshape\color{inksubtle}#1}}
+% \eyebrow[color]{label}: small spaced capitals for labels above content
+\newcommand{\eyebrow}[2][inksubtle]{{\usebeamerfont{eyebrow}\color{#1}\textls[60]{\MakeUppercase{#2}}}}
+\newcommand{\twodigit}[1]{\ifnum#1<10 0\fi\number#1}
+
+% --- Beamer wiring ---
+\hyphenpenalty=10000\exhyphenpenalty=10000% no hyphenation
+\AtBeginDocument{\raggedright}\g@addto@macro\@parboxrestore{\raggedright}% ragged right everywhere, minipages and overprint included
+\usefonttheme{professionalfonts}
+\setbeamercolor{normal text}{fg=ink,bg=paper}
+\setbeamercolor{structure}{fg=accent}
+\setbeamercolor{alerted text}{fg=accent}
+\setbeamercolor{frametitle}{fg=ink}
+\setbeamercolor{footline}{fg=inksubtle}
+\setbeamercolor{item}{fg=inkfaint}
+\setbeamercolor{enumerate item}{fg=inksubtle}
+\setbeamercolor{section in toc}{fg=ink}
+\beamer@centeredfalse% top-align frame content under the title, [c] centers a frame
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{background canvas}[default]
+\setbeamersize{text margin left=\gcmargin,text margin right=\gcmargin}
+\setbeamertemplate{caption label separator}{: }
+
+% Frame title: top left corner at the shared margin, optional italic \framesubtitle below
+% Location: chapter and step in the footer of titled content slides, the step is dropped when both do not fit
+\newif\ifgc@titled
+\newsavebox{\gc@locbox}
+\newcommand{\gc@location}{\ifgc@titled\ifnum\c@section>0
+  \sbox\gc@locbox{\lastsection\ifnum\c@subsection>0 \hspace{4pt}\textperiodcentered\hspace{4pt}\lastsubsection\fi}%
+  \ifdim\wd\gc@locbox>\dimexpr\paperwidth-2\gcmargin-\gcprogresswidth-2cm\relax\sbox\gc@locbox{\lastsection}\fi
+  \usebox\gc@locbox\hspace{10pt}\fi\fi\global\gc@titledfalse}
+\setbeamertemplate{frametitle}{%
+  \global\gc@titledtrue
+  \vskip\dimexpr\gcmargin-0.5cm\relax
+  \begin{minipage}[t][1.0cm][t]{\textwidth}\raggedright
+    {\usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}\insertframetitle\par}
+    \ifx\insertframesubtitle\@empty\else
+      \vskip2pt{\usebeamerfont{framesubtitle}\color{inksubtle}\insertframesubtitle\par}\fi
+  \end{minipage}\vskip0.35cm}
+
+% Master footer: progress bar on the left (option progress, from the first \section on), location and page number on the right
+\setbeamertemplate{footline}{%
+  \leavevmode\hspace*{\gcmargin}%
+  \begin{minipage}{\dimexpr\paperwidth-2\gcmargin\relax}
+    \ifgc@progress\ifnum\c@section>0 \ifnum\beamer@sectionmax>0 \gc@progress\fi\fi\fi
+    \hfill{\usebeamerfont{footline}\usebeamercolor[fg]{footline}\gc@location\insertframenumber}%
+    \par\vspace*{\dimexpr\gcmargin-0.12cm\relax}
+  \end{minipage}}
+\setbeamertemplate{headline}{}
+
+% Title page: left aligned, vertically lower third, no chrome
+\setbeamertemplate{title page}{%
+  \vfill
+  {\usebeamerfont{title}\color{ink}\inserttitle\par}
+  \ifx\insertsubtitle\@empty\else\vskip8pt{\usebeamerfont{subtitle}\color{inkmuted}\insertsubtitle\par}\fi
+  \vskip1.2cm
+  {\usebeamerfont{author}\color{inkmuted}\insertauthor\par}
+  \ifx\insertinstitute\@empty\else\vskip3pt{\usebeamerfont{author}\color{inksubtle}\insertinstitute\par}\fi
+  \vskip3pt{\usebeamerfont{date}\color{inksubtle}\insertdate\par}
+  \vskip1.6cm}
+
+% Lists: small faint markers, slide-size items with an em-based gap, lists in cards take the card text size
+\setbeamertemplate{itemize item}{\raisebox{0.15ex}{\scalebox{0.75}{$\bullet$}}}
+\setbeamertemplate{itemize subitem}{\raisebox{0.15ex}{\scalebox{0.75}{$\circ$}}}
+\setbeamertemplate{enumerate item}{\insertenumlabel.}
+\setbeamertemplate{enumerate subitem}{\insertenumlabel.\insertsubenumlabel}
+\def\@listi{\leftmargin1.1em\topsep0.2em\parsep0pt\itemsep0.7em plus0.2em}
+\let\@listI\@listi
+\setbeamertemplate{itemize/enumerate body begin}{\vspace{0.2em}}
+\setbeamertemplate{itemize/enumerate body end}{\vspace{0.2em}}
+
+% --- Cards: a flat chalky surface on the sand paper, a faint shadow keeps the edge on a projector ---
+\tcbset{
+  gc@card/.style={enhanced,boxrule=0pt,arc=\gcarc,colback=surfaceelevated,colframe=surfaceelevated,
+    coltitle=ink,fonttitle=\usebeamerfont{card title},colbacktitle=surfaceelevated,titlerule=0pt,
+    before upper={\raggedright},left=14pt,right=14pt,top=10pt,bottom=14pt,boxsep=0pt,toptitle=13pt,bottomtitle=0pt,
+    fuzzy shadow={0mm}{-0.3mm}{0mm}{0.15mm}{cardshadow},before skip=8pt,after skip=10pt},
+  gc@cardtext/.style={before upper={\raggedright\usebeamerfont{card text}\color{inkmuted}%
+    \setbeamerfont*{itemize/enumerate body}{}\setbeamerfont*{itemize/enumerate subbody}{}},bottomtitle=4pt},
+  gc@current/.style={borderline={0.9pt}{0pt}{accent}},% the one card in focus
+  gc@blocktitle/.code={\ifx\insertblocktitle\@empty\else\tcbset{title=\insertblocktitle}\fi}}
+\newtcolorbox{card}[1][]{gc@card,#1}
+\newtcolorbox{cardtitled}[2][]{gc@card,gc@cardtext,title={#2},#1}
+% cardrow{n}: n equal-height cardtitled boxes side by side
+\newenvironment{cardrow}[1]{\begin{tcbraster}[raster columns=#1,raster equal height=rows,raster column skip=\gcgap,raster before skip=0pt,raster after skip=0pt]}{\end{tcbraster}}
+% Beamer blocks are cards, so overlays (\begin{block}<2->{Title}) work, alertblock carries the accent border
+\setbeamertemplate{block begin}{\begin{tcolorbox}[gc@card,gc@cardtext,gc@blocktitle]}
+\setbeamertemplate{block end}{\end{tcolorbox}}
+\setbeamertemplate{block example begin}{\begin{tcolorbox}[gc@card,gc@cardtext,gc@blocktitle]}
+\setbeamertemplate{block example end}{\end{tcolorbox}}
+\setbeamertemplate{block alerted begin}{\begin{tcolorbox}[gc@card,gc@cardtext,gc@blocktitle,gc@current]}
+\setbeamertemplate{block alerted end}{\end{tcolorbox}}
+
+% --- Slide primitives (see example.tex) ---
+% Interface: a primitive is an environment, each entry one item macro inside it (\keyfigure, \step, \fig, \phase).
+% Short numeric lists may be comma lists, text never is. A frame with one visual uses [c], so it sits centred under the title
+
+% \claim{headline}{text}: a short serif headline with muted text below, the words beside a figure
+\newcommand{\claim}[2]{{\usebeamerfont{claim}#1\par}\vspace{8pt}{\color{inkmuted}#2\par}}
+% \hd{header}: small muted table header cell, \best{value}: the one value in focus, \bestrow: tints the winner row
+\newcommand{\hd}[1]{{\small\color{inkmuted}#1}}
+\newcommand{\best}[1]{\hl{#1}}
+\newcommand{\bestrow}{\rowcolor{accenttint}}
+% \harvey{0..4}: a ball filled in quarters, for ratings in a table, a bit taller than the capitals around it
+\newcommand{\harvey}[1]{\tikz[baseline=-0.35em]{\fill[surfaceelevated](0,0)circle(0.5em);
+  \ifnum#1>0 \fill[inkmuted](0,0)--(0,0.5em)arc[start angle=90,delta angle=-90*#1,radius=0.5em]--cycle;\fi
+  \draw[inkmuted,line width=0.6pt](0,0)circle(0.5em);}}
+
+% \roundimage[includegraphics options]{file}: image clipped to the card radius, at most \linewidth wide and \gcfigheight tall
+\newsavebox{\gc@imagebox}
+\newcommand{\roundimage}[2][]{\sbox\gc@imagebox{\includegraphics[width=\linewidth,height=\gcfigheight,keepaspectratio,#1]{#2}}%
+  \begin{tikzpicture}\clip[rounded corners=\gcarc](0,0)rectangle(\wd\gc@imagebox,\ht\gc@imagebox);
+  \node[anchor=south west,inner sep=0pt]{\usebox\gc@imagebox};\end{tikzpicture}}
+
+% \fullbleed[source]{file}{caption}: the image covers the page, cropped to fill. The caption sits on a paper band
+% in the lower left, so it keeps full ink contrast on any image. Use it in a [plain] frame
+\newlength{\gccaptionwidth}\setlength{\gccaptionwidth}{0.46\paperwidth}% widest the fullbleed caption gets
+\newcommand{\fullbleed}[3][]{\sbox\gc@imagebox{\includegraphics[width=\paperwidth]{#2}}%
+  \ifdim\ht\gc@imagebox<\paperheight\sbox\gc@imagebox{\includegraphics[height=\paperheight]{#2}}\fi
+  \begin{tikzpicture}[remember picture,overlay]
+    \clip(current page.south west)rectangle(current page.north east);
+    \node[inner sep=0pt] at (current page.center){\usebox\gc@imagebox};
+    \node[anchor=south west,fill=paper,rounded corners=\gcarc,inner xsep=14pt,inner ysep=12pt,text=ink]
+      at ([shift={(\gcmargin,\gcmargin)}]current page.south west)
+      {\begin{varwidth}{\gccaptionwidth}\raggedright{\usebeamerfont{lead}#3\par}%
+        \if\relax\detokenize{#1}\relax\else\vspace{5pt}\subtle{#1}\par\fi\end{varwidth}};
+  \end{tikzpicture}}
+
+% Charts: pgfplots styles in the house look. gc chart: no box, a light horizontal grid, muted series and
+% direct labels at the line ends instead of a legend (\addplot ... node[gc label]{name};). gc focus: the one accent series
+\pgfplotsset{
+  gc chart/.style={scale only axis,width=\linewidth-4cm,height=0.52\textheight,
+    axis x line*=bottom,axis y line*=left,y axis line style={draw=none},
+    axis line style={inksubtle,line width=0.6pt},major tick length=0pt,
+    ymajorgrids,grid style={divider,line width=\gc@hairline},
+    tick label style={font=\small,text=inksubtle},label style={font=\small,text=inkmuted},
+    cycle list={{inksubtle},{inksubtle,densely dashed},{inksubtle,densely dotted}},
+    every axis plot/.append style={line width=1.1pt,mark=none},
+    enlarge x limits=false,clip=false},
+  gc focus/.style={accent,line width=2.2pt}}
+\tikzset{gc label/.style={pos=1,anchor=west,xshift=6pt,font=\small}}
+
+% \hero{value}{label}: one number carries the slide, the label says what it measures, in a [c] frame
+\newcommand{\hero}[2]{{\usebeamerfont{hero}#1\par}\vspace{6pt}{\usebeamerfont{lead}\color{inkmuted}#2\par}}
+
+% keyfigures{n}: a row of n equal \keyfigure[fraction]{value}{label}.
+% fraction (0.49 or 49/100) draws a bar under the value against the full track as reference
+\newcommand{\gc@kfwidth}{\linewidth}
+\newenvironment{keyfigures}[1]{\par\renewcommand{\gc@kfwidth}{\dimexpr(\linewidth-\gcgap*(#1-1))/#1\relax}\noindent\ignorespaces}{\par}
+\newcommand{\keyfigure}[3][]{\begin{minipage}[t]{\gc@kfwidth}\raggedright
+  {\usebeamerfont{key figure}#2\par}%
+  \if\relax\detokenize{#1}\relax\else\vspace{6pt}\gc@bar{#1}\par\fi
+  \vspace{6pt}\muted{#3}\end{minipage}\hfill\ignorespaces}
+\newcommand{\gc@bar}[1]{\begin{tikzpicture}
+  \fill[divider,rounded corners=1.2pt](0,0)rectangle(\linewidth,\gc@barheight);
+  \fill[inkmuted,rounded corners=1.2pt](0,0)rectangle({min(#1,1)*\linewidth},\gc@barheight);\end{tikzpicture}}
+
+% keyequation{math}: one centred equation, \term{symbol}{meaning} names its parts below, \eqhl{} marks the term in focus
+\newenvironment{keyequation}[1]{\par\centering{\usebeamerfont{equation}$\displaystyle #1$\par}\vspace{2\gcgap}%
+  {\color{divider}\rule{0.4\linewidth}{\gc@hairline}}\par\vspace{\gcgap}}{\par}
+\newcommand{\term}[2]{\hspace{\gcgap}\mbox{{\large$#1$}\hspace{6pt}\muted{#2}}\hspace{\gcgap}}
+\newcommand{\eqhl}[1]{{\color{accent}#1}}
+
+% \statement[source]{sentence}: one large sentence for a thesis, a quote or the closing line, in a [plain,c] frame
+\newcommand{\statement}[2][]{{\usebeamerfont{statement}#2\par}\if\relax\detokenize{#1}\relax\else\vspace{2\gcgap}\subtle{#1}\fi}
+
+% datatable{colspec}: a booktabs table across the line, an X column takes the free width.
+% \hd cells head the columns, \midrule under them, no other rules. \best and \bestrow mark the winner
+\newenvironment{datatable}[1]{\par\noindent\renewcommand{\arraystretch}{1.6}\setlength{\tabcolsep}{8pt}%
+  \tabularx{\linewidth}{#1}}{\endtabularx\par}
+\setlength{\lightrulewidth}{\gc@hairline}
+\arrayrulecolor{divider}
+
+% figrow: \fig{file}{caption} images side by side at equal widths, same view and scale
+\newcounter{gc@fig}\newcounter{gc@figk}
+\newlength{\gc@figw}
+\newenvironment{figrow}{\setcounter{gc@fig}{0}\def\gc@figs{}}{\gc@drawfigrow}
+\newcommand{\fig}[2]{\stepcounter{gc@fig}\appto\gc@figs{\gc@figcell{#1}{#2}}}
+% the row is one box at the line width, so rounding in the column widths never wraps the last column
+\newcommand{\gc@drawfigrow}{\par\noindent\setcounter{gc@figk}{0}%
+  \setlength{\gc@figw}{\dimexpr(\linewidth-\gcgap*(\value{gc@fig}-1))/\value{gc@fig}\relax}\makebox[\linewidth][l]{\gc@figs}\par}
+\newcommand{\gc@figcell}[2]{\stepcounter{gc@figk}\ifnum\value{gc@figk}>1 \hspace{\gcgap}\fi
+  \begin{minipage}[t]{\gc@figw}\roundimage{#1}\par\vspace{6pt}\centering\small\muted{#2}\end{minipage}}
+
+% annotated{figure}: \annot<overlay>{x}{y}{note} numbers the figure at fractions x, y and lists the notes beside it
+\newcounter{gc@annot}
+\newlength{\gc@markw}\setlength{\gc@markw}{0.7cm}% marker column of the note list
+\tikzset{gc@marker/.style={circle,fill=ink,text=surfaceelevated,draw=surfaceelevated,line width=0.8pt,minimum size=0.5cm,inner sep=0pt,font=\small\bfseries}}
+\newenvironment{annotated}[1]{\def\gc@annotfigure{#1}\def\gc@annots{}}{\gc@drawannotated}
+\newcommand<>{\annot}[3]{\appto\gc@annots{\gc@annot{#1}{#2}{#3}{#4}}}
+\newcommand{\gc@drawannotated}{\begin{columns}[T,onlytextwidth]\column{0.6\textwidth}
+    \begin{tikzpicture}\node[anchor=south west,inner sep=0pt](fig) at (0,0){\gc@annotfigure};
+      \begin{scope}[x={(fig.south east)},y={(fig.north west)}]
+        \setcounter{gc@annot}{0}%
+        \def\gc@annot##1##2##3##4{\stepcounter{gc@annot}\only##4{\node[gc@marker] at (##1,##2){\arabic{gc@annot}};}}\gc@annots
+      \end{scope}\end{tikzpicture}
+    \column{0.36\textwidth}\setcounter{gc@annot}{0}%
+    \def\gc@annot##1##2##3##4{\stepcounter{gc@annot}\uncover##4{\noindent\makebox[\gc@markw][l]{\tikz[baseline=-0.6ex]\node[gc@marker]{\arabic{gc@annot}};}%
+      \parbox[t]{\dimexpr\linewidth-\gc@markw\relax}{\raggedright\muted{##3}\par}\par\vspace{12pt}}}\gc@annots
+  \end{columns}}
+
+% steps[current]: \step{title}{text} columns on one rail, read left to right, numbered.
+% current: auto (one click per step, counted from the step's \pause, so text and \pause may come before),
+% a step number for one static slide, or 0 for a plain pipeline with no step in focus
+\newcounter{gc@step}\newcounter{gc@stepk}
+\newlength{\gc@stepw}
+\def\gc@auto{auto}
+\newenvironment{steps}[1][auto]{\setcounter{gc@step}{0}\def\gc@stepcurrent{#1}\edef\gc@stepbase{\the\c@beamerpauses}\def\gc@steps{}}{\gc@drawsteps}
+\newcommand{\step}[2]{\stepcounter{gc@step}\appto\gc@steps{\gc@stepcol{#1}{#2}}}
+% \gc@altat{overlay spec}{on}{off}: \alt with a computed spec
+\newcommand{\gc@altat}[3]{\edef\gc@spec{#1}\expandafter\gc@altat@\expandafter{\gc@spec}{#2}{#3}}
+\newcommand{\gc@altat@}[3]{\alt<#1>{#2}{#3}}
+% state of a step: number colour, rail colour and weight, title colour, text colour
+\newcommand{\gc@stepcolors}[5]{\def\gc@numc{#1}\def\gc@railc{#2}\def\gc@railw{#3}\def\gc@titlec{#4}\def\gc@textc{#5}}
+\newcommand{\gc@stepcurrentc}{\gc@stepcolors{accent}{accent}{1.6pt}{ink}{inkmuted}}
+\newcommand{\gc@stepdonec}{\gc@stepcolors{inksubtle}{inkmuted}{0.8pt}{ink}{inkmuted}}
+\newcommand{\gc@stepnextc}{\gc@stepcolors{inkfaint}{divider}{0.8pt}{inkmuted}{inksubtle}}
+\newcommand{\gc@stepstate}[1]{\ifx\gc@stepcurrent\gc@auto
+    \gc@altat{\the\numexpr\gc@stepbase+#1-1\relax}{\gc@stepcurrentc}{\gc@altat{\the\numexpr\gc@stepbase+#1\relax-}{\gc@stepdonec}{\gc@stepnextc}}%
+  \else\ifnum\gc@stepcurrent=0 \gc@stepdonec
+  \else\ifnum#1=\gc@stepcurrent\relax\gc@stepcurrentc
+  \else\ifnum#1<\gc@stepcurrent\relax\gc@stepdonec\else\gc@stepnextc\fi\fi\fi\fi}
+\newcommand{\gc@drawsteps}{\par\noindent
+  \setlength{\gc@stepw}{\dimexpr(\linewidth-\gcgap*(\value{gc@step}-1))/\value{gc@step}\relax}%
+  \setcounter{gc@stepk}{0}\makebox[\linewidth][l]{\gc@steps}\par}
+\newcommand{\gc@stepcol}[2]{\stepcounter{gc@stepk}\ifnum\value{gc@stepk}>1 \hspace{\gcgap}\fi
+  \gc@stepstate{\value{gc@stepk}}%
+  \begin{minipage}[t]{\gc@stepw}\leavevmode
+    {\usebeamerfont{claim}\color{\gc@numc}\twodigit{\value{gc@stepk}}\par}\vspace{6pt}
+    {\color{\gc@railc}\rule{\linewidth}{\gc@railw}\rule{0pt}{1.6pt}\par}\vspace{12pt}
+    {\usebeamerfont{card title}\color{\gc@titlec}#1\par}\vspace{5pt}
+    {\usebeamerfont{card text}\color{\gc@textc}#2\par}
+  \end{minipage}}
+
+% roadmap[now]: \phase{length}{name}{detail} segments on one line, \milestone{position}{label} dots below, now marks the present
+\newcounter{gc@phase}\newcounter{gc@phasek}
+\newenvironment{roadmap}[1][-1]{\setcounter{gc@phase}{0}\def\gc@roadnow{#1}\def\gc@phases{}\def\gc@miles{}}{\gc@drawroadmap}
+\newcommand{\phase}[3]{\stepcounter{gc@phase}\appto\gc@phases{\gc@phase{#1}{#2}{#3}}}
+\newcommand{\milestone}[2]{\appto\gc@miles{\gc@mile{#1}{#2}}}
+% first pass sums the lengths into \gc@roadT, second pass draws, \gc@roadacc is the running start in length units
+\newcommand{\gc@drawroadmap}{\par\noindent
+  \def\gc@roadT{0}\def\gc@phase##1##2##3{\pgfmathsetmacro\gc@roadT{\gc@roadT+##1}}\gc@phases
+  \pgfmathsetmacro\gc@roadW{\linewidth}\def\gc@roadacc{0}\setcounter{gc@phasek}{0}%
+  \begin{tikzpicture}
+    \let\gc@phase\gc@roadphase\gc@phases
+    \let\gc@mile\gc@roadmile\gc@miles
+    \ifdim\gc@roadnow pt>-1pt
+      \pgfmathsetmacro\gc@x{\gc@roadnow/\gc@roadT*\gc@roadW}%
+      \draw[accent,line width=1.4pt,line cap=round](\gc@x pt,-4pt)--(\gc@x pt,9pt);
+      \node[anchor=north,inner sep=0pt,font=\small\bfseries,text=accent] at (\gc@x pt,-30pt){Now};\fi
+  \end{tikzpicture}\par}
+\newcommand{\gc@roadphase}[3]{\stepcounter{gc@phasek}%
+  \pgfmathsetmacro\gc@xa{\gc@roadacc/\gc@roadT*\gc@roadW}%
+  \pgfmathsetmacro\gc@xb{(\gc@roadacc+#1)/\gc@roadT*\gc@roadW-(\value{gc@phasek}<\value{gc@phase})*4}%
+  \fill[divider,rounded corners=2pt](\gc@xa pt,0)rectangle(\gc@xb pt,5pt);
+  \pgfmathsetmacro\gc@x{min(max(\gc@roadnow/\gc@roadT*\gc@roadW,\gc@xa),\gc@xb)}%
+  \ifdim\gc@x pt>\gc@xa pt\fill[inkmuted,rounded corners=2pt](\gc@xa pt,0)rectangle(\gc@x pt,5pt);\fi
+  \pgfmathsetmacro\gc@w{\gc@xb-\gc@xa-6}%
+  \node[anchor=south west,inner sep=0pt,text width=\gc@w pt] at (\gc@xa pt,14pt)
+    {{\bfseries\color{ink}#2\par}\vspace{2pt}\subtle{#3}\par};
+  \pgfmathsetmacro\gc@roadacc{\gc@roadacc+#1}}
+% milestone labels centre on their dot, near the ends they align to the line's edge
+\newcommand{\gc@roadmile}[2]{\pgfmathsetmacro\gc@x{#1/\gc@roadT*\gc@roadW}%
+  \begin{scope}[overlay]% dots may hang past the line's ends
+    \fill[paper](\gc@x pt,2.5pt)circle(5pt);\fill[surfaceelevated](\gc@x pt,2.5pt)circle(3.6pt);\draw[ink,line width=0.9pt](\gc@x pt,2.5pt)circle(3.6pt);
+  \end{scope}%
+  \ifdim\gc@x pt<0.1\linewidth\def\gc@anchor{north west}\pgfmathsetmacro\gc@x{max(\gc@x-4,0)}%
+  \else\ifdim\gc@x pt>0.9\linewidth\def\gc@anchor{north east}\pgfmathsetmacro\gc@x{min(\gc@x+4,\gc@roadW)}%
+  \else\def\gc@anchor{north}\fi\fi
+  \node[anchor=\gc@anchor,inner sep=0pt,align=center,font=\small,text=inkmuted] at (\gc@x pt,-10pt){#2};}
+
+% --- Structure: \section and \subsection feed the agenda, the chapter slides, the footer location and the progress bar ---
+% \gc@fit{height}{box}: the box as is, scaled down when taller than height
+\newcommand{\gc@fit}[2]{\ifdim\dimexpr\ht#2+\dp#2\relax>#1\relax\resizebox*{!}{#1}{\box#2}\else\box#2\fi}
+
+% Chapter slide: every \section opens one. Big number and title, the chapter's subsections as its agenda,
+% all chapters on a faint track below with this one in ink. Too many subsections: they run on in one paragraph,
+% then the track is dropped, then the block shrinks
+\newsavebox{\gc@chapterbox}\newsavebox{\gc@trackbox}\newdimen\gc@avail
+\newif\ifgc@runin
+\newcommand{\gc@chapterblock}{\setbox\gc@chapterbox\vbox{\hsize\textwidth\linewidth\hsize
+    {\rmfamily\fontsize{60}{60}\selectfont\color{divider}\twodigit{\c@section}\par}\vskip10pt
+    {\usebeamerfont{section title}\color{ink}\insertsection\par}\vskip8pt
+    {\def\gc@tocmode{2}\vskip.5em\gc@beamertoc[sectionstyle=hide,subsectionstyle=show/show/hide]}}}
+\newcommand{\gc@chapterheight}{\dimexpr\ht\gc@chapterbox+\dp\gc@chapterbox+\ht\gc@trackbox+\dp\gc@trackbox+1cm\relax}
+\newcommand{\gc@chapterslide}{%
+  \gc@runinfalse\gc@chapterblock
+  \setbox\gc@trackbox\vbox{\hsize\textwidth\linewidth\hsize
+    \def\gc@tocmode{1}\ifnum\beamer@sectionmax>0 \gc@columns{\beamer@sectionmax}{sectionstyle=show/shaded}\fi\kern\z@}% zero depth
+  \gc@avail=\dimexpr\paperheight-2\gcmargin-0.4cm\relax
+  \ifdim\gc@chapterheight>\gc@avail\gc@runintrue\gc@chapterblock\fi
+  \ifdim\gc@chapterheight>\gc@avail\setbox\gc@trackbox\box\voidb@x\fi
+  \vspace*{\fill}\gc@fit{\gc@avail}{\gc@chapterbox}\par
+  \vskip 0pt plus 1.4fill
+  \ifvoid\gc@trackbox\else\box\gc@trackbox\par\vskip\dimexpr\gcmargin-0.2cm\relax\fi}
+\AtBeginSection[]{\begin{frame}[plain]\gc@chapterslide\end{frame}}
+
+% \tableofcontents[options] is the agenda: one beamer toc per chapter column, options such as currentsection pass through.
+% The toc templates below set it in one of three modes.
+% 0 agenda: chapters side by side as columns (rule, number, title, subsections), the default for the agenda frame
+% 1 track: the same columns in one row with titles only, the current chapter in ink (chapter slide)
+% 2 list: the current chapter's subsections as a numbered list (chapter slide)
+\let\gc@beamertoc\tableofcontents
+\renewcommand{\tableofcontents}[1][]{\gc@agenda{#1}}
+\def\gc@tocmode{0}
+\newif\ifgc@tocsubs\gc@tocsubstrue
+\newcount\gc@colk\newcount\gc@inrow\newcount\gc@percol
+\newdimen\gc@colw
+\newlength{\gccolgap}\setlength{\gccolgap}{0.5cm}% gap between chapter columns
+\newsavebox{\gc@tocbox}
+% \gc@columns{n}{toc options}: chapters as columns, at most n per row, rows share the chapters evenly.
+% Each column is beamer's toc restricted to one chapter with sections={k}
+\newcommand{\gc@columns}[2]{\vbox{%
+  \count@=\numexpr\beamer@sectionmax+#1-1\relax\divide\count@ by #1\relax
+  \gc@percol=\numexpr\beamer@sectionmax+\count@-1\relax\divide\gc@percol by \count@
+  \gc@colw=\dimexpr(\linewidth-\gccolgap*(\gc@percol-1))/\gc@percol\relax
+  \def\gc@tocopts{#2}\global\gc@colk\z@
+  \@whilenum\gc@colk<\beamer@sectionmax\do{%
+    \ifnum\gc@colk>\z@\vskip0.6cm\fi
+    \hbox{\gc@inrow\z@
+      \@whilenum\gc@inrow<\gc@percol\do{%
+        \ifnum\gc@inrow>\z@\hskip\gccolgap\fi
+        \global\advance\gc@colk\@ne\advance\gc@inrow\@ne
+        \edef\gc@next{\noexpand\gc@column{\the\gc@colk}}\gc@next
+        \ifnum\gc@colk=\beamer@sectionmax\gc@inrow\gc@percol\fi}}}}}
+% beamer's toc starts with \vspace*{-.5em}, the \vskip in front cancels it so the column starts at its rule
+\newcommand{\gc@column}[1]{\vtop{\hsize\gc@colw\linewidth\gc@colw\vskip.5em
+  \expandafter\gc@beamertoc\expandafter[\gc@tocopts,sections={#1}]}}
+% agenda: up to five columns per row. Subsections are dropped when the agenda grows taller than the free space,
+% then it shrinks
+\newcommand{\gc@agendaheight}{0.55\paperheight}
+\newcommand{\gc@agenda}[1]{\ifnum\beamer@sectionmax>0
+  \setbox\gc@tocbox\gc@columns{5}{#1}%
+  \ifdim\dimexpr\ht\gc@tocbox+\dp\gc@tocbox\relax>\gc@agendaheight\relax
+    \gc@tocsubsfalse\setbox\gc@tocbox\gc@columns{5}{#1}\fi
+  \vskip 0pt plus 1fill\noindent\gc@fit{\gc@agendaheight}{\gc@tocbox}\par\fi}% centred: the frame's bottom fill balances the top one
+% #1 = 1 for the current chapter or every chapter on the agenda, 0 for shaded ones
+\newcommand{\gc@sectionintoc}[1]{\vtop{\ifcase\gc@tocmode\relax
+    {\color{divider}\hrule height0.6pt}\vskip10pt
+    {\rmfamily\fontsize{24}{24}\selectfont\color{inkfaint}\twodigit{\inserttocsectionnumber}\par}\vskip6pt
+    {\rmfamily\fontsize{15}{18}\selectfont\ifnum#1=1 \color{ink}\else\color{inkfaint}\fi\inserttocsection\strut\par}%
+  \or
+    {\ifnum#1=1 \color{inkmuted}\else\color{divider}\fi\hrule height0.8pt}\vskip6pt
+    {\fontsize{7.5}{9.5}\selectfont\ifnum#1=1 \color{ink}\else\color{inkfaint}\fi
+      {\rmfamily\twodigit{\inserttocsectionnumber}}\hspace{5pt}\inserttocsection\par}%
+  \fi}}
+% list mode sets one subsection per line, or runs them on in one paragraph when the chapter slide overflows
+\newcommand{\gc@subsectionintoc}[1]{\ifcase\gc@tocmode\relax
+    \ifgc@tocsubs\ifnum\inserttocsubsectionnumber=1 \vskip9pt\else\vskip4pt\fi
+      {\fontsize{9}{11}\selectfont\color{#1}\strut\inserttocsubsection\strut\par}\fi
+  \or\or
+    \ifgc@runin
+      \ifnum\inserttocsubsectionnumber=1 \vskip6pt\noindent\else\hskip1.2em plus0.6em\relax\fi
+      {\fontsize{11}{14}\selectfont\mbox{\rmfamily\itshape\color{inksubtle}\inserttocsubsectionnumber}\nobreak\hspace{0.5em}%
+        \color{#1}\inserttocsubsection}%
+    \else
+      \vskip6pt{\fontsize{11}{14}\selectfont\hangindent1.6em\noindent
+        \makebox[1.6em][l]{\rmfamily\itshape\color{inksubtle}\inserttocsubsectionnumber}{\color{#1}\inserttocsubsection}\par}%
+    \fi
+  \fi}
+\setbeamertemplate{section in toc}{\gc@sectionintoc{1}}
+\setbeamertemplate{section in toc shaded}{\gc@sectionintoc{0}}
+\setbeamertemplate{subsection in toc}{\gc@subsectionintoc{inkmuted}}
+\setbeamertemplate{subsection in toc shaded}{\gc@subsectionintoc{inkfaint}}
+
+% Progress: one segment per chapter, equal widths like the agenda columns, filled up to the current slide
+\newlength{\gcprogresswidth}\setlength{\gcprogresswidth}{4.4cm}
+\newcommand{\gc@progress}{\begin{tikzpicture}[baseline=0pt]
+  \pgfmathsetmacro\gc@segw{(\gcprogresswidth-(\the\beamer@sectionmax-1)*3pt)/\the\beamer@sectionmax}%
+  \pgfmathsetmacro\gc@part{max(0,min(1,(\c@page-\insertsectionstartpage+1)/(\insertsectionendpage-\insertsectionstartpage+1)))*\gc@segw}%
+  \foreach \gc@k in {1,...,\the\beamer@sectionmax}{%
+    \pgfmathsetmacro\gc@segx{(\gc@k-1)*(\gc@segw+3)}%
+    \fill[divider,rounded corners=0.8pt](\gc@segx pt,2pt)rectangle++(\gc@segw pt,1.6pt);
+    \ifnum\gc@k<\c@section\fill[inksubtle,rounded corners=0.8pt](\gc@segx pt,2pt)rectangle++(\gc@segw pt,1.6pt);\fi
+    \ifnum\gc@k=\c@section\fill[inksubtle,rounded corners=0.8pt](\gc@segx pt,2pt)rectangle++(\gc@part pt,1.6pt);\fi}
+\end{tikzpicture}}
+
+\mode<all>

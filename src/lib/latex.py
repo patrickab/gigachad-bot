@@ -1,6 +1,7 @@
 r"""LaTeX builds with `latexmk` and tex projects.
 
 - `build` compiles one file into `<directory>/.latex-build`, one build at a time per file, without shell escape
+- `build_output` locates one output of a root document in its build folder
 - `discard_build` deletes the outputs of a file that was renamed or replaced, so a build never shows or reuses another file's PDF
 - `project_of` finds the root document of any file of a tex project, `set_root` writes the `% !TEX root` comment that picks it
 - `is_build_output` tells the files that are not sources
@@ -13,12 +14,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
+import logging
 import os
 from pathlib import Path
 import re
 import shutil
 import signal
 import time
+
+from lib.tex_source import COMMENT, plain_lines
 
 BUILD_DIRECTORY = ".latex-build"
 _AUX_SUFFIXES = (
@@ -41,7 +45,6 @@ _LOG_TAIL_LINES = 40
 MAGIC_COMMENT_LINES = 5
 _ANCESTOR_LEVELS = 2
 ROOT_COMMENT = re.compile(r"^(?P<head>\s*%\s*!TEX\s+root\s*=\s*)(?P<root>\S.*?)(?P<tail>\s*)$", re.IGNORECASE)
-COMMENT = re.compile(r"(?<!\\)%.*")
 _PACKAGE_LOAD = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{(?P<names>[^}]*)\}")
 _ENGINE_FLAGS = {"pdflatex": "-pdf", "xelatex": "-pdfxe", "lualatex": "-pdflua"}
 _ENGINE_COMMENT = re.compile(r"^\s*%\s*!TEX\s+program\s*=\s*(\w+)", re.IGNORECASE)
@@ -51,6 +54,7 @@ _ERROR_LINE = re.compile(r"^l\.(?P<line>\d+)\b")
 _BARE_ERROR_LOOKAHEAD = 10
 
 _build_locks: dict[Path, asyncio.Lock] = {}
+log = logging.getLogger(__name__)
 
 
 class LatexUnavailable(RuntimeError):
@@ -229,6 +233,11 @@ def _read_log(log: Path) -> str:
     return log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
 
 
+def build_output(root: Path, suffix: str) -> Path:
+    """Locate the build output of *root* with *suffix* (`.pdf`, `.synctex.gz`)."""
+    return root.parent / BUILD_DIRECTORY / f"{root.stem}{suffix}"
+
+
 def discard_build(source: Path) -> None:
     """Delete `<directory>/.latex-build/<stem>.*` of *source*, leaving the outputs of a sibling whose stem extends it (`a.b` for `a`)."""
     outputs = source.parent / BUILD_DIRECTORY
@@ -265,11 +274,12 @@ def ensure_package(root: Path, package: str) -> bool:
     except (OSError, UnicodeDecodeError):
         return False
     lines = text.splitlines(keepends=True)
-    code = "".join(COMMENT.sub("", line) for line in lines)
+    plain = plain_lines(lines)
+    code = "".join(plain)
     for loaded in _PACKAGE_LOAD.finditer(code):
         if package in (name.strip() for name in loaded.group("names").split(",")):
             return False
-    begun = next((index for index, line in enumerate(lines) if r"\begin{document}" in COMMENT.sub("", line)), None)
+    begun = next((index for index, line in enumerate(plain) if r"\begin{document}" in line), None)
     if begun is None:
         return False
     newline = "\r\n" if "\r\n" in text else "\n"
@@ -361,3 +371,5 @@ def new_file_content(path: Path, root: Path | None) -> str:
     if path.suffix != ".tex":
         return ""
     return NEW_DOCUMENT if root is None else f"% !TEX root = {Path(os.path.relpath(root, path.parent)).as_posix()}\n\n"
+
+

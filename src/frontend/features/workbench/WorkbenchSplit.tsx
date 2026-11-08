@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type RefObject } from "react"
+import { useCallback, useEffect, useState, type RefObject } from "react"
 import type { PdfPageBox } from "@/components/content/PdfViewer"
 import { RENDER_WIDTH } from "@/components/content/pdf/pdfLayout"
 import { useElementSize } from "@/hooks/useElementSize"
@@ -16,17 +16,19 @@ export type PaneLayout = PdfPageBox & { height: number }
 
 const STORAGE_KEY = "workbench_view"
 
-/** The view, remembered on this device for every workbench tab. */
-export function useWorkbenchView(): [WorkbenchView, (view: WorkbenchView) => void] {
+/** One of the split's two panes: Neovim's page or the rendered file. */
+export type WorkbenchSide = "editor" | "render"
+
+/** The view, remembered on this device for every workbench tab, and `show(side)`, which brings `side` back when the view hides it. */
+export function useWorkbenchView(): [WorkbenchView, (view: WorkbenchView) => void, (side: WorkbenchSide) => void] {
   const [view, setView] = useState<WorkbenchView>(() => {
     const stored = readStorage(STORAGE_KEY)
     return stored === "editor" || stored === "render" ? stored : "split"
   })
-  const change = (next: WorkbenchView) => {
-    setView(next)
-    writeStorage(STORAGE_KEY, next)
-  }
-  return [view, change]
+  useEffect(() => { writeStorage(STORAGE_KEY, view) }, [view])
+  // Reads the view it changes, so a call from an answer that arrived later sees the view of that moment
+  const show = useCallback((side: WorkbenchSide) => setView((current) => current === "split" || current === side ? current : "split"), [])
+  return [view, setView, show]
 }
 
 /** Height of the floating top bar (`TopBar`, h-11) the panes sit beneath. */

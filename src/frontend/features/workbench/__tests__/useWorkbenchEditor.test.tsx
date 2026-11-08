@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
-import type { NeovimDocument, NeovimSelection } from "@/features/editor/NeovimEditor"
+import type { NeovimDocument } from "@/features/editor/NeovimEditor"
+import type { NeovimCommand, NeovimEventHandlers } from "@/features/editor/neovimProtocol"
 import { announceFileMove } from "@/lib/backend/fileEvents"
 import type { ChangeEvent } from "@/lib/backend/syncStream"
 
@@ -23,18 +24,14 @@ vi.mock("@/lib/backend/syncStream", () => ({
 interface Session {
   document: NeovimDocument | null
   save: (text: string, path: string) => Promise<string>
-  options: {
-    onSelection: (selection: NeovimSelection) => void
-    onSwitched: (path: string) => void
-    onOpenFailed: (path: string, message: string) => void
-  }
+  options: { on: Required<Pick<NeovimEventHandlers, "selection" | "switched" | "open_failed">> }
 }
 const editor = vi.hoisted(() => ({
   session: null as Session | null,
   ops: {
     restart: vi.fn(),
     setContent: vi.fn<(text: string, path?: string) => boolean>(() => true),
-    openFile: vi.fn<(path: string) => boolean>(() => true),
+    openFile: vi.fn<(path: string, line?: number, column?: number) => boolean>(() => true),
     renameFile: vi.fn<(from: string, to: string) => boolean>(() => true),
     insertLines: vi.fn<(text: string) => boolean>(() => true),
   },
@@ -42,7 +39,18 @@ const editor = vi.hoisted(() => ({
 vi.mock("@/features/editor/NeovimEditor", () => ({
   useNeovimTerminal: (document: Session["document"], save: Session["save"], _onQuit: () => void, options: Session["options"]) => {
     editor.session = { document, save, options }
-    return { terminal: null, status: { state: "running" }, ...editor.ops }
+    // Each command goes to its own fake, so a test names the command it expects
+    const { ops } = editor
+    const send = (command: NeovimCommand) => {
+      switch (command.type) {
+        case "set_content": return ops.setContent(command.content, command.path)
+        case "open_file": return command.line === undefined ? ops.openFile(command.path) : ops.openFile(command.path, command.line, command.column)
+        case "renamed": return ops.renameFile(command.from, command.path)
+        case "insert_lines": return ops.insertLines(command.text)
+        default: return false
+      }
+    }
+    return { terminal: null, status: { state: "running" }, restart: ops.restart, send }
   },
 }))
 
@@ -54,7 +62,7 @@ const RENAMED = "/home/me/thesis/chapters/opening.tex"
 const textOf = (path: string) => `text of ${path}`
 const moved = (from: string, to: string): ChangeEvent => ({ seq: 1, resource_kind: "document", resource_key: from, moved_to: to, version: null, operation: "move", device_id: "other" })
 
-const callbacks = () => ({ onPathChange: vi.fn(), onSaved: vi.fn(), onClose: vi.fn(), onSelection: vi.fn() })
+const callbacks = () => ({ onPathChange: vi.fn(), onSaved: vi.fn(), onClose: vi.fn(), onSelection: vi.fn(), onNotice: vi.fn() })
 
 /** The editor over `MAIN`, loaded. `rerender({ path })` is the tab's item changing its path. */
 async function openEditor(enabled = true) {
@@ -125,33 +133,73 @@ describe("useWorkbenchEditor", () => {
     expect(synced().get(CHAPTER)).toBe(textOf(CHAPTER))
   })
 
+  it("puts the cursor on a line and column of the shown file at once", async () => {
+    const { result, props } = await openEditor()
+
+    act(() => result.current.reveal(MAIN, 42, 17))
+
+    expect(editor.ops.openFile).toHaveBeenCalledExactlyOnceWith(MAIN, 42, 17)
+    expect(props.onPathChange).not.toHaveBeenCalled()
+    expect(props.onNotice).toHaveBeenLastCalledWith(null)
+  })
+
+  it("says so when the session cannot take a line of the shown file", async () => {
+    const { result, props } = await openEditor()
+    editor.ops.openFile.mockReturnValueOnce(false)
+
+    act(() => result.current.reveal(MAIN, 42))
+
+    expect(props.onNotice).toHaveBeenLastCalledWith("Neovim is not ready, the line was not shown")
+  })
+
+  it("switches to another file through the owner's path and puts the cursor on its line and column, also after a retry", async () => {
+    const { result, rerender, props } = await openEditor()
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    editor.ops.openFile.mockReturnValueOnce(false)
+
+    act(() => result.current.reveal(CHAPTER, 7, 3))
+    expect(props.onPathChange).toHaveBeenCalledExactlyOnceWith(CHAPTER)
+    expect(editor.ops.openFile).not.toHaveBeenCalled()
+
+    rerender({ path: CHAPTER })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+    expect(editor.ops.openFile.mock.calls).toEqual([[CHAPTER, 7, 3], [CHAPTER, 7, 3]])
+
+    // The line went with the switch, coming back later shows the file where Neovim left it
+    rerender({ path: MAIN })
+    rerender({ path: CHAPTER })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(editor.ops.openFile).toHaveBeenLastCalledWith(CHAPTER)
+  })
+
   it("reports the buffer Neovim switched to and does not switch back when the path follows", async () => {
     const { rerender, session, props } = await openEditor()
-    act(() => session().options.onSwitched(CHAPTER))
+    act(() => session().options.on.switched({ type: "switched", path: CHAPTER }))
     expect(props.onPathChange).toHaveBeenCalledExactlyOnceWith(CHAPTER)
 
     rerender({ path: CHAPTER })
-    act(() => session().options.onSwitched(CHAPTER))
+    act(() => session().options.on.switched({ type: "switched", path: CHAPTER }))
     expect(props.onPathChange).toHaveBeenCalledTimes(1)
     expect(editor.ops.openFile).not.toHaveBeenCalled()
   })
 
   it("keeps the shown file and says so when another file cannot be opened", async () => {
-    const { result, rerender, props } = await openEditor()
+    const { rerender, props } = await openEditor()
     api.loadFileViewerText.mockRejectedValueOnce(new Error("Gone"))
     rerender({ path: CHAPTER })
-    await waitFor(() => expect(result.current.notice).toBe("Gone"))
+    await waitFor(() => expect(props.onNotice).toHaveBeenLastCalledWith("Gone"))
     expect(props.onPathChange).toHaveBeenCalledExactlyOnceWith(MAIN)
     expect(editor.ops.openFile).not.toHaveBeenCalled()
   })
 
   it("goes back to the file Neovim still shows when the backend could not open the new one", async () => {
-    const { result, rerender, session, synced, props } = await openEditor()
+    const { rerender, session, synced, props } = await openEditor()
     rerender({ path: CHAPTER })
     await waitFor(() => expect(editor.ops.openFile).toHaveBeenCalledTimes(1))
 
-    act(() => session().options.onOpenFailed(CHAPTER, "Not UTF-8"))
-    expect(result.current.notice).toBe("Not UTF-8")
+    act(() => session().options.on.open_failed({ type: "open_failed", path: CHAPTER, message: "Not UTF-8" }))
+    expect(props.onNotice).toHaveBeenLastCalledWith("Not UTF-8")
     expect(props.onPathChange).toHaveBeenCalledExactlyOnceWith(MAIN)
     expect(synced().has(CHAPTER)).toBe(false)
 
@@ -247,5 +295,16 @@ describe("useWorkbenchEditor", () => {
     await waitFor(() => expect(editor.ops.openFile).toHaveBeenCalledTimes(2))
     expect(editor.ops.openFile).toHaveBeenLastCalledWith(CHAPTER)
     expect(editor.session?.document?.content).toBe("agent edit")
+  })
+
+  it("hands a command to Neovim, says whether it took it and reports the refusal until the next command goes in", async () => {
+    const { result, props } = await openEditor()
+    editor.ops.insertLines.mockReturnValueOnce(false)
+    act(() => expect(result.current.send({ type: "insert_lines", text: "% note" }, "Neovim is not ready, the note was not added")).toBe(false))
+    expect(props.onNotice).toHaveBeenLastCalledWith("Neovim is not ready, the note was not added")
+
+    act(() => expect(result.current.send({ type: "insert_lines", text: "% note" }, "Neovim is not ready, the note was not added")).toBe(true))
+    expect(editor.ops.insertLines).toHaveBeenLastCalledWith("% note")
+    expect(props.onNotice).toHaveBeenLastCalledWith(null)
   })
 })

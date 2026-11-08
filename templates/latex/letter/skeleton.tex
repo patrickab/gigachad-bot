@@ -1,0 +1,27 @@
+% New letter: DIN 5008 business letter (KOMA-Script scrlttr2). Design in layout.lco, sender in sender.lco. Build: latexmk -pdf
+\documentclass[version=last, fontsize=11pt, parskip=half]{scrlttr2}% parskip: paragraphs apart by half a line, no indent
+\LoadLetterOptions{DIN, layout, sender}% DIN 5008 positions (address fits a window envelope), the design, the sender
+\usepackage[left=25mm, right=20mm]{geometry}% DIN 5008 text margins
+\usepackage[ngerman]{babel}
+
+\setkomavar{subject}{Betreff in einer Zeile}
+
+\begin{document}
+
+\begin{letter}{%
+  Firma GmbH\\
+  Vorname Nachname\\
+  Straße 1\\
+  12345 Ort%
+}
+
+\opening{Sehr geehrte Damen und Herren,}
+
+Erster Absatz: worum es geht, in einem Satz.
+
+Zweiter Absatz: Details, Bitte oder nächster Schritt.
+
+\closing{Viele Grüße}
+
+\end{letter}
+\end{document}

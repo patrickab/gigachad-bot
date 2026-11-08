@@ -1,17 +1,19 @@
 "use client"
 
-import { AnimatePresence, motion, Reorder } from "framer-motion"
+import { Reorder } from "framer-motion"
 import { Check, type LucideIcon } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "./IconButton"
+import { PillPopover, usePillPopover } from "./PillPopover"
 
 interface SelectorCategory<T> { key: string; label: string; items: T[] }
 
 interface HeaderAction { icon: LucideIcon; label: string; onClick: () => void }
 
 /** Popover selector: pill trigger, optional category tabs, vertical item list, optional footer.
+ *
+ * ArrowDown/ArrowUp move focus through the shown items (from outside the list to the selected one, else the first or last), Enter or Space picks the focused one. Escape closes, focus back on the trigger.
  *
  * Attributes
  * ----------
@@ -63,25 +65,34 @@ export function PopoverSelector<T>({
   triggerLabel, triggerContent, triggerClassName, label, categories, itemKey, isSelected, renderItem, onSelect,
   onReorderCategories, footer, headerAction, view, emptyText = "Nothing to select", placement = "above", panelClassName, onClose,
 }: PopoverSelectorProps<T>) {
-  const [open, setOpen] = useState(false)
   const [manualCategory, setManualCategory] = useState<string | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => {
-    setOpen(false)
+  const popover = usePillPopover(useCallback(() => {
     setManualCategory(null)
     onClose?.()
-  }, [onClose])
-  useClickOutside(rootRef, close)
+  }, [onClose]))
+  const { open, close, panelRef } = popover
   // Long lists scroll, so bring the current pick into view on open.
   useEffect(() => {
     if (open) panelRef.current?.querySelector("[data-selected]")?.scrollIntoView?.({ block: "nearest" })
-  }, [open])
+  }, [open, panelRef])
 
   const active = categories.find((category) => category.key === manualCategory)
     ?? categories.find((category) => category.items.some(isSelected))
     ?? categories[0]
   const select = (item: T) => { onSelect(item); close() }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!open || view !== undefined || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return
+    const items = [...panelRef.current?.querySelectorAll<HTMLElement>("[role=menuitemradio]") ?? []]
+    if (items.length === 0) return
+    event.preventDefault()
+    const down = event.key === "ArrowDown"
+    const focused = items.findIndex((row) => row === document.activeElement)
+    const selected = items.findIndex((row) => row.hasAttribute("data-selected"))
+    const next = focused >= 0 ? (focused + (down ? 1 : items.length - 1)) % items.length
+      : selected >= 0 ? selected : down ? 0 : items.length - 1
+    items[next].focus()
+  }
 
   const tabButton = (category: SelectorCategory<T>) => (
     <button type="button" onClick={() => setManualCategory(category.key)} className={tabClass(category.key === active?.key)}>{category.label}</button>
@@ -107,7 +118,10 @@ export function PopoverSelector<T>({
         aria-checked={selected}
         onClick={() => select(item)}
         data-selected={selected || undefined}
-        className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors", selected ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface-elevated hover:text-ink")}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ink-muted",
+          selected ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface-elevated hover:text-ink",
+        )}
       >
         {renderItem(item)}
         {selected && <Check className="ml-auto h-4 w-4 shrink-0" />}
@@ -115,37 +129,20 @@ export function PopoverSelector<T>({
     })}</div>
     : <p className="px-3.5 py-3 text-xs text-ink-subtle">{emptyText}</p>
 
-  return <div ref={rootRef} className="relative min-w-0">
-    <button
-      type="button"
-      onClick={() => open ? close() : setOpen(true)}
-      aria-label={triggerLabel}
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink", open && "text-ink", triggerClassName)}
-    >
-      {triggerContent}
-    </button>
-    <AnimatePresence>{open && <motion.div
-      ref={panelRef}
-      role="dialog"
-      aria-label={label}
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 4 }}
-      transition={{ duration: 0.15 }}
-      className={cn(
-        "absolute left-0 z-50 flex w-64 flex-col rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]",
-        view === undefined && "overflow-hidden",
-        placement === "below" ? "top-full mt-2" : "bottom-full mb-2",
-        panelClassName,
-      )}
-    >
-      {view ?? <>
-        {(tabs || headerAction) && <div className="flex items-center gap-1 border-b border-divider p-1.5">{tabs}{headerAction && <>{!tabs && <span className="flex-1" />}<IconButton {...headerAction} className="hover:bg-surface-elevated" /></>}</div>}
-        {list}
-        {footer && <div className="border-t border-divider p-1.5">{footer}</div>}
-      </>}
-    </motion.div>}</AnimatePresence>
-  </div>
+  return <PillPopover
+    popover={popover}
+    triggerLabel={triggerLabel}
+    triggerContent={triggerContent}
+    triggerClassName={triggerClassName}
+    label={label}
+    placement={placement}
+    panelClassName={cn(view === undefined && "overflow-hidden", panelClassName)}
+    onKeyDown={onKeyDown}
+  >
+    {view ?? <>
+      {(tabs || headerAction) && <div className="flex items-center gap-1 border-b border-divider p-1.5">{tabs}{headerAction && <>{!tabs && <span className="flex-1" />}<IconButton {...headerAction} className="hover:bg-surface-elevated" /></>}</div>}
+      {list}
+      {footer && <div className="border-t border-divider p-1.5">{footer}</div>}
+    </>}
+  </PillPopover>
 }

@@ -32,6 +32,11 @@ function pageTops(aspects: number[], pageWidth: number): number[] {
   return tops
 }
 
+/** Top offset of 1-based `page` at `pageWidth`, relative to the first page. */
+export function pageTop(aspects: number[], pageWidth: number, page: number): number {
+  return pageTops(aspects.slice(0, page), pageWidth)[page - 1]
+}
+
 /** `scrollTop` re-projected from pages `previousWidth` px wide to `nextWidth`: same page, same fraction within it (the gaps do not scale). */
 export function scrollTopAfterWidthChange(scrollTop: number, aspects: number[], previousWidth: number, nextWidth: number): number {
   const previousTops = pageTops(aspects, previousWidth)

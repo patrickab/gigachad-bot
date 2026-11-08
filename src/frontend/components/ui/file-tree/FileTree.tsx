@@ -14,12 +14,14 @@ import type { FileBranchController } from "./useFileTree"
 import type { InlineRename } from "./useInlineRename"
 
 /** A second input of a create form, e.g. the branch a new worktree starts from. */
-interface FileTreeCreateChoice {
+export interface FileTreeCreateChoice {
   label: string
   options: string[]
   initial: string
   /** A window opens first instead of an inline select: Tab cycles the options, Enter picks one and moves on to the name. */
   floating?: boolean
+  /** Floating only: picking one of these options opens its own choice next, e.g. the template after "LaTeX". */
+  then?: Record<string, FileTreeCreateChoice>
 }
 
 type FileTreeCreateAction =
@@ -27,7 +29,8 @@ type FileTreeCreateAction =
     label: string
     placeholder: string
     choice?: FileTreeCreateChoice
-    onSubmit: (name: string, choice?: string) => Promise<void>
+    /** `subchoice` is the pick of the `then` choice of `choice`, when it had one. */
+    onSubmit: (name: string, choice?: string, subchoice?: string) => Promise<void>
   }
   | {
     label: string
@@ -364,15 +367,32 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
   const tabActive = useTabActive()
   useEscapeLayer(onCancel, tabActive)
   const [choice, setChoice] = useState(action.choice?.initial)
-  const [picking, setPicking] = useState(Boolean(action.choice?.floating))
+  const [subchoice, setSubchoice] = useState<string>()
+  /** Open window: "choice" first when floating, then "then" for the `then` choice of the picked option, null once picked. */
+  const [picking, setPicking] = useState<"choice" | "then" | null>(action.choice?.floating ? "choice" : null)
+  const thenChoice = choice == null ? undefined : action.choice?.then?.[choice]
+  const openChoice = picking === "choice" ? action.choice : picking === "then" ? thenChoice : undefined
   const nameInput = useRef<HTMLInputElement>(null)
-  const { run, pending: saving, error } = useAsyncAction(async (chosen: string | undefined) => {
-    await action.onSubmit(name.trim(), chosen)
+  const { run, pending: saving, error } = useAsyncAction(async (chosen: string | undefined, subchosen: string | undefined) => {
+    await action.onSubmit(name.trim(), chosen, subchosen)
     onDone()
   }, "Could not create this item")
   const submit = () => {
     if (!name.trim() || saving) return
-    void run(choice)
+    void run(choice, thenChoice ? subchoice : undefined)
+  }
+  /** Take the pick of the open window: the first choice opens the `then` choice of its option when there is one. */
+  const confirmPick = (chosen: string) => {
+    const next = picking === "choice" ? action.choice?.then?.[chosen] : undefined
+    if (picking === "choice") {
+      setChoice(chosen)
+      setSubchoice(next?.initial)
+    } else {
+      setSubchoice(chosen)
+    }
+    setPicking(next ? "then" : null)
+    // The window unmounts after this commit, then focus returns to the name.
+    if (!next) requestAnimationFrame(() => nameInput.current?.focus())
   }
   return <div style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP + 20 }}>
     <input ref={nameInput} autoFocus aria-label={action.placeholder} placeholder={action.placeholder} value={name} disabled={saving}
@@ -385,15 +405,10 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
       }}
       className="h-6 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
     />
-    {picking && action.choice && choice != null && <ChoiceWindow choice={action.choice} initial={choice}
-      onCancel={onCancel}
-      onConfirm={(chosen) => {
-        setChoice(chosen)
-        setPicking(false)
-        // The window unmounts after this commit, then focus returns to the name.
-        requestAnimationFrame(() => nameInput.current?.focus())
-      }} />}
-    {action.choice?.floating && !picking && <div className="text-[10px] text-ink-faint">{choice}</div>}
+    {openChoice && <ChoiceWindow key={picking} choice={openChoice}
+      initial={(picking === "choice" ? choice : subchoice) ?? openChoice.initial}
+      onCancel={onCancel} onConfirm={confirmPick} />}
+    {action.choice?.floating && !picking && <div className="text-[10px] text-ink-faint">{thenChoice && subchoice ? `${choice} · ${subchoice}` : choice}</div>}
     {action.choice && !action.choice.floating && choice != null && <div className="flex items-center gap-1 text-[10px] text-ink-faint">
       <span>{action.choice.label}</span>
       <StyledSelect variant="inline" ariaLabel={action.choice.label} value={choice} onChange={setChoice}

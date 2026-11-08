@@ -12,7 +12,7 @@ import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument
 import { deviceHeaders } from "./deviceId"
 import type { KernelSpecs, RunningKernel } from "@/lib/domain/jupyter"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
-import type { LatexBuild, StoredImage, TexProject } from "@/lib/domain/latex"
+import type { LatexBuild, LatexTemplates, StoredImage, SynctexClickedSource, SynctexSource, SynctexView, TemplateSetInfo, TexProject } from "@/lib/domain/latex"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
@@ -624,9 +624,13 @@ export function prepareWorkbench(path: string): Promise<PreparedWorkbench> {
   return post<PreparedWorkbench>("/workbench/prepare", { path })
 }
 
-/** Create workbench document *name* (`.tex` or `.md`) of project *slug* on disk, listed in its files. Resolves to its path. */
-export async function createWorkbenchDocument(slug: string, name: string): Promise<string> {
-  return (await post<{ path: string }>("/workbench/create", { slug, name })).path
+/**
+ * Create workbench document *name* (`.tex` or `.md`) of project *slug* on disk, listed in its files. Resolves to its path.
+ *
+ * - *template* names a LaTeX template set: the document becomes a presentation folder `<stem>/main.tex` with the theme beside it
+ */
+export async function createWorkbenchDocument(slug: string, name: string, template?: string): Promise<string> {
+  return (await post<{ path: string }>("/workbench/create", { slug, name, ...(template ? { template } : {}) })).path
 }
 
 /**
@@ -675,6 +679,21 @@ export function loadTexProject(path: string): Promise<TexProject> {
   return request<TexProject>(`/latex/project${toQuery({ path })}`)
 }
 
+/** The source line and column SyncTeX finds for the spot `x`, `y` (PDF points from the top-left corner) on 1-based *page* of the PDF the root at absolute *root* built. The double-clicked *word* picks its own line of a beamer frame, whose whole body SyncTeX puts on `\end{frame}`, then the clicked character's 0-based *offset* in it and the word's 0-based *occurrence* among equal words of its rendered line give the column. Rejects with ApiError 404 when there is none, 503 without `synctex`. */
+export function findSynctexSource(root: string, page: number, x: number, y: number, word = "", offset = 0, occurrence = 0): Promise<SynctexClickedSource> {
+  return post<SynctexClickedSource>("/latex/synctex", { path: root, page, x, y, ...(word ? { word, offset, occurrence } : {}) })
+}
+
+/** The PDF spot SyncTeX finds for 1-based *line* of the source *file* (absolute) in the PDF the root at absolute *root* built. Rejects with ApiError 404 when there is none, 403 for a file outside the roots, 503 without `synctex`. */
+export function findSynctexView(root: string, file: string, line: number): Promise<SynctexView> {
+  return post<SynctexView>("/latex/synctex/view", { path: root, file, line })
+}
+
+/** The source line after the slide on 1-based *page* of the PDF the root at absolute *root* built, where Neovim's cursor makes "Add slide" put the next frame: the slide's `\end{frame}`, or the heading of a theme's chapter slide. Rejects with ApiError 404 when there is none, 403 for a file outside the roots. */
+export function findSlideEnd(root: string, page: number): Promise<SynctexSource> {
+  return post<SynctexSource>("/latex/synctex/slide", { path: root, page })
+}
+
 /** Make *root* the root of the `.tex` at *path* by writing its `% !TEX root` line. Resolves to the project. */
 export function chooseTexRoot(path: string, root: string): Promise<TexProject> {
   return post<TexProject>("/latex/root", { path, root })
@@ -690,9 +709,19 @@ export async function promoteToTexProject(slug: string, path: string): Promise<s
   return (await post<{ folder: string }>("/workbench/promote", { slug, path })).folder
 }
 
-/** Store a pasted PNG next to the workbench file at absolute *path* (in `imgs/`), resolving to it and the line to insert. */
+/** Store a pasted PNG in the image folder next to the workbench file at absolute *path*, resolving to it, its placeholder path and the line to insert. */
 export function storeWorkbenchImage(path: string, image: Blob): Promise<StoredImage> {
   return request<StoredImage>(`/workbench/image${toQuery({ path })}`, { method: "POST", body: fileForm(image, "image.png") })
+}
+
+/** The template set of the LaTeX root at absolute *root*, `theme` null when it is not a presentation. */
+export function loadLatexTemplates(root: string): Promise<LatexTemplates> {
+  return request<LatexTemplates>(`/latex/templates${toQuery({ root })}`)
+}
+
+/** The template sets a new presentation can start from. */
+export function loadTemplateSets(): Promise<TemplateSetInfo[]> {
+  return request<TemplateSetInfo[]>("/latex/template-sets")
 }
 
 /** Every learn session with the project it is grouped under. Host-access logins only. */

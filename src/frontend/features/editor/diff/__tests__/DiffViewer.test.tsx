@@ -14,7 +14,7 @@ const neovim = vi.hoisted(() => ({ enabled: false, setContent: vi.fn() }))
 vi.mock("@/contexts/SettingsContext", () => ({ useNeovimSetting: () => neovim }))
 vi.mock("@/features/editor/NeovimEditor", () => ({
   NeovimEditor: () => <div>neovim</div>,
-  useNeovimTerminal: () => ({ terminal: null, status: "ready", restart: () => {}, setContent: neovim.setContent }),
+  useNeovimTerminal: () => ({ terminal: null, status: "ready", restart: () => {}, send: (command: { type: string; content?: string; path?: string }) => command.type === "set_content" && neovim.setContent(command.content, command.path) }),
 }))
 // The follow primitive is faked: a test reports a change of a file by calling what the editor registered.
 const follow = vi.hoisted(() => ({ files: [] as readonly string[], onChange: (() => {}) as (path: string) => void }))

@@ -3,7 +3,7 @@
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
-import { NeovimEditor, NeovimStopped, useNeovimTerminal, type NeovimSelection } from "@/features/editor/NeovimEditor"
+import { NeovimEditor, NeovimStopped, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { NotebookDocument, useEditorPath } from "@/features/notebook/NotebookDocument"
 import { createNotebookTextStore } from "@/features/notebook/notebookTextStore"
 import { fileLead } from "@/features/omp/fileLead"
@@ -14,6 +14,7 @@ import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
 import { EditorNote, WorkbenchFrame } from "./WorkbenchFrame"
+import { useWorkbenchView } from "./WorkbenchSplit"
 
 /** The fence language of lines picked in the notebook's Neovim buffer `path` (`<notebook>.ipynb.py`), named by its extension. */
 function quoteLanguage(path: string): string {
@@ -55,6 +56,7 @@ function PreparedNotebookWorkbench({ path, tabId, cwd, ...chatProps }: NotebookW
   const neovim = useNeovimSetting()
   const chat = useWorkbenchChat(path, cwd, fileLead(path, cwd), chatProps)
   const editor = useEditorPath(path)
+  const [view, setView] = useWorkbenchView()
   const sessionKey = `${tabId}:${editor.generation}`
   // One text store per session, so another notebook opened in the tab never starts its session with the previous notebook's text
   const [held, setHeld] = useState(() => ({ key: sessionKey, store: createNotebookTextStore() }))
@@ -74,13 +76,15 @@ function PreparedNotebookWorkbench({ path, tabId, cwd, ...chatProps }: NotebookW
     () => setClosedKey(sessionKey),
     {
       askKeymap: true,
-      onSelection: (selection: NeovimSelection) => chat.quote(quoteSelection({ ...selection, path }, quoteLanguage(selection.path))),
-      onRunCell: (_, line) => textStore.runAt(line),
+      on: {
+        selection: (selection) => chat.quote(quoteSelection({ ...selection, path }, quoteLanguage(selection.path))),
+        run_cell: ({ line }) => textStore.runAt(line),
+      },
     },
   )
 
   const push = useEffectEvent((text: string) => {
-    if (buffer) session.setContent(text, buffer.path)
+    if (buffer) session.send({ type: "set_content", content: text, path: buffer.path })
   })
   // Followed while bound, Neovim open or not, so a session opens on the current text
   const bound = textState !== null
@@ -93,6 +97,8 @@ function PreparedNotebookWorkbench({ path, tabId, cwd, ...chatProps }: NotebookW
 
   return (
     <WorkbenchFrame
+      view={view}
+      onViewChange={setView}
       editor={neovim.enabled ? neovimPage : null}
       renderPane={() => <NotebookDocument editor={editor} tabId={tabId} textStore={textStore} />}
       chat={<WorkbenchChat state={chat} {...chatProps} />}

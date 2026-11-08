@@ -19,7 +19,7 @@ from backend.routes.deps import (
 )
 from backend.routes.fileviewer import resolve_allowed
 import config
-from lib import document_service, latex
+from lib import document_service, latex, latex_templates
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, InvalidStorageKey, Revision, StorageConflictError, StorageNotFoundError, validate_key
 from lib.disk_files import DiskFiles
@@ -33,7 +33,7 @@ from lib.workbench import Kind, document_folder, kind_directory, kind_of, new_fo
 router = APIRouter(prefix="/api/workbench", tags=["workbench"], dependencies=[host_access_only("Workbench")])
 
 _CONTENT: dict[Kind, str] = {"latex": latex.NEW_DOCUMENT, "markdown": ""}
-_IMAGE_DIRECTORY = "imgs"
+_IMAGE_DIRECTORY = latex_templates.IMAGE_DIRECTORY
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -53,8 +53,11 @@ class PreparedFile(BaseModel):
 
 
 class NewDocument(BaseModel):
+    """The document `name` of project `slug`, a LaTeX presentation of the template set `template` when given."""
+
     slug: str
     name: str
+    template: str | None = None
 
 
 class Promotion(BaseModel):
@@ -69,9 +72,10 @@ class PromotedFolder(BaseModel):
 
 
 class StoredImage(BaseModel):
-    """Where a pasted image went and the text that references it from the file it was pasted into."""
+    """Where a pasted image went, its path relative to the folder it is stored under (the project folder for LaTeX) and the text that references it from the file it was pasted into."""
 
     path: str
+    placeholder_path: str
     reference: str
     changed: list[str] = []
 
@@ -179,29 +183,35 @@ def post_prepare(
 def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_store)) -> FilePath:
     """Create the document `name` of project `slug` in its workbench folder and list it in the project's files.
 
+    - With `template` the document is a LaTeX project folder, listed as such: `main.tex` from the set's skeleton, its theme `.sty` and `imgs/`
+    - A template for a Markdown document or one that is no template set answers 400
     - A folder that exists already answers 409 even without a file of that name, a leftover is never adopted
-    - A failure to list it removes the new file and the folders made for it
+    - A failure to list it removes the new folder with everything written into it
     """
     name = body.name.strip()
     kind = _kind(name)
     if kind == "pdf" or Path(name).suffix.lower() != suffix_of(kind):
         raise HTTPException(status_code=400, detail="New documents are .md or .tex")
+    template = None if body.template is None else latex_templates.template_set(body.template)
+    if body.template is not None and (kind != "latex" or template is None):
+        raise HTTPException(status_code=400, detail="Unknown presentation template")
     with http_errors((FileNotFoundError, 404, "Project not found"), (ValueError, 400, None)):
         store.require(body.slug)
         folder = document_folder(config.WORKBENCH, kind, body.slug, name.removesuffix(Path(name).suffix))
-    source = folder / f"{folder.name}{suffix_of(kind)}"
     conflict = "A document with that name already exists"
     if folder.exists():
         raise HTTPException(status_code=409, detail=conflict)
     with new_folder(folder):
-        with http_errors((FileExistsError, 409, conflict)), source.open("x", encoding="utf-8") as file:
-            file.write(_CONTENT[kind])
-        try:
-            store.add_file(body.slug, str(source))
-        except BaseException:
-            source.unlink(missing_ok=True)
-            raise
-    return FilePath(path=str(source))
+        if template is None:
+            written = listed = folder / f"{folder.name}{suffix_of(kind)}"
+            with http_errors((FileExistsError, 409, conflict)), written.open("x", encoding="utf-8") as file:
+                file.write(_CONTENT[kind])
+        else:
+            written, listed = folder / "main.tex", folder
+            with http_errors((FileExistsError, 409, conflict)):
+                template.populate(folder)
+        store.add_file(body.slug, str(listed))
+    return FilePath(path=str(written))
 
 
 @router.post("/promote")
@@ -237,7 +247,8 @@ def post_image(
     """Store the PNG `file` pasted into the workbench file `path` as `imgs/img-<YYYYMMDD-HHMMSS>.png` and say how to reference it.
 
     - A LaTeX file stores into its project folder and is referenced by `\\includegraphics`, a Markdown file next to itself with `![]()`
-    - A LaTeX root that does not load `graphicx` gets it, so the reference builds
+    - A LaTeX presentation of a template set is referenced by the set's image macro
+    - A LaTeX root that does not load `graphicx` gets it, so the reference builds. Beamer, so every presentation, loads it
     - Anything but a PNG answers 400, more than 20 MB 413, a name already taken 409
     """
     source = resolve_allowed(path, roots)
@@ -251,17 +262,26 @@ def post_image(
         raise HTTPException(status_code=400, detail="Only PNG images can be pasted")
     project = None if kind == "markdown" else latex.project_of(source, ceiling=roots.ceiling_of(source))
     base = source.parent if project is None else project.folder
+    theme = None if project is None or project.root is None else latex_templates.presentation_theme(project.root)
     name = f"img-{datetime.now():%Y%m%d-%H%M%S}.png"
     target = base / _IMAGE_DIRECTORY / name
     with http_errors((FileExistsError, 409, "An image with that name exists already"), (OSError, 400, None)):
         target.parent.mkdir(parents=True, exist_ok=True)
         target = files.create(target, content)
     changed = []
-    if project is not None and project.root is not None and latex.ensure_package(project.root, "graphicx"):
+    if project is not None and project.root is not None and theme is None and latex.ensure_package(project.root, "graphicx"):
         files.record(project.root)
         changed.append(str(project.root))
-    reference = rf"\includegraphics[width=\linewidth]{{{_IMAGE_DIRECTORY}/{name}}}" if kind == "latex" else f"![]({_IMAGE_DIRECTORY}/{name})"
-    return StoredImage(path=str(target), reference=reference, changed=changed)
+    image = f"{_IMAGE_DIRECTORY}/{name}"
+    return StoredImage(path=str(target), placeholder_path=image, reference=_image_reference(kind, theme, image), changed=changed)
+
+
+def _image_reference(kind: Kind, theme: latex_templates.TemplateSet | None, image: str) -> str:
+    """The text that shows *image* in a *kind* document: Markdown `![]()`, the presentation *theme*'s image macro, else `\\includegraphics`."""
+    if kind == "markdown":
+        return f"![]({image})"
+    themed = None if theme is None else theme.image_reference(image)
+    return themed or rf"\includegraphics[width=\linewidth]{{{image}}}"
 
 
 @router.get("/session")

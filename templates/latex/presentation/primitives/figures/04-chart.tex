@@ -1,0 +1,10 @@
+% Chart: one pgfplots chart in the house style, direct labels at the line ends, the series in focus in accent
+\begin{frame}[c]{Claim the chart proves}{Unit and direction in one line, lower is better}
+  \begin{tikzpicture}
+    \begin{axis}[gc chart,xlabel={Unit of the x axis},xtick={1,...,6},ymin=0,ymax=100]
+      \addplot coordinates {(1,82) (2,80) (3,84) (4,79) (5,81) (6,80)} node[gc label]{Baseline};
+      \addplot[gc focus] coordinates {(1,80) (2,64) (3,52) (4,45) (5,41) (6,39)} node[gc label]{New method};
+    \end{axis}
+  \end{tikzpicture}
+  \note{What you say about the chart: what the axes measure, where the lines part and why the gap matters.}
+\end{frame}

@@ -1,7 +1,7 @@
 """Prompt store backed by the database-native ``prompt`` namespace.
 
-Reads ``prompts/*.md`` files with YAML frontmatter and resolves ``{{block}}``
-includes from ``prompts/_blocks/*.md``.
+Reads ``templates/prompts/*.md`` files with YAML frontmatter and resolves ``{{block}}``
+includes from ``templates/prompts/_blocks/*.md``.
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from functools import cached_property
 import logging
 from pathlib import Path
 import re
-import sys
 
 import yaml
 
+import config
 from lib.data_store import DataStore, StorageNotFoundError, overwrite_text, read_text_or
 from lib.storage_namespace import PROMPT
 
@@ -45,7 +45,7 @@ def seed_prompts(store: DataStore) -> None:
     An existing collection is authoritative, including deleted prompts. Defaults
     remain source assets; all subsequent editor writes go to persistent storage.
     """
-    source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "prompts"
+    source = config.TEMPLATES / "prompts"
     if not source.is_dir() or store.exists(PROMPT):
         return
     store.mkdir(PROMPT)

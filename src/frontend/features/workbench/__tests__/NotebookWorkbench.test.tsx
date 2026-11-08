@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { useEffect } from "react"
-import type { NeovimDocument, NeovimSelection } from "@/features/editor/NeovimEditor"
+import type { NeovimDocument } from "@/features/editor/NeovimEditor"
+import type { NeovimCommand, NeovimEventHandlers } from "@/features/editor/neovimProtocol"
 import { FakeNotebook } from "@/features/notebook/__tests__/fakeNotebook"
 import type { NotebookTextStore } from "@/features/notebook/notebookTextStore"
 import { NOTEBOOK_TEXT_DELAY_MS } from "@/features/notebook/notebookTextStore"
@@ -15,14 +16,14 @@ const api = vi.hoisted(() => ({
   informFileSession: vi.fn(),
   fetchNotebookDirectory: vi.fn<(path: string) => Promise<string>>(),
 }))
-interface NeovimOptions { askKeymap?: boolean; onSelection?: (selection: NeovimSelection) => void; onRunCell?: (path: string, line: number) => void }
+interface NeovimOptions { askKeymap?: boolean; on?: NeovimEventHandlers }
 const neovim = vi.hoisted(() => ({
   enabled: true,
   documents: [] as (NeovimDocument | null)[],
   save: null as ((text: string, path: string) => Promise<string>) | null,
   quit: null as (() => void) | null,
   options: {} as NeovimOptions,
-  setContent: vi.fn(() => true),
+  send: vi.fn<(command: NeovimCommand) => boolean>(() => true),
 }))
 const notebook = vi.hoisted(() => ({ model: null as FakeNotebook | null, persist: vi.fn(async () => true), run: vi.fn() }))
 vi.mock("@/lib/backend/api", () => api)
@@ -36,7 +37,7 @@ vi.mock("@/features/editor/NeovimEditor", () => ({
     neovim.save = save
     neovim.quit = quit
     neovim.options = options
-    return { terminal: null, status: { state: "running" }, restart: () => {}, setContent: neovim.setContent }
+    return { terminal: null, status: { state: "running" }, restart: () => {}, send: neovim.send }
   },
 }))
 // Keyed by the generation like the real one, so another notebook in the tab mounts afresh and binds `notebook.model` as it is then
@@ -134,7 +135,7 @@ describe("NotebookWorkbench chat", () => {
     const onDrawerOpenChange = vi.fn()
     const { rerender } = render(workbenchOf(false, onDrawerOpenChange))
     await screen.findByText(`notebook ${PATH}`)
-    act(() => neovim.options.onSelection?.({ path: `${PATH}.py`, start_line: 2, end_line: 3, text: "x = 1\ny = 2" }))
+    act(() => neovim.options.on?.selection?.({ type: "selection", path: `${PATH}.py`, start_line: 2, end_line: 3, text: "x = 1\ny = 2" }))
     expect(onDrawerOpenChange).toHaveBeenCalledWith(true)
 
     rerender(workbenchOf(true, onDrawerOpenChange))
@@ -163,7 +164,7 @@ describe("NotebookWorkbench Neovim", () => {
     await expect(neovim.save?.("# %%\nx = 2\n\n# %%\ny = 1\n", `${PATH}.py`)).resolves.toBe("# %%\nx = 2\n\n# %%\ny = 1\n")
     expect(model.cells.map((cell) => cell.source)).toEqual(["x = 2", "y = 1"])
     expect(notebook.persist).toHaveBeenCalledTimes(1)
-    neovim.options.onRunCell?.(`${PATH}.py`, 4)
+    neovim.options.on?.run_cell?.({ type: "run_cell", path: `${PATH}.py`, line: 4 })
     expect(notebook.run).toHaveBeenCalledWith(1)
   })
 
@@ -177,7 +178,7 @@ describe("NotebookWorkbench Neovim", () => {
       model.edit(0, "x = 3")
       vi.advanceTimersByTime(NOTEBOOK_TEXT_DELAY_MS)
     })
-    expect(neovim.setContent).toHaveBeenCalledWith("# %%\nx = 3\n", `${PATH}.py`)
+    expect(neovim.send).toHaveBeenCalledWith({ type: "set_content", content: "# %%\nx = 3\n", path: `${PATH}.py` })
   })
 
   it("leaves the notebook alone after :q and starts a fresh session on its current text, edits made while closed included", async () => {

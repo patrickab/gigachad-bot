@@ -1,0 +1,8 @@
+% Sender of every letter: edit here once, each new letter gets a copy beside its main.tex
+\ProvidesFile{sender.lco}[letter sender]
+\setkomavar{fromname}{Patrick Bitzer}
+\setkomavar{fromaddress}{Dahlienstr. 19\\80935 München}
+\setkomavar{fromphone}{+49 157 8479 5075}
+\setkomavar{fromemail}{patrick.a.bitzer@gmail.com}
+\setkomavar{place}{München}
+\setkomavar{signature}{Patrick Bitzer}
