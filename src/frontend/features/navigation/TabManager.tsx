@@ -9,7 +9,7 @@ import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
 import { announceFileClosed, onFileRemoval } from "@/lib/backend/fileEvents"
-import { BlankChatContext, TabStripContext, blankChatTab, filesOfTabs, nextTab, opensBesideWorkbench, parseSavedTabs, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab, type TabPeek, type TabStripValue } from "./tabs"
+import { TabStripContext, filesOfTabs, nextTab, opensBesideWorkbench, parseSavedTabs, relocatedTab, renamedTab, tabAfterClosing, tabLabel, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab, type TabPeek, type TabStripValue } from "./tabs"
 import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
@@ -26,8 +26,6 @@ export interface TabManagerHandle {
   getTabs: () => Tab[]
   openTab: (tab: Tab) => void
   showChat: (historyFile: string) => void
-  /** Start a chat in project `projectSlug`: an untouched chat tab takes it over, else a new tab opens. */
-  newChat: (projectSlug: string | null) => void
   showItem: (item: WorkspaceItem) => void
   relocateHistories: (moves: ReadonlyMap<string, string>) => void
   /** Point every tab of project `oldSlug` at `newSlug`, its content then reloads from the moved keys. */
@@ -117,13 +115,6 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   // What the state holds, kept ahead of it by removals so several in one tick each see the previous one's result.
   const shown = useRef({ tabs, activeTab })
   useEffect(() => { shown.current = { tabs, activeTab } }, [tabs, activeTab])
-  // Tabs whose chat has no messages yet, reported by each tab's workspace
-  const blankChats = useRef(new Set<string>())
-  const setBlankChat = useCallback((id: string, blank: boolean) => {
-    if (blank) blankChats.current.add(id)
-    else blankChats.current.delete(id)
-  }, [])
-
   // Restored after hydration, the server renders the initial tab. The ref survives Strict Mode's effect replay, which would restore the initial tab saved meanwhile.
   const restored = useRef(false)
   useLayoutEffect(() => {
@@ -159,17 +150,6 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
           historyFile, chatId: crypto.randomUUID(), title: null, name: null, workspaceItem: null,
         } : {}),
       }))
-    },
-    newChat: (projectSlug) => {
-      const blank = blankChatTab(tabs, activeTab, (id) => blankChats.current.has(id))
-      if (blank) {
-        if (blank.projectSlug !== projectSlug) updateTab(blank.id, () => ({ projectSlug }))
-        setActiveTab(blank.id)
-        return
-      }
-      const opened = { ...nextTab(defaultConfig), projectSlug }
-      setTabs((prev) => [...prev, opened])
-      setActiveTab(opened.id)
     },
     showItem: (item) => {
       // A file open in another tab switches there instead of showing twice.
@@ -303,27 +283,25 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
 
   return (
     <TabStripContext.Provider value={strip}>
-      <BlankChatContext.Provider value={setBlankChat}>
-        <TabPeekContext.Provider value={peekedTabId}>
-          <div ref={rootRef} className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
-            {tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className="workspace-tab absolute inset-0 h-full"
-                data-phase={tab.id === peekedTabId ? "peek" : phaseOf(tab.id)}
-                aria-hidden={tab.id !== activeTab}
-                inert={tab.id !== activeTab}
-                onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
-                style={{ display: isShown(tab.id) || tab.id === peekedTabId ? undefined : "none" }}
-              >
-                <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
-                  {children}
-                </TabScope>
-              </div>
-            ))}
-          </div>
-        </TabPeekContext.Provider>
-      </BlankChatContext.Provider>
+      <TabPeekContext.Provider value={peekedTabId}>
+        <div ref={rootRef} className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className="workspace-tab absolute inset-0 h-full"
+              data-phase={tab.id === peekedTabId ? "peek" : phaseOf(tab.id)}
+              aria-hidden={tab.id !== activeTab}
+              inert={tab.id !== activeTab}
+              onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
+              style={{ display: isShown(tab.id) || tab.id === peekedTabId ? undefined : "none" }}
+            >
+              <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
+                {children}
+              </TabScope>
+            </div>
+          ))}
+        </div>
+      </TabPeekContext.Provider>
     </TabStripContext.Provider>
   )
 }

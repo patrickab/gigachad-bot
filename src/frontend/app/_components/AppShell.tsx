@@ -78,8 +78,8 @@ export function AppShell() {
   }, [settings.tabDefaults])
 
   const handleNewChat = useCallback((slug: string | null) => {
-    tabManagerRef.current?.newChat(slug)
-  }, [])
+    openNewTab({ projectSlug: slug })
+  }, [openNewTab])
 
   const handleOpenProject = useCallback((slug: string) => {
     const manager = tabManagerRef.current

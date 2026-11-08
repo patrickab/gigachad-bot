@@ -1,6 +1,6 @@
 "use client"
 
-import { useContext, useEffect, useState } from "react"
+import { useState } from "react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { useSidebar } from "@/features/navigation/SidebarContext"
@@ -12,7 +12,6 @@ import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { TabPicker } from "@/features/navigation/TabPicker"
-import { BlankChatContext } from "@/features/navigation/tabs"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
@@ -74,11 +73,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const [folder, setFolder] = useState<string | null>(null)
   const [ompLaunch, setOmpLaunch] = useState<ComposerLaunch | null>(null)
   const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
-  const setBlankChat = useContext(BlankChatContext)
-  useEffect(() => {
-    setBlankChat?.(tab.id, isEmptyChat)
-    return () => setBlankChat?.(tab.id, false)
-  }, [setBlankChat, tab.id, isEmptyChat])
   const handleSend = (text: string, attachments: Attachment[]) => {
     if (folder === null || !isEmptyChat) {
       turns.handleSend(text, attachments)

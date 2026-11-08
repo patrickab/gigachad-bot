@@ -78,12 +78,6 @@ export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: strin
   return tabs.find((tab) => tab.id === activeId && shows(tab)) ?? tabs.find(shows)
 }
 
-/** An untouched chat tab a new chat takes over instead of opening another tab, the active one first; `isBlank` tells whether a tab's chat has no messages. */
-export function blankChatTab(tabs: Tab[], activeId: string, isBlank: (id: string) => boolean): Tab | undefined {
-  const blank = (tab: Tab) => tab.appMode === "chat" && !tab.historyFile && !tab.workspaceItem && isBlank(tab.id)
-  return tabs.find((tab) => tab.id === activeId && blank(tab)) ?? tabs.find(blank)
-}
-
 /** Open tabs saved across a reload of this browser tab. */
 export interface SavedTabs { tabs: Tab[]; activeId: string }
 
@@ -202,6 +196,3 @@ export interface TabStripValue {
   peek: (peek: TabPeek | null) => void
 }
 export const TabStripContext = createContext<TabStripValue | null>(null)
-
-/** Reports whether tab `id`'s chat is blank (no messages), so a new chat can take that tab over. */
-export const BlankChatContext = createContext<((id: string, blank: boolean) => void) | null>(null)

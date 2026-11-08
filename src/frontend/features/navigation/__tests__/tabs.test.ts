@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { WorkspaceItem } from "@/contexts/TabContext"
-import { blankChatTab, nextTab, parseSavedTabs, relocatedTab, renamedTab, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
+import { nextTab, parseSavedTabs, relocatedTab, renamedTab, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
@@ -154,17 +154,6 @@ describe("tabShowingItem", () => {
     expect(tabShowingItem([first], { ...canvas, path: "project/proj/document/other.canvas" }, "")).toBeUndefined()
     const omp: WorkspaceItem = { kind: "omp", path: "/repo", projectSlug: null }
     expect(tabShowingItem([tabWith(omp)], omp, "")).toBeUndefined()
-  })
-})
-
-describe("blankChatTab", () => {
-  it("takes an untitled chat without messages or item, the active one first", () => {
-    const [blank, active, saved] = [nextTab(), nextTab(), { ...nextTab(), historyFile: "chat/proj/a.json" }]
-    const withItem = tabWith({ kind: "canvas", path: "b.canvas", projectSlug: null })
-    const tabs = [saved, withItem, blank, active]
-    expect(blankChatTab(tabs, active.id, () => true)).toBe(active)
-    expect(blankChatTab(tabs, active.id, (id) => id !== active.id)).toBe(blank)
-    expect(blankChatTab([saved, { ...withItem, appMode: "chat" as const }], "", () => true)).toBeUndefined()
   })
 })
 
