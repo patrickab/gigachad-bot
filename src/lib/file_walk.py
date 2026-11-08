@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from pathspec import GitIgnoreSpec
 
-from lib.latex import is_build_output
+from lib.latex import BUILD_DIRECTORY, aux_source_name
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -68,23 +68,33 @@ def _is_ignored(path: str, is_dir: bool, layers: _IgnoreLayers) -> bool:
     return ignored
 
 
+def _is_build_output(entry: os.DirEntry, siblings: dict[str, os.DirEntry]) -> bool:
+    """`latex.is_build_output` of *entry*, answered from its scanned *siblings* instead of a stat per entry."""
+    if entry.name == BUILD_DIRECTORY or entry.name.endswith(".view.pdf"):
+        return True
+    source = siblings.get(aux_source_name(entry.name) or "")
+    return source is not None and source.is_file()
+
+
 def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[list[tuple[os.DirEntry, bool]], _IgnoreLayers]:
     """Entries of *directory* as ``(entry, is_dir)`` minus skipped, git-ignored and LaTeX build output ones, plus the layers for its children.
 
     An ignored folder is dropped whole, as in git, so nothing inside it can be re-included.
     """
     layers = _with_gitignore(directory, inherited)
+    if BUILD_DIRECTORY in Path(directory).parts:
+        return [], layers
     try:
-        entries = list(os.scandir(directory))
+        siblings = {entry.name: entry for entry in os.scandir(directory)}
     except OSError:
         return [], layers
     visible = []
-    for entry in entries:
+    for entry in siblings.values():
         is_dir = entry.is_dir(follow_symlinks=False)
         # A linked worktree's `.git` is a file pointing at the clone, skipped like the folder.
         if (is_dir and entry.name in _SKIP_DIRS) or entry.name == ".git" or _is_ignored(entry.path, is_dir, layers):
             continue
-        if is_build_output(Path(entry.path)):
+        if _is_build_output(entry, siblings):
             continue
         visible.append((entry, is_dir))
     return visible, layers

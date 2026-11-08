@@ -253,8 +253,14 @@ def is_build_output(path: Path) -> bool:
     """Whether *path* is LaTeX build output: inside `.latex-build/`, a `*.view.pdf`, or an aux file of a sibling `.tex`."""
     if BUILD_DIRECTORY in path.parts or path.name.endswith(".view.pdf"):
         return True
-    suffix = next((suffix for suffix in _AUX_SUFFIXES if path.name.endswith(suffix)), None)
-    return suffix is not None and path.with_name(f"{path.name.removesuffix(suffix)}.tex").is_file()
+    source = aux_source_name(path.name)
+    return source is not None and path.with_name(source).is_file()
+
+
+def aux_source_name(name: str) -> str | None:
+    """Name of the `.tex` file whose aux file *name* would be (`main.aux` -> `main.tex`), None without an aux suffix."""
+    suffix = next((suffix for suffix in _AUX_SUFFIXES if name.endswith(suffix)), None)
+    return None if suffix is None else f"{name.removesuffix(suffix)}.tex"
 
 
 def _read_head(source: Path) -> str:
