@@ -10,6 +10,11 @@ export function dirName(path: string): string {
   return i === -1 ? "" : path.slice(0, i)
 }
 
+/** `path` with a home directory shown as `~`. */
+export function shortPath(path: string): string {
+  return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~")
+}
+
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
 
 export type FileKind = "image" | "pdf" | "markdown" | "text"

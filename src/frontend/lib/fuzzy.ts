@@ -1,3 +1,5 @@
+import { baseName } from "@/lib/paths"
+
 /**
  * Subsequence fuzzy scorer shared by the file pickers. Returns `null` when the
  * query is not a subsequence of the text; higher scores rank better. Adjacent
@@ -24,4 +26,20 @@ export function fuzzyScore(text: string, query: string): number | null {
     ti = found + 1
   }
   return score - text.length * 0.01
+}
+
+/** Score of `path` for `query`: a match in `name`, its last segment by default, outranks the same match spread over the folders. */
+export function fuzzyPathScore(path: string, query: string, name: string = baseName(path)): number | null {
+  const byName = fuzzyScore(name, query)
+  const byPath = fuzzyScore(path, query)
+  return byName === null ? byPath : Math.max(byName + 1, byPath ?? -Infinity)
+}
+
+/** The `items` `score` matches, best first. */
+export function rankByScore<T>(items: readonly T[], score: (item: T) => number | null): T[] {
+  return items
+    .map((item) => ({ item, score: score(item) }))
+    .filter((ranked): ranked is { item: T; score: number } => ranked.score !== null)
+    .sort((left, right) => right.score - left.score)
+    .map(({ item }) => item)
 }

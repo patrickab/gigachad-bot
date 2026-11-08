@@ -2,13 +2,13 @@
 
 import { useContext, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { Plus, X } from "lucide-react"
-import { FloatingPicker } from "@/components/ui/CommandPicker"
+import { FloatingPicker, isRemoveRowKey, neighbourKey } from "@/components/ui/CommandPicker"
 import { useTab, type Tab } from "@/contexts/TabContext"
 import { useDisplayName, useProject } from "@/contexts/ProjectContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { PATH_COLLATOR } from "@/lib/paths"
-import { isEditableTarget } from "@/lib/utils"
+import { isAltOnly, isEditableTarget } from "@/lib/utils"
 import { TabStripContext, tabLocation, type TabStripValue } from "./tabs"
 
 const GENERAL = "general"
@@ -29,17 +29,9 @@ function isPickerSpace(event: KeyboardEvent): boolean {
   return plain && event.code === "Space" && !isEditableTarget(target, { includeSelect: true }) && !target?.closest(SPACE_CONTROLS)
 }
 
-/** Only Alt held, the modifier of the tab shortcuts (`TabManager`). */
-function altOnly(event: ReactKeyboardEvent): boolean {
-  return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
-}
-
-/** Delete with the search caret at its end (before that it edits the search), or Alt+W: close the highlighted tab and keep picking. */
+/** Delete at the search's end, or Alt+W: close the highlighted tab and keep picking. */
 function isCloseTabKey(event: ReactKeyboardEvent<HTMLInputElement>): boolean {
-  const input = event.currentTarget
-  const caretAtEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length
-  const bare = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
-  return (event.key === "Delete" && bare && caretAtEnd) || (event.key === "w" && altOnly(event))
+  return isRemoveRowKey(event) || (event.key === "w" && isAltOnly(event))
 }
 
 /**
@@ -132,7 +124,7 @@ export function TabPicker() {
     renderPreview={(entry) => entry.tab.id === strip.activeTabId ? null : <TabPeekSlot tabId={entry.tab.id} peek={strip.peek} />}
     initialKey={strip.activeTabId}
     onKeyDown={(event, entry, list) => {
-      const opensTab = event.key === "t" && altOnly(event)
+      const opensTab = event.key === "t" && isAltOnly(event)
       if (!opensTab && !isCloseTabKey(event)) return false
       // Handled here, so `TabManager`'s shortcut never switches away from the tab holding this picker
       event.preventDefault()
@@ -143,9 +135,7 @@ export function TabPicker() {
       }
       // The current tab holds this picker, it stays
       if (!entry || !closable || entry.tab.id === strip.activeTabId) return true
-      // The highlight moves on to the next row, the previous at the end
-      const index = list.keys.indexOf(entry.tab.id)
-      const neighbour = list.keys[index + 1] ?? list.keys[index - 1]
+      const neighbour = neighbourKey(list, entry.tab.id)
       if (neighbour) list.highlight(neighbour)
       strip.close(entry.tab.id)
       return true

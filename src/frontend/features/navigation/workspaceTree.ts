@@ -5,7 +5,7 @@ import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import type { AppSurface } from "@/contexts/TabContext"
 import { projectMount } from "@/features/omp/sessions"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
-import type { FileTreeNode } from "@/lib/domain/files"
+import { mountOf, type FileTreeNode } from "@/lib/domain/files"
 import type { BranchMeta } from "@/lib/domain/histories"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { isInside } from "@/lib/paths"
@@ -61,9 +61,6 @@ type CodeTreeContext =
     pending: (key: string) => boolean
     onDiffSelect?: (path: string) => void
   }
-
-/** Registered path of a file-root node: its mount when set, else its own path. */
-export const mountOf = (node: FileTreeNode): string => node.mount ?? node.path
 
 /** Drag kind of a stored project file: it moves into another project's files or a Code folder, never among chats or canvases. */
 const PROJECT_FILE_DRAG_KIND = "project-file"

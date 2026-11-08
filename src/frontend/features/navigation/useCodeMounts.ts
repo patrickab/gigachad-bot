@@ -11,11 +11,10 @@ import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
 import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
 import { fileRootTree, removeFileRoot } from "@/lib/backend/api"
 import { onFileChange, onFileMove } from "@/lib/backend/fileEvents"
-import { isNewFileIn, type FileTreeNode } from "@/lib/domain/files"
+import { isNewFileIn, mountOf, type FileTreeNode } from "@/lib/domain/files"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
 import { useWorktrees } from "./useWorktrees"
-import { mountOf } from "./workspaceTree"
 
 interface CodeMountsOptions {
   onRootsChanged?: () => void

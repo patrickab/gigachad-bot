@@ -20,6 +20,10 @@ import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
 import { itemOf, useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { opensInWorkbench } from "@/lib/domain/workbench"
+import type { Attachment } from "@/lib/domain/types"
+import type { ComposerLaunch } from "@/features/omp/OmpComposer"
+import { ompItem } from "@/features/omp/useOmpSidebar"
+import { WorkspacePicker } from "@/features/omp/WorkspacePicker"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
@@ -64,6 +68,21 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
 
+  // A folder picked in an empty chat makes its first message start an omp session there, the omp tab's composer sends it.
+  // The picker shows only in an empty chat, so a folder left over from one never redirects another chat's message
+  const [folder, setFolder] = useState<string | null>(null)
+  const [ompLaunch, setOmpLaunch] = useState<ComposerLaunch | null>(null)
+  const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
+  const handleSend = (text: string, attachments: Attachment[]) => {
+    if (folder === null || !isEmptyChat) {
+      turns.handleSend(text, attachments)
+      return
+    }
+    setOmpLaunch({ text, attachments })
+    setFolder(null)
+    onOpenItem(ompItem({ kind: "new", cwd: folder }, folder, projectSlug))
+  }
+
   const chatBody = (
     <ChatContainer
       chatId={chatId}
@@ -73,7 +92,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
       extracting={extracting}
-      onSend={turns.handleSend}
+      onSend={handleSend}
       onCancel={chat.cancel}
       onRegenerate={turns.handleRegenerate}
       onBranch={onBranch}
@@ -83,6 +102,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       slug={projectSlug}
       attachmentActions={attachmentActions}
       attachMenuItems={attachMenuItems}
+      composerLeading={isEmptyChat ? <WorkspacePicker folder={folder} onChange={setFolder} /> : undefined}
       composerNotice={docs.architectureError || undefined}
     />
   )
@@ -123,6 +143,9 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           chatBody={chatBody}
           refreshDocuments={docs.refreshDocuments}
           ompShellCommands={ompShellCommands}
+          ompLaunch={ompLaunch}
+          onOmpLaunched={() => setOmpLaunch(null)}
+          onOpenItem={onOpenItem}
         />
         {isActive && standaloneFile && (
           // File-picker overlays sit below the bar, over whatever surface is open.
@@ -175,8 +198,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           onClose={() => docs.setDocumentOpen(false)}
         />
       )}
-      <MemoryCommandLayer bar={memory} items={menuItems} onRun={runMenuCommand} />
       <TabPicker />
+      <MemoryCommandLayer bar={memory} items={menuItems} onRun={runMenuCommand} />
     </div>
   )
 }

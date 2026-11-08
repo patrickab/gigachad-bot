@@ -218,6 +218,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- OmpProvider.tsx
 |       |   |   |-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
 |       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file or LaTeX project folder, menu, New session (`fileLead.ts`: `File:`/`Project:` leads)
+|       |   |   |-- SessionPicker.tsx Top-bar session picker: running, recent and older omp sessions from the shared overview
+|       |   |   |-- WorkspacePicker.tsx Composer project selector of an empty chat: fuzzy picker over file mounts and omp workspaces, a pick makes the first message start an omp session
 |       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Neovim, quoting, status slot and editor notes on `WorkbenchFrame`, kinds supply `renderPane`
@@ -283,8 +285,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- hooks/                    Feature-independent interaction hooks
 |       |   |-- useEventListener.ts, useEscapeLayer.ts, useOutsidePress.ts
 |       |   |-- useFollowFiles.ts     Follow absolute files and folders on disk, `onChange(path)`
-|       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the shared omp/learn frame over a tab's slot, previewed tab first
+|       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
 |       |   |-- backend/              HTTP, URL, runtime API base and stream clients
 |       |   |   |-- api.ts                Resource endpoints over one fetch core

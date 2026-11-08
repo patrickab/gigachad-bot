@@ -31,7 +31,7 @@ const NAVIGATION_ACK_MS = 5_000
 const READY_TIMEOUT_MS = 20_000
 
 /** Shell shortcuts that must keep working while focus sits inside the frame. */
-const FORWARD_KEYS: KeyChord[] = ["t", "w", "d"].map((key) => ({ key, altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }))
+const FORWARD_KEYS: KeyChord[] = ["t", "w", "d", "a"].map((key) => ({ key, altKey: true, ctrlKey: false, metaKey: false, shiftKey: false }))
 
 export type FrameStatus = "loading" | "ready" | "unreachable"
 

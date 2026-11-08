@@ -11,7 +11,7 @@ export interface ArchiveEntry {
 export function ArchiveSelector({ noun, entries, onRestore }: { noun: string; entries: ArchiveEntry[]; onRestore: (key: string) => void }) {
   return <PopoverSelector
     triggerLabel={`Show all ${noun}`} triggerContent={<Archive className="h-3 w-3" />}
-    triggerClassName="h-auto rounded p-1 text-ink-faint opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+    triggerClassName="h-auto rounded p-1 text-ink-faint opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100"
     label={`All ${noun}`} placement="below" panelClassName="left-auto right-0 w-56"
     categories={[{ key: noun, label: `All ${noun}`, items: entries }]}
     itemKey={(entry) => entry.key} isSelected={(entry) => !entry.archived}

@@ -1,7 +1,7 @@
 import type { Attachment, ModelsResponse, OmpView } from "@/lib/domain/types"
 import { blobToDataUrl } from "@/lib/utils"
 import { OMP_LITELLM_ID } from "@/lib/models"
-import { fuzzyScore } from "@/lib/fuzzy"
+import { fuzzyPathScore, fuzzyScore, rankByScore } from "@/lib/fuzzy"
 import { buildHiddenContent, composeUserMessage, isImageAttachment } from "@/features/chat/attachments"
 import type { ComposerImage, FrameMessage, ModelRef } from "@gigachad/chat-ui/protocol"
 
@@ -38,11 +38,7 @@ export function skillQueryOf(query: string): string | null {
 /** Items whose name matches `query`, best first. No query lists them by name. */
 export function rankByName<Item extends { name: string }>(items: Item[], query: string): Item[] {
   if (!query) return [...items].sort((left, right) => left.name.localeCompare(right.name))
-  return items
-    .map((item) => ({ item, score: fuzzyScore(item.name, query) }))
-    .filter((ranked): ranked is { item: Item; score: number } => ranked.score !== null)
-    .sort((left, right) => right.score - left.score)
-    .map(({ item }) => item)
+  return rankByScore(items, (item) => fuzzyScore(item.name, query))
 }
 
 /** An option label as a menu row: a path shows its last segment, the folder beside it (`./scripts/a.sh` -> `a.sh`, `./scripts`). */
@@ -55,14 +51,7 @@ export function optionParts(option: string): { name: string; lead: string } {
 export function rankOptions(options: string[], query: string): string[] {
   const trimmedQuery = query.trim()
   if (!trimmedQuery) return options
-  return options
-    .map((option) => {
-      const byName = fuzzyScore(optionParts(option).name, trimmedQuery)
-      return { option, score: Math.max(byName === null ? -Infinity : byName + 1, fuzzyScore(option, trimmedQuery) ?? -Infinity) }
-    })
-    .filter(({ score }) => score > -Infinity)
-    .sort((left, right) => right.score - left.score)
-    .map(({ option }) => option)
+  return rankByScore(options, (option) => fuzzyPathScore(option, trimmedQuery, optionParts(option).name))
 }
 
 /** Draft after a restore, mirror of omp-web's `mergeRecoveredText` (`lib/draft-store.ts`): later restores replace the block an earlier one put in front. */

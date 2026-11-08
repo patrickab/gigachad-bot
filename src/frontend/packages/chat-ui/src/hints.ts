@@ -135,9 +135,10 @@ function visibleTargets(isCovered: (rect: DOMRect) => boolean): Target[] {
   })
 }
 
+/** Focus a text entry, click anything else: focusing a button from a keystroke would leave a lasting focus-visible ring. */
 function activateElement(target: HTMLElement) {
-  target.focus({ preventScroll: true })
-  if (!isTextEntry(target)) target.click()
+  if (isTextEntry(target)) target.focus({ preventScroll: true })
+  else target.click()
 }
 
 /** One hidden badge per target in a top-layer popover, above every dialog. */

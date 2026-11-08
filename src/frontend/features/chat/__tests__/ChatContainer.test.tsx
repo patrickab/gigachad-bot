@@ -12,8 +12,9 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useSettings: () => ({ ocrModel: "" }),
   useNeovimSetting: () => ({ available: false, enabled: false, setPreferred: () => {} }),
 }))
-// jsdom lays nothing out: give the column and composer a size so the empty state can center
-vi.mock("@/hooks/useElementSize", () => ({ useElementSize: () => ({ width: 800, height: 600 }) }))
+// jsdom lays nothing out: size the composer (measured first each render) and the column (second) so the empty state can center
+const sizeCalls = vi.hoisted(() => ({ count: 0 }))
+vi.mock("@/hooks/useElementSize", () => ({ useElementSize: () => ({ width: 800, height: sizeCalls.count++ % 2 === 0 ? 100 : 600 }) }))
 
 const GREETING = "What's on your mind?"
 

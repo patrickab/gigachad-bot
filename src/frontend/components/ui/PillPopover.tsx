@@ -16,8 +16,9 @@ const INSTANT = { duration: 0 } as const
 
 /** The client flag never changes, nothing to subscribe to. */
 const subscribeNothing = () => () => {}
+const closeNothing = () => {}
 
-interface PillPopoverState {
+export interface PillPopoverState {
   open: boolean
   show: () => void
   close: () => void
@@ -27,7 +28,7 @@ interface PillPopoverState {
 }
 
 /** Open state of a `PillPopover`: a press outside its trigger and panel or Escape closes it, closing puts focus inside the panel back on the trigger, then runs `onClose`. */
-export function usePillPopover(onClose: () => void): PillPopoverState {
+export function usePillPopover(onClose: () => void = closeNothing): PillPopoverState {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -126,7 +127,7 @@ export function PillPopover({
       aria-label={triggerLabel}
       aria-haspopup="dialog"
       aria-expanded={open}
-      className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink", open && "text-ink", triggerClassName)}
+      className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink focus-visible:outline-none", open && "text-ink", triggerClassName)}
     >
       {triggerContent}
     </button>

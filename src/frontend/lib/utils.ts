@@ -27,6 +27,20 @@ export function isModKey(event: { ctrlKey: boolean; metaKey: boolean }): boolean
   return event.ctrlKey || event.metaKey
 }
 
+/** True when Alt is the only modifier held, the modifier of the shell's shortcuts (Alt+T, Alt+A). */
+export function isAltOnly(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): boolean {
+  return event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+}
+
+/** Compact time from `thenMs` to `nowMs`: "now", "5m", "3h", "2d". */
+export function compactElapsed(thenMs: number, nowMs: number): string {
+  const minutes = Math.floor((nowMs - thenMs) / 60_000)
+  if (minutes < 1) return "now"
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`
+}
+
 /** Copy of `set` with `value` removed when present, added otherwise. */
 export function toggled<T>(set: ReadonlySet<T>, value: T): Set<T> {
   const next = new Set(set)

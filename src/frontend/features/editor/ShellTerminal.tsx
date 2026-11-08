@@ -8,7 +8,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { terminalSessionUrl } from "@/lib/backend/urls"
 import { isEditableTarget } from "@/lib/utils"
-import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
+import { NERD_FONTS, TERMINAL_FONT_SIZE, shellTheme } from "./terminalTheme"
 
 const POLICY_VIOLATION = 1008
 /** A second Esc this soon hides the window even while a program (vim, less) took the first one. */
@@ -54,7 +54,7 @@ function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => 
       if (disposed) return
       const host = window.document.createElement("div")
       host.className = "h-full w-full font-mono"
-      const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })
+      const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: shellTheme(window.document.body) })
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
       let isOpen = false
@@ -107,7 +107,7 @@ function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => 
         }
         fitAddon.fit()
       }
-      const restyle = () => { if (host.parentElement) xterm.options.theme = terminalTheme(host.parentElement).theme }
+      const restyle = () => { if (host.parentElement) xterm.options.theme = shellTheme(host.parentElement) }
 
       setFailure(null)
       setTerminal({
@@ -177,7 +177,8 @@ function TabShell({ sessionKey, shown, onExit, onHide, onRestart }: {
   const { terminal, failure } = useShellSession(sessionKey, onExit, onHide)
   if (!shown) return null
   return (
-    <FloatingWindow onClose={onHide} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3">
+    // Black in both modes, xterm's colors and prompts need a dark background. `shellTheme` reads it from here
+    <FloatingWindow onClose={onHide} label="Terminal" panelClassName="h-[66.667vh] max-h-full w-[66.667vw] max-w-full p-3 bg-[#000]">
       <ShellTerminalSlot terminal={terminal} failure={failure} onRestart={onRestart} />
     </FloatingWindow>
   )

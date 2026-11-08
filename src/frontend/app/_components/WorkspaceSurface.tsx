@@ -23,12 +23,13 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerLaunch, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpFileChat } from "@/features/omp/OmpFileChat"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
+import { SessionPicker } from "@/features/omp/SessionPicker"
 import { TopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -58,6 +59,11 @@ interface WorkspaceSurfaceProps {
   refreshDocuments: () => void
   /** The tab's slash commands an omp tab's composer offers (`/memorize`). */
   ompShellCommands: ShellCommands
+  /** First message of an omp session started from the chat, sent by the new-session composer of the omp tab. */
+  ompLaunch: ComposerLaunch | null
+  onOmpLaunched: () => void
+  /** Opens a session picked in the top bar's "Agents" picker. */
+  onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
 }
 
 /** What one mode puts in the top bar beside the sidebar toggle, and the surface below it. */
@@ -120,7 +126,7 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands, ompLaunch, onOmpLaunched, onOpenItem }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // omp needs host access, other logins keep the PDF's local assistant
@@ -274,7 +280,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           {filePanelToggle}
         </>,
         runsUnderTopBar: !!ompView && ompView.kind !== "settings",
-        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
+        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} launch={ompLaunch} onLaunched={onOmpLaunched} /> : chatBody,
       }
     },
     workbench: () => {
@@ -330,7 +336,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
 
   return <>
     <TopBar
-      left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{surface.left}</>}
+      left={<><TopBarTransparent><div className="flex items-center gap-3">{sidebarToggle}<SessionPicker onOpenItem={onOpenItem} /></div></TopBarTransparent>{surface.left}</>}
       center={surface.center}
       right={surface.right}
       raised={surface.raised}

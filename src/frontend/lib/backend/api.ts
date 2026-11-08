@@ -604,6 +604,11 @@ export async function archiveOmpSession(sessionId: string): Promise<void> {
   await requestVoid(`/omp/sessions/${encodeURIComponent(sessionId)}/archive`, { method: "POST" })
 }
 
+/** Delete an omp session with its file and artifacts. Its forks are re-parented, not deleted. */
+export async function deleteOmpSession(sessionId: string): Promise<void> {
+  await requestVoid(`/omp/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+}
+
 export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystemPrompt> {
   return request<OmpSystemPrompt>(`/omp/sessions/${encodeURIComponent(sessionId)}/system-prompt`)
 }

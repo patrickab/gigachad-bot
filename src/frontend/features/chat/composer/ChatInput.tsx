@@ -1,6 +1,6 @@
 "use client"
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType } from "react"
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { Mic, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -37,6 +37,8 @@ interface ChatInputProps {
   context?: ChatContext
   /** Extra entries of the "+" menu after the built-in ones. */
   attachMenuItems?: AttachMenuItem[]
+  /** Extra controls of the action row after the "+" menu, e.g. the folder an omp session starts in. */
+  leading?: ReactNode
 }
 
 /** Attachments already in the chat with their context actions. */
@@ -78,6 +80,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   hint,
   context,
   attachMenuItems = [],
+  leading,
 }, ref) {
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
@@ -225,6 +228,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <div className="mt-2 flex items-center justify-between">
             <div className="-ml-1.5 flex min-w-0 items-center gap-0.5">
               <AttachMenu items={menuItems} disabled={disabled} />
+              {leading}
             </div>
             <div className="flex items-center gap-0.5">
               {toolsMenu && <ToolsMenu disabled={disabled} />}

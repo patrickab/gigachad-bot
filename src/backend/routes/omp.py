@@ -41,6 +41,11 @@ async def post_archive(session_id: SessionId) -> None:
     await call_upstream(omp_web.archive_session(session_id))
 
 
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: SessionId) -> None:
+    await call_upstream(omp_web.delete_session(session_id))
+
+
 @router.get("/sessions/{session_id}/system-prompt")
 async def get_system_prompt(session_id: SessionId) -> omp_web.OmpSystemPrompt:
     return await call_upstream(omp_web.system_prompt(session_id))

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
@@ -19,8 +19,8 @@ import { InTopBar } from "@/features/navigation/TopBarSlots"
 const CHAT_COLUMN_MAX_PX = 960
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
-/** An empty chat centers the composer this far above the column's middle, as a share of its height. */
-const EMPTY_LIFT = 0.05
+/** An empty chat centers the composer this far above the column's bottom, as a share of its height. Slightly below the middle. */
+const EMPTY_CENTER_FROM_BOTTOM = 0.45
 const EMPTY_GREETING = "What's on your mind?"
 
 /** Asks the chat to expand and scroll to one question; a new `key` re-fires the request for the same index. */
@@ -58,6 +58,8 @@ interface ChatContainerProps {
   attachmentActions?: AttachmentActions
   /** Extra entries of the composer's "+" menu. */
   attachMenuItems?: AttachMenuItem[]
+  /** Extra controls of the composer's action row, after the "+" menu. */
+  composerLeading?: ReactNode
   /** Note under the draft, e.g. why the last attach failed. */
   composerNotice?: string
   /** Expose the message column for top-bar overlap measurement. */
@@ -81,6 +83,7 @@ export function ChatContainer({
   chatInputRef,
   attachmentActions,
   attachMenuItems,
+  composerLeading,
   composerNotice,
   onChatColumnChange,
 }: ChatContainerProps) {
@@ -105,9 +108,9 @@ export function ChatContainer({
   if (inputAreaSize.height > 0 && inputAreaSize.height !== inputAreaHeight) setInputAreaHeight(inputAreaSize.height)
   const columnHeight = useElementSize(columnRef).height
 
-  // A chat known to be empty lifts the composer from the bottom to slightly above the column's middle. A loading one keeps it at the bottom
+  // A chat known to be empty lifts the composer from the bottom to just below the column's middle. A loading one keeps it at the bottom
   const isEmpty = messages.length === 0 && !historyLoading
-  const emptyLift = isEmpty && columnHeight > 0 ? Math.max(0, columnHeight * (0.5 + EMPTY_LIFT) - inputAreaHeight / 2) : 0
+  const emptyLift = isEmpty && columnHeight > 0 ? Math.max(0, columnHeight * EMPTY_CENTER_FROM_BOTTOM - inputAreaHeight / 2) : 0
   // The greeting waits for the measured, centered composer, so it never flashes at the bottom
   const showGreeting = emptyLift > 0 && inputAreaHeight > 0
 
@@ -206,6 +209,7 @@ export function ChatContainer({
               slug={slug}
               context={context}
               attachMenuItems={attachMenuItems}
+              leading={composerLeading}
               hint={composerNotice ? () => composerNotice : undefined}
             />
           </div>

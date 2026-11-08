@@ -15,7 +15,7 @@ import { useStoredString } from "@/hooks/useStoredString"
 import { exportLearnSession } from "@/lib/backend/api"
 import type { LearnSession, LearnView } from "@/lib/domain/types"
 import { saveBlob } from "@/lib/download"
-import { errorMessage } from "@/lib/utils"
+import { compactElapsed, errorMessage } from "@/lib/utils"
 import type { LearnChromeKey, LearnFrameMessageOf, LearnPanel, LearnSessionStatus } from "@gigachad/chat-ui/learn-protocol"
 import { learnItem, type OpenItem } from "./items"
 import { useLearn, useLearnDrive, useLearnFrameEvent, useLearnFrameState } from "./LearnProvider"
@@ -54,15 +54,12 @@ function listStatus(session: LearnSession): LearnSessionStatus | null {
   return session.busy ? "working" : null
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
 /** How long ago `iso` was, compact: "now", "5m", "3h", "2d", then the date. */
 export function sinceLabel(iso: string, now: number = Date.now()): string {
-  const minutes = Math.floor((now - Date.parse(iso)) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return days < 7 ? `${days}d` : iso.slice(0, 10)
+  const then = Date.parse(iso)
+  return now - then < WEEK_MS ? compactElapsed(then, now) : iso.slice(0, 10)
 }
 
 /**

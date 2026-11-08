@@ -141,6 +141,29 @@ function useComposerInsertion(insertion: ComposerInsertion | null, enabled: bool
   }, [insertion, enabled, inputRef])
 }
 
+/** First message of a session the shell starts from a chat, sent once the new-session composer is ready. */
+export interface ComposerLaunch {
+  text: string
+  attachments: Attachment[]
+}
+
+/** The frame applies the shell's `new-session` after it is posted, a message sent sooner could still land in the previous directory. */
+const LAUNCH_SETTLE_MS = 250
+
+/** Submit `launch` once `enabled` and settled, then report it through `onLaunched`. A run that restarts (`enabled` flipped meanwhile) waits again. */
+function useComposerLaunch(launch: ComposerLaunch | null, enabled: boolean, onLaunched: (() => void) | undefined, submit: (text: string, attachments: Attachment[]) => void) {
+  const submitLaunch = useEffectEvent(submit)
+  const reportLaunched = useEffectEvent(() => onLaunched?.())
+  useEffect(() => {
+    if (!launch || !enabled) return
+    const timer = window.setTimeout(() => {
+      reportLaunched()
+      submitLaunch(launch.text, launch.attachments)
+    }, LAUNCH_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [launch, enabled])
+}
+
 /** `view`'s pending extension `select` (e.g. `/files`) as the active tab's draft picker, answered through the frame. A path option shows its folder beside it. */
 function useSelectPicker(view: OmpView): DraftPicker | undefined {
   const { isActive } = useTab()
@@ -181,16 +204,19 @@ function useComposerFor(view: OmpView) {
  * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
  * - A send while the agent runs is queued by omp (follow-up, or steer per omp-web Settings), the stop button shows with an empty draft
  * - `insertion` is appended to the draft once, with focus, as soon as the composer is enabled. `onInserted` follows
+ * - `launch` is sent once as the first message of a new session, as soon as its composer is ready. `onLaunched` follows
  * - `lead` leads the next message (not commands), separated by a blank line, `onLeadSent` follows a message it led
  * - Disabled until the frame reports the composer of this tab's session
  */
-export function OmpComposer({ view, chatId, slug, shellCommands, insertion = null, onInserted, lead, onLeadSent }: {
+export function OmpComposer({ view, chatId, slug, shellCommands, insertion = null, onInserted, launch = null, onLaunched, lead, onLeadSent }: {
   view: OmpView
   chatId: string
   slug: string | null
   shellCommands: ShellCommands
   insertion?: ComposerInsertion | null
   onInserted?: () => void
+  launch?: ComposerLaunch | null
+  onLaunched?: () => void
   lead?: string
   onLeadSent?: () => void
 }) {
@@ -211,6 +237,7 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
   const submit = async (text: string, attachments: Attachment[]) => {
     if (!(await shellCommands.run(text.trim()))) await send(text, attachments)
   }
+  useComposerLaunch(launch, state !== null && view.kind === "new", onLaunched, (text, attachments) => { void submit(text, attachments) })
 
   return (
     <div className="px-4 pb-6 pt-2">

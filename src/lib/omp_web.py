@@ -107,6 +107,10 @@ class _Archived(ContractModel):
     ok: bool
 
 
+class _Deleted(ContractModel):
+    ok: bool
+
+
 class _Restored(ContractModel):
     session_id: str
 
@@ -182,6 +186,11 @@ async def archived_sessions() -> list[OmpArchivedSession]:
 async def archive_session(session_id: str) -> None:
     """Stop the session's omp process and move its file into omp's archive. Sessions with forks answer 409."""
     await _request("POST", f"/api/sessions/{session_id}/archive", _Archived)
+
+
+async def delete_session(session_id: str) -> None:
+    """Delete the session's file and artifacts, its forks are re-parented to its parent."""
+    await _request("DELETE", f"/api/sessions/{session_id}", _Deleted)
 
 
 async def restore_session(key: str) -> str:

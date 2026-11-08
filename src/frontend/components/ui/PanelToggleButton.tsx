@@ -18,7 +18,7 @@ export function PanelToggleButton({ open, onClick, openLabel, closeLabel, side =
     <button
       aria-label={open ? closeLabel : openLabel}
       onClick={() => onClick()}
-      className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
     >
       <Icon className="h-4 w-4" />
     </button>

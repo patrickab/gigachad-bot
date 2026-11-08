@@ -14,6 +14,9 @@ export interface FileTreeNode {
   children?: FileTreeNode[]
 }
 
+/** Registered path of a file-root node: its mount when set, else its own path. */
+export const mountOf = (node: FileTreeNode): string => node.mount ?? node.path
+
 /** A folder with its listed tree, a mount root or a project's folder entry. */
 interface ListedFolder {
   path: string

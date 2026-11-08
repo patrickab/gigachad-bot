@@ -75,8 +75,9 @@ interface ChatPairProps {
   onExpand: () => void
   onCollapse: () => void
   collapsedRef: (el: HTMLDivElement | null) => void
-  onAttachmentClick: (attachment: Attachment) => void
-  onDelete: (index: number) => void
+  onAttachmentClick?: (attachment: Attachment) => void
+  /** Unset -> read-only pair without a delete action. */
+  onDelete?: (index: number) => void
   onRegenerate?: (index: number) => void
   onBranch?: () => void
 }

@@ -6,7 +6,7 @@ import { loadFileViewerText } from "@/lib/backend/api"
 import { RawFileView } from "./RawFileView"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { FloatingPicker } from "@/components/ui/CommandPicker"
-import { fuzzyScore } from "@/lib/fuzzy"
+import { fuzzyPathScore, rankByScore } from "@/lib/fuzzy"
 import { baseName, dirName, extOf, kindOf, type FileKind } from "@/lib/paths"
 import { buildPathTree, relativeName, type PathTreeNode } from "@/lib/pathTree"
 import { cn } from "@/lib/utils"
@@ -113,18 +113,10 @@ export function FileViewer({
   const rows = useMemo<Row[]>(() => {
     const q = query.trim()
     if (q) {
-      // Search ignores the directory context: flat fuzzy across every file, name matches get a +1 bonus.
-      return sortFiles(files, nameOf)
-        .map((path) => {
-          const byName = fuzzyScore(nameOf(path), q)
-          const byPath = fuzzyScore(path, q)
-          const s = Math.max(byName === null ? -Infinity : byName + 1, byPath ?? -Infinity)
-          return { path, s }
-        })
-        .filter((x) => x.s > -Infinity)
-        .sort((a, b) => b.s - a.s)
+      // Search ignores the directory context: flat fuzzy across every file, name matches rank first
+      return rankByScore(sortFiles(files, nameOf), (path) => fuzzyPathScore(path, q, nameOf(path)))
         .slice(0, RESULT_CAP)
-        .map((x) => ({ type: "file" as const, label: nameOf(x.path), path: x.path }))
+        .map((path) => ({ type: "file" as const, label: nameOf(path), path }))
     }
     const dirRows: Row[] = [...currentNode.dirs]
       .map((node) => ({ type: "dir" as const, label: relativeName(currentNode.path, node.path), path: node.path, node }))

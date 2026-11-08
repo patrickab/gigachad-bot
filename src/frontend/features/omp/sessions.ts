@@ -1,4 +1,5 @@
-import type { OmpOverview, OmpSession, OmpView } from "@/lib/domain/types"
+import type { Pair } from "@/lib/domain/pairs"
+import type { Message, OmpOverview, OmpSession, OmpView } from "@/lib/domain/types"
 import { PATH_COLLATOR, baseName, isInside, trimSlash } from "@/lib/paths"
 
 /** Sidebar and tab title of a session: its name, else its first prompt. */
@@ -15,7 +16,7 @@ export function viewTitle(view: OmpView, overview: OmpOverview | null): string {
 }
 
 /** Directory a session belongs to: its main repository for a worktree cwd, else the cwd. */
-function sessionDirectory(session: OmpSession): string {
+export function sessionDirectory(session: OmpSession): string {
   return session.project_root ?? session.cwd
 }
 
@@ -48,6 +49,47 @@ export function sessionForest(sessions: readonly OmpSession[]): SessionNode[] {
   return roots
 }
 
+/** How long a session that stopped running stays in the picker's "Recent" group. */
+export const RECENT_SESSION_MS = 24 * 60 * 60 * 1000
+
+export interface SessionGroups {
+  running: OmpSession[]
+  recent: OmpSession[]
+  older: OmpSession[]
+}
+
+/** `sessions` split into running ones, the rest modified within `RECENT_SESSION_MS` of `nowMs`, and the older rest. Each newest first. */
+export function groupSessions(sessions: readonly OmpSession[], runningIds: readonly string[], nowMs: number): SessionGroups {
+  const running = new Set(runningIds)
+  const groups: SessionGroups = { running: [], recent: [], older: [] }
+  for (const session of [...sessions].sort(byNewest)) {
+    if (running.has(session.id)) groups.running.push(session)
+    else if (nowMs - Date.parse(session.modified) <= RECENT_SESSION_MS) groups.recent.push(session)
+    else groups.older.push(session)
+  }
+  return groups
+}
+
+/** A session history (`fetchOmpSessionHistory`) as chat pairs: each prompt with every assistant text up to the next prompt, omp splits one answer across tool steps. */
+export function historyPairs(history: readonly Pick<Message, "role" | "content">[]): Pair[] {
+  const pairs: Pair[] = []
+  history.forEach((message, index) => {
+    const last = pairs.at(-1)
+    if (message.role !== "user" && last) {
+      last.assistant = { role: "assistant", content: [last.assistant.content, message.content].filter(Boolean).join("\n\n") }
+      return
+    }
+    const isPrompt = message.role === "user"
+    pairs.push({
+      user: { role: "user", content: isPrompt ? message.content : "" },
+      assistant: { role: "assistant", content: isPrompt ? "" : message.content },
+      globalIndex: index,
+      qaIndex: pairs.length,
+    })
+  })
+  return pairs
+}
+
 interface WorkspaceGroup {
   path: string
   label: string
@@ -75,4 +117,17 @@ export function unlinkedWorkspaces(overview: OmpOverview, linkedPaths: readonly 
   return [...groups.entries()]
     .map(([path, sessions]) => ({ path, label: aliases.get(path) || baseName(path), sessions }))
     .sort((left, right) => PATH_COLLATOR.compare(left.label, right.label) || PATH_COLLATOR.compare(left.path, right.path))
+}
+
+/**
+ * Directories an omp session can start in: every mount and omp-web workspace, the most recently used first, the rest by name.
+ *
+ * - A directory counts as used when a session ran in it or below it (a worktree counts for its main repository)
+ */
+export function startDirectories(mounts: readonly string[], overview: OmpOverview | null): string[] {
+  const workspaces = overview ? unlinkedWorkspaces(overview, mounts).map((workspace) => workspace.path) : []
+  const directories = [...new Set([...mounts.map(trimSlash), ...workspaces])]
+  const sessions = overview?.sessions ?? []
+  const used = new Map(directories.map((directory) => [directory, sessionsInside(sessions, directory).map((session) => session.modified).sort().at(-1) ?? ""]))
+  return directories.sort((left, right) => used.get(right)!.localeCompare(used.get(left)!) || PATH_COLLATOR.compare(baseName(left), baseName(right)))
 }
