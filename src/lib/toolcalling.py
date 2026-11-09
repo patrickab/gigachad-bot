@@ -7,14 +7,14 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from dataclasses import asdict, dataclass, field
 import json
 import time
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 from uuid import uuid4
-
-import litellm
-from llm_baseclient.client import LLMClient
 
 from lib.async_utils import aiter_in_thread
 from lib.llm_json import extract_json_from_llm
+
+if TYPE_CHECKING:
+    from llm_baseclient.client import LLMClient
 
 __all__ = [
     "Source",
@@ -272,6 +272,8 @@ def _start_stream(
     kwargs: dict[str, Any],
 ) -> Iterator[Any]:
     """Use LiteLLM directly to retain tool deltas and the client's routing."""
+    import litellm  # loaded already: the client imports it
+
     model_id, api_base, custom_provider = client._resolve_routing(model)  # noqa: SLF001
     return litellm.completion(
         model=model_id,

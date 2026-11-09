@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from litellm.exceptions import UnsupportedParamsError
-
 _UNSUPPORTED_PARAMS_RE = re.compile(r"does not support parameters:\s*\[(.*?)\]")
 
 
@@ -19,6 +17,8 @@ def _parse_unsupported_params(message: str) -> set[str]:
 
 def api_query_resilient(client: Any, **kwargs: Any) -> Any:
     """Call ``api_query``, retrying once with parameters rejected by stale LiteLLM metadata."""
+    from litellm.exceptions import UnsupportedParamsError  # loaded already: the client imports LiteLLM
+
     try:
         return client.api_query(**kwargs)
     except UnsupportedParamsError as e:

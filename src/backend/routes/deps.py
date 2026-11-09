@@ -3,11 +3,11 @@ from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial
 import hashlib
-from typing import Annotated
+import threading
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import Depends
-from llm_baseclient.client import LLMClient
 
 from backend.identity import RequestIdentity, get_request_identity
 from config import env_flag
@@ -35,15 +35,23 @@ from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
 
+if TYPE_CHECKING:
+    from llm_baseclient.client import LLMClient
+
 ExtractionPublisher = Callable[[str, str, str], None]
 
-_client: LLMClient | None = None
+_client: "LLMClient | None" = None
+_client_lock = threading.Lock()
 
 
-def get_client() -> LLMClient:
+def get_client() -> "LLMClient":
+    """The process-wide client. Its import pulls in LiteLLM (~1.5 s), so it loads here, not when the server starts."""
     global _client
-    if _client is None:
-        _client = LLMClient()
+    with _client_lock:
+        if _client is None:
+            from llm_baseclient.client import LLMClient
+
+            _client = LLMClient()
     return _client
 
 
@@ -184,13 +192,14 @@ def get_prompt_store(
 
 def shutdown_client() -> None:
     global _client
-    if _client is not None:
-        _client.kill_inference_engines()
-        _client = None
+    with _client_lock:
+        if _client is not None:
+            _client.kill_inference_engines()
+            _client = None
 
 
 @contextmanager
-def request_client() -> Iterator[LLMClient]:
+def request_client() -> Iterator["LLMClient"]:
     """Yield the shared client with its history reset, since it is one process-wide instance."""
     c = get_client()
     c.reset_history()

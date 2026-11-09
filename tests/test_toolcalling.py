@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import litellm
 import pytest
 
 from config import TEST_MODEL
@@ -14,7 +15,7 @@ from tests.fakes import ClientStub, collect_tool_turn, text_chunk, tool_chunk, u
 async def test_tool_free_turn_streams_tokens_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """With tools offered but unused, the turn is an ordinary streamed answer."""
     monkeypatch.setattr(
-        toolcalling.litellm,
+        litellm,
         "completion",
         lambda **_: iter([text_chunk("no "), text_chunk("tools"), usage_chunk(7)]),
     )
@@ -49,7 +50,7 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
             detail={"script": sentinel_script},
         )
 
-    monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
+    monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     events = await collect_tool_turn()
@@ -74,7 +75,7 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
 async def test_mindmap_tool_result_does_not_trigger_an_assistant_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """The rendered tool card is the complete mind map response."""
     rounds = [iter([tool_chunk(0, "call_mindmap", "mindmap", "{}")])]
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="```markmap\n# Topic\n```", summary="Mind map ready")
@@ -99,7 +100,7 @@ async def test_exactly_one_tool_call_per_turn(monkeypatch: pytest.MonkeyPatch) -
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="evidence")
 
-    monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
+    monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     events = await collect_tool_turn()
@@ -119,7 +120,7 @@ async def test_tool_call_written_as_plain_text_is_recovered(monkeypatch: pytest.
         iter([text_chunk('{"name": "web_search", '), text_chunk('"arguments": {"query": "cheesecake"}}')]),
         iter([text_chunk("Here you go")]),
     ]
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
 
     async def fake_execute(name: str, args: dict[str, Any], _ctx: Any, **_kwargs: Any) -> toolcalling.ToolOutcome:
         assert (name, args) == ("web_search", {"query": "cheesecake"})
@@ -136,7 +137,7 @@ async def test_tool_call_written_as_plain_text_is_recovered(monkeypatch: pytest.
 @pytest.mark.asyncio
 async def test_held_json_that_is_not_a_tool_call_is_still_shown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Buffering JSON-looking text must not swallow an answer that genuinely is JSON."""
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: iter([text_chunk('{"shape": "answer"}')]))
+    monkeypatch.setattr(litellm, "completion", lambda **_: iter([text_chunk('{"shape": "answer"}')]))
 
     assert await collect_tool_turn() == [("token", '{"shape": "answer"}')]
 
@@ -150,7 +151,7 @@ async def test_unknown_tool_names_are_never_offered(monkeypatch: pytest.MonkeyPa
         offered.append(kwargs.get("tools"))
         return iter([text_chunk("hi")])
 
-    monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
+    monkeypatch.setattr(litellm, "completion", fake_completion)
 
     await collect_tool_turn(enabled=["rm_rf", "deep_research"])
 
@@ -193,7 +194,7 @@ async def test_a_tool_the_turn_did_not_enable_is_refused_without_running(monkeyp
         ]
     )
     rounds = [iter([tool_chunk(0, "call_a", "workspace_agent", "{}")]), iter([text_chunk("cannot do that")])]
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
 
     events = [
         event

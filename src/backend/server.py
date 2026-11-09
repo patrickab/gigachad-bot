@@ -83,6 +83,13 @@ def widen_default_executor() -> None:
     )
 
 
+def _warm_client() -> None:
+    try:
+        get_client()
+    except Exception:
+        log.exception("Could not create the LLM client, the first model call retries")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
@@ -92,7 +99,8 @@ async def lifespan(app: FastAPI):
     # prefix where the local OMP gateway lives, which is how OMP-sourced
     # models (including OAuth subscription quota) reach a provider.
     omp_source.configure_litellm_proxy()
-    get_client()
+    # LLMClient imports LiteLLM (~1.5 s, most of the backend's import time): load it beside serving, not before.
+    asyncio.get_running_loop().run_in_executor(None, _warm_client)
     upgrade(database_url())
     reset_cancel()
     try:

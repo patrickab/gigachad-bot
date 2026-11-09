@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastapi.testclient import TestClient
+import litellm
 import pytest
 
 from backend import http_plumbing
@@ -57,7 +58,7 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
         iter([tool_chunk(0, "call_a", "web_search", '{"query": "cheesecake"}')]),
         iter([text_chunk("Try [ap]")]),
     ]
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="[ap] evidence", summary="1 sources", sources=[{"label": "ap", "url": "u"}])
@@ -107,7 +108,7 @@ def test_learn_sessions_are_offered_to_host_logins_only(monkeypatch: pytest.Monk
         offers.append([spec["function"]["name"] for spec in kwargs.get("tools") or []])
         return iter([text_chunk("Hi")])
 
-    monkeypatch.setattr(toolcalling.litellm, "completion", completion)
+    monkeypatch.setattr(litellm, "completion", completion)
 
     response = _chat_client(monkeypatch, has_host_access=has_host_access).post(
         "/api/chat",

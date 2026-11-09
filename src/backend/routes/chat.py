@@ -1,8 +1,7 @@
 import asyncio
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends
-from llm_baseclient.client import LLMClient
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -27,6 +26,9 @@ from .deps import (
     request_client,
 )
 
+if TYPE_CHECKING:
+    from llm_baseclient.client import LLMClient
+
 router = APIRouter(prefix="/api", tags=["chat"])
 
 MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
@@ -47,7 +49,7 @@ class ChatRequest(BaseModel):
     tool_options: ToolOptions = ToolOptions()
 
 
-def _resolve_images(c: LLMClient, req: ChatRequest, assets: AssetStore) -> list | None:
+def _resolve_images(c: "LLMClient", req: ChatRequest, assets: AssetStore) -> list | None:
     paths = resolve_chat_image_paths(
         c,
         req.chat_id,

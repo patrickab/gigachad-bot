@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import litellm
 import pytest
 
 from config import TEST_MODEL
@@ -25,7 +26,7 @@ async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monke
         iter([tool_chunk(0, "call_1", "workspace_agent", '{"prompt": "write a script"}')]),
         iter([text_chunk("OK")]),
     ]
-    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
 
     events = await collect_tool_turn(enabled=["workspace_agent"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused"))
     (result,) = [data for name, data in events if name == "tool_result"]
@@ -129,7 +130,7 @@ async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source
     def fake_query(_client: Any, **_kwargs: Any) -> Any:
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```mermaid\nflowchart LR\nA --> B\n```"))])
 
-    monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
+    monkeypatch.setattr(litellm, "completion", fake_completion)
     monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
 
     events = await collect_tool_turn(

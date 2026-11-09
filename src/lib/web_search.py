@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
-from llm_baseclient.client import LLMClient
 
 from lib.llm_json import extract_json_from_llm
 from lib.llm_resilience import completion_text
 from lib.toolcalling import Source
+
+if TYPE_CHECKING:
+    from llm_baseclient.client import LLMClient
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 

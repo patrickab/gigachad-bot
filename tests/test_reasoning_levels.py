@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import BackgroundTasks
+import litellm
 import pytest
 
 from backend.routes.models import get_reasoning_levels
@@ -10,14 +11,14 @@ from lib.reasoning_levels import litellm_levels, resolve
 
 def _stub_litellm(monkeypatch: pytest.MonkeyPatch, supports_reasoning: bool, model_info: dict | Exception) -> None:
     """Replace LiteLLM's registry lookups with a fixed answer."""
-    monkeypatch.setattr(reasoning_levels.litellm, "supports_reasoning", lambda model: supports_reasoning)
+    monkeypatch.setattr(litellm, "supports_reasoning", lambda model: supports_reasoning)
 
     def get_model_info(model: str) -> dict:
         if isinstance(model_info, Exception):
             raise model_info
         return model_info
 
-    monkeypatch.setattr(reasoning_levels.litellm, "get_model_info", get_model_info)
+    monkeypatch.setattr(litellm, "get_model_info", get_model_info)
 
 
 @pytest.mark.parametrize(

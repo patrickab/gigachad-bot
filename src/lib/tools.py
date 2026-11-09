@@ -7,7 +7,6 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from agent_sandbox import PromptImage
-from llm_baseclient.client import LLMClient
 
 from lib import learnharness
 from lib.data_store import StorageConflictError
@@ -23,6 +22,8 @@ from lib.web_search import brave_sources, evidence_prompt, plan_query, source_la
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from llm_baseclient.client import LLMClient
 
     from lib.project_store import ProjectStore
 

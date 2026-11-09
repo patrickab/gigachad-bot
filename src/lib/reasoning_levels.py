@@ -4,7 +4,6 @@ import asyncio
 from typing import Any
 
 import httpx
-import litellm
 
 from config import OLLAMA_BASE_URL
 from lib import omp_source
@@ -38,6 +37,8 @@ def litellm_levels(model: str) -> list[str]:
     - `medium` and `high` come with any reasoning model
     - `supports_none_reasoning_effort` is ignored, `none` is the app's own "off"
     """
+    import litellm  # ~1.5 s on first use, kept out of server startup
+
     if not litellm.supports_reasoning(model=model):
         return []
     try:
@@ -109,6 +110,8 @@ def _supports_effort(model: str) -> bool:
     table instead of an allowlist. Fail closed on lookup errors: dropping the param
     is harmless, forwarding it blind can crash the request.
     """
+    import litellm
+
     try:
         return "reasoning_effort" in (litellm.get_supported_openai_params(model=model) or [])
     except Exception:

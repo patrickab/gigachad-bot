@@ -1,14 +1,20 @@
 """Resolve chat upload filenames into image payloads."""
 
-from collections.abc import Iterator
+from __future__ import annotations
+
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from agent_sandbox import PromptImage
-from llm_baseclient.client import LLMClient
 
 from lib.asset_store import Asset, AssetStore
 from lib.data_store import StorageNotFoundError
 from lib.storage_namespace import chat_upload
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from llm_baseclient.client import LLMClient
 
 _DEFAULT_MAX_TOKENS = 2048
 
