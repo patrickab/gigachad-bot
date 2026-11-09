@@ -8,7 +8,7 @@ import type { Point } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
-import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
+import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
@@ -80,7 +80,7 @@ export function CanvasAttachmentWindow({
         return renderNestedCanvas(att, name)
       case "pdf":
         return (
-          <AnnotatedPdfViewer
+          <LazyAnnotatedPdfViewer
             path={att.path}
             pen={pdfPen}
             clipToPages
