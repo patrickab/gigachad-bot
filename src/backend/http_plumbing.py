@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 from typing import TYPE_CHECKING, Any
+import zlib
 
 from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -107,6 +108,8 @@ _GZIP_MIN_BYTES = 1024
 # Level 1: the 3.5 MB ink canvas compresses to 1.38 MB in 48 ms, level 6 only reaches 1.20 MB in 173 ms.
 _GZIP_LEVEL = 1
 _OFF_LOOP_BYTES = 256 * 1024
+# Bounds what a gzip request body may inflate to, a few KB of zeros would otherwise expand without limit.
+_MAX_INFLATED_REQUEST_BYTES = 512 * 1024 * 1024
 
 
 def etag_matches(if_none_match: str | None, etag: str) -> bool:
@@ -144,9 +147,34 @@ def _gzip(body: bytes) -> bytes:
     return gzip.compress(body, _GZIP_LEVEL, mtime=0)
 
 
-class TransferMiddleware:
-    """Validate and gzip whole JSON/text responses.
+def _inflating(receive: Receive) -> Receive:
+    """*receive* with its gzip request body inflated: 400 for a corrupt one, 413 past `_MAX_INFLATED_REQUEST_BYTES`."""
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    inflated = 0
 
+    async def receive_inflated() -> Message:
+        nonlocal inflated
+        message = await receive()
+        if message["type"] != "http.request":
+            return message
+        try:
+            body = inflater.decompress(message.get("body", b""), _MAX_INFLATED_REQUEST_BYTES - inflated + 1)
+            if not message.get("more_body", False):
+                body += inflater.flush()
+        except zlib.error as exc:
+            raise HTTPException(400, "Invalid gzip request body") from exc
+        inflated += len(body)
+        if inflated > _MAX_INFLATED_REQUEST_BYTES or inflater.unconsumed_tail:
+            raise HTTPException(413, "Request body too large")
+        return {**message, "body": body}
+
+    return receive_inflated
+
+
+class TransferMiddleware:
+    """Inflate gzip request bodies, validate and gzip whole JSON/text responses.
+
+    - ``Content-Encoding: gzip`` request bodies (large JSON the frontend sends, e.g. chat saves) reach routes inflated
     - GET: weak ETag of the body plus ``private, no-cache``, a matching ``If-None-Match`` gets 304 without the body
     - Gzip when the client accepts it and the body has at least ``_GZIP_MIN_BYTES``
     - Streamed bodies (SSE, proxies, files), ranges and responses with their own ETag or encoding pass through
@@ -160,6 +188,10 @@ class TransferMiddleware:
             await self.app(scope, receive, send)
             return
         request_headers = Headers(scope=scope)
+        if request_headers.get("content-encoding") == "gzip":
+            stripped = (b"content-encoding", b"content-length")
+            scope = {**scope, "headers": [(name, value) for name, value in scope["headers"] if name not in stripped]}
+            receive = _inflating(receive)
         deferred_start: Message | None = None
 
         async def send_optimized(message: Message) -> None:

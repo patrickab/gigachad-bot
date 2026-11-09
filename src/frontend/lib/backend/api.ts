@@ -77,25 +77,33 @@ async function requestVoid(path: string, init?: RequestInit): Promise<void> {
   await ensureOk(await apiFetch(path, init))
 }
 
-function jsonInit(method: string, body: unknown, headers: Record<string, string> = {}): RequestInit {
-  return { method, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
+/** Bodies from this size on are gzipped, smaller ones are not worth the round of compression. */
+const GZIP_REQUEST_MIN_BYTES = 64 * 1024
+
+/** `body` as a JSON request, gzipped when large: a long chat's save resends every message, the backend inflates it (`TransferMiddleware`). */
+async function jsonInit(method: string, body: unknown, headers: Record<string, string> = {}): Promise<RequestInit> {
+  const json = JSON.stringify(body)
+  const init = { method, headers: { "Content-Type": "application/json", ...headers }, body: json as BodyInit }
+  if (json.length < GZIP_REQUEST_MIN_BYTES || typeof CompressionStream === "undefined") return init
+  const gzipped = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer()
+  return { ...init, headers: { ...init.headers, "Content-Encoding": "gzip" }, body: gzipped }
 }
 
 /** POSTs `body` as JSON and streams the SSE response. */
 function sseStream(path: string, body: Record<string, unknown>): SSEStreamResult {
-  return createSSEStream((signal) => apiFetch(path, { ...jsonInit("POST", body), signal }))
+  return createSSEStream(async (signal) => apiFetch(path, { ...await jsonInit("POST", body), signal }))
 }
 
-function post<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, jsonInit("POST", body))
+async function post<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, await jsonInit("POST", body))
 }
 
-function put<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
-  return request<T>(path, jsonInit("PUT", body, headers))
+async function put<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
+  return request<T>(path, await jsonInit("PUT", body, headers))
 }
 
-function patch<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, jsonInit("PATCH", body))
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, await jsonInit("PATCH", body))
 }
 
 function del<T>(path: string): Promise<T> {
@@ -741,7 +749,7 @@ export async function fetchLearnSessions(signal?: AbortSignal): Promise<LearnSes
 
 /** Group a learn session under `projectSlug` (out of any other project), or under none. */
 export async function assignLearnSession(sessionId: string, projectSlug: string | null): Promise<void> {
-  await requestVoid(`/learn/sessions/${encodeURIComponent(sessionId)}/project`, jsonInit("PUT", { project_slug: projectSlug }))
+  await requestVoid(`/learn/sessions/${encodeURIComponent(sessionId)}/project`, await jsonInit("PUT", { project_slug: projectSlug }))
 }
 
 /** Rename a learn session in LearnHarness, resolving to the title it stored. */

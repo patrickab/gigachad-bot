@@ -35,6 +35,7 @@ change log + SSE        LikeC4  omp-web   factory
 | Factory | `127.0.0.1:8090` | Same default, separate production configuration/database |
 
 - `TransferMiddleware` (`backend/http_plumbing.py`) handles every whole `200` JSON/text body without its own `ETag` or encoding: GET gets a weak body-hash `ETag` with `private, no-cache`, so an unchanged reread answers `304` without the body; bodies of 1 KiB and up are gzipped (level 1) for clients that accept it. Bodies over 256 KiB hash/compress in a thread. SSE, streamed proxies, files, ranges and routes with their own validator (`/fileviewer/raw`) pass through. A 304 still runs the handler, it saves transfer, not server work.
+- The same middleware inflates `Content-Encoding: gzip` request bodies before any route reads them (400 for a corrupt body, 413 past 512 MiB inflated). `lib/backend/api.ts` `jsonInit` gzips JSON bodies of 64 KiB and up with `CompressionStream`, so a long chat's save, which resends every message, uploads about a quarter of its bytes. Browsers without `CompressionStream` send the body as is.
 
 ### Host processes
 

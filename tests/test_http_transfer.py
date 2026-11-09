@@ -1,9 +1,15 @@
-"""TransferMiddleware: revalidation and gzip for whole JSON bodies, untouched streams and ranges."""
+"""TransferMiddleware: gzip request bodies inflated, revalidation and gzip for whole JSON bodies, untouched streams and ranges."""
+
+import gzip
+import json
 
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
+import httpx
+import pytest
 
+from backend import http_plumbing
 from backend.http_plumbing import TransferMiddleware
 
 BIG = {"points": [[i * 0.123456789, i * 1.5] for i in range(2000)]}
@@ -20,6 +26,12 @@ def big_json() -> dict:
 @app.post("/json")
 def posted_json() -> dict:
     return BIG
+
+
+@app.put("/echo")
+def echo(body: dict) -> dict:
+    return body
+
 
 
 @app.get("/stream")
@@ -71,3 +83,19 @@ def test_streams_and_ranges_pass_through_unchanged():
     assert (ranged_response.status_code, ranged_response.content) == (206, b"x" * 4096)
     assert "content-encoding" not in ranged_response.headers
     assert "etag" not in ranged_response.headers
+
+
+def _gzip_put(payload: bytes) -> httpx.Response:
+    return client.put("/echo", content=payload, headers={"Content-Type": "application/json", "Content-Encoding": "gzip"})
+
+
+def test_gzip_request_bodies_reach_the_route_inflated():
+    assert _gzip_put(gzip.compress(json.dumps(BIG).encode())).json() == BIG
+    assert client.put("/echo", json={"plain": True}).json() == {"plain": True}
+
+
+def test_corrupt_or_oversized_gzip_request_bodies_are_refused(monkeypatch: pytest.MonkeyPatch):
+    assert _gzip_put(b"not gzip").status_code == 400
+
+    monkeypatch.setattr(http_plumbing, "_MAX_INFLATED_REQUEST_BYTES", 1024)
+    assert _gzip_put(gzip.compress(b"[" + b"0," * 5000 + b"0]")).status_code == 413
