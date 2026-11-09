@@ -135,6 +135,9 @@ app.add_middleware(
     # The frontend switches to credentialed requests to escape a dead pooled connection. Echoing any origin with
     # credentials would be unsafe, so only exact allow-lists grant them.
     allow_credentials="*" not in CORS_ORIGINS,
+    # A split-origin frontend preflights every distinct URL (custom `X-Device-Id` header):
+    # cache each for Chrome's 2 h cap, not Starlette's 10 min.
+    max_age=7200,
 )
 
 

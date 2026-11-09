@@ -80,12 +80,14 @@ export function useWorkspaceDocuments({
   const [templateSets, setTemplateSets] = useState<TemplateSetInfo[]>([])
 
   // The LaTeX templates come from the template sets on the server, none when they fail to load.
+  // Keyed on availability, not on the callback: a parent's new callback identity would refetch on every render.
+  const workbenchAvailable = onWorkbenchSelect !== undefined
   useEffect(() => {
-    if (!onWorkbenchSelect) return
+    if (!workbenchAvailable) return
     let cancelled = false
     loadTemplateSets().then((sets) => { if (!cancelled) setTemplateSets(sets) }, () => {})
     return () => { cancelled = true }
-  }, [onWorkbenchSelect])
+  }, [workbenchAvailable])
   const templateNames = useMemo(() => new Map(templateSets.map((set) => [set.label, set.name])), [templateSets])
   /** The `+` choice of the files folder: the file type, then the template for LaTeX. Absent without the workbench, files are Markdown then. */
   const newFileChoice = useMemo((): FileTreeCreateChoice | undefined => {
