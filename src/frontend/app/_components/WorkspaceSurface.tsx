@@ -14,7 +14,7 @@ import { PdfAssistant } from "@/features/editor/pdf/PdfAssistant"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import type { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { LazyArchitectureWindow } from "@/features/editor/architecture/LazyArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
 import { LearnModelSelector, LearnReasoningSelector } from "@/features/learn/LearnModel"
 import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
@@ -185,7 +185,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       runsUnderTopBar: canvas.view.kind !== "architecture",
       raised: true,
       body: canvas.view.kind === "architecture"
-        ? <ArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
+        ? <LazyArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
         : <CanvasWorkspace
           selected={canvas.view.selection}
           slug={projectSlug}

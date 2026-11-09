@@ -6,7 +6,7 @@ import { attachmentName, attachmentTraits } from "@/lib/domain/canvasAttachments
 import { CANVAS_ASPECT, type AttachmentPatch, type CanvasAttachment, type NestedCanvasAttachment } from "@/lib/domain/canvasDocument"
 import type { Point } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
-import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { LazyArchitectureWindow } from "@/features/editor/architecture/LazyArchitectureWindow"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
@@ -66,7 +66,7 @@ export function CanvasAttachmentWindow({
   const body = () => {
     switch (att.kind) {
       case "architecture-graph":
-        return <ArchitectureWindow path={att.path} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => onPatch({ edgeStyle })} onNavigate={(path) => onPatch({ path })} />
+        return <LazyArchitectureWindow path={att.path} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => onPatch({ edgeStyle })} onNavigate={(path) => onPatch({ path })} />
       case "document":
         return (
           <CanvasDocumentAttachment

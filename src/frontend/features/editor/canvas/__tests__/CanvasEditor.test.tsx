@@ -47,8 +47,8 @@ vi.mock("@/components/content/PlotElement", () => ({
   PlotElement: ({ figure }: { figure: unknown }) => <div data-testid="document-plot">{JSON.stringify(figure)}</div>,
 }))
 // The architecture window and the text editor have their own tests; here they only report what the canvas hands them.
-vi.mock("@/features/editor/architecture/ArchitectureWindow", () => ({
-  ArchitectureWindow: ({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) =>
+vi.mock("@/features/editor/architecture/LazyArchitectureWindow", () => ({
+  LazyArchitectureWindow: ({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) =>
     <button type="button" data-testid="architecture-window" onClick={() => onNavigate("graph/proj/backend/backend.c4")}>{path}</button>,
 }))
 vi.mock("@/features/editor/DocumentEditor", () => ({
