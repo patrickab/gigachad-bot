@@ -59,6 +59,21 @@ Every long-lived process the backend starts ends with it, also when the backend 
 - `ProjectProvider` keeps the project list's identity when a refresh returns it unchanged, so startup refreshes (change-feed replay, first branch metadata) do not re-run reads keyed on it, such as the sidebar's per-project document lists.
 - Startup reads only what the first view needs. Each chat tab's mounted-file picker reads `GET /api/fileroots/enabled` (no walk) at startup and lists every root's files (`/fileroots/files`) only when it opens: walking the roots in the startup burst competes with the sidebar tree and other reads for the backend's CPU.
 
+## Frontend first load
+
+The page bundle of `/` holds the shell, chat and markdown (streamdown, KaTeX). Heavy surfaces load on first use:
+
+| Module | Loaded through |
+| --- | --- |
+| pdf.js / react-pdf | `components/content/LazyPdfViewer.tsx`, `features/editor/pdf/LazyAnnotatedPdfViewer.ts` |
+| React Flow, libavoid, LikeC4 diagram surface | `features/editor/architecture/LazyArchitectureWindow.ts` |
+| Shiki grammars and themes | `packages/chat-ui/src/shikiBundle.ts`, imported by `syntaxHighlighting.ts` on the first highlight |
+| Mermaid, Markmap, pdf-lib, notebook | `import()` at the point of use |
+
+- A dynamic import splits only while nothing imports the target statically, so callers use the `Lazy*` module (own file, `next/dynamic` with `ssr: false`), never the component itself. The canvas editor is in the page bundle: whatever it imports statically is first-load JS.
+- Tests that mock a lazily loaded component mock its `Lazy*` module, a mock of the inner module renders only after the dynamic import resolves.
+- Measure with a production build (`next build --webpack`, a copy of `src/frontend` with `node_modules` symlinked keeps the dev server's `.next`): the `<script>` chunks in `.next/server/app/index.html` are the first-load JS, except `polyfills-*.js` (`noModule`, legacy browsers only).
+
 ## Identity and filesystem policy
 
 - Keep production listeners on loopback behind trusted private Tailscale Serve. Prefer one private HTTPS origin for frontend and `/api`.
