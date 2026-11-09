@@ -66,11 +66,12 @@ The page bundle of `/` holds the shell, chat and markdown (streamdown, KaTeX). H
 | Module | Loaded through |
 | --- | --- |
 | pdf.js / react-pdf | `components/content/LazyPdfViewer.tsx`, `features/editor/pdf/LazyAnnotatedPdfViewer.ts` |
+| Canvas editor (workspace, collaborative and file-root canvases) | `features/editor/canvas/LazyCanvas.ts` |
 | React Flow, libavoid, LikeC4 diagram surface | `features/editor/architecture/LazyArchitectureWindow.ts` |
 | Shiki grammars and themes | `packages/chat-ui/src/shikiBundle.ts`, imported by `syntaxHighlighting.ts` on the first highlight |
 | Mermaid, Markmap, pdf-lib, notebook | `import()` at the point of use |
 
-- A dynamic import splits only while nothing imports the target statically, so callers use the `Lazy*` module (own file, `next/dynamic` with `ssr: false`), never the component itself. The canvas editor is in the page bundle: whatever it imports statically is first-load JS.
+- A dynamic import splits only while nothing imports the target statically, so callers use the `Lazy*` module (own file, `next/dynamic` with `ssr: false`), never the component itself.
 - Tests that mock a lazily loaded component mock its `Lazy*` module, a mock of the inner module renders only after the dynamic import resolves.
 - Measure with a production build (`next build --webpack`, a copy of `src/frontend` with `node_modules` symlinked keeps the dev server's `.next`): the `<script>` chunks in `.next/server/app/index.html` are the first-load JS, except `polyfills-*.js` (`noModule`, legacy browsers only).
 

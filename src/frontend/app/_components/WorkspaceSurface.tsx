@@ -12,7 +12,7 @@ import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { FilePanelToggle } from "@/features/editor/FilePanel"
 import { PdfAssistant } from "@/features/editor/pdf/PdfAssistant"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
-import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
+import { LazyCanvasWorkspace } from "@/features/editor/canvas/LazyCanvas"
 import type { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { LazyArchitectureWindow } from "@/features/editor/architecture/LazyArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
@@ -186,7 +186,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       raised: true,
       body: canvas.view.kind === "architecture"
         ? <LazyArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
-        : <CanvasWorkspace
+        : <LazyCanvasWorkspace
           selected={canvas.view.selection}
           slug={projectSlug}
           onCloseEditor={canvas.closeCanvas}

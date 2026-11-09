@@ -1,7 +1,6 @@
 "use client"
 
-import { CanvasDocumentEditor } from "@/features/editor/canvas/CanvasDocumentEditor"
-import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
+import { LazyCanvasDocumentEditor, LazyFileCanvasEditor } from "@/features/editor/canvas/LazyCanvas"
 import { ArchitectureSourceEditor, TextDocumentEditor, type DocumentEditorProps } from "./TextDocumentEditor"
 import { RawFileView } from "./RawFileView"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -20,7 +19,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   if (isArchitecturePath(props.path)) return <ArchitectureSourceEditor {...props} />
   if (props.path.endsWith(".canvas")) {
     const { persistOverride } = props
-    return persistOverride ? <FileCanvasEditor {...props} persistOverride={persistOverride} /> : <CanvasDocumentEditor {...props} />
+    return persistOverride ? <LazyFileCanvasEditor {...props} persistOverride={persistOverride} /> : <LazyCanvasDocumentEditor {...props} />
   }
   return <TextDocumentEditor {...props} />
 }
