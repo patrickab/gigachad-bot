@@ -212,10 +212,12 @@ cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 
 - Setup installs Docker/runsc, builds the image, and configures host services.
   Existing installations need only `./scripts/setup_host_services.sh`.
-- Ollama stays on loopback, a persistent alias/socket proxy exposes it to sandbox
-  containers at `10.200.200.1:11434`.
-- The bundled `gigachad` profile uses absolute paths for the real OMP binary,
-  Python interpreters, and `~/.omp`. Do not mount a mise shim or edit installed
+- Ollama stays on loopback (setup refuses to bridge a port bound to `0.0.0.0`), a
+  persistent alias/socket proxy exposes it to sandbox containers at `10.200.200.1:11434`.
+- The bundled `gigachad` profile uses `${HOME}`-relative absolute paths for the real
+  OMP binary, Python interpreters, and `~/.omp`. Its OMP path assumes mise's
+  `github-can1357-oh-my-pi` install directory: override that mount in a custom profile
+  when `mise` names it differently. Do not mount a mise shim or edit installed
   profiles, `uv sync` replaces them. Put custom profiles in a directory named by
   `AGENT_SANDBOX_PROFILE_PATH`, searched before bundled profiles. Doctor must pass.
 
