@@ -8,7 +8,15 @@ Every `.tex` file other than the root starts with `% !TEX root = <relative path 
 
 Put images in `imgs/` of the project folder and reference them by their path relative to the project folder, for example `\includegraphics[width=\linewidth]{imgs/plot.png}`. Never use `\graphicspath`.
 
-When the root has `\usetheme{X}` and `.templates/X/` exists in your working directory, the project is a presentation: read `.templates/X/STYLE.md` and `.templates/X/example.tex` first and build every slide from a primitive there. Write a `\note{...}` for every content slide with what the speaker says. Structure the deck only with `\section{}` and `\subsection{}`: the theme draws the agenda (`\tableofcontents`), the chapter slides and the progress itself, never build those by hand. A new deck starts from `.templates/X/skeleton.tex`.
+When the root has `\usetheme{X}` and `.templates/X/` exists in your working directory, the project is a presentation: read `.templates/X/STYLE.md` first and follow it, it says how slides are built in this theme. A new deck starts from `.templates/X/skeleton.tex`. Every theme follows these slide rules:
+
+- The deck is told in chapters: one `\section{}` per chapter, one `\subsection{}` per step inside it, nothing else marks structure. Three to five chapters, at most six, two to four steps per chapter, a chapter may have none. Chapter and step titles are one to three words, a noun phrase
+- The theme draws the agenda (`\tableofcontents`) and the chapter slides, never build those by hand
+- One message per slide: the frame title states it as a full sentence. A slide that needs two claims is two slides
+- Bullets state cause and effect, one grammar per list, three or four short items
+- Each chapter gets at least one slide where a single visual (number, chart, image, figure, steps) carries the claim
+- Whatever is taken from elsewhere (figure, data, quote) names its source right under it
+- Every content frame ends with `\note{...}`, two to four plain sentences with what the speaker says. Notes carry the talk, slides carry the evidence: say why it matters, never read the slide aloud
 
 When the project folder holds a `.lco` file, the root is a KOMA-Script letter (`scrlttr2`, DIN 5008): the design lives in `layout.lco` and the sender in `sender.lco`, write recipient, subject (`\setkomavar{subject}`), `\opening`, text and `\closing` in the root, never position blocks by hand with `\vspace` or tabbing. A new letter starts from `.templates/letter/skeleton.tex`.
 

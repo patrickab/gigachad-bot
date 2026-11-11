@@ -335,6 +335,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   `-- latex/                        LaTeX template sets, rules in `templates/latex/AGENTS.md`
 |       |-- render.py                 Primitives -> `example.tex`/`example.pdf` -> preview PNGs
 |       |-- presentation/             Beamer set: theme `.sty`, `skeleton.tex`, `STYLE.md`, `primitives/<group>/`, generated example and previews
+|       |-- draft/                    Plain Beamer draft set: theme `.sty` (`\visual`, `\question`), `skeleton.tex`, `STYLE.md`, no primitives
 |       `-- letter/                   KOMA-Script letter document set
 |-- tests/                            Python route/service/store/security regressions
 |   |-- conftest.py                    Shared fixtures, Postgres store helpers, `route_client`

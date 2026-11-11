@@ -1,0 +1,51 @@
+% New presentation draft: storyline and content first, polish later by switching to \usetheme[progress]{presentation}. Build: latexmk -pdf
+\documentclass[aspectratio=169,11pt]{beamer}
+\usetheme{draft}
+
+\title{Deck title}
+\subtitle{What this talk gives you}
+\author{Author}
+\institute{Team or institution}% optional
+\date{Venue \textperiodcentered{} Year}
+
+\begin{document}
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+\begin{frame}{Agenda}{Question of the talk}
+  \tableofcontents
+  \note{The question the talk answers and why the chapters come in this order.}
+\end{frame}
+
+% Every \section opens a chapter slide, its subsections become that chapter's agenda
+\section{First chapter}
+\subsection{First step}
+
+\begin{frame}{Claim as a full sentence}
+  \begin{itemize}
+    \item Evidence or argument for the claim
+    \item What follows from it
+  \end{itemize}
+  \visual{Chart: what it shows and what it proves}
+  \question{What is still open on this slide}
+  \note{Why this claim matters and what the audience should take from it.}
+\end{frame}
+
+\section{Second chapter}
+\subsection{Second step}
+
+\begin{frame}{Claim as a full sentence}
+  \begin{itemize}
+    \item Evidence or argument for the claim
+  \end{itemize}
+  \note{How this chapter builds on the first one.}
+\end{frame}
+
+\begin{frame}[plain,c]
+  \centering\Large The one sentence to remember.
+  \note{The one sentence again in your own words, then the next step for the audience.}
+\end{frame}
+
+\end{document}

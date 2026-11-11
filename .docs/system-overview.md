@@ -107,10 +107,10 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Presentations
 
-- Create a LaTeX document from the files folder's `+`: pick LaTeX, then "Blank" or a template set (a Beamer presentation, a KOMA-Script letter). The project gets its own copy of the set's files, so it builds anywhere (e.g. Overleaf) and may diverge.
+- Create a LaTeX document from the files folder's `+`: pick LaTeX, then "Blank" or a template set (a Beamer presentation, a presentation draft, a KOMA-Script letter). The project gets its own copy of the set's files, so it builds anywhere (e.g. Overleaf) and may diverge.
 - A root that uses a presentation set's theme is a presentation. With Neovim enabled the top bar offers Add slide: a searchable picker of the set's slide primitives with previews, inserted as a new frame after the one around Neovim's cursor. Clicking the gap between two PDF pages inserts after the slide above. Ctrl+Shift+V of an image fills the image placeholder on the cursor line.
 - Present opens a presenter popup (current and next slide, `\note{}` notes, timer) and on request an audience popup, synchronized slide by slide.
-- Workbench chats for LaTeX read the set's `STYLE.md` and example, so the agent builds slides from the primitives. Editing a template set follows `templates/latex/AGENTS.md`.
+- Workbench chats for LaTeX follow the shared slide rules of the agent prompt and the set's `STYLE.md`: in a presentation the agent builds slides from the primitives, in a draft it brainstorms storyline and content with plain frames and `\visual{}` placeholders, polished later by switching the theme. Editing a template set follows `templates/latex/AGENTS.md`.
 
 ## Canvas
 

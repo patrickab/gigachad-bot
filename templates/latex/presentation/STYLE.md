@@ -1,34 +1,31 @@
 # presentation style guide
 
-A calm, minimalist Beamer theme on warm paper. Build every slide from a primitive in `primitives/` and copy its frame from `example.tex` (or the primitive file itself). Start a new deck from `skeleton.tex`.
+A calm, minimalist Beamer theme on warm paper. Build every slide from a primitive in `primitives/` and copy its frame from `example.tex` (or the primitive file itself). Start a new deck from `skeleton.tex`. The slide rules every theme shares (chapters, one claim per slide, bullets, sources, notes) are in your system prompt, this guide adds what is particular to this theme.
+
+A deck coming from the `draft` theme turns each `\visual{...}` into the primitive that fits it. If none fits, say so and propose extending one, never force the content into the wrong primitive. `\question{}` is not defined here, so settle every one before switching.
 
 ## Philosophy
 
 - **Calm**: warm paper background, soft cards, no heavy borders, no decoration without a function.
 - **Content first**: the claim and its evidence get the space, chrome stays small and quiet.
 - **One accent**: the accent color has one job, marking the single thing in focus.
-- **One message per slide**: if a slide needs two claims, it is two slides.
 - **Consistent**: one corner radius, one gap, one margin, one arrow style. New slides copy their neighbours.
 - **Shared primitives**: reuse a primitive before writing custom markup. If none fits, extend one in the sty instead of a one-off frame.
 
 ## Structure
 
-- The talk is told in chapters: one `\section{Chapter}` per chapter, one `\subsection{Step}` per step inside it. Nothing else marks structure.
+- Chapters are `\section{}`, steps are `\subsection{}`. Every chapter slide shows number, title, its subsections and all chapters on a faint track.
 - Agenda: `\begin{frame}{Agenda}{Optional italic line}\tableofcontents\end{frame}`. The theme sets the chapters as columns with their subsections, beamer's toc options such as `[currentsection]` still apply. Never build an agenda by hand.
-- Every `\section` opens its chapter slide on its own: number, title, its subsections, all chapters on a faint track. Never add divider frames yourself.
 - Content slides show where you are in a small muted note in the footer, before the page number (`Chapter · Step`, the step dropped when too long). With `\usetheme[progress]{...}` the footer adds a quiet bar with one segment per chapter, filled up to the current slide.
-- Three to five chapters, at most six. Two to four subsections per chapter, a chapter may have none.
-- Rhythm: each chapter gets at least one slide where a single visual (hero number, chart, full-bleed image, figure, steps) carries the claim. A `\statement` slide may close a chapter.
-- Chapter titles: one to three words, a noun phrase (`Method`, `Results`). Subsection titles: one to three words naming the step (`Key figures`), short enough for one line in an agenda column. No sentences, no punctuation.
+- A `\statement` slide may close a chapter.
 - `\section[Short]{Title}` and `\subsection[Short]{Title}`: the footer location uses the short form, agenda and chapter slides show the full title.
 - Frames before the first `\section` (title, agenda) and `[plain]` frames carry no location and no progress bar.
 - Build with `latexmk -pdf`: agenda, chapter slides and progress bar read the previous run, latexmk reruns until they are current.
 
 ## Slide rules
 
-- Title is the claim as a full sentence: `\begin{frame}{Claim as a sentence}{Short context}`.
+- Title is the claim: `\begin{frame}{Claim as a sentence}{Short context}`.
 - The subtitle is a visual anchor, not a sentence to read: two to five words naming what the slide shows (scope, unit, source), e.g. `Error in mm, lower is better`. Never a second claim, never an instruction. Drop it when it adds nothing.
-- Bullets state cause and effect, one grammar per list. Three or four short items, plain `itemize` sets them at slide size.
 - `\hl{}` at most one phrase per slide.
 - Cards: two to four, one heading each, two or three short points as `itemize` below it, never a paragraph.
 - One big number: `\hero{18\texttimes}{what it measures}` in a `[c]` frame. Two or three: `keyfigures`. `\keyfigure[0.49]{49\%}{label}` adds a bar against the full track, give the reference in one `\subtle` line.
@@ -46,7 +43,6 @@ A calm, minimalist Beamer theme on warm paper. Build every slide from a primitiv
 - A thesis, a quote or the closing line gets its own `[plain,c]` frame with `\statement[source]{sentence}`, the source is optional.
 - Text helpers: `\muted{}` for supporting sentences, `\subtle{}` for caveats, `\source{}` for sources, `\eyebrow{}` for small labels.
 - Beamer's `block`, `exampleblock` and `alertblock` render as cards and take overlays (`\begin{block}<2->{Title}`), `alertblock` carries the accent border.
-- Speaker notes: every content frame ends with `\note{...}`, two to four plain sentences. Notes carry the talk, slides carry the evidence: say why it matters, never read the slide aloud. Notes become hidden PDF annotations for the presenter view and never print.
 
 ## Color levels
 

@@ -1,0 +1,32 @@
+% draft: plain Beamer theme for drafting a deck's storyline and content, load with \usetheme{draft}. Build with pdfLaTeX.
+% Content macros are plain (\visual, \question, \source), everything internal starts with \draft@.
+\ProvidesPackage{beamerthemedraft}
+
+\RequirePackage[T1]{fontenc}
+\RequirePackage{tikz}
+% \note{...}: speaker notes as hidden zero-size PDF text annotations for presenter views, never printed, never a page
+\RequirePackage[overridenote]{pdfpc}
+% pdfpc writes raw bytes under pdfLaTeX, \pdfstringdef turns umlauts and macros into plain Unicode text, \\ breaks the line
+\ifPDFTeX
+  \renewcommand<>{\pdfpcnote}[1]{\only#2{\ifhmode\unskip\fi\pdfstringdefDisableCommands{\def\\{\textLF}}\pdfstringdef\draft@note{#1}%
+    \pdfannot width 0pt height 0pt depth 0pt {/Subtype /Text /Contents (\draft@note) /F 6}}\relax}
+\fi
+
+\mode<presentation>
+
+\setbeamertemplate{navigation symbols}{}
+% Footer: where you are (chapter · step) before the page number, empty before the first \section
+\setbeamertemplate{footline}{\hfill\insertsection\ifx\insertsubsection\empty\else\ \textperiodcentered\ \insertsubsection\fi\quad\insertframenumber\hspace*{1em}\vspace*{0.6em}}
+% Every \section opens a chapter slide: the agenda with the current chapter in focus
+\AtBeginSection[]{\begin{frame}[plain]\tableofcontents[currentsection]\end{frame}}
+
+% \visual{what it shows and what it proves}: a planned figure, chart or table, built later in the polish theme
+\newcommand{\visual}[1]{\par\smallskip\noindent
+  \tikz\node[draw=gray,dashed,rounded corners=4pt,inner sep=8pt,text width=\dimexpr\linewidth-16pt-0.8pt\relax]
+    {\textcolor{gray}{\footnotesize\textsc{Visual}}\par #1};\par\smallskip}
+% \question{open point}: content still to settle with the user
+\newcommand{\question}[1]{\par\noindent\textcolor{red!70!black}{\textbf{?}\ #1}\par}
+% \source{Author Year}: where a figure, number or quote comes from, right under it
+\newcommand{\source}[1]{{\leavevmode\footnotesize\color{gray}#1}}
+
+\mode<all>
