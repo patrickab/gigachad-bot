@@ -5,7 +5,7 @@ import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
 import { memo, useCallback, useMemo, type ClipboardEvent as ReactClipboardEvent, type ComponentProps, type CSSProperties } from "react"
 import { proseComponents, type CodeRenderers } from "./components.tsx"
-import { normalizeMathDelimiters } from "./math.ts"
+import { normalizeMathDelimiters, remarkHtmlMath } from "./math.ts"
 import { selectionToMarkdown } from "./selectionToMarkdown.ts"
 
 type StreamdownProps = ComponentProps<typeof Streamdown>
@@ -15,7 +15,7 @@ type RehypePlugin = NonNullable<StreamdownProps["rehypePlugins"]>[number]
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
 const PLUGINS = { math: mathPlugin }
 const LINK_SAFETY_OFF = { enabled: false }
-const DEFAULT_REMARK_PLUGINS: PluginList = [...Object.values(defaultRemarkPlugins), remarkBreaks]
+const DEFAULT_REMARK_PLUGINS: PluginList = [...Object.values(defaultRemarkPlugins), remarkBreaks, remarkHtmlMath]
 
 /** How the host's hrefs pass Streamdown's sanitizer. Omit it to keep Streamdown's defaults. */
 export interface LinkPolicy {
