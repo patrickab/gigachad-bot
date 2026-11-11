@@ -1,0 +1,11 @@
+% Bars: a few values compared as horizontal bars with the value at each bar's end, the bar in focus in accent
+\begin{frame}[c]{Claim the bars prove}{Unit, lower is better}
+  \begin{tikzpicture}
+    \begin{axis}[gc bars,symbolic y coords={New method,Option C,Option B,Option A}]
+      \addplot[gc focus] coordinates {(39,New method)};
+      \addplot coordinates {(52,Option C) (64,Option B) (82,Option A)};
+    \end{axis}
+  \end{tikzpicture}
+  \par\source{Author Year, Table n}
+  \note{What you say about the bars: what was measured, how big the gap to the next option is and why it matters.}
+\end{frame}

@@ -82,6 +82,7 @@
 \setbeamerfont{lead}{family=\rmfamily,size=\fontsize{18}{22}\selectfont}
 \setbeamerfont{claim}{family=\rmfamily,size=\fontsize{24}{28}\selectfont}
 \setbeamerfont{equation}{size=\fontsize{30}{36}\selectfont}
+\setbeamerfont{equation row}{size=\fontsize{19}{24}\selectfont}
 \setbeamerfont{card title}{family=\rmfamily,size=\fontsize{16}{19}\selectfont}
 \setbeamerfont{card text}{size=\fontsize{11}{14}\selectfont}
 \setbeamerfont{eyebrow}{series=\bfseries,size=\fontsize{8}{10}\selectfont}
@@ -95,6 +96,8 @@
 \newcommand{\mk}[2][accent]{\tcbox[on line,boxrule=0pt,arc=\gc@arcinline,boxsep=1.5pt,left=1pt,right=1pt,top=0pt,bottom=0pt,colback=#1!14!paper]{#2}}
 \newcommand{\muted}[1]{{\leavevmode\color{inkmuted}#1}}
 \newcommand{\subtle}[1]{{\leavevmode\rmfamily\itshape\color{inksubtle}#1}}
+% \source{Author Year, Fig. n}: where a figure, number or quote comes from, in footer size right under it
+\newcommand{\source}[1]{{\leavevmode\usebeamerfont{footline}\color{inksubtle}#1}}
 % \eyebrow[color]{label}: small spaced capitals for labels above content
 \newcommand{\eyebrow}[2][inksubtle]{{\usebeamerfont{eyebrow}\color{#1}\textls[60]{\MakeUppercase{#2}}}}
 \newcommand{\twodigit}[1]{\ifnum#1<10 0\fi\number#1}
@@ -144,16 +147,16 @@
   \end{minipage}}
 \setbeamertemplate{headline}{}
 
-% Title page: left aligned, vertically lower third, no chrome
+% Title page: left aligned, a little above the vertical centre, a short rule parts title and author, no chrome
 \setbeamertemplate{title page}{%
-  \vfill
+  \vspace*{0pt plus 1fill}
   {\usebeamerfont{title}\color{ink}\inserttitle\par}
   \ifx\insertsubtitle\@empty\else\vskip8pt{\usebeamerfont{subtitle}\color{inkmuted}\insertsubtitle\par}\fi
-  \vskip1.2cm
-  {\usebeamerfont{author}\color{inkmuted}\insertauthor\par}
+  \vskip0.7cm{\color{inkfaint}\hrule width1.2cm height0.8pt}\vskip0.7cm
+  {\usebeamerfont{author}\color{ink}\insertauthor\par}
   \ifx\insertinstitute\@empty\else\vskip3pt{\usebeamerfont{author}\color{inksubtle}\insertinstitute\par}\fi
   \vskip3pt{\usebeamerfont{date}\color{inksubtle}\insertdate\par}
-  \vskip1.6cm}
+  \vspace*{0pt plus 0.4fill}}
 
 % Lists: small faint markers, slide-size items with an em-based gap, lists in cards take the card text size
 \setbeamertemplate{itemize item}{\raisebox{0.15ex}{\scalebox{0.75}{$\bullet$}}}
@@ -172,7 +175,8 @@
     before upper={\raggedright},left=14pt,right=14pt,top=10pt,bottom=14pt,boxsep=0pt,toptitle=13pt,bottomtitle=0pt,
     fuzzy shadow={0mm}{-0.3mm}{0mm}{0.15mm}{cardshadow},before skip=8pt,after skip=10pt},
   gc@cardtext/.style={before upper={\raggedright\usebeamerfont{card text}\color{inkmuted}%
-    \setbeamerfont*{itemize/enumerate body}{}\setbeamerfont*{itemize/enumerate subbody}{}},bottomtitle=4pt},
+    \setbeamerfont*{itemize/enumerate body}{}\setbeamerfont*{itemize/enumerate subbody}{}%
+    \def\@listi{\leftmargin1em\topsep0pt\parsep0pt\itemsep0.4em}},bottomtitle=4pt},% lists in cards sit tight
   gc@current/.style={borderline={0.9pt}{0pt}{accent}},% the one card in focus
   gc@blocktitle/.code={\ifx\insertblocktitle\@empty\else\tcbset{title=\insertblocktitle}\fi}}
 \newtcolorbox{card}[1][]{gc@card,#1}
@@ -188,7 +192,7 @@
 \setbeamertemplate{block alerted end}{\end{tcolorbox}}
 
 % --- Slide primitives (see example.tex) ---
-% Interface: a primitive is an environment, each entry one item macro inside it (\keyfigure, \step, \fig, \phase).
+% Interface: a primitive is an environment, each entry one item macro inside it (\keyfigure, \step, \fig, \task).
 % Short numeric lists may be comma lists, text never is. A frame with one visual uses [c], so it sits centred under the title
 
 % \claim{headline}{text}: a short serif headline with muted text below, the words beside a figure
@@ -225,15 +229,24 @@
 % Charts: pgfplots styles in the house look. gc chart: no box, a light horizontal grid, muted series and
 % direct labels at the line ends instead of a legend (\addplot ... node[gc label]{name};). gc focus: the one accent series
 \pgfplotsset{
-  gc chart/.style={scale only axis,width=\linewidth-4cm,height=0.52\textheight,
+  gc chart/.style={scale only axis,width=\linewidth-4cm,height=0.4\textheight,
     axis x line*=bottom,axis y line*=left,y axis line style={draw=none},
-    axis line style={inksubtle,line width=0.6pt},major tick length=0pt,
+    axis line style={inksubtle,line width=0.6pt},major tick length=0pt,minor tick length=0pt,
     ymajorgrids,grid style={divider,line width=\gc@hairline},
-    tick label style={font=\small,text=inksubtle},label style={font=\small,text=inkmuted},
+    tick label style={font=\small,text=inksubtle,/pgf/number format/assume math mode=true},% ticks in the body face
+    label style={font=\small,text=inkmuted},x tick label style={yshift=-3pt},% clear of the y axis zero
     cycle list={{inksubtle},{inksubtle,densely dashed},{inksubtle,densely dotted}},
     every axis plot/.append style={line width=1.1pt,mark=none},
     enlarge x limits=false,clip=false},
-  gc focus/.style={accent,line width=2.2pt}}
+  gc focus/.style={accent,line width=2.2pt},
+  % gc bars: horizontal bars, one per name, the value at the bar's end instead of an axis. Coordinates are (value,name)
+  gc bars/.style={gc chart,xbar,bar shift=0pt,bar width=13pt,xmin=0,y dir=reverse,ytick distance=1,
+    hide x axis,ymajorgrids=false,enlarge y limits={abs=14pt},enlarge x limits={upper,value=0.08},
+    y tick label style={font=\normalsize,text=ink,xshift=-4pt},
+    visualization depends on=rawx\as\gc@rawx,nodes near coords={\pgfmathprintnumber{\gc@rawx}},% the value as given, on a log axis too
+    nodes near coords style={font=\small,text=inkmuted,/pgf/number format/assume math mode=true},
+    cycle list={{inksubtle!55!paper,fill=inksubtle!55!paper}},every axis plot/.append style={draw=none},
+    gc focus/.style={fill=accent,draw=none}}}
 \tikzset{gc label/.style={pos=1,anchor=west,xshift=6pt,font=\small}}
 
 % \hero{value}{label}: one number carries the slide, the label says what it measures, in a [c] frame
@@ -257,12 +270,23 @@
 \newcommand{\term}[2]{\hspace{\gcgap}\mbox{{\large$#1$}\hspace{6pt}\muted{#2}}\hspace{\gcgap}}
 \newcommand{\eqhl}[1]{{\color{accent}#1}}
 
+% equations: two or three related equations as rows, \eq{name}{math} names each on the left, \eqhl{} marks the term in focus
+\newenvironment{equations}{\par\def\gc@eqsep{}}{\par}
+\newcommand{\eq}[2]{\gc@eqsep\def\gc@eqsep{\vspace{\gcgap}{\color{divider}\hrule height\gc@hairline}\vspace{\gcgap}}%
+  \noindent\begin{minipage}[c]{0.3\linewidth}\raggedright\usebeamerfont{card title}#1\end{minipage}\hfill
+  \begin{minipage}[c]{0.66\linewidth}\usebeamerfont{equation row}$\displaystyle #2$\end{minipage}\par}
+
+% references: \reference{authors and year}{title and venue} entries, the full form of every \source on the slides
+\newenvironment{references}{\par\usebeamerfont{card text}}{\par}
+\newcommand{\reference}[2]{{\color{ink}#1\par}\vspace{1pt}{\color{inkmuted}#2\par}\vspace{0.8em}}
+
 % \statement[source]{sentence}: one large sentence for a thesis, a quote or the closing line, in a [plain,c] frame
 \newcommand{\statement}[2][]{{\usebeamerfont{statement}#2\par}\if\relax\detokenize{#1}\relax\else\vspace{2\gcgap}\subtle{#1}\fi}
 
 % datatable{colspec}: a booktabs table across the line, an X column takes the free width.
 % \hd cells head the columns, \midrule under them, no other rules. \best and \bestrow mark the winner
 \newenvironment{datatable}[1]{\par\noindent\renewcommand{\arraystretch}{1.6}\setlength{\tabcolsep}{8pt}%
+  \fontfamily{Montserrat-TLF}\selectfont% tabular figures, so digits align in columns
   \tabularx{\linewidth}{#1}}{\endtabularx\par}
 \setlength{\lightrulewidth}{\gc@hairline}
 \arrayrulecolor{divider}
@@ -328,42 +352,40 @@
     {\usebeamerfont{card text}\color{\gc@textc}#2\par}
   \end{minipage}}
 
-% roadmap[now]: \phase{length}{name}{detail} segments on one line, \milestone{position}{label} dots below, now marks the present
-\newcounter{gc@phase}\newcounter{gc@phasek}
-\newenvironment{roadmap}[1][-1]{\setcounter{gc@phase}{0}\def\gc@roadnow{#1}\def\gc@phases{}\def\gc@miles{}}{\gc@drawroadmap}
-\newcommand{\phase}[3]{\stepcounter{gc@phase}\appto\gc@phases{\gc@phase{#1}{#2}{#3}}}
-\newcommand{\milestone}[2]{\appto\gc@miles{\gc@mile{#1}{#2}}}
-% first pass sums the lengths into \gc@roadT, second pass draws, \gc@roadacc is the running start in length units
-\newcommand{\gc@drawroadmap}{\par\noindent
-  \def\gc@roadT{0}\def\gc@phase##1##2##3{\pgfmathsetmacro\gc@roadT{\gc@roadT+##1}}\gc@phases
-  \pgfmathsetmacro\gc@roadW{\linewidth}\def\gc@roadacc{0}\setcounter{gc@phasek}{0}%
-  \begin{tikzpicture}
-    \let\gc@phase\gc@roadphase\gc@phases
-    \let\gc@mile\gc@roadmile\gc@miles
-    \ifdim\gc@roadnow pt>-1pt
-      \pgfmathsetmacro\gc@x{\gc@roadnow/\gc@roadT*\gc@roadW}%
-      \draw[accent,line width=1.4pt,line cap=round](\gc@x pt,-4pt)--(\gc@x pt,9pt);
-      \node[anchor=north,inner sep=0pt,font=\small\bfseries,text=accent] at (\gc@x pt,-30pt){Now};\fi
+% gantt[now]{units}: one row per \task{first}{last}{name}, a bar over the time units first to last, and per
+% \milestone{unit}{name}, a diamond at the end of that unit. now is the time elapsed in units, bars and diamonds fill up to it
+\newcounter{gc@gantt}\newcounter{gc@ganttk}
+\newlength{\gcganttlabel}\setlength{\gcganttlabel}{3.4cm}% name column
+\newlength{\gcganttrow}\setlength{\gcganttrow}{0.6cm}% row height
+\newenvironment{gantt}[2][-1]{\setcounter{gc@gantt}{0}\def\gc@ganttnow{#1}\def\gc@ganttunits{#2}\def\gc@ganttrows{}}{\gc@drawgantt}
+\newcommand{\task}[3]{\stepcounter{gc@gantt}\appto\gc@ganttrows{\gc@ganttname{#3}\gc@gantttask{#1}{#2}}}
+\newcommand{\milestone}[2]{\stepcounter{gc@gantt}\appto\gc@ganttrows{\gc@ganttname{#2}\gc@ganttmile{#1}}}
+% x runs in pt: \gc@gx is the left edge of the grid, \gc@gu one unit. y runs in rows, downwards
+\newcommand{\gc@drawgantt}{\par\noindent
+  \pgfmathsetmacro\gc@gx{\gcganttlabel}\pgfmathsetmacro\gc@gu{(\linewidth-\gcganttlabel)/\gc@ganttunits}%
+  \pgfmathtruncatemacro\gc@gstep{ceil(\gc@ganttunits/12)}% at most twelve unit labels
+  \setcounter{gc@ganttk}{0}%
+  \begin{tikzpicture}[x=1pt,y=-1*\gcganttrow]
+    \foreach \gc@k in {0,\gc@gstep,...,\gc@ganttunits}{%
+      \draw[divider!55!paper,line width=\gc@hairline](\gc@gx+\gc@k*\gc@gu,0)--(\gc@gx+\gc@k*\gc@gu,\value{gc@gantt});
+      \ifnum\gc@k>0 \node[anchor=south,inner sep=0pt,font=\footnotesize,text=inksubtle] at (\gc@gx+\gc@k*\gc@gu-0.5*\gc@gu,-0.3){\gc@k};\fi}
+    \draw[divider,line width=\gc@hairline](0,0)--(\gc@gx+\gc@ganttunits*\gc@gu,0);
+    \gc@ganttrows
+    \ifdim\gc@ganttnow pt>-1pt
+      \pgfmathsetmacro\gc@x{\gc@gx+\gc@ganttnow*\gc@gu}%
+      \draw[accent,line width=1.2pt,line cap=round](\gc@x,0)--(\gc@x,\value{gc@gantt});
+      \node[anchor=north,inner sep=0pt,font=\small\bfseries,text=accent] at ([yshift=-5pt]\gc@x,\value{gc@gantt}){Now};\fi
   \end{tikzpicture}\par}
-\newcommand{\gc@roadphase}[3]{\stepcounter{gc@phasek}%
-  \pgfmathsetmacro\gc@xa{\gc@roadacc/\gc@roadT*\gc@roadW}%
-  \pgfmathsetmacro\gc@xb{(\gc@roadacc+#1)/\gc@roadT*\gc@roadW-(\value{gc@phasek}<\value{gc@phase})*4}%
-  \fill[divider,rounded corners=2pt](\gc@xa pt,0)rectangle(\gc@xb pt,5pt);
-  \pgfmathsetmacro\gc@x{min(max(\gc@roadnow/\gc@roadT*\gc@roadW,\gc@xa),\gc@xb)}%
-  \ifdim\gc@x pt>\gc@xa pt\fill[inkmuted,rounded corners=2pt](\gc@xa pt,0)rectangle(\gc@x pt,5pt);\fi
-  \pgfmathsetmacro\gc@w{\gc@xb-\gc@xa-6}%
-  \node[anchor=south west,inner sep=0pt,text width=\gc@w pt] at (\gc@xa pt,14pt)
-    {{\bfseries\color{ink}#2\par}\vspace{2pt}\subtle{#3}\par};
-  \pgfmathsetmacro\gc@roadacc{\gc@roadacc+#1}}
-% milestone labels centre on their dot, near the ends they align to the line's edge
-\newcommand{\gc@roadmile}[2]{\pgfmathsetmacro\gc@x{#1/\gc@roadT*\gc@roadW}%
-  \begin{scope}[overlay]% dots may hang past the line's ends
-    \fill[paper](\gc@x pt,2.5pt)circle(5pt);\fill[surfaceelevated](\gc@x pt,2.5pt)circle(3.6pt);\draw[ink,line width=0.9pt](\gc@x pt,2.5pt)circle(3.6pt);
-  \end{scope}%
-  \ifdim\gc@x pt<0.1\linewidth\def\gc@anchor{north west}\pgfmathsetmacro\gc@x{max(\gc@x-4,0)}%
-  \else\ifdim\gc@x pt>0.9\linewidth\def\gc@anchor{north east}\pgfmathsetmacro\gc@x{min(\gc@x+4,\gc@roadW)}%
-  \else\def\gc@anchor{north}\fi\fi
-  \node[anchor=\gc@anchor,inner sep=0pt,align=center,font=\small,text=inkmuted] at (\gc@x pt,-10pt){#2};}
+\newcommand{\gc@ganttname}[1]{\stepcounter{gc@ganttk}\pgfmathsetmacro\gc@gy{\value{gc@ganttk}-0.5}%
+  \node[anchor=west,inner sep=0pt,align=left,text=ink,text width=\dimexpr\gcganttlabel-8pt\relax] at (0,\gc@gy){\strut#1};}
+\newcommand{\gc@gantttask}[2]{%
+  \pgfmathsetmacro\gc@xa{\gc@gx+(#1-1)*\gc@gu+1.5}\pgfmathsetmacro\gc@xb{\gc@gx+#2*\gc@gu-1.5}%
+  \fill[divider,rounded corners=2pt]([yshift=-3.5pt]\gc@xa,\gc@gy)rectangle([yshift=3.5pt]\gc@xb,\gc@gy);
+  \pgfmathsetmacro\gc@x{min(\gc@gx+\gc@ganttnow*\gc@gu,\gc@xb)}%
+  \ifdim\gc@x pt>\gc@xa pt\fill[inkmuted,rounded corners=2pt]([yshift=-3.5pt]\gc@xa,\gc@gy)rectangle([yshift=3.5pt]\gc@x,\gc@gy);\fi}
+\newcommand{\gc@ganttmile}[1]{\pgfmathsetmacro\gc@x{\gc@gx+#1*\gc@gu}%
+  \ifdim\gc@ganttnow pt<#1pt \def\gc@fill{surfaceelevated}\else\def\gc@fill{inkmuted}\fi
+  \node[rotate=45,draw=inkmuted,fill=\gc@fill,line width=0.9pt,minimum size=6pt,inner sep=0pt] at (\gc@x,\gc@gy){};}
 
 % --- Structure: \section and \subsection feed the agenda, the chapter slides, the footer location and the progress bar ---
 % \gc@fit{height}{box}: the box as is, scaled down when taller than height

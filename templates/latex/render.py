@@ -17,6 +17,7 @@ PREVIEW_COLORS = 128
 SUBSECTIONS = {
     "text/bullets": "Points",
     "text/statement": "Theses",
+    "text/references": "Sources",
     "numbers/hero": "Key figures",
     "numbers/keyequation": "Equations",
     "tables/datatable": "Results",
@@ -24,7 +25,7 @@ SUBSECTIONS = {
     "figures/fullbleed": "Single figures",
     "figures/chart": "Charts and sets",
     "process/steps": "Steps",
-    "process/roadmap": "Timelines",
+    "process/gantt": "Timelines",
 }
 
 

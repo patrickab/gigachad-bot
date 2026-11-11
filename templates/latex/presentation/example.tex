@@ -3,7 +3,7 @@
 \usetheme[progress]{presentation}% [progress]: chapter progress bar in the footer
 
 \title{Deck title}
-\subtitle{One sentence that says what this talk gives you}
+\subtitle{What this talk gives you}
 \author{Author}
 \institute{Team or institution}% optional
 \date{Venue \textperiodcentered{} Year}
@@ -14,7 +14,7 @@
   \titlepage
 \end{frame}
 
-\begin{frame}{Agenda}{The question this talk answers in one line}
+\begin{frame}{Agenda}{Question of the talk}
   \tableofcontents
   \note{What you say to frame the talk: the question it answers and why the chapters come in this order.}
 \end{frame}
@@ -24,7 +24,7 @@
 \subsection{Points}
 
 % Bullets: cause and effect points, one message per slide, one grammar per list
-\begin{frame}[c]{Claim as a sentence}{Italic context in one line}
+\begin{frame}[c]{Claim as a sentence}{Short context}
   \begin{itemize}
     \item Condition \(\to\) consequence
     \item Second condition \(\to\) second consequence
@@ -34,12 +34,30 @@
 \end{frame}
 
 
-% Cards: two to four parallel ideas in equal-height cards, each with a serif heading and one or two lines of text
-\begin{frame}[c]{Claim that groups parallel ideas}{Use two to four cards, one heading each}
+% Cards: two to four parallel ideas in equal-height cards, each with a serif heading and two or three short points
+\begin{frame}[c]{Claim that groups parallel ideas}{What the ideas share}
   \begin{cardrow}{3}
-    \begin{cardtitled}{First idea}Short text that supports the heading.\end{cardtitled}
-    \begin{cardtitled}{Second idea}Short text that supports the heading.\end{cardtitled}
-    \begin{cardtitled}{Third idea}Short text that supports the heading.\end{cardtitled}
+    \begin{cardtitled}{First idea}
+      \begin{itemize}
+        \item Short point
+        \item Another point
+        \item Third point
+      \end{itemize}
+    \end{cardtitled}
+    \begin{cardtitled}{Second idea}
+      \begin{itemize}
+        \item Short point
+        \item Another point
+        \item Third point
+      \end{itemize}
+    \end{cardtitled}
+    \begin{cardtitled}{Third idea}
+      \begin{itemize}
+        \item Short point
+        \item Another point
+        \item Third point
+      \end{itemize}
+    \end{cardtitled}
   \end{cardrow}
   \note{What you say about the ideas: what ties them together and which one matters most.}
 \end{frame}
@@ -52,18 +70,29 @@
   \note{What you say to land the thesis: why it holds and what the audience should do with it.}
 \end{frame}
 
+\subsection{Sources}
+
+% References: the full entry for every source named on the slides, up to six per slide
+\begin{frame}{References}
+  \begin{references}
+    \reference{First Author, Second Author and Third Author (Year)}{Title of the work. Venue or publisher.}
+    \reference{First Author and Second Author (Year)}{Title of the work. Venue or publisher.}
+    \reference{Author (Year)}{Title of the work. Venue or publisher, link.}
+  \end{references}
+\end{frame}
+
 \section{Numbers}
 \subsection{Key figures}
 
 % Hero: one big number carries the slide, one line says what it measures
-\begin{frame}[c]{Claim the number proves}{Context of the number in one line}
+\begin{frame}[c]{Claim the number proves}{What was measured}
   \hero{18\texttimes}{what the number measures, against which reference}
   \note{What you say about the number: how it was measured and why it holds beyond this one case.}
 \end{frame}
 
 
 % Key figures: two or three numbers carry the result, the optional [fraction] draws a bar against the full track
-\begin{frame}[c]{Claim the numbers prove}{Two or three figures per slide}
+\begin{frame}[c]{Claim the numbers prove}{What was measured}
   \begin{keyfigures}{3}
     \keyfigure[0.49]{49\%}{what the first number measures}
     \keyfigure[0.78]{78\%}{what the second number measures}
@@ -77,18 +106,29 @@
 \subsection{Equations}
 
 % Key equation: one equation with every term named, the term in focus highlighted
-\begin{frame}[c]{Claim the equation carries}{The highlighted term is the one this talk changes}
+\begin{frame}[c]{Claim the equation carries}{Name of the equation}
   \begin{keyequation}{\mathcal{L} = a + \beta\,\eqhl{b}}
     \term{\mathcal{L}}{quantity}\term{a}{first term}\term{\beta}{weight}\term{b}{term in focus}
   \end{keyequation}
   \note{What you say about the equation: the intuition behind it and why the highlighted term is the one that changes.}
 \end{frame}
 
+
+% Equations: two or three related equations as named rows, the term in focus highlighted
+\begin{frame}[c]{Claim the equations carry}{Name of the model}
+  \begin{equations}
+    \eq{First quantity}{y = f(x)}
+    \eq{Second quantity}{\hat{x} = g(y)}
+    \eq{Objective}{\mathcal{L} = \lVert x - \eqhl{\hat{x}} \rVert^2}
+  \end{equations}
+  \note{What you say about the equations: how each follows from the one before and why the highlighted term matters.}
+\end{frame}
+
 \section{Tables}
 \subsection{Results}
 
 % Data table: options as rows sorted best first, metrics as columns, \bestrow tints the winner
-\begin{frame}[c]{Claim the table supports}{Rows are the options, columns the metrics, lower is better}
+\begin{frame}[c]{Claim the table supports}{Unit, lower is better}
   \begin{datatable}{X r r r}
     & \hd{Metric 1} & \hd{Metric 2} & \hd{Metric 3}\\
     \midrule
@@ -97,14 +137,14 @@
     Option A & 6.11 & 9.82 & 5.93\\
   \end{datatable}
   \vspace{\gcgap}
-  \muted{One sentence reading the table: how far the winner leads and on which metric.}
+  \muted{Takeaway in one line: how far the winner leads.}
   \note{What you say about the table: which row to look at, which direction is better and whether the gap matters.}
 \end{frame}
 
 \subsection{Decisions}
 
 % Decision: options against criteria rated with \harvey{0} to \harvey{4}, the last row says when to pick each
-\begin{frame}[c]{Claim about the choice}{Filled quarters replace adjectives, the last row is the decision}
+\begin{frame}[c]{Claim about the choice}{Options against criteria}
   \begin{datatable}{X c c c}
     & \hd{Option A} & \hd{Option B} & \hd{Option C}\\
     \midrule
@@ -128,12 +168,12 @@
 
 
 % Evidence: the claim in words beside the figure that proves it, the right column takes any figure, table or chart
-\begin{frame}[c]{Claim the evidence proves}{Setup of the evidence in one line}
+\begin{frame}[c]{Claim the evidence proves}{Setup of the evidence}
   \begin{columns}[c,onlytextwidth]
     \column{0.34\textwidth}
     \claim{One short claim}{One or two sentences on what to see in the figure.}
     \vspace{\gcgap}
-    \subtle{Source or setup in one line.}
+    \source{Author Year, Fig. n}
     \column{0.62\textwidth}
     \roundimage{example-image-16x9}
   \end{columns}
@@ -142,7 +182,7 @@
 
 
 % Annotated figure: numbered markers on the figure, notes beside it, revealed one by one
-\begin{frame}[c]{Claim the evidence supports}{Numbers on the figure, notes beside it, revealed one by one}
+\begin{frame}[c]{Claim the evidence supports}{What the figure shows}
   \begin{annotated}{\roundimage{example-image-16x9}}
     \annot<1->{0.3}{0.62}{First observation on the figure.}
     \annot<2->{0.52}{0.45}{Second observation on the figure.}
@@ -154,19 +194,33 @@
 \subsection{Charts and sets}
 
 % Chart: one pgfplots chart in the house style, direct labels at the line ends, the series in focus in accent
-\begin{frame}[c]{Claim the chart proves}{Unit and direction in one line, lower is better}
+\begin{frame}[c]{Claim the chart proves}{Unit, lower is better}
   \begin{tikzpicture}
     \begin{axis}[gc chart,xlabel={Unit of the x axis},xtick={1,...,6},ymin=0,ymax=100]
       \addplot coordinates {(1,82) (2,80) (3,84) (4,79) (5,81) (6,80)} node[gc label]{Baseline};
       \addplot[gc focus] coordinates {(1,80) (2,64) (3,52) (4,45) (5,41) (6,39)} node[gc label]{New method};
     \end{axis}
   \end{tikzpicture}
+  \par\source{Author Year, Table n}
   \note{What you say about the chart: what the axes measure, where the lines part and why the gap matters.}
 \end{frame}
 
 
+% Bars: a few values compared as horizontal bars with the value at each bar's end, the bar in focus in accent
+\begin{frame}[c]{Claim the bars prove}{Unit, lower is better}
+  \begin{tikzpicture}
+    \begin{axis}[gc bars,symbolic y coords={New method,Option C,Option B,Option A}]
+      \addplot[gc focus] coordinates {(39,New method)};
+      \addplot coordinates {(52,Option C) (64,Option B) (82,Option A)};
+    \end{axis}
+  \end{tikzpicture}
+  \par\source{Author Year, Table n}
+  \note{What you say about the bars: what was measured, how big the gap to the next option is and why it matters.}
+\end{frame}
+
+
 % Figure row: equal images side by side, same view, same scale, one caption each
-\begin{frame}[c]{Claim the comparison shows}{Same view, same scale, one caption each}
+\begin{frame}[c]{Claim the comparison shows}{What is compared}
   \begin{figrow}
     \fig{example-image-a}{First caption}
     \fig{example-image-b}{Second caption}
@@ -179,7 +233,7 @@
 \subsection{Steps}
 
 % Steps: a sequence on one numbered rail, one click per step, the current step carries the only accent. [0] is a plain pipeline
-\begin{frame}[c]{Claim the sequence makes}{Done steps in ink, the current step in accent, the rest still faint}
+\begin{frame}[c]{Claim the sequence makes}{Name of the process}
   \begin{steps}
     \step{First step}{What happens in this step.}
     \step{Second step}{What happens in this step.}
@@ -191,17 +245,16 @@
 
 \subsection{Timelines}
 
-% Roadmap: phases as segments, milestones as dots, one mark for today
-\begin{frame}[c]{Claim about the plan}{Phases as segments, milestones as dots, one mark for today}
-  \begin{roadmap}[4.5]
-    \phase{3}{First phase}{Months 1 to 3}
-    \phase{4}{Second phase}{Months 4 to 7}
-    \phase{3}{Third phase}{Months 8 to 10}
-    \phase{2}{Last phase}{Months 11, 12}
-    \milestone{3}{First milestone}
-    \milestone{7}{Second milestone}
-    \milestone{12}{Final}
-  \end{roadmap}
+% Gantt: tasks as bars on a grid of time units, milestones as diamonds, one mark for today
+\begin{frame}[c]{Claim about the plan}{Time unit and period}
+  \begin{gantt}[4.5]{12}
+    \task{1}{3}{First phase}
+    \task{3}{7}{Second phase}
+    \milestone{7}{First milestone}
+    \task{6}{10}{Third phase}
+    \task{10}{12}{Last phase}
+    \milestone{12}{Final milestone}
+  \end{gantt}
   \note{What you say about the plan: where we stand today, the next milestone and what could delay it.}
 \end{frame}
 

@@ -16,8 +16,14 @@ The user edits in Neovim and saves often, so re-read a file before every edit an
 
 A selection arrives as `file:start-end` followed by the quoted lines. Treat it as the part of the project the request is about.
 
-Edit files with the edit tool, never rewrite a whole file with write.
+Edit files with the edit tool, never rewrite a whole file with write and never edit through the shell (`sed`, `perl`, `python`). Read files with the read tool, find them with glob or grep, never guess a path.
+
+Batch independent reads and searches into one turn.
 
 Make minimal, surgical edits. Keep the author's voice, macros, labels, citations and every line you were not asked to change.
+
+Ask before deleting text or files you were not asked to remove.
+
+Never invent content you have not seen: no claims about a file you did not read, no citation keys, references or numbers that are not in the project or given by the user. Say what you could not find.
 
 Answer briefly in Markdown, use LaTeX math for formulas.
