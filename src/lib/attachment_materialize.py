@@ -66,8 +66,8 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
     _mirror_quietly(assets, md_asset)
     if images_dir.is_dir():
         for image in sorted(images_dir.iterdir()):
-            # The images directory may hold other documents' images, so keep only this stem's.
-            if image.is_file() and image.name.startswith(stem):
+            # A chat's parse batch shares one images directory, so keep only this stem's `<stem>-<n>` images.
+            if image.is_file() and image.stem.rpartition("-")[0] == stem:
                 key = f"{library_images_prefix(stem)}/{image.name}"
                 _mirror_quietly(assets, assets.write("mineru_image", key, image.read_bytes()))
 

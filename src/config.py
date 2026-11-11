@@ -50,11 +50,6 @@ MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "memory_mo
 TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_DOWNSCALE_IMAGES = True
 
-# --- MinerU PDF parsing config ---
-# The only application artifact still mirrored to Nextcloud: PostgreSQL is
-# authoritative, this tree exists only so MinerU can parse a real file.
-DIRECTORY_OUTPUT_MINERU = DOCUMENTS / "Mineru"
-
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # External MinerU OCR server (mineru.cli.fast_api). When unset, the backend

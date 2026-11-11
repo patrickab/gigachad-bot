@@ -30,6 +30,7 @@ def test_store_library_output_writes_markdown_and_matching_images(tmp_path, asse
     (images_dir / "paper-1.png").write_bytes(b"\x89PNG image one")
     (images_dir / "paper-2.png").write_bytes(b"\x89PNG image two")
     (images_dir / "other-1.png").write_bytes(b"\x89PNG unrelated stem")
+    (images_dir / "paper-v2-1.png").write_bytes(b"\x89PNG stem sharing the prefix")
 
     store_library_output(asset_store, "paper", md_path, images_dir)
 

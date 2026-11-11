@@ -12,8 +12,6 @@ import logging
 from pathlib import Path
 import tempfile
 
-from config import DIRECTORY_OUTPUT_MINERU
-
 # Bound as a module so tests can replace ``mineru.parse_pdf``.
 from lib import mineru
 
@@ -44,7 +42,7 @@ async def _worker() -> None:
             with tempfile.TemporaryDirectory() as tmp:
                 pdf_path = Path(tmp) / name
                 pdf_path.write_bytes(content)
-                md_path, images_dir = await mineru.parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
+                md_path, images_dir = await mineru.parse_pdf(pdf_path, Path(tmp) / "mineru")
                 store(pdf_path.stem, md_path, images_dir)
             log.info("Extraction complete: %s", name)
         except Exception:

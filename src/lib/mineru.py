@@ -17,7 +17,7 @@ import sys
 import tempfile
 import threading
 
-from config import DIRECTORY_OUTPUT_MINERU, MINERU_SERVER_URL
+from config import MINERU_SERVER_URL
 from lib.mime import IMAGE_SUFFIXES
 
 log = logging.getLogger(__name__)
@@ -54,23 +54,6 @@ def should_cancel() -> bool:
     return _cancel_event.is_set()
 
 
-def _copy_stem_images(source: Path, destination: Path, stem: str) -> None:
-    """Copy the images named after *stem* from the *source* directory, if it exists, into *destination*."""
-    if source.exists():
-        for img in source.iterdir():
-            if img.is_file() and img.name.startswith(stem):
-                shutil.copy2(img, destination / img.name)
-
-
-def _global_cache_path(stem: str) -> Path:
-    """Shared MinerU markdown cache path for one PDF stem.
-
-    Engine-internal dedup only, never read by a route. The app-facing cache is each
-    user's Postgres ``mineru_markdown`` asset.
-    """
-    return DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
-
-
 async def parse_pdf(
     pdf_path: str | Path,
     output_dir: str | Path,
@@ -78,7 +61,7 @@ async def parse_pdf(
 ) -> tuple[Path, Path]:
     """Parse a PDF with MinerU into ``(md_path, images_dir)`` under *output_dir*.
 
-    - Reuses an existing extraction in *output_dir*, then the shared cache, before running MinerU
+    - Always runs MinerU, the per-user Postgres asset is the only extraction cache
     - ``backend="auto"`` picks by GPU presence
     - Images are renamed ``<stem>-<padded>.<ext>`` and markdown links rewritten to ``images/``
     """
@@ -93,18 +76,6 @@ async def parse_pdf(
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-
-    extracted_md = output_dir / f"{stem}.md"
-    if extracted_md.exists():
-        log.info("MinerU already extracted for %s", stem)
-        return extracted_md, images_dir
-
-    global_md = _global_cache_path(stem)
-    if global_md.exists():
-        log.info("MinerU already extracted for %s (global cache)", stem)
-        shutil.copy2(global_md, extracted_md)
-        _copy_stem_images(DIRECTORY_OUTPUT_MINERU / "images", images_dir, stem)
-        return extracted_md, images_dir
 
     if backend == "auto":
         backend = _detect_backend()
@@ -191,15 +162,6 @@ async def parse_pdf(
 
         final_md_path = output_dir / f"{stem}.md"
         final_md_path.write_text(md_content, encoding="utf-8")
-
-    if output_dir != DIRECTORY_OUTPUT_MINERU:
-        global_md_path = _global_cache_path(stem)
-        if not global_md_path.exists():
-            # Direct-chat parses use a temp output_dir, so the global cache dir may not exist yet.
-            global_images_dir = DIRECTORY_OUTPUT_MINERU / "images"
-            global_images_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(final_md_path, global_md_path)
-            _copy_stem_images(images_dir, global_images_dir, stem)
 
     return final_md_path, images_dir
 
