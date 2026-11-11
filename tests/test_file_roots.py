@@ -195,6 +195,42 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
     assert scope.changes == []
 
 
+def test_a_mounted_latex_folder_joins_a_project_as_one_folder_and_leaves_it_without_touching_disk(tmp_path):
+    report = tmp_path / "report"
+    (report / "imgs").mkdir(parents=True)
+    (report / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\\end{document}\n")
+    (report / "imgs" / "plot.png").write_bytes(b"\x89PNG")
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("a")
+    project = _Project()
+    client = route_client(
+        file_attach_route.router,
+        documents_route.router,
+        overrides={
+            file_attach_route.get_file_roots: mounted_roots(tmp_path),
+            file_attach_route.get_project_store: project,
+            file_attach_route.get_asset_store: None,
+            file_attach_route.get_extraction_publisher: None,
+            documents_route.get_document_store: None,
+            documents_route.get_disk_files: DiskFiles(mounted_roots(tmp_path), RecordingScope()),
+        },
+    )
+
+    added = client.post("/api/fileroots/add-to-project", json={"slug": "test", "paths": [str(report), str(notes)]})
+
+    assert project.files == [str(report.resolve()), str((notes / "a.md").resolve())]
+    folder = added.json()["documents"][0]
+    assert (folder["mime"], folder["name"]) == ("inode/directory", "report")
+    assert {child["name"] for child in folder["children"]} == {"imgs", "main.tex"}
+
+    removed = client.delete("/api/documents", params={"slug": "test", "path": str(report.resolve())})
+
+    assert removed.json() == {"status": "ok", "removed": []}
+    assert project.files == [str((notes / "a.md").resolve())]
+    assert (report / "imgs" / "plot.png").is_file()
+
+
 def test_workspace_files_serve_raw_bytes_and_refuse_binary_as_text(tmp_path):
     (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "image.png").write_bytes(b"\x89PNG\xff")

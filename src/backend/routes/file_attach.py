@@ -13,11 +13,12 @@ from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
 from backend.routes.deps import ExtractionPublisher, get_asset_store, get_extraction_publisher, get_file_roots, get_project_store
-from backend.routes.schemas import FileListResponse, FileMeta, file_meta
+from backend.routes.schemas import FileListResponse, FileMeta, file_meta, folder_meta
 from lib.asset_store import AssetStore
 from lib.attachments import AttachResult, attach_host_file, attach_library_pdf, kind_of, read_text_or_none, sync_pdf
 from lib.data_store import StorageNotFoundError
 from lib.file_roots import FileRoots
+from lib.latex import holds_root_document
 from lib.project_store import ProjectStore
 from lib.storage_namespace import pdf_stem
 
@@ -59,9 +60,10 @@ def add_to_project(
     assets: AssetStore = Depends(get_asset_store),
     publish: ExtractionPublisher = Depends(get_extraction_publisher),
 ) -> FileListResponse:
-    """Reference file-root files (folders expand recursively) from a project.
+    """Reference file-root files and LaTeX project folders from a project.
 
-    - Every file is stored as its absolute path, so the project always sees the mounted file
+    - A folder holding a root `.tex` stays one folder entry, any other folder expands to its files recursively
+    - Every entry is stored as its absolute path, so the project always sees the mounted file or folder
       and removing it from the project never touches the filesystem
     - PDFs are also synced into the shared library and queued for extraction, as on attach,
       and their Markdown joins the project's files once done
@@ -69,9 +71,13 @@ def add_to_project(
     """
     with http_errors((FileNotFoundError, 404, None), (ValueError, 400, None)):
         store.require(body.slug)
-        files = roots.files_under(body.paths)
+        latex_folders = [folder for path in body.paths if (folder := _latex_folder(roots, path)) is not None]
+        files = roots.files_under([path for path in body.paths if Path(path).expanduser().resolve() not in latex_folders])
 
     added: list[FileMeta] = []
+    for folder in latex_folders:
+        store.add_file(body.slug, str(folder))
+        added.append(folder_meta(folder, folder.name))
     for file in files:
         if kind_of(file.name) == "pdf":
             sync_pdf(assets, file.name, file.read_bytes(), partial(publish, body.slug, pdf_stem(file.name)))
@@ -81,3 +87,12 @@ def add_to_project(
         store.add_file(body.slug, key)
         added.append(file_meta(key))
     return FileListResponse(documents=added)
+
+
+def _latex_folder(roots: FileRoots, path: str) -> Path | None:
+    """*path* resolved when it is a file-root folder holding a root `.tex`, else None."""
+    try:
+        folder = roots.resolve_folder(path)
+    except NotADirectoryError:
+        return None
+    return folder if holds_root_document(folder) else None

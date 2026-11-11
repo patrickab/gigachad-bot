@@ -320,6 +320,11 @@ def _roots_in(folder: Path) -> list[Path]:
     ]
 
 
+def holds_root_document(folder: Path) -> bool:
+    """Whether *folder* itself holds a root `.tex` document, so it is a LaTeX project folder."""
+    return bool(_roots_in(folder))
+
+
 def _default_root(folder: Path) -> Path | None:
     """`main.tex` of *folder*, else its only root document."""
     main = folder / "main.tex"

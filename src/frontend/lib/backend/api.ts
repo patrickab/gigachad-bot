@@ -328,7 +328,7 @@ export async function deleteWorktreeBranch(root: string, branch: string, force =
 type DocumentList = { documents: ProjectDocument[] }
 const documentsOf = (data: DocumentList) => data.documents
 
-/** Add file-root files (folders expand to their valid files) to a project's documents. */
+/** Add file-root files to a project's documents: a folder holding a root `.tex` stays one folder entry, other folders expand to their valid files. */
 export async function addRootFilesToProject(slug: string, paths: string[]): Promise<ProjectDocument[]> {
   return post<DocumentList>("/fileroots/add-to-project", { slug, paths }).then(documentsOf)
 }
