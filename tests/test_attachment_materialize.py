@@ -3,7 +3,7 @@
 A PDF's MinerU markdown is cached once per user in Postgres
 (``Mineru/<stem>.md``), not on disk: ``materialize`` must read that row, and
 only ever touch the filesystem to write a Nextcloud mirror (a convenience
-copy, never read back).
+copy, read back only to restore missing images).
 """
 
 import pytest

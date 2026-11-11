@@ -102,7 +102,7 @@ The page bundle of `/` holds the shell, chat and markdown (streamdown, KaTeX). H
 | Data | Authoritative representation |
 | --- | --- |
 | Chats, prompts, project documents, memory, model configuration, sandbox records | User-scoped PostgreSQL logical namespaces through domain stores / `PostgresDataStore` |
-| Uploads, PDF library, extracted Markdown/images | PostgreSQL asset records. PDF/MinerU files also have a convenience filesystem mirror, never read back as canonical data. |
+| Uploads, PDF library, extracted Markdown/images | PostgreSQL asset records. PDF/MinerU files also have a convenience filesystem mirror. The only read back: `GET /api/assets/Mineru/images/<stem>/<name>` for a host-access login stores a missing image from `Documents/Mineru/images/<stem>/<name>` or the flat `Documents/Mineru/images/<name>` older extractions wrote (`attachment_materialize.restore_library_image`), so a database moved without the folders fills those images on first open. |
 | Mounted file contents | Original disk files. Projects/attachments reference them rather than creating independently editable copies. |
 | Architecture | Linked clone `docs/architecture/` when present, otherwise PostgreSQL `graph/<slug>/` |
 | Diff notes/layout, per-device preferences, archived Code directories | Browser-local state, not shared database artifacts |

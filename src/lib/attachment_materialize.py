@@ -2,8 +2,8 @@
 
 A PDF and its MinerU output (markdown + images) are written once per user into
 the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
-``Mineru/images/<stem>/...``) and mirrored to Nextcloud as a copy the app never
-reads back. This module is the one place that writes those namespaces.
+``Mineru/images/<stem>/...``) and mirrored to Nextcloud. The copy is read back only
+to restore MinerU images an older extraction never stored. This module is the one place that writes those namespaces.
 """
 
 from collections.abc import Callable
@@ -15,8 +15,8 @@ from pathlib import Path
 from config import DOCUMENTS
 from lib import extract_queue
 from lib.asset_store import Asset, AssetStore
-from lib.data_store import StorageNotFoundError
-from lib.storage_namespace import library_images_prefix, library_markdown, library_pdf, pdf_stem
+from lib.data_store import InvalidStorageKey, StorageNotFoundError, validate_key
+from lib.storage_namespace import MINERU, library_images_prefix, library_markdown, library_pdf, pdf_stem
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +70,26 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
             if image.is_file() and image.stem.rpartition("-")[0] == stem:
                 key = f"{library_images_prefix(stem)}/{image.name}"
                 _mirror_quietly(assets, assets.write("mineru_image", key, image.read_bytes()))
+
+
+def restore_library_image(assets: AssetStore, logical_path: str) -> Asset | None:
+    """Store the MinerU image *logical_path* from its Nextcloud copy, None when it is no MinerU image key or has no copy.
+
+    - Looks at the mirror layout `Mineru/images/<stem>/<name>`, then the flat `Mineru/images/<name>` older extractions wrote
+    - Lets a migrated database fill images it lacks on first open, without moving folders
+    """
+    try:
+        parts = validate_key(logical_path).split("/")
+    except InvalidStorageKey:
+        return None
+    if len(parts) != 4 or parts[:2] != [MINERU, "images"]:
+        return None
+    images = DOCUMENTS / MINERU / "images"
+    for copy in (images / parts[2] / parts[3], images / parts[3]):
+        if copy.is_file():
+            log.info("Restoring %s from %s", logical_path, copy)
+            return assets.write("mineru_image", logical_path, copy.read_bytes())
+    return None
 
 
 def _store_extraction(
