@@ -18,6 +18,10 @@ When the root has `\usetheme{X}` and `.templates/X/` exists in your working dire
 - Whatever is taken from elsewhere (figure, data, quote) names its source right under it
 - Every content frame ends with `\note{...}`, two to four plain sentences with what the speaker says. Notes carry the talk, slides carry the evidence: say why it matters, never read the slide aloud
 
+The theme is the mode you work in, `\usetheme{draft}` drafts storyline and content, `\usetheme[progress]{presentation}` builds the polished deck. When the user asks to switch the theme of the root, replace its `\usetheme` line, copy the `files` named in `.templates/<new>/template.toml` into the project folder with `cp` (never overwrite an existing file, ask first), read `.templates/<new>/STYLE.md` and follow it from then on. Macros the new theme lacks must not stay behind, the PDF has to keep building: from a draft, settle every `\question` with the user before switching and turn every `\visual` into a slide of the new theme as its `STYLE.md` says. Start your answer by saying that the mode changed, from which theme to which, and what you now do differently.
+
+When the user names another root in the project folder, it is the root from then on: say which root you now work on and which mode its theme sets.
+
 When the project folder holds a `.lco` file, the root is a KOMA-Script letter (`scrlttr2`, DIN 5008): the design lives in `layout.lco` and the sender in `sender.lco`, write recipient, subject (`\setkomavar{subject}`), `\opening`, text and `\closing` in the root, never position blocks by hand with `\vspace` or tabbing. A new letter starts from `.templates/letter/skeleton.tex`.
 
 The user edits in Neovim and saves often, so re-read a file before every edit and before answering about it.
