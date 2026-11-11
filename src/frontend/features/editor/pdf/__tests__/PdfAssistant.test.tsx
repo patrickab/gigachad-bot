@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { PdfAssistant } from "../PdfAssistant"
 import { TopBarSlotProvider, TopBarSlot } from "@/features/navigation/TopBarSlots"
 
@@ -21,11 +21,13 @@ function mount(path: string) {
   </TopBarSlotProvider>)
 }
 
-it("switches a PDF with an extraction between its pages and the Markdown text", async () => {
-  attach.mockResolvedValue({ parsedMd: "# Extracted heading" })
+it("switches a PDF with an extraction between its pages and the rendered Markdown with its library images", async () => {
+  attach.mockResolvedValue({ parsedMd: "# Extracted heading\n\n![](images/Paper-1.jpg)" })
   mount("PDFs/Paper.pdf")
   fireEvent.click(await screen.findByRole("button", { name: "Text" }))
-  expect(screen.getByLabelText("Extracted text").textContent).toBe("# Extracted heading")
+  const text = screen.getByRole("region", { name: "Extracted text" })
+  expect(within(text).getByRole("heading", { name: "Extracted heading" })).toBeTruthy()
+  expect(text.querySelector("img")?.getAttribute("src")).toMatch(/\/assets\/Mineru\/images\/Paper\/Paper-1\.jpg$/)
   expect(screen.queryByText("pages")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "PDF" }))
   expect(screen.getByText("pages")).toBeTruthy()

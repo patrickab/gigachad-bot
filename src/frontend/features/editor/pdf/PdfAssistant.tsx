@@ -12,6 +12,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { usePolling } from "@/hooks/usePolling"
 import { useSelectionAction } from "@/hooks/useSelectionAction"
 import { attachReference } from "@/lib/backend/references"
+import { rewriteImages } from "@/lib/backend/urls"
 import { baseName } from "@/lib/paths"
 import { cn, errorMessage, isModKey } from "@/lib/utils"
 
@@ -110,7 +111,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
       {pdfText.status === "ready" && <InTopBar name="pdf"><PdfTextSwitch showText={showText} onChange={setShowText} /></InTopBar>}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
         {showText && pdfText.status === "ready"
-          ? <pre aria-label="Extracted text" className="h-full overflow-auto whitespace-pre-wrap break-words px-6 pb-6 pt-14 font-mono text-xs text-ink">{pdfText.markdown}</pre>
+          ? <div role="region" aria-label="Extracted text" className="h-full overflow-auto px-6 pb-6 pt-14"><div className="mx-auto max-w-3xl"><LaTeXMarkdown content={rewriteImages(pdfText.markdown, baseName(path))} /></div></div>
           : children}
       </div>
       {selected && (
@@ -135,7 +136,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
   )
 }
 
-/** Switch between the PDF pages and their extracted Markdown, for copying text. */
+/** Switch between the PDF pages and their extracted Markdown, rendered with its images. */
 function PdfTextSwitch({ showText, onChange }: { showText: boolean; onChange: (showText: boolean) => void }) {
   return <div role="group" aria-label="Show" className="flex items-center gap-px rounded-md p-0.5">
     {([[false, "PDF"], [true, "Text"]] as const).map(([value, label]) => (

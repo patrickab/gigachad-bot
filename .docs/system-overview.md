@@ -75,7 +75,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Upload PDFs or attach mounted PDFs, view their pages, and use MinerU extraction to supply readable Markdown to chat. Image OCR can transcribe text and LaTeX with the configured vision model.
 - Annotate PDFs with pen and highlighter. Annotations belong to the PDF's content, so every copy shares them and a renamed file keeps them, while changed bytes start empty.
 - Ask about a PDF in a side chat. With host access it is an omp session per PDF (session menu, New session, kept like workbench chats) that reads the PDF itself. Other logins get an unsaved local chat grounded in the extracted text. Ask about a selected passage either way.
-- A PDF with a finished extraction gets a PDF/Text switch in its top bar, Text shows the extracted Markdown for copying. That Markdown has no sidebar row of its own and is deleted together with its PDF.
+- A PDF with a finished extraction gets a PDF/Text switch in its top bar, Text shows the extracted Markdown rendered with its images. That Markdown has no sidebar row of its own and is deleted together with its PDF.
 - Keep PDF library names unique within your account. Uploading or syncing another PDF with the same filename replaces the shared library entry, rather than creating a separate library item. Extraction is also keyed by filename stem.
 - For study, attach extracted lecture/document material, choose a tutoring prompt, and ask for explanations, active-recall material, diagrams, or mind maps.
 - Enable tools for the current conversation rather than assuming every reply uses them. Use web search for current or source-dependent facts and deep research for broad, multi-part investigations; deep research can take minutes.
