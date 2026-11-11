@@ -1008,6 +1008,24 @@ async def test_no_answer_pastes_nothing_after_the_timeout_and_stops_waiting(neov
 
 
 @requires_nvim
+async def test_a_plugin_reading_the_clipboard_while_typing_does_not_ask_the_browser(neovim_home, tmp_path):
+    # Like blink.cmp, which reads the register for its snippet variables on every completion
+    _clipboard_config(neovim_home, 'vim.api.nvim_create_autocmd("InsertCharPre", { callback = function() vim.fn.getreg("+") end })')
+    file = _notes(tmp_path)
+    asked: list[str] = []
+
+    async def read_clipboard(path: str) -> str:
+        asked.append(path)
+        return "XY"
+
+    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
+        session.write_input(b"it\x1bp")
+
+        await _evaluates_to(session, "getline(1, '$')", ["tXYabc"])
+        assert asked == [str(file)]
+
+
+@requires_nvim
 @pytest.mark.parametrize("user_config", [_HOST_PROVIDER, _NO_PROVIDER], ids=["provider of its own", "no provider"])
 async def test_the_browsers_clipboard_replaces_the_provider_of_the_users_config(neovim_home, tmp_path, user_config):
     _clipboard_config(neovim_home, *user_config)

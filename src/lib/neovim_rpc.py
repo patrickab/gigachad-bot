@@ -24,7 +24,8 @@
   is a `paste` request with the path of the current buffer, answered `{ text }` or `{ error }`. An error is shown and the
   last copy is pasted instead (`yy` then `p` works without the browser's clipboard), a copy stays in Neovim's registers.
   It replaces the provider the user's config chose (`vim.g.clipboard`, even one already in use), the `clipboard` option
-  decides which registers reach it
+  decides which registers reach it. Only reads in normal and visual mode ask, others (plugins reading `+` while you type,
+  insert-mode `<C-r>+`) get the last copy, each ask could show the browser's paste prompt
 - With `notebook` the first document is a notebook's percent text (`# %%` before each cell): its buffer is named by its id, a
   virtual path beside the notebook (`<notebook>.ipynb.py`), so the user's LSP finds the notebook's project and `.venv`. Nothing is
   ever read from or written to that name: `BufReadCmd` loads the text the caller last agreed on (a `base` request, also for `:e!`),
@@ -497,7 +498,14 @@ if own_clipboard == true then
     return { lines, "v" }
   end
 
+  -- Only `p`-like commands of normal and visual mode ask the browser. Plugins read `+` in insert mode too (blink.cmp's
+  -- snippet variables), each read would show the browser's paste prompt, they get the last copy
+  local function is_paste_command()
+    return vim.api.nvim_get_mode().mode:match("^[nvV\22]") ~= nil
+  end
+
   local function paste()
+    if not is_paste_command() then return yanked end
     local buffer = vim.api.nvim_get_current_buf()
     local ok, answer = pcall(vim.rpcrequest, channel, "paste", ids[buffer] or vim.api.nvim_buf_get_name(buffer))
     if not ok then answer = { error = tostring(answer) } end

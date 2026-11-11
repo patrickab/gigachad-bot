@@ -27,7 +27,8 @@
   and replace the provider of the user's config: a paste asks `read_clipboard(path)` with the path of the shown document,
   which answers the text to paste (linewise when it ends with a newline) or raises `ClipboardError`. Neovim shows its
   message and pastes its last copy instead, and so after 15 s without an answer ("Clipboard did not answer"). A copy
-  stays in Neovim's registers, the yank reaches the caller through `on_yank`. Reads run beside the other requests, so a
+  stays in Neovim's registers, the yank reaches the caller through `on_yank`. Only reads in normal and visual mode ask,
+  others (a plugin reading `+` while you type) get the last copy. Reads run beside the other requests, so a
   paste waiting for the browser never holds up `set_text`, `:w` or the others
 - `set_background` sets 'background' to the browser theme's, so the colorscheme picks its light or dark palette
 - A notebook's percent text (`spawn` with *notebook*) is a document whose buffer has a virtual name beside the notebook
