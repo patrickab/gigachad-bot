@@ -298,7 +298,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
 |       |   |-- backend/              HTTP, URL, runtime API base and stream clients
-|       |   |   |-- api.ts                Resource endpoints over one fetch core
+|       |   |   |-- api/                  Resource endpoints: `index.ts` (public entry `@/lib/backend/api`), `http.ts` (fetch core), one client per route family
 |       |   |   |-- references.ts         Live document references (attach, write back)
 |       |   |   |-- config.ts
 |       |   |   |-- urls.ts
