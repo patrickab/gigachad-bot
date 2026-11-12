@@ -286,7 +286,8 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
     }
     user = launcher.user_home
     expected_hidden = {
-        ".secrets", ".ssh", ".omp", ".gnupg", ".config/gh", ".aws", ".netrc", ".git-credentials", ".local/share/gigachad-bot/litellm-proxy",
+        ".secrets", ".ssh", ".omp", ".gnupg", ".config/gh", ".aws", ".netrc", ".git-credentials",
+        ".local/share/gigachad-bot/litellm-proxy",
         ".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".local/share/keyrings",
         ".password-store", ".docker", ".kube", ".config/gcloud", ".azure", ".npmrc", ".pypirc", ".var/app",
         ".config/google-chrome", ".mozilla",
@@ -328,7 +329,7 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
     assert launcher.npm_calls() == ["ci openai=none", "install openai=none", "run openai=none"]
     # The proxy's master key is read through the generator, which creates it when the proxy launcher has not yet.
     generator_calls = launcher.write_config_log.read_text()
-    assert generator_calls == f"-m lib.learnharness master-key home={home} proxy={launcher.proxy} src={launcher.root / 'src'}\n"
+    assert generator_calls == f"-m lib.learnharness_config master-key home={home} proxy={launcher.proxy} src={launcher.root / 'src'}\n"
     # LearnHarness listened: its data now belongs to this commit.
     assert (home / "served-commit").read_text() == first_commit
     assert launcher.snapshots() == []

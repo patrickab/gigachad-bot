@@ -2,7 +2,7 @@
 # Serves the LiteLLM proxy, learn mode's model endpoint: LearnHarness's custom OpenAI provider reaches every model of
 # gigachad's catalog through it.
 #
-#   config    `python -m lib.learnharness write-config` generates GIGACHAD_LITELLM_PROXY_HOME/config.yaml and
+#   config    `python -m lib.learnharness_config write-config` generates GIGACHAD_LITELLM_PROXY_HOME/config.yaml and
 #             LearnHarness's model settings from one read of gigachad's catalog, right before the proxy starts. This is
 #             their only generation point, so the proxy and LearnHarness's menus list the same models. When generation
 #             fails (gateway down, unknown login, empty catalog) the last config and settings are served unchanged
@@ -38,7 +38,7 @@ esac
 
 generator() {
     GIGACHAD_LITELLM_PROXY_HOME="$home" GIGACHAD_LITELLM_PROXY_BIND="$bind" PYTHONPATH="$root_dir/src" \
-        "$python" -m lib.learnharness "$@"
+        "$python" -m lib.learnharness_config "$@"
 }
 
 if port_open "$bind"; then

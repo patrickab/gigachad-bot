@@ -12,7 +12,7 @@ import litellm
 import pytest
 import yaml
 
-from lib import learnharness, omp_source, reasoning_levels
+from lib import learnharness_config, omp_source, reasoning_levels
 
 PROVIDERS = {
     "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.5-flash"]},
@@ -65,13 +65,17 @@ def models(monkeypatch):
     monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_URL", "http://127.0.0.1:4000/v1")
     monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_TOKEN", "gateway-token")
     return [
-        learnharness.served_model(selector, reasoning=selector in REASONING, omp_entries=OMP_ENTRIES, ollama_details=OLLAMA_DETAILS)
-        for selector in learnharness.catalog_selectors(PROVIDERS, OLLAMA)
+        learnharness_config.served_model(
+            selector, reasoning=selector in REASONING, omp_entries=OMP_ENTRIES, ollama_details=OLLAMA_DETAILS
+        )
+        for selector in learnharness_config.catalog_selectors(PROVIDERS, OLLAMA)
     ]
 
 
 def write(models, tmp_path, defaults=DEFAULTS):
-    learnharness.write_config(models, defaults, proxy_dir=tmp_path / "proxy", learnharness_dir=tmp_path / "lh", base_url=BASE_URL)
+    learnharness_config.write_config(
+        models, defaults, proxy_dir=tmp_path / "proxy", learnharness_dir=tmp_path / "lh", base_url=BASE_URL
+    )
     config = yaml.safe_load((tmp_path / "proxy" / "config.yaml").read_text())
     settings = json.loads((tmp_path / "lh" / "data" / "settings.json").read_text())
     auth = json.loads((tmp_path / "lh" / "auth.json").read_text())
@@ -101,7 +105,7 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
         "api_base": "http://127.0.0.1:4000/v1",
         "api_key": "os.environ/GIGACHAD_OMP_GATEWAY_TOKEN",
     }
-    assert routes["ollama/gemma3:4b"] == {"model": "ollama/gemma3:4b", "api_base": learnharness.OLLAMA_BASE_URL}
+    assert routes["ollama/gemma3:4b"] == {"model": "ollama/gemma3:4b", "api_base": learnharness_config.OLLAMA_BASE_URL}
     # Provider keys stay in the proxy's environment, where LiteLLM looks them up like gigachad's own calls.
     assert routes["gemini/gemini-3.5-flash"] == {"model": "gemini/gemini-3.5-flash"}
     assert config["litellm_settings"] == {"drop_params": True}
@@ -109,7 +113,7 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
 
     key = (tmp_path / "proxy" / "master.key").read_text().strip()
     assert key.startswith("sk-")
-    assert key == learnharness.master_key(tmp_path / "proxy")
+    assert key == learnharness_config.master_key(tmp_path / "proxy")
     config_text = (tmp_path / "proxy" / "config.yaml").read_text()
     assert key not in config_text
     assert "gateway-token" not in config_text
@@ -118,7 +122,7 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
 
     provider = settings["customProvider"]
     assert (provider["baseUrl"], provider["authMode"]) == (BASE_URL, "apiKey")
-    binding = json.loads(auth[learnharness.CUSTOM_AUTH_BINDING])
+    binding = json.loads(auth[learnharness_config.CUSTOM_AUTH_BINDING])
     assert binding == {"version": 1, "id": provider["credentialBindingId"], "baseUrl": BASE_URL, "authMode": "apiKey"}
     assert len(binding["id"]) == 32
     assert key not in (tmp_path / "lh" / "auth.json").read_text() + (tmp_path / "lh" / "data" / "settings.json").read_text()
@@ -157,31 +161,31 @@ def test_capabilities_come_from_the_omp_gateway_ollama_and_litellm(models, tmp_p
             "image": False,
             "reasoning": False,
             "context": 262144,
-            "maxTokens": learnharness.ASSUMED_MAX_TOKENS,
+            "maxTokens": learnharness_config.ASSUMED_MAX_TOKENS,
         },
         "ollama/gemma3:4b": {
             "id": "ollama/gemma3:4b",
             "image": True,
             "reasoning": False,
             "context": 131072,
-            "maxTokens": learnharness.ASSUMED_MAX_TOKENS,
+            "maxTokens": learnharness_config.ASSUMED_MAX_TOKENS,
         },
     }
     assert [model.id for model in models if model.assumed_limits] == ["litellm_proxy/ollama-cloud/devstral-2:123b", "ollama/gemma3:4b"]
 
 
 def test_a_model_no_source_describes_gets_assumed_limits_not_8k(models):
-    unknown = learnharness.served_model("openrouter/new/model", reasoning=False, omp_entries={}, ollama_details={})
+    unknown = learnharness_config.served_model("openrouter/new/model", reasoning=False, omp_entries={}, ollama_details={})
     assert unknown.assumed_limits
     assert unknown.snapshot() == {
         "id": "openrouter/new/model",
         "image": False,
         "reasoning": False,
-        "context": learnharness.ASSUMED_CONTEXT,
-        "maxTokens": learnharness.ASSUMED_MAX_TOKENS,
+        "context": learnharness_config.ASSUMED_CONTEXT,
+        "maxTokens": learnharness_config.ASSUMED_MAX_TOKENS,
     }
     # A small known window keeps half of it for the answer.
-    small = learnharness.ServedModel("ollama/tiny", {"model": "ollama/tiny"}, context=8192)
+    small = learnharness_config.ServedModel("ollama/tiny", {"model": "ollama/tiny"}, context=8192)
     assert small.snapshot()["maxTokens"] == 4096
 
 
@@ -280,7 +284,7 @@ def test_an_empty_catalog_writes_nothing(tmp_path):
     (tmp_path / "proxy").mkdir()
     (tmp_path / "proxy" / "config.yaml").write_text("model_list: [kept]\n")
 
-    with pytest.raises(learnharness.ConfigUnavailable, match="no model"):
+    with pytest.raises(learnharness_config.ConfigUnavailable, match="no model"):
         write([], tmp_path)
     assert settings_path.read_text() == last_good
     assert (tmp_path / "proxy" / "config.yaml").read_text() == "model_list: [kept]\n"
@@ -301,7 +305,7 @@ def test_a_settings_write_by_learnharness_meanwhile_is_merged_not_lost(models, t
     settings_path = tmp_path / "lh" / "data" / "settings.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(json.dumps({"appearance": {"accent": "teal"}}))
-    merge = learnharness.merged_settings
+    merge = learnharness_config.merged_settings
     calls = []
 
     def learner_picks_meanwhile(current, **kwargs):
@@ -310,7 +314,7 @@ def test_a_settings_write_by_learnharness_meanwhile_is_merged_not_lost(models, t
             settings_path.write_text(json.dumps({"appearance": {"accent": "teal"}, "general": {"picked": "while we merged"}}))
         return merge(current, **kwargs)
 
-    monkeypatch.setattr(learnharness, "merged_settings", learner_picks_meanwhile)
+    monkeypatch.setattr(learnharness_config, "merged_settings", learner_picks_meanwhile)
     _, settings, _ = write(models, tmp_path)
 
     assert len(calls) == 2
@@ -322,20 +326,20 @@ def test_a_failed_rename_leaves_no_staging_file(tmp_path, monkeypatch):
     def failing_replace(source, target):
         raise OSError("disk full")
 
-    monkeypatch.setattr(learnharness.os, "replace", failing_replace)
+    monkeypatch.setattr(learnharness_config.os, "replace", failing_replace)
     with pytest.raises(OSError, match="disk full"):
-        learnharness._write_private(tmp_path / "settings.json", "{}")
+        learnharness_config._write_private(tmp_path / "settings.json", "{}")
     assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("stored", ["", "sk-", "sk-12ab\n"])
 def test_an_empty_or_cut_master_key_is_replaced(tmp_path, stored):
     (tmp_path / "master.key").write_text(stored)
-    key = learnharness.master_key(tmp_path)
+    key = learnharness_config.master_key(tmp_path)
     assert len(key) == 67
     assert key.startswith("sk-")
     assert (tmp_path / "master.key").read_text() == f"{key}\n"
-    assert learnharness.master_key(tmp_path) == key
+    assert learnharness_config.master_key(tmp_path) == key
 
 
 def test_concurrent_runs_agree_on_one_master_key_and_one_binding(models, tmp_path):
@@ -344,7 +348,7 @@ def test_concurrent_runs_agree_on_one_master_key_and_one_binding(models, tmp_pat
 
     def run():
         try:
-            keys.append(learnharness.master_key(tmp_path / "proxy"))
+            keys.append(learnharness_config.master_key(tmp_path / "proxy"))
             write(models, tmp_path)
         except Exception as exc:  # pragma: no cover - reported below
             errors.append(exc)
@@ -359,7 +363,7 @@ def test_concurrent_runs_agree_on_one_master_key_and_one_binding(models, tmp_pat
     assert len(set(keys)) == 1
     assert (tmp_path / "proxy" / "master.key").read_text() == f"{keys[0]}\n"
     _, settings, auth = write(models, tmp_path)
-    assert json.loads(auth[learnharness.CUSTOM_AUTH_BINDING])["id"] == settings["customProvider"]["credentialBindingId"]
+    assert json.loads(auth[learnharness_config.CUSTOM_AUTH_BINDING])["id"] == settings["customProvider"]["credentialBindingId"]
 
 
 # ── Live catalog reads, faked at their sources ───────────────────────────────────────────────────────────────────────
@@ -381,8 +385,8 @@ def catalog(monkeypatch):
     async def resolve(model):
         return ["none", "high"] if model in REASONING else []
 
-    monkeypatch.setattr(learnharness, "_host_catalog", lambda login: (PROVIDERS, DEFAULTS))
-    monkeypatch.setattr(learnharness, "discover_ollama_models", list)
+    monkeypatch.setattr(learnharness_config, "_host_catalog", lambda login: (PROVIDERS, DEFAULTS))
+    monkeypatch.setattr(learnharness_config, "discover_ollama_models", list)
     monkeypatch.setattr(omp_source, "catalog_entries", gateway)
     monkeypatch.setattr(omp_source, "thinking_registry", registry)
     monkeypatch.setattr(reasoning_levels, "resolve", resolve)
@@ -392,7 +396,7 @@ def catalog(monkeypatch):
 
 
 def test_omp_models_are_described_from_one_gateway_and_one_registry_read(catalog):
-    models, defaults = asyncio.run(learnharness.served_catalog("host"))
+    models, defaults = asyncio.run(learnharness_config.served_catalog("host"))
 
     assert catalog == {"gateway": 1, "registry": 1}
     by_id = {model.id: model for model in models}
@@ -414,8 +418,8 @@ def test_an_omp_source_down_fails_instead_of_degrading(catalog, monkeypatch, sou
         raise failure
 
     monkeypatch.setattr(omp_source, source, down)
-    with pytest.raises(learnharness.ConfigUnavailable, match=message):
-        asyncio.run(learnharness.served_catalog("host"))
+    with pytest.raises(learnharness_config.ConfigUnavailable, match=message):
+        asyncio.run(learnharness_config.served_catalog("host"))
 
 
 def test_an_unanswered_reasoning_lookup_fails_instead_of_counting_as_no(catalog, monkeypatch):
@@ -423,13 +427,13 @@ def test_an_unanswered_reasoning_lookup_fails_instead_of_counting_as_no(catalog,
         return None
 
     monkeypatch.setattr(reasoning_levels, "resolve", unknown)
-    with pytest.raises(learnharness.ConfigUnavailable, match=r"no reasoning answer for gemini/gemini-3\.5-flash"):
-        asyncio.run(learnharness.served_catalog("host"))
+    with pytest.raises(learnharness_config.ConfigUnavailable, match=r"no reasoning answer for gemini/gemini-3\.5-flash"):
+        asyncio.run(learnharness_config.served_catalog("host"))
 
 
 def test_an_omp_model_the_gateway_does_not_list_is_warned_about(catalog, monkeypatch, capsys):
     monkeypatch.setattr(omp_source, "catalog_entries", lambda: [OMP_ENTRIES["anthropic/claude-sonnet-5-5"]])
-    asyncio.run(learnharness.served_catalog("host"))
+    asyncio.run(learnharness_config.served_catalog("host"))
     err = capsys.readouterr().err
     assert "the OMP gateway does not list ollama-cloud/devstral-2:123b" in err
     assert "no context or max output figure for litellm_proxy/ollama-cloud/devstral-2:123b" in err
@@ -437,10 +441,10 @@ def test_an_omp_model_the_gateway_does_not_list_is_warned_about(catalog, monkeyp
 
 def test_an_empty_catalog_fails(catalog, monkeypatch):
     monkeypatch.setattr(
-        learnharness, "_host_catalog", lambda login: ({"OpenRouter": {"litellm_id": "openrouter", "models": []}}, DEFAULTS)
+        learnharness_config, "_host_catalog", lambda login: ({"OpenRouter": {"litellm_id": "openrouter", "models": []}}, DEFAULTS)
     )
-    with pytest.raises(learnharness.ConfigUnavailable, match="host's catalog has no model"):
-        asyncio.run(learnharness.served_catalog("host"))
+    with pytest.raises(learnharness_config.ConfigUnavailable, match="host's catalog has no model"):
+        asyncio.run(learnharness_config.served_catalog("host"))
 
 
 class _NoRows:
@@ -471,8 +475,8 @@ class _NoRows:
 
 def test_an_unknown_login_fails_without_registering_a_user():
     pool = _NoRows()
-    with pytest.raises(learnharness.ConfigUnavailable, match="no gigachad user 'typo'"):
-        learnharness._user_id(pool, "typo")
+    with pytest.raises(learnharness_config.ConfigUnavailable, match="no gigachad user 'typo'"):
+        learnharness_config._user_id(pool, "typo")
     assert [statement.split()[0] for statement in pool.statements] == ["SELECT"]
 
 
@@ -480,7 +484,7 @@ def test_write_config_against_a_dead_gateway_keeps_the_last_good_files(catalog, 
     monkeypatch.setenv("GIGACHAD_LITELLM_PROXY_HOME", str(tmp_path / "proxy"))
     monkeypatch.setenv("GIGACHAD_LEARNHARNESS_HOME", str(tmp_path / "lh"))
     monkeypatch.setenv("GIGACHAD_LITELLM_PROXY_BIND", BASE_URL.removeprefix("http://"))
-    assert learnharness.main(["write-config", "--login", "host"]) == 0
+    assert learnharness_config.main(["write-config", "--login", "host"]) == 0
     good = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     assert "host's catalog: 4 (1 image, 2 reasoning, 1 with assumed limits)" in capsys.readouterr().out
 
@@ -488,7 +492,7 @@ def test_write_config_against_a_dead_gateway_keeps_the_last_good_files(catalog, 
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(omp_source, "catalog_entries", refused)
-    assert learnharness.main(["write-config", "--login", "host"]) == 1
+    assert learnharness_config.main(["write-config", "--login", "host"]) == 1
     assert "no OMP gateway" in capsys.readouterr().err
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == good
 
@@ -524,15 +528,17 @@ def proxy():
 def test_a_reused_proxy_is_checked_against_this_homes_config_and_key(proxy, tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text(
-        yaml.safe_dump(learnharness.proxy_config([learnharness.ServedModel(m, {"model": m}) for m in ["a/one", "b/two"]]))
+        yaml.safe_dump(
+            learnharness_config.proxy_config([learnharness_config.ServedModel(m, {"model": m}) for m in ["a/one", "b/two"]])
+        )
     )
     url = f"http://127.0.0.1:{proxy.server_port}"
 
-    assert learnharness.proxy_drift(url, "sk-right", config) is None
-    assert "refuses the master key" in learnharness.proxy_drift(url, "sk-other", config)
+    assert learnharness_config.proxy_drift(url, "sk-right", config) is None
+    assert "refuses the master key" in learnharness_config.proxy_drift(url, "sk-other", config)
     proxy.served = ["a/one"]
-    assert "missing: b/two, extra: none" in learnharness.proxy_drift(url, "sk-right", config)
-    assert "there is no" in learnharness.proxy_drift(url, "sk-right", tmp_path / "absent.yaml")
+    assert "missing: b/two, extra: none" in learnharness_config.proxy_drift(url, "sk-right", config)
+    assert "there is no" in learnharness_config.proxy_drift(url, "sk-right", tmp_path / "absent.yaml")
 
 
 def test_the_proxy_tool_pin_follows_the_locked_litellm(tmp_path, monkeypatch):
@@ -547,12 +553,12 @@ sdist = { url = "x", upload-time = "2026-08-22T22:19:21.931Z" }
 wheels = [{ url = "y", upload-time = "2026-08-22T22:20:00Z" }]
 """
     )
-    monkeypatch.setattr(learnharness.importlib.metadata, "version", lambda name: "1.98.0")
-    requirement, python, exclude_newer = learnharness.proxy_tool_pin(lock).split()
+    monkeypatch.setattr(learnharness_config.importlib.metadata, "version", lambda name: "1.98.0")
+    requirement, python, exclude_newer = learnharness_config.proxy_tool_pin(lock).split()
     assert requirement == "litellm[proxy]==1.98.0"
     assert python.count(".") == 1
     assert exclude_newer == "2026-08-23T22:20:00Z"
 
-    monkeypatch.setattr(learnharness.importlib.metadata, "version", lambda name: "1.99.0")
-    with pytest.raises(learnharness.ConfigUnavailable, match=r"does not lock litellm 1\.99\.0"):
-        learnharness.proxy_tool_pin(lock)
+    monkeypatch.setattr(learnharness_config.importlib.metadata, "version", lambda name: "1.99.0")
+    with pytest.raises(learnharness_config.ConfigUnavailable, match=r"does not lock litellm 1\.99\.0"):
+        learnharness_config.proxy_tool_pin(lock)

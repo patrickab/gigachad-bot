@@ -70,7 +70,8 @@ LearnHarness runs unmodified in one iframe. Its teaching, sessions, composer, do
                                              is the upstream-feature inventory
   src/frontend/features/learn/             shell adapter: frame, bridge, provider, model, sidebar, tabs, tool link
   src/frontend/packages/chat-ui/src/learn-protocol.ts   the postMessage protocol, shared by both sides
-  src/lib/learnharness.py                  backend adapter (sessions API) and the model generator (write-config)
+  src/lib/learnharness.py                  backend adapter (sessions API)
+  src/lib/learnharness_config.py           the model generator (write-config, master-key, check-proxy)
   src/backend/routes/learn.py              /api/learn (host only): sessions, rename, delete modes, export, projects
   src/backend/learnharness_gate.py         production Tailnet gate in front of the frame
   run-learnharness.sh                      builds and serves LearnHarness in its sandbox unit, refuses an unguarded ref
@@ -90,7 +91,7 @@ LearnHarness runs unmodified in one iframe. Its teaching, sessions, composer, do
 | The postMessage protocol | `learn-protocol.ts`, both sides in the same commit | same gigachad-bot commit (the launcher packs chat-ui) |
 | Shell side (selectors, sidebar rows, tabs, tool link) | `src/frontend/features/learn/` | gigachad-bot commit, frontend hot-reloads |
 | Which LearnHarness API the backend calls, its shapes | `src/lib/learnharness.py` only, routes map its errors | gigachad-bot commit, backend restart |
-| Models LearnHarness offers | the generator in `src/lib/learnharness.py`, served by `run-litellm-proxy.sh` | next proxy start |
+| Models LearnHarness offers | the generator in `src/lib/learnharness_config.py`, served by `run-litellm-proxy.sh` | next proxy start |
 | Sandbox, environment allowlist, build, upstream markers | `run-learnharness.sh` | next LearnHarness restart |
 | LearnHarness lacks a seam or has a bug | upstream issue or pull request to amosblomqvist/learnharness (drafts: `.wayfinder/learnharness-integration/spec/upstream-proposals.md`), then bump the ref | ref the launcher serves |
 | LearnHarness's server API, sessions, teaching logic, storage | never | n/a |
@@ -243,7 +244,7 @@ For a commit that is no release tag (`origin/main`), or to hold a version. Go th
 
 ## Models: generator and proxy
 
-- `python -m lib.learnharness write-config` (run only by `run-litellm-proxy.sh`, right before the proxy starts) reads one login's catalog (`GIGACHAD_LEARNHARNESS_LOGIN`, else the OS user; read-only lookup) and writes, under a lock, staged and renamed:
+- `python -m lib.learnharness_config write-config` (run only by `run-litellm-proxy.sh`, right before the proxy starts) reads one login's catalog (`GIGACHAD_LEARNHARNESS_LOGIN`, else the OS user; read-only lookup) and writes, under a lock, staged and renamed:
   - `config.yaml` in the proxy home: one route per model, named by its gigachad selector string. No secret: `os.environ/LITELLM_MASTER_KEY`, `os.environ/GIGACHAD_OMP_GATEWAY_TOKEN` and provider keys by name, exported by the proxy launcher only;
   - LearnHarness's `settings.json`: `customProvider` (base URL, binding id, models with capabilities, `context` and `maxTokens`, assumed 128000/16384 when unknown) and the `strong`/`cheap`/`vision` tiers only when absent. Every other key is untouched;
   - the `auth.json` binding record, without the key.
@@ -306,7 +307,7 @@ Parallel-safe slices: one override or driver each (`embed/<driver>` + its overri
   - A new upstream surface, control, input, event or marker fails the inventory (`learnharness-overlay/inventory.test.mjs`) or the launcher's `upstream_markers`: map it, never delete the entry to pass
 - **Seam policy**: never change LearnHarness's server API, sessions, teaching logic or storage. Keep `seams.patch` to loading the overlay. Each override is evidence of a missing seam: it goes upstream as an issue or pull request valuable to every LearnHarness host (drafts in `.wayfinder/learnharness-integration/spec/upstream-proposals.md`), posted by the user
 - **Adapters own all LearnHarness knowledge**, one place per side, so a LearnHarness change lands in one file:
-  - Backend: `src/lib/learnharness.py` only (sessions API with contract models, the model generator). Routes (`routes/learn.py`, the project delete) map its errors, they never build LearnHarness URLs. `src/backend/learnharness_gate.py` is a plain identity-checking proxy whose only LearnHarness knowledge is the refused credential routes
+  - Backend: `src/lib/learnharness.py` only (sessions API with contract models), the model generator in `src/lib/learnharness_config.py`. Routes (`routes/learn.py`, the project delete) map its errors, they never build LearnHarness URLs. `src/backend/learnharness_gate.py` is a plain identity-checking proxy whose only LearnHarness knowledge is the refused credential routes
   - Frontend: `src/frontend/features/learn/` only. Nothing else knows the iframe, the protocol (`packages/chat-ui/src/learn-protocol.ts`, eslint lets only this feature import it) or LearnHarness URLs. Other features import its public files (eslint `crossFeature`)
   - The browser never calls LearnHarness's API, the backend does, server to server
 - **Never vendor LearnHarness code** (components, hooks, CSS). Write new code against its API with LearnHarness as reference
@@ -320,7 +321,7 @@ Parallel-safe slices: one override or driver each (`embed/<driver>` + its overri
 ## Production deployment
 
 - gigachad-bot's side is the overlay `learnharness-overlay/`, the launchers
-  `run-learnharness.sh` and `run-litellm-proxy.sh`, `src/lib/learnharness.py` and
+  `run-learnharness.sh` and `run-litellm-proxy.sh`, `src/lib/learnharness.py`, `src/lib/learnharness_config.py` and
   the gate.
 - LearnHarness's only model provider is a loopback LiteLLM proxy. Its model list
   and LearnHarness's model menus are generated from one gigachad login's catalog

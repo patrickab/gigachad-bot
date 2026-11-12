@@ -67,7 +67,7 @@ def test_proxy_serves_a_fresh_config_on_loopback_with_its_secrets_in_the_environ
     assert result.returncode == 0, result.stdout + result.stderr
     # ~/.secrets is loaded for a standalone start. config.yaml names the secrets, uv gets them, never the project's src.
     assert log == [
-        f"-m lib.learnharness write-config bind=127.0.0.1:1 home={home} src={root / 'src'} secret=loaded",
+        f"-m lib.learnharness_config write-config bind=127.0.0.1:1 home={home} src={root / 'src'} secret=loaded",
         "uv tool run --python 3.12 --exclude-newer 2026-08-23T22:19:21Z --from litellm[proxy]==1.98.0 "
         f"litellm --config {home / 'config.yaml'} --host 127.0.0.1 --port 1 --telemetry False "
         f"cwd={home} key=sk-master token=gateway-token path=",
@@ -112,7 +112,7 @@ def test_a_running_proxy_is_reused_and_checked_never_regenerated(tmp_path):
         result, root, home, log = launch(tmp_path, bind=f"127.0.0.1:{port}")
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stdout == f"Reusing the LiteLLM proxy already listening on 127.0.0.1:{port}\n"
-        assert log == [f"-m lib.learnharness check-proxy bind=127.0.0.1:{port} home={home} src={root / 'src'} secret=loaded"]
+        assert log == [f"-m lib.learnharness_config check-proxy bind=127.0.0.1:{port} home={home} src={root / 'src'} secret=loaded"]
 
         # A proxy serving another model list or master key is reported, and still left running.
         result, _, _, log = launch(tmp_path, bind=f"127.0.0.1:{port}", PROXY_STALE="1")

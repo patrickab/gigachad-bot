@@ -457,7 +457,7 @@ chmod 700 "$chrome"
 
 # Created here when the proxy launcher has not yet: both read the same file, which appears whole.
 if ! master_key="$(GIGACHAD_LITELLM_PROXY_HOME="$proxy_home" PYTHONPATH="$root_dir/src" \
-    "$root_dir/.venv/bin/python" -m lib.learnharness master-key)"; then
+    "$root_dir/.venv/bin/python" -m lib.learnharness_config master-key)"; then
     master_key=""
 fi
 
