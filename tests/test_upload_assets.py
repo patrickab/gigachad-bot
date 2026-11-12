@@ -8,7 +8,7 @@ from backend.routes import files
 from backend.routes.assets import get_asset
 from lib.postgres_data_store import PostgresDataStore
 from lib.references import References, Released
-from tests.conftest import make_asset_store
+from tests.conftest import make_asset_store, request_identity
 
 pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
 
@@ -120,7 +120,7 @@ def test_asset_route_serves_owner_bytes_and_hides_other_users(postgres_pool):
     bob, _ = make_asset_store(postgres_pool, "bob@example.test")
     written = alice.write("upload", "attachment/chat/chat-8/photo.png", b"\x89PNG\r\n\x1a\nbody", mime="image/png")
 
-    response = get_asset("attachment/chat/chat-8/photo.png", assets=alice)
+    response = get_asset("attachment/chat/chat-8/photo.png", assets=alice, identity=request_identity(False))
 
     assert response.body == b"\x89PNG\r\n\x1a\nbody"
     assert response.media_type == "image/png"
@@ -128,13 +128,13 @@ def test_asset_route_serves_owner_bytes_and_hides_other_users(postgres_pool):
 
     for store, path in ((bob, "attachment/chat/chat-8/photo.png"), (alice, "attachment/chat/chat-8/gone.png")):
         with pytest.raises(HTTPException) as raised:
-            get_asset(path, assets=store)
+            get_asset(path, assets=store, identity=request_identity(False))
         assert raised.value.status_code == 404
 
 
 def test_asset_route_rejects_traversal(asset_store):
     with pytest.raises(HTTPException) as raised:
-        get_asset("../../etc/passwd", assets=asset_store)
+        get_asset("../../etc/passwd", assets=asset_store, identity=request_identity(False))
 
     assert raised.value.status_code == 404
 
