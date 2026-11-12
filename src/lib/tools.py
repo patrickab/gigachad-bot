@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import re
 from typing import TYPE_CHECKING, Any
-
-from agent_sandbox import PromptImage
 
 from lib import learnharness
 from lib.data_store import StorageConflictError
@@ -14,8 +13,8 @@ from lib.llm_resilience import completion_text
 from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_OCR_TEXT_EXTRACTION, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
-from lib.sandbox_service import PROMPT_MAX_LEN, WORKSPACE_AGENT_SCOPE, SandboxService
-from lib.tool_context import ToolContext, ToolOptions
+from lib.sandbox_service import PROMPT_MAX_LEN, WORKSPACE_AGENT_SCOPE
+from lib.tool_context import ToolContext
 from lib.toolcalling import Stage, ToolCatalog, ToolDefinition, ToolOutcome, sandbox_unavailable, stream_tool_turn
 from lib.upstream import UpstreamContractError, UpstreamRequestFailed, UpstreamUnavailable
 from lib.web_search import brave_sources, evidence_prompt, plan_query, source_label
@@ -23,9 +22,6 @@ from lib.web_search import brave_sources, evidence_prompt, plan_query, source_la
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from llm_baseclient.client import LLMClient
-
-    from lib.project_store import ProjectStore
 
 TOOL_GUIDANCE = (
     "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
@@ -309,58 +305,27 @@ def offered_tools(enabled: list[str], *, host_access: bool) -> list[str]:
 
 
 async def stream_chat_with_tools(
+    context: ToolContext,
     *,
-    client: LLMClient,
-    model: str,
-    user_msg: str,
-    history: list[dict[str, Any]],
     system_prompt: str,
-    img: Any = None,
     enabled: list[str],
-    opts: ToolOptions,
-    chat_id: str = "",
-    sandbox_service: SandboxService | None = None,
-    prompt_images: tuple[PromptImage, ...] = (),
-    small_model: str = "",
-    vision_model: str = "",
     host_access: bool = False,
-    project_slug: str | None = None,
-    project_store: ProjectStore | None = None,
     **kwargs: Any,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Bind request dependencies, then stream one optional tool call and the answer.
+    """Stream one optional tool call and the answer, each call bound to *context* with its id.
 
     *host_access*: the login holds the host capability, without it `HOST_TOOLS` are never offered.
     """
-
-    def context_for_call(tool_call_id: str) -> ToolContext:
-        return ToolContext(
-            client=client,
-            model=model,
-            opts=opts,
-            chat_id=chat_id,
-            sandbox_service=sandbox_service,
-            tool_call_id=tool_call_id,
-            prompt_images=prompt_images,
-            small_model=small_model,
-            history=tuple(history),
-            user_msg=user_msg,
-            img=img,
-            vision_model=vision_model,
-            project_slug=project_slug,
-            project_store=project_store,
-        )
-
     async for event in stream_tool_turn(
-        client=client,
-        model=model,
-        user_msg=user_msg,
-        history=history,
+        client=context.client,
+        model=context.model,
+        user_msg=context.user_msg,
+        history=list(context.history),
         system_prompt=system_prompt,
-        img=img,
+        img=context.img,
         enabled=offered_tools(enabled, host_access=host_access),
         catalog=BUILTIN_TOOLS,
-        context_for_call=context_for_call,
+        context_for_call=lambda tool_call_id: replace(context, tool_call_id=tool_call_id),
         guidance=TOOL_GUIDANCE,
         **kwargs,
     ):

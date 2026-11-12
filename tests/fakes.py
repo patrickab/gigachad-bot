@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
+import dataclasses
 from dataclasses import dataclass
 import hashlib
 import io
@@ -19,7 +20,7 @@ from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.data_store import Entry, Revision, StorageNotFoundError
 from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult
-from lib.tool_context import ToolOptions
+from lib.tool_context import ToolContext, ToolOptions
 
 
 class RecordingScope:
@@ -261,14 +262,13 @@ def usage_chunk(total: int) -> SimpleNamespace:
 
 async def collect_tool_turn(**overrides: Any) -> list[tuple[str, Any]]:
     """Run one ``stream_chat_with_tools`` turn against ``ClientStub`` and return its events."""
-    kwargs: dict[str, Any] = {
-        "client": ClientStub(),
-        "model": TEST_MODEL,
-        "user_msg": "who won?",
-        "history": [],
-        "system_prompt": "be terse",
-        "enabled": ["web_search"],
-        "opts": ToolOptions(),
-    }
-    kwargs.update(overrides)
-    return [event async for event in tools.stream_chat_with_tools(**kwargs)]
+    context_fields: dict[str, Any] = {"client": ClientStub(), "model": TEST_MODEL, "user_msg": "who won?", "opts": ToolOptions()}
+    turn_kwargs: dict[str, Any] = {"system_prompt": "be terse", "enabled": ["web_search"]}
+    field_names = {field.name for field in dataclasses.fields(ToolContext)}
+    for name, value in overrides.items():
+        if name in field_names:
+            context_fields[name] = tuple(value) if name == "history" else value
+        else:
+            turn_kwargs[name] = value
+    context = ToolContext(**context_fields)
+    return [event async for event in tools.stream_chat_with_tools(context, **turn_kwargs)]

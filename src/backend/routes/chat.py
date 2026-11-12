@@ -14,7 +14,7 @@ from lib.memory_context import augment_system_prompt
 from lib.memory_store import MemoryStore
 from lib.project_store import ProjectStore
 from lib.sandbox_service import SandboxService
-from lib.tool_context import ToolOptions
+from lib.tool_context import ToolContext, ToolOptions
 from lib.tools import stream_chat_with_tools
 
 from .deps import (
@@ -95,22 +95,24 @@ async def chat(
             # never touches (it passes an explicit message list on every call).
             return sse_tool_event_stream(
                 stream_chat_with_tools(
-                    client=c,
-                    model=req.model,
-                    user_msg=req.user_msg,
-                    history=req.messages,
+                    ToolContext(
+                        client=c,
+                        model=req.model,
+                        opts=req.tool_options,
+                        chat_id=req.chat_id,
+                        sandbox_service=sandbox_service,
+                        prompt_images=prompt_images,
+                        small_model=model_defaults["small_model"],
+                        history=tuple(req.messages),
+                        user_msg=req.user_msg,
+                        img=img,
+                        vision_model=model_defaults["vision_model"],
+                        project_slug=req.project_slug,
+                        project_store=project_store,
+                    ),
                     system_prompt=system_prompt,
-                    img=img,
                     enabled=req.tools,
-                    opts=req.tool_options,
-                    chat_id=req.chat_id,
-                    sandbox_service=sandbox_service,
-                    prompt_images=prompt_images,
-                    small_model=model_defaults["small_model"],
-                    vision_model=model_defaults["vision_model"],
                     host_access=identity.has_host_access,
-                    project_slug=req.project_slug,
-                    project_store=project_store,
                     **kwargs,
                 )
             )
