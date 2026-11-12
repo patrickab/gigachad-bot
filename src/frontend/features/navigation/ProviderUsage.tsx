@@ -5,8 +5,10 @@ import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useStoredString } from "@/hooks/useStoredString"
 import { usePolling } from "@/hooks/usePolling"
-import { fetchProviderUsage } from "@/lib/backend/api"
+import { useResource } from "@/hooks/useResource"
+import { providerUsageResource, refreshProviderUsage } from "@/lib/backend/resources"
 import type { ProviderUsageReport } from "@/lib/domain/types"
+import { useSidebar } from "./SidebarContext"
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
 const OPEN_STORAGE_KEY = "provider_usage_open"
@@ -60,24 +62,28 @@ function AccountRow({ report }: { report: ProviderUsageReport }) {
   </div>
 }
 
+/** Read the usage at once and every five minutes while the sidebar is open, for every tab at once. The app shell mounts it once. */
+export function ProviderUsagePoll() {
+  const { collapsed } = useSidebar()
+  usePolling(() => providerUsageResource.load(), { intervalMs: REFRESH_INTERVAL_MS, active: !collapsed, runWhileHidden: true })
+  return null
+}
+
 /** Five-hour subscription usage with muted meters, expandable for other limits and reset times. */
 export function ProviderUsage() {
-  const [reports, setReports] = useState<ProviderUsageReport[] | null>(null)
-  const [failed, setFailed] = useState(false)
+  // `ProviderUsagePoll` loads the usage, so a failure shows here and never in the startup banner.
+  const usage = useResource(null, providerUsageResource, false)
+  const reports = usage?.reports
+  const failed = usage?.failed ?? false
   const [loading, setLoading] = useState(false)
   const [storedOpen, setOpen] = useStoredString(OPEN_STORAGE_KEY)
   const open = storedOpen === "true"
 
-  const load = (forced: boolean) => fetchProviderUsage(forced).then(
-    (usage) => { setReports(usage.reports.filter((report) => !report.no_limits)); setFailed(false) },
-    () => { setFailed(true) },
-  )
   const refresh = async () => {
     setLoading(true)
-    await load(true)
+    await refreshProviderUsage()
     setLoading(false)
   }
-  usePolling(() => load(false), { intervalMs: REFRESH_INTERVAL_MS, runWhileHidden: true })
 
   if (!failed && reports?.length === 0) return null
   const leastUsed = (reports ?? []).reduce<number | null>((least, report) => {

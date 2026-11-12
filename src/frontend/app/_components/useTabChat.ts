@@ -74,7 +74,6 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
     reasoningEffort,
     prompts,
     autosave: persistence.handleAutosave,
-    refreshDocuments: docs.refreshDocuments,
     runSlashCommand,
   })
   const { syncReferences } = turns

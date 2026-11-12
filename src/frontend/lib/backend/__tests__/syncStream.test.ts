@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { getDeviceId } from "@/lib/backend/deviceId"
 
 class FakeEventSource {
   static instances: FakeEventSource[] = []
@@ -122,5 +123,22 @@ describe("sync stream cursor", () => {
 
     subscribeToChanges(() => {})
     expect(FakeEventSource.instances[1].url).toMatch(/\/sync\/stream\?since=7$/)
+  })
+
+  it("delivers this device's changes only to a subscriber that asked for them", async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value) } })
+    const { subscribeToChanges } = await load()
+    const plain: number[] = []
+    const own: number[] = []
+    subscribeToChanges((event) => plain.push(event.seq))
+    subscribeToChanges((event) => own.push(event.seq), { ownDevice: true })
+
+    const [stream] = FakeEventSource.instances
+    stream.emit("cursor", { seq: 1 })
+    stream.emit("change", { ...change(2), device_id: getDeviceId() })
+    stream.emit("change", change(3))
+    expect(plain).toEqual([3])
+    expect(own).toEqual([2, 3])
   })
 })

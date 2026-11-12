@@ -13,6 +13,7 @@ import { FilePanelProvider } from "@/features/editor/FilePanel"
 import { ShellTerminals } from "@/features/editor/ShellTerminal"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
+import { ProviderUsagePoll } from "@/features/navigation/ProviderUsage"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
@@ -21,6 +22,7 @@ import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
 import { onFileMove } from "@/lib/backend/fileEvents"
+import { watchDocumentLists } from "@/lib/backend/resources"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -130,6 +132,9 @@ export function AppShell() {
   // A file moved by this device or another one moves the tabs that show it
   useEffect(() => onFileMove(({ from, to }) => handleDocumentRenamed(from, to)), [handleDocumentRenamed])
 
+  // Every tab's sidebar shows the same lists, one subscription keeps them current
+  useEffect(() => watchDocumentLists(), [])
+
   useEventListener("document", "keydown", (event) => {
     if (!event.altKey || event.key !== "d") return
     event.preventDefault()
@@ -157,6 +162,7 @@ export function AppShell() {
             </OmpProvider>
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />
+            <ProviderUsagePoll />
             <MemoryViewer />
             <ShellTerminals activeTabId={activeTabId} tabIds={tabIds} />
           </MemoryViewerProvider>

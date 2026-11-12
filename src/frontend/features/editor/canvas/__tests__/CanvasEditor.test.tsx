@@ -18,6 +18,7 @@ import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
 import type { CanvasAttachment, CanvasDocument } from "@/lib/domain/canvasDocument"
+import type { ChangeEvent } from "@/lib/backend/syncStream"
 
 const noop = () => {}
 
@@ -92,7 +93,14 @@ const collaboration = vi.hoisted(() => {
   }
 })
 vi.mock("@/features/editor/canvas/useCollaborativeCanvas", () => collaboration)
-vi.mock("@/lib/backend/syncStream", () => ({ syncCursorReady: () => Promise.resolve(), subscribeToChanges: () => () => {} }))
+const changes = vi.hoisted(() => ({ listeners: new Set<(event: ChangeEvent) => void>() }))
+vi.mock("@/lib/backend/syncStream", () => ({
+  syncCursorReady: () => Promise.resolve(),
+  subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
+    changes.listeners.add(listener)
+    return () => { changes.listeners.delete(listener) }
+  },
+}))
 
 import { CanvasEditor } from "@/features/editor/canvas/CanvasEditor"
 import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
@@ -102,6 +110,7 @@ import { polyBounds, resizeBox, scalePoly, scaleStroke, type SelBox } from "@/fe
 import { inOwnAttachment, remapAcrossCanvases } from "@/features/editor/canvas/attachments/canvasTransfer"
 import type { StrokeData } from "@/lib/drawing"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
+import { watchDocumentLists } from "@/lib/backend/resources"
 
 class RO {
   observe() {}
@@ -766,12 +775,13 @@ describe("document attachments", () => {
     expect(api.renameDocument).not.toHaveBeenCalled()
   })
 
-  it("renames and deletes documents from the add menu, attachments keeping the renamed file's key", async () => {
-    api.listProjectDocuments.mockResolvedValueOnce([
-      { path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "sandbox_plot-toolu_1.plot.json", mime: "application/json" },
-      { path: "project/proj/document/diagram-toolu_2.md", name: "diagram-toolu_2.md", mime: "text/markdown" },
-    ])
-    api.renameDocument.mockResolvedValueOnce({ path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "Loss.plot.json", mime: "application/json" })
+  it("renames and deletes documents from the add menu, its list following the project's changes and attachments keeping the renamed file's key", async () => {
+    const plot = { path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "sandbox_plot-toolu_1.plot.json", mime: "application/json" }
+    const diagram = { path: "project/proj/document/diagram-toolu_2.md", name: "diagram-toolu_2.md", mime: "text/markdown" }
+    api.listProjectDocuments.mockResolvedValueOnce([plot, diagram]).mockResolvedValueOnce([{ ...plot, name: "Loss.plot.json" }, diagram])
+    api.renameDocument.mockResolvedValueOnce({ ...plot, name: "Loss.plot.json" })
+    api.removeDocument.mockResolvedValueOnce([diagram.path])
+    const stopWatching = watchDocumentLists()
     const seen: CanvasDocument[] = []
     const initialDoc: CanvasDocument = {
       version: 1, frames: [], strokes: [], texts: [],
@@ -789,9 +799,13 @@ describe("document attachments", () => {
     const input = getByLabelText("New name for sandbox_plot-toolu_1.plot.json") as HTMLInputElement
     fireEvent.change(input, { target: { value: "Loss" } })
     fireEvent.blur(input)
+    await waitFor(() => expect(api.renameDocument).toHaveBeenLastCalledWith("proj", plot.path, "Loss"))
+    // The rename's change to the project's catalog entry reads the list again.
+    act(() => {
+      for (const listener of changes.listeners) listener({ seq: 1, resource_kind: "document", resource_key: "chat/proj/project.json", version: null, operation: "write", device_id: "this" })
+    })
     await waitFor(() => expect(container.textContent).toContain("Loss.plot.json"))
-    expect(api.renameDocument).toHaveBeenLastCalledWith("proj", "project/proj/document/sandbox_plot-toolu_1.plot.json", "Loss")
-    expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/sandbox_plot-toolu_1.plot.json")
+    expect(latest(seen).attachments[0]!.path).toBe(plot.path)
 
     // Deleting hides the row at once; the request and the attachment removal wait for the undo window.
     fireEvent.click(getByLabelText("Delete diagram-toolu_2.md"))
@@ -806,9 +820,11 @@ describe("document attachments", () => {
       await act(async () => { vi.advanceTimersByTime(6000) })
     } finally {
       vi.useRealTimers()
+      stopWatching()
     }
-    expect(api.removeDocument).toHaveBeenCalledWith("proj", "project/proj/document/diagram-toolu_2.md")
+    expect(api.removeDocument).toHaveBeenCalledWith("proj", diagram.path)
     expect(latest(seen).attachments.map((a) => a.id)).toEqual(["plot"])
+    expect(queryByLabelText("Delete diagram-toolu_2.md")).toBeNull()
   })
 
   it("lays plots out at a zoom-independent width and hides them only while a zoom gesture runs", async () => {

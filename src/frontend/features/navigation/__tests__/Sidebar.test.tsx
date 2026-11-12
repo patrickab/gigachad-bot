@@ -9,6 +9,8 @@ import { TabContext, useIsPeeked, useTab } from "@/contexts/TabContext"
 import { useFrameAttachment } from "@/hooks/useFrameAttachment"
 import { onFileChange } from "@/lib/backend/fileEvents"
 import { removeDocument } from "@/lib/backend/api"
+import { fileRootsEnabledResource } from "@/lib/backend/resources"
+import { useResource } from "@/hooks/useResource"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
 
@@ -54,6 +56,7 @@ const api = vi.hoisted(() => ({
       { path: "/source/docs", name: "docs", type: "folder", children: [{ path: "/source/docs/guide.md", name: "guide.md", type: "file" }] },
     ],
   }] })),
+  fileRootsEnabled: vi.fn<typeof import("@/lib/backend/api").fileRootsEnabled>(async () => ({ enabled: true })),
   fetchWorktrees: vi.fn<typeof import("@/lib/backend/api").fetchWorktrees>(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
   removeWorktree: vi.fn<typeof import("@/lib/backend/api").removeWorktree>(async () => {}),
   deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
@@ -182,6 +185,11 @@ function openedProject(view: RenderResult) {
   return within(view.getByLabelText("Proj contents"))
 }
 
+/** Whether any root is mounted, as the file pickers read it. */
+function RootsMountedProbe() {
+  return <output aria-label="Roots mounted">{String(useResource(null, fileRootsEnabledResource))}</output>
+}
+
 function WorkspaceLabel() {
   const { tab } = useTab()
   return <output>{tab.name ?? "Initial workspace"}</output>
@@ -249,8 +257,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: [] })
     const onDocumentSelect = vi.fn()
     const onDocumentRenamed = vi.fn()
-    const onDocumentsChanged = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onDocumentRenamed={onDocumentRenamed} onDocumentsChanged={onDocumentsChanged} />)
+    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onDocumentRenamed={onDocumentRenamed} />)
     const file = await openedProject(view).findByRole("button", { name: "notes.md" })
     fireEvent.click(file)
     expect(onDocumentSelect).toHaveBeenCalledWith("project/proj/document/notes.md", "proj")
@@ -262,14 +269,17 @@ describe("Project navigation", () => {
     expect(input).toHaveValue("notes.md")
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, "notes".length])
     fireEvent.change(input, { target: { value: "ideas" } })
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? fixtures.documents.map((doc) => doc.name === "notes.md" ? { ...doc, path: "project/proj/document/ideas.md", name: "ideas.md" } : doc)
+      : [])
     fireEvent.keyDown(input, { key: "Enter" })
 
     await waitFor(() => expect(onDocumentRenamed).toHaveBeenCalledWith("project/proj/document/notes.md", "project/proj/document/ideas.md"))
     expect(fixtures.renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/notes.md", "ideas")
-    await waitFor(() => expect(onDocumentsChanged).toHaveBeenCalled())
-    expect(api.listProjectDocuments.mock.calls.length).toBeGreaterThan(1)
-    expect(api.fileRootTree.mock.calls.length).toBeGreaterThan(1)
-    expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
+    await waitFor(() => expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument())
+    const project = within(view.getByLabelText("Proj contents"))
+    expect(await project.findByRole("button", { name: "ideas.md" })).toBeInTheDocument()
+    expect(project.queryByRole("button", { name: "notes.md" })).not.toBeInTheDocument()
   })
 
   it("announces the files a rename rewrote to follow it", async () => {
@@ -497,6 +507,16 @@ describe("Project navigation", () => {
     expect(fileMounts.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
   })
 
+  it("tells the file pickers whether roots are mounted once a mount is removed", async () => {
+    const view = render(<><Sidebar appMode="chat" /><RootsMountedProbe /></>)
+    await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("true"))
+
+    api.fileRootsEnabled.mockResolvedValue({ enabled: false })
+    fireEvent.click(await within(view.getByLabelText("Code")).findByRole("button", { name: "Delete source" }))
+    await act(() => undo.schedule.mock.lastCall![2]())
+    await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("false"))
+  })
+
   it("opens the diff of a file mount from its hover action", async () => {
     const onDiffSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
@@ -601,26 +621,6 @@ describe("Project navigation", () => {
     expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj")
     fireEvent.click(project.getByText("data.csv"))
     expect(onDocumentSelect).toHaveBeenCalledExactlyOnceWith("project/proj/document/data.csv", "proj")
-  })
-
-  it("reads the project files again once opening moved a stored document to disk", async () => {
-    let moved = false
-    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
-      ? [{ path: moved ? "/data/workbench/markdown/proj/plan/plan.md" : "project/proj/document/plan.md", name: "plan.md", mime: "text/markdown" }]
-      : [])
-    const onWorkbenchSelect = vi.fn()
-    const view = render(<Sidebar appMode="workbench" activeDocumentPath="project/proj/document/plan.md" onWorkbenchSelect={onWorkbenchSelect} />)
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    await within(view.getByLabelText("Proj contents")).findByText("plan.md")
-
-    moved = true
-    view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-      <Sidebar appMode="workbench" activeDocumentPath="/data/workbench/markdown/proj/plan/plan.md" onWorkbenchSelect={onWorkbenchSelect} />
-    </TabContext.Provider>)
-    await waitFor(() => {
-      fireEvent.click(within(view.getByLabelText("Proj contents")).getByText("plan.md"))
-      expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/markdown/proj/plan/plan.md", "proj")
-    })
   })
 
   it("hides a PDF's extracted Markdown and deletes both together", async () => {

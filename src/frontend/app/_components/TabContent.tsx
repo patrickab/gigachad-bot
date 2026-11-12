@@ -1,12 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
-import { Sidebar } from "@/features/navigation/Sidebar"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
-import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { PromptEditor } from "@/features/settings/PromptEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
@@ -16,10 +14,7 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
-import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
-import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
-import { itemOf, useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
-import { opensInWorkbench } from "@/lib/domain/workbench"
+import { useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import type { Attachment } from "@/lib/domain/types"
 import type { ComposerLaunch } from "@/features/omp/OmpComposer"
 import { ompItem } from "@/features/omp/useOmpSidebar"
@@ -27,6 +22,7 @@ import { WorkspacePicker } from "@/features/omp/WorkspacePicker"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
+import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
 
@@ -45,26 +41,22 @@ export function TabContent(props: TabContentProps) {
   return <TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider>
 }
 
-/** The tab's sidebar, surfaces and the top bar whose slots they render their controls into. */
+/** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
 function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentRenamed, onNewChat, onOpenItem, focus }: TabContentProps) {
-  const { tab, isActive, setModeLabel, updateConfig } = useTab()
-  const { projectSlug, config, appMode } = tab
-  const { researchEnabled } = useEnabledTools()
-  // The workbench needs Neovim for the source and host access for omp and the LaTeX build
-  const neovimEnabled = useNeovimSetting().enabled
-  const hostAccess = useHostAccess()
-  const opensWorkbench = neovimEnabled && hostAccess
+  const { tab, isActive, setModeLabel } = useTab()
+  const { projectSlug, config } = tab
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const contentAreaRef = useContentAreaRef()
   const peeked = useIsPeeked()
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const openPromptEditor = useCallback(() => setPromptEditorOpen(true), [])
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const canvas = useCanvasView()
   const {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems, onBranch,
   } = useTabChat({ focus, onOpenChat, onOpenItem })
-  const { models, prompts, setPrompts } = chat
+  const { models } = chat
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
 
@@ -109,26 +101,13 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
 
   return (
     <div className="relative flex h-full overflow-hidden">
-      <Sidebar
-        onFileSelect={(path, scope) => onOpenItem({ kind: opensWorkbench && opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: scope, rootFile: true })}
-        onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
-        onRootsChanged={filePicker.refreshRoots}
-        onDocumentsChanged={docs.refreshDocuments}
-        {...canvas.sidebarProps}
-        onProjectSelect={onOpenProject}
+      <TabSidebar
+        onOpenProject={onOpenProject}
         onProjectRenamed={onProjectRenamed}
         onDocumentRenamed={onDocumentRenamed}
         onNewChat={onNewChat}
-        onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
-        onWorkbenchSelect={opensWorkbench ? (path, scope) => onOpenItem({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: scope || null }) : undefined}
-        activeDocumentPath={appMode === "document" ? itemOf(tab, "document")?.path : appMode === "workbench" ? itemOf(tab, "workbench")?.path : null}
-        onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
-        onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
-        onItemOpen={onOpenItem}
-        renderSettings={() => (
-          <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={() => setPromptEditorOpen(true)} models={models} researchEnabled={researchEnabled} />
-        )}
-        appMode={appMode}
+        onOpenItem={onOpenItem}
+        onEditPrompts={openPromptEditor}
       />
       {/* Previewed in the tab picker, the paper comes from the card behind: a shared frame laid under this tab must show through */}
       <main ref={contentAreaRef} className={`flex-1 min-w-0 flex flex-col relative ${peeked ? "" : "bg-paper"}`}>
@@ -141,7 +120,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           totalUsage={chat.totalUsage}
           chatColumn={chatColumn}
           chatBody={chatBody}
-          refreshDocuments={docs.refreshDocuments}
           ompShellCommands={ompShellCommands}
           ompLaunch={ompLaunch}
           onOmpLaunched={() => setOmpLaunch(null)}
@@ -178,7 +156,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       </main>
       <FilePanelSlot />
       <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />
-      <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
+      <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} />
       {isActive && filePicker.filePickerOpen && filePicker.rootFiles.enabled && (
         <FileViewer
           files={(filePicker.rootFiles.files ?? []).map((f) => f.path)}

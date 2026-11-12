@@ -58,7 +58,6 @@ export function useChatTurns({
   reasoningEffort,
   prompts,
   autosave,
-  refreshDocuments,
   runSlashCommand,
 }: {
   chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "removePair" | "setMessages" | "replaceMessages">
@@ -68,7 +67,6 @@ export function useChatTurns({
   reasoningEffort: string
   prompts: Record<string, string>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
-  refreshDocuments: () => void
   /** Resolves true when `text` was a slash command and has been handled. */
   runSlashCommand: (text: string) => Promise<boolean>
 }) {
@@ -91,10 +89,10 @@ export function useChatTurns({
       const artifact = toolArtifactDocument(call)
       return artifact ? [artifact] : []
     })
-    await Promise.allSettled(artifacts.map((artifact) => writeDocument(projectSlug ?? "", artifact.name, artifact.content)))
-    refreshDocuments()
+    const scope = projectSlug ?? ""
+    await Promise.allSettled(artifacts.map((artifact) => writeDocument(scope, artifact.name, artifact.content)))
     void autosave(completion.messages, completion.usage)
-  }, [projectSlug, refreshDocuments, autosave])
+  }, [projectSlug, autosave])
 
   /**
    * Re-read the chat's live references and those of `draft`, patched into the latest chat for the next `send` or `regenerateAt`.

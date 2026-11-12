@@ -1,23 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react"
-import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useMemo, useState } from "react"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { FileTreeCreateChoice } from "@/components/ui/file-tree/FileTree"
-import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, listNotes, listProjectDocuments, loadTemplateSets, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
-import { announceFileRemoval, onFileChange, onFileRemoval } from "@/lib/backend/fileEvents"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
-import { isNewFileIn } from "@/lib/domain/files"
-import type { TemplateSetInfo } from "@/lib/domain/latex"
+import { useResource, useResourceFamily } from "@/hooks/useResource"
+import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
+import { announceFileRemoval } from "@/lib/backend/fileEvents"
+import { notesResource, projectDocumentsResource, refreshDocumentLists, refreshProjectDocuments, templateSetsResource } from "@/lib/backend/resources"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { opensInWorkbench } from "@/lib/domain/workbench"
-import { isInside } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 
-/** Key of a project's catalog entry, which lists its files. */
-const PROJECT_FILE_LIST = /^chat\/[^/]+\/project\.json$/
+/** The notes while they load. */
+const NO_NOTES: ProjectDocument[] = []
 
 /** Open the OS file dialog (any platform, the webview provides it) and resolve with the chosen files, none when cancelled. */
 function pickFiles(): Promise<File[]> {
@@ -34,12 +31,6 @@ function pickFiles(): Promise<File[]> {
 /** Whether `path` is a file stored in a project (not a canvas or a file on disk), the kind that can move into a folder. */
 export const isStoredProjectFile = (path: string) => /^project\/[^/]+\/document\//.test(path) && !path.endsWith(".canvas")
 
-/** `documents` without the entries at or inside the deleted `path`, the same array when none is. */
-function withoutRemoved(documents: ProjectDocument[], path: string): ProjectDocument[] {
-  const kept = documents.filter((doc) => !isInside(doc.path, path))
-  return kept.length === documents.length ? documents : kept
-}
-
 /** Kinds the files folder's `+` creates. */
 const FILE_KINDS = ["Markdown", "LaTeX"]
 
@@ -54,10 +45,7 @@ const markdownName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}
 
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
-  /** A change reads both lists again while the tab is active. */
-  reloadKey: string
   moveHistory: (path: string, scope: string) => Promise<void>
-  onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
   /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
   onWorkbenchSelect?: (path: string, scope: string) => void
@@ -66,29 +54,21 @@ interface WorkspaceDocumentsOptions {
   onArchitectureSelect?: (slug: string) => void
 }
 
-/** Loose notes and project documents of the sidebar, with the actions that change them. */
+/** Loose notes and project documents of the sidebar, with the actions that change them. Every tab shares the lists, `watchDocumentLists` keeps them current. */
 export function useWorkspaceDocuments({
-  projects, reloadKey, moveHistory, onDocumentsChanged, onDocumentSelect, onWorkbenchSelect, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
+  projects, moveHistory, onDocumentSelect, onWorkbenchSelect, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
 }: WorkspaceDocumentsOptions) {
-  const isActive = useTabActive()
   const { schedule } = useUndoDelete()
-  const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
-  const [notes, setNotes] = useState<ProjectDocument[]>([])
+  const isActive = useTabActive()
+  const documents = useResourceFamily("Sidebar project documents", projectDocumentsResource, projects.map((project) => project.slug))
+  const notes = useResource("Sidebar notes", notesResource) ?? NO_NOTES
   /** Project whose create-document panel is open. */
   const [createTarget, setCreateTarget] = useState<string | null>(null)
   const [fileError, setFileError] = useState("")
-  const [templateSets, setTemplateSets] = useState<TemplateSetInfo[]>([])
 
-  // The LaTeX templates come from the template sets on the server, none when they fail to load.
-  // Keyed on availability, not on the callback: a parent's new callback identity would refetch on every render.
-  const workbenchAvailable = onWorkbenchSelect !== undefined
-  useEffect(() => {
-    if (!workbenchAvailable) return
-    let cancelled = false
-    loadTemplateSets().then((sets) => { if (!cancelled) setTemplateSets(sets) }, () => {})
-    return () => { cancelled = true }
-  }, [workbenchAvailable])
-  const templateNames = useMemo(() => new Map(templateSets.map((set) => [set.label, set.name])), [templateSets])
+  // The LaTeX templates come from the template sets on the server, none when they fail to load. The tab's next activation tries again.
+  const templateSets = useResource(null, templateSetsResource, onWorkbenchSelect !== undefined && isActive)
+  const templateNames = useMemo(() => new Map((templateSets ?? []).map((set) => [set.label, set.name])), [templateSets])
   /** The `+` choice of the files folder: the file type, then the template for LaTeX. Absent without the workbench, files are Markdown then. */
   const newFileChoice = useMemo((): FileTreeCreateChoice | undefined => {
     if (!onWorkbenchSelect) return undefined
@@ -96,48 +76,10 @@ export function useWorkspaceDocuments({
     return { label: "File type", options: FILE_KINDS, initial: "Markdown", floating: true, then: templateNames.size ? { LaTeX: templates } : undefined }
   }, [onWorkbenchSelect, templateNames])
 
-  const loadProjectDocuments = useCallback(async (signal?: AbortSignal) => {
-    const entries = await Promise.all(projects.map(async (project) =>
-      [project.slug, await listProjectDocuments(project.slug, signal)] as const))
-    return Object.fromEntries(entries)
-  }, [projects])
-
-  useStartupRead("Sidebar notes", listNotes, setNotes, isActive, reloadKey)
-  useStartupRead("Sidebar project documents", loadProjectDocuments, setDocuments, isActive, reloadKey)
-
-  // A project's file list changes without this device when an extraction finishes, or on another device.
-  useEffect(() => subscribeToChanges((event) => {
-    if (!isActive || event.resource_kind !== "document" || !PROJECT_FILE_LIST.test(event.resource_key)) return
-    void loadProjectDocuments().then(setDocuments).catch(() => {})
-  }), [isActive, loadProjectDocuments])
-
-  // A file created inside a folder entry (a pasted image, a file made on another device) shows up in its tree.
-  const folderEntries = useMemo(() => Object.values(documents).flat().filter((doc) => doc.children), [documents])
-  const isNewInFolders = useEffectEvent((path: string) => isActive && isNewFileIn(folderEntries, path))
-  const reloadDocuments = useEffectEvent(() => { void loadProjectDocuments().then(setDocuments).catch(() => {}) })
-  useEffect(() => onFileChange((path) => isNewInFolders(path), () => reloadDocuments()), [])
-
-  // A file or folder deleted here or on another device leaves the lists of every tab's sidebar at once, the lists reload when it lay in a folder entry.
-  const dropRemoved = useEffectEvent((path: string) => {
-    setNotes((current) => withoutRemoved(current, path))
-    setDocuments((current) => {
-      const next = Object.fromEntries(Object.entries(current).map(([slug, docs]) => [slug, withoutRemoved(docs, path)]))
-      return Object.keys(next).every((slug) => next[slug] === current[slug]) ? current : next
-    })
-    if (isActive && folderEntries.some((entry) => isInside(path, entry.path))) reloadDocuments()
-  })
-  useEffect(() => onFileRemoval((path) => dropRemoved(path)), [])
-
-  const refresh = async () => {
-    const [loose, entries] = await Promise.all([listNotes(), loadProjectDocuments()])
-    setNotes(loose)
-    setDocuments(entries)
-  }
-
-  /** Create `name` in `scope`, refresh the lists and hand the new path to `open`. */
+  /** Create `name` in `scope`, read its list again and hand the new path to `open`. */
   const createAndOpen = async (scope: string, name: string, open: (path: string) => void) => {
     const { path } = await writeDocument(scope, name)
-    await refresh()
+    await refreshProjectDocuments(scope)
     open(path)
   }
 
@@ -156,7 +98,7 @@ export function useWorkspaceDocuments({
   const createFile = async (scope: string, name: string, kind: string, template?: string) => {
     if (onWorkbenchSelect && kind === "LaTeX") {
       const path = await createWorkbenchDocument(scope, latexName(name), template && templateNames.get(template))
-      await refresh()
+      await refreshProjectDocuments(scope)
       onWorkbenchSelect(path, scope)
     } else {
       await createAndOpen(scope, markdownName(name), (path) => selectDocument(path, scope))
@@ -170,8 +112,7 @@ export function useWorkspaceDocuments({
       const from = Object.entries(documents).find(([, docs]) => docs.some((doc) => doc.path === path))?.[0] ?? ""
       if (from !== scope) {
         await moveDocument(path, from, scope)
-        await refresh()
-        onDocumentsChanged?.()
+        await refreshDocumentLists()
         onCanvasDeleted?.(path)
       }
     } else {
@@ -182,8 +123,7 @@ export function useWorkspaceDocuments({
   /** Move the stored project file `path` into the mounted `folder`, where it then behaves as a mounted file. */
   const moveToFolder = async (path: string, folder: string) => {
     await moveDocumentToFolder(path, folder)
-    await refresh()
-    onDocumentsChanged?.()
+    await refreshDocumentLists()
     onCanvasDeleted?.(path)
   }
 
@@ -195,8 +135,7 @@ export function useWorkspaceDocuments({
     } catch (cause) {
       setFileError(errorMessage(cause, "Could not make a LaTeX project"))
     }
-    await refresh()
-    onDocumentsChanged?.()
+    await refreshDocumentLists()
   }
 
   /** Pick files from this device and store them as documents of project `scope`. */
@@ -209,8 +148,7 @@ export function useWorkspaceDocuments({
     } catch (cause) {
       setFileError(errorMessage(cause, "Could not upload files"))
     }
-    await refresh()
-    onDocumentsChanged?.()
+    await refreshProjectDocuments(scope)
   }
 
   /** Delete `document` after the undo window, with the `alsoRemove` documents that hang under it (a PDF's extraction). */
@@ -219,16 +157,14 @@ export function useWorkspaceDocuments({
       for (const target of [path, ...alsoRemove.map((extra) => extra.path)]) {
         for (const removed of await removeDocument(scope, target)) announceFileRemoval(removed)
       }
-      await refresh()
-      onDocumentsChanged?.()
+      await refreshDocumentLists()
       onCanvasDeleted?.(path)
     })
   }
 
   const importFiles = async (scope: string, paths: string[]) => {
     await addRootFilesToProject(scope, paths)
-    await refresh()
-    onDocumentsChanged?.()
+    await refreshProjectDocuments(scope)
   }
 
   const hasArchitecture = (slug: string) => (documents[slug] ?? []).some((doc) => isArchitecturePath(doc.path))
@@ -236,7 +172,7 @@ export function useWorkspaceDocuments({
   const openArchitecture = async (slug: string) => {
     if (!hasArchitecture(slug)) {
       await createArchitectureSource(slug, "system.c4")
-      await refresh()
+      await refreshProjectDocuments(slug)
     }
     onArchitectureSelect?.(slug)
   }
@@ -255,14 +191,13 @@ export function useWorkspaceDocuments({
         open = path.endsWith(".canvas") ? () => onCanvasSelect?.(path, slug) : () => selectDocument(path, slug)
       }
       setCreateTarget(null)
-      await refresh()
-      onDocumentsChanged?.()
+      await refreshProjectDocuments(slug)
       open()
     } catch { /* the panel stays open to retry */ }
   }
 
   return {
-    documents, notes, refresh, createAndOpen, selectDocument, createFile, newFileChoice, move, moveToFolder, promote, remove, importFiles,
+    documents, notes, createAndOpen, selectDocument, createFile, newFileChoice, move, moveToFolder, promote, remove, importFiles,
     uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
   }
 }

@@ -17,7 +17,8 @@ export interface ChangeEvent {
 
 type Listener = (event: ChangeEvent) => void
 
-const listeners = new Set<Listener>()
+// Each listener, with whether it also takes this device's own changes.
+const listeners = new Map<Listener, boolean>()
 // One shared EventSource for all subscribers. Closed when the last one unsubscribes.
 let source: EventSource | null = null
 // Null until the first connection announces the head, so a fresh page replays nothing.
@@ -90,9 +91,9 @@ function connect(): void {
     // Any event means the server subscribed first, so reads from here on miss nothing (a server without the head event replays instead).
     releaseCursor()
     reconnectDelayMs = 1000
-    // A device never reacts to its own write; it already holds that state.
-    if (event.device_id && event.device_id === getDeviceId()) return
-    for (const listener of listeners) listener(event)
+    // A device's own write reaches only the listeners that asked for it, the others already hold that state.
+    const own = Boolean(event.device_id) && event.device_id === getDeviceId()
+    for (const [listener, ownDevice] of listeners) if (ownDevice || !own) listener(event)
   })
 
   stream.onerror = () => disconnect(stream)
@@ -113,9 +114,9 @@ export function syncCursorReady(): Promise<void> {
   return cursorReady
 }
 
-/** Subscribe to this user's change feed. Returns an unsubscribe function. */
-export function subscribeToChanges(listener: Listener): () => void {
-  listeners.add(listener)
+/** Subscribe to this user's change feed, to other devices' changes only unless `ownDevice`. Returns an unsubscribe function. */
+export function subscribeToChanges(listener: Listener, { ownDevice = false }: { ownDevice?: boolean } = {}): () => void {
+  listeners.set(listener, ownDevice)
   void syncCursorReady()
   connect()
   return () => {

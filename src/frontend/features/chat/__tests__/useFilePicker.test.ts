@@ -8,6 +8,7 @@ type MockImpl = (...args: unknown[]) => unknown
 const { impls } = vi.hoisted(() => ({
   impls: {
     listRootFiles: async () => ({ enabled: false, files: [] }),
+    fileRootsEnabled: async () => ({ enabled: false }),
     attachReference: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
   } as Record<string, MockImpl>,
 }))
@@ -17,10 +18,11 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
   __setImpl: (k: string, fn: (...a: never[]) => unknown) => { impls[k] = fn as MockImpl },
   __resetImpls: () => {
     impls.listRootFiles = async () => ({ enabled: false, files: [] })
+    impls.fileRootsEnabled = async () => ({ enabled: false })
     impls.attachReference = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
   listRootFiles: (...a: unknown[]) => impls.listRootFiles(...a),
-  fileRootsEnabled: async () => ({ enabled: false }),
+  fileRootsEnabled: (...a: unknown[]) => impls.fileRootsEnabled(...a),
 }))
 
 vi.mock("@/lib/backend/references", () => ({
@@ -37,7 +39,7 @@ const mockControls = apiMock as unknown as {
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 
 import { useFilePicker } from "@/features/chat/useFilePicker"
-import { renderHook, act } from "@testing-library/react"
+import { renderHook, act, waitFor } from "@testing-library/react"
 
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
   return { current: { addAttachment: vi.fn(), ...handle } as unknown as ChatInputHandle }
@@ -156,5 +158,20 @@ describe("useFilePicker", () => {
     act(() => { result.current.openFile("/work/a.ipynb") })
     expect(onOpenItem).toHaveBeenCalledWith({ kind: "document", path: "/work/a.ipynb", projectSlug: null, rootFile: true })
     expect(result.current.standaloneFile).toBeNull()
+  })
+
+  it("shares whether roots are mounted with every picker, from a listing", async () => {
+    const enabledReads = vi.fn(async () => ({ enabled: true }))
+    mockControls.__setImpl("fileRootsEnabled", enabledReads)
+    const usePicker = () => useFilePicker({ hasMessages: false, chatInputRef: makeChatInputRef(), track, onOpenItem: vi.fn() })
+    const first = renderHook(usePicker)
+    const second = renderHook(usePicker)
+    await waitFor(() => expect(first.result.current.rootFiles.enabled).toBe(true))
+    expect(enabledReads).toHaveBeenCalledOnce()
+
+    mockControls.__setImpl("listRootFiles", async () => ({ enabled: false, files: [] }))
+    act(() => second.result.current.openFilePicker())
+    await waitFor(() => expect(first.result.current.rootFiles.enabled).toBe(false))
+    expect(first.result.current.rootFiles.files).toBeNull()
   })
 })

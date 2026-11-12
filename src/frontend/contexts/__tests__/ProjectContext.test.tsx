@@ -5,6 +5,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
+import { projectDocumentsResource } from "@/lib/backend/resources"
 import { ProjectProvider, useProject } from "../ProjectContext"
 
 const api = vi.hoisted(() => ({
@@ -35,7 +36,8 @@ it("creates a project and refreshes the list without loading it", async () => {
   expect(api.loadProject).not.toHaveBeenCalled()
 })
 
-it("deletes a project and refreshes the list", async () => {
+it("deletes a project, refreshes the list and forgets its documents", async () => {
+  projectDocumentsResource("proj").set([{ path: "project/proj/document/notes.md", name: "notes.md", mime: "text/markdown" }])
   api.listProjects.mockResolvedValueOnce([{ name: "Proj", slug: "proj" }]).mockResolvedValueOnce([])
   const { result } = renderHook(() => useProject(), { wrapper })
   await waitFor(() => expect(result.current.projects).toHaveLength(1))
@@ -44,10 +46,12 @@ it("deletes a project and refreshes the list", async () => {
 
   expect(api.deleteProject).toHaveBeenCalledWith("proj")
   expect(result.current.projects).toEqual([])
+  expect(projectDocumentsResource("proj").get()).toEqual([])
   expect(api.loadProject).not.toHaveBeenCalled()
 })
 
-it("renames a project and returns the slug the server moved it to", async () => {
+it("renames a project, returns the slug the server moved it to and forgets the old slug's documents", async () => {
+  projectDocumentsResource("original").set([{ path: "project/original/document/notes.md", name: "notes.md", mime: "text/markdown" }])
   api.listProjects.mockResolvedValue([{ name: "Renamed", slug: "renamed" }]).mockResolvedValueOnce([{ name: "Original", slug: "original" }])
   const { result } = renderHook(() => useProject(), { wrapper })
   await waitFor(() => expect(result.current.projects[0]?.slug).toBe("original"))
@@ -55,6 +59,7 @@ it("renames a project and returns the slug the server moved it to", async () => 
   await act(async () => { slug = await result.current.renameProject("original", "Renamed") })
   expect(slug).toBe("renamed")
   expect(result.current.projects).toEqual([{ name: "Renamed", slug: "renamed" }])
+  expect(projectDocumentsResource("original").get()).toEqual([])
 })
 
 it("refreshes the list when another device changes the project catalog", async () => {

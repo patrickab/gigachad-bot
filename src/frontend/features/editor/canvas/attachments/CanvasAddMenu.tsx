@@ -1,13 +1,19 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { FileType, ImageIcon, Network, Pencil, PenLine, Plus, SquarePen, X } from "lucide-react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useRenameDocument } from "@/contexts/ProjectContext"
 import { useMenuPopover } from "@/components/ui/MenuPopover"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import { listNotes, listProjectDocuments, removeDocument } from "@/lib/backend/api"
+import { useResource } from "@/hooks/useResource"
+import { removeDocument } from "@/lib/backend/api"
+import { announceFileRemoval } from "@/lib/backend/fileEvents"
+import { notesResource, projectDocumentsResource } from "@/lib/backend/resources"
 import type { ProjectDocument } from "@/lib/domain/projects"
+
+/** A list while it loads. */
+const NO_DOCUMENTS: ProjectDocument[] = []
 
 const ITEM = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
 
@@ -50,13 +56,13 @@ function FileButton({ icon, name, onClick }: { icon: ReactNode; name: string; on
 
 /**
  * The toolbar's "+" popover: pages, project images/PDFs/documents, an architecture window and canvases.
- * It fetches project assets itself, so chat and canvas mode share one data path. Only the outermost
+ * It shows the shared list of the project's documents, or of the loose notes, so the sidebar and every menu agree. Only the outermost
  * editor offers other canvases, so a canvas window can hold a file without handing out more.
  * Documents (generated tool artifacts included) are renamed and deleted in place: a rename moves the file, canvases and chats follow its new path.
  */
 export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onAddPdf, onAddDocument, onAddArchitecture, onAddNewCanvas, onAddCanvasFile, onDocumentRenamed, onDocumentDeleted }: CanvasAddMenuProps) {
   const { ref: menuRef, open, toggle, close } = useMenuPopover({ escape: false })
-  const [docs, setDocs] = useState<ProjectDocument[]>([])
+  const docs = useResource(null, slug ? projectDocumentsResource(slug) : notesResource, open) ?? NO_DOCUMENTS
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const cancelRename = useRef(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -65,12 +71,6 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
   const renameDocument = useRenameDocument()
   const deleteKey = (path: string) => `canvas-document:${slug ?? ""}:${path}`
-
-  useEffect(() => {
-    if (!open) return
-    const load = slug ? listProjectDocuments(slug) : listNotes()
-    load.then(setDocs).catch(() => { /* picker just stays empty */ })
-  }, [open, slug])
 
   const images = slug ? docs.filter((d) => d.mime.startsWith("image/")) : []
   const pdfs = slug ? docs.filter((d) => d.mime === "application/pdf") : []
@@ -87,7 +87,6 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
     if (!name || name === currentName) return
     try {
       const renamed = await renameDocument(slug ?? "", path, name)
-      setDocs((all) => all.map((d) => d.path === path ? { ...d, path: renamed.path, name: renamed.name } : d))
       if (renamed.path !== path) onDocumentRenamed(path, renamed.path)
     } catch { /* the stored name stays authoritative when rename fails */ }
   }
@@ -95,8 +94,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   // The row hides during its undo window; the file and its attachments go once the delete commits.
   const deleteDocumentRow = ({ path, name }: ProjectDocument) => {
     scheduleDelete(deleteKey(path), name, async () => {
-      await removeDocument(slug ?? "", path)
-      setDocs((all) => all.filter((d) => d.path !== path))
+      for (const removed of await removeDocument(slug ?? "", path)) announceFileRemoval(removed)
       onDocumentDeleted(path)
     })
   }

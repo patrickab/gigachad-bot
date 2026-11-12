@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { displayName, type ProjectListItem } from "@/lib/domain/projects"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { forgetProjectDocuments } from "@/lib/backend/resources"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import {
   listProjects as apiListProjects,
@@ -81,9 +82,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [refreshProjects])
 
   const createProject = useCallback(async (name: string) => (await thenRefresh(apiCreateProject(name))).slug, [thenRefresh])
-  const deleteProject = useCallback((name: string) => thenRefresh(apiDeleteProject(name)), [thenRefresh])
+  const deleteProject = useCallback(async (slug: string) => {
+    await apiDeleteProject(slug)
+    forgetProjectDocuments(slug)
+    await refreshProjects()
+  }, [refreshProjects])
   const setProjectArchived = useCallback((slug: string, archived: boolean) => thenRefresh(apiSetProjectArchived(slug, archived)), [thenRefresh])
-  const renameProject = useCallback(async (slug: string, name: string) => (await thenRefresh(apiRenameProject(slug, name))).slug, [thenRefresh])
+  const renameProject = useCallback(async (slug: string, name: string) => {
+    const renamed = (await apiRenameProject(slug, name)).slug
+    if (renamed !== slug) forgetProjectDocuments(slug)
+    await refreshProjects()
+    return renamed
+  }, [refreshProjects])
 
   const value = useMemo<ProjectContextState>(
     () => ({ projects, refreshProjects, createProject, deleteProject, setProjectArchived, renameProject }),

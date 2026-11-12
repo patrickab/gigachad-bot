@@ -1,13 +1,8 @@
 "use client"
 
-import { useCallback, useState } from "react"
-import { useStartupRead } from "@/contexts/StartupReadContext"
-import { fetchReasoningLevels } from "@/lib/backend/api"
+import { useResource } from "@/hooks/useResource"
+import { reasoningLevelsResource } from "@/lib/backend/resources"
 import { PopoverSelector } from "@/components/ui/PopoverSelector"
-
-/** Shared across every instance so switching tabs/models reuses a lookup
- *  already made this session instead of refetching. */
-const levelsCache = new Map<string, string[]>()
 
 interface ReasoningSelectorProps {
   /** Levels from `useReasoningLevels`, undefined while loading. */
@@ -30,16 +25,7 @@ function ReasoningGlyph({ level }: { level: string }) {
 
 /** Reasoning levels `model` accepts, `[]` when it can't reason, undefined while loading. */
 export function useReasoningLevels(model: string): string[] | undefined {
-  const [fetched, setFetched] = useState<{ model: string; levels: string[] } | null>(null)
-  const levels = levelsCache.get(model) ?? (fetched?.model === model ? fetched.levels : undefined)
-
-  const loadLevels = useCallback((signal: AbortSignal) => fetchReasoningLevels(model, signal), [model])
-  useStartupRead("Reasoning levels", loadLevels, ({ levels: result }) => {
-    levelsCache.set(model, result)
-    setFetched({ model, levels: result })
-  }, Boolean(model) && !levelsCache.has(model))
-
-  return levels
+  return useResource("Reasoning levels", reasoningLevelsResource(model), Boolean(model))
 }
 
 /** Effort actually used for the model, derived so the stored choice survives model switches.

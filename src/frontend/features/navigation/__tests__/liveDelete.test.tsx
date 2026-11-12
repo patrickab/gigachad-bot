@@ -7,6 +7,7 @@ import { TabManager, type TabManagerHandle } from "@/features/navigation/TabMana
 import { nextTab } from "@/features/navigation/tabs"
 import type { WorkspaceItem } from "@/contexts/TabContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
+import { watchDocumentLists } from "@/lib/backend/resources"
 import type { ChangeEvent } from "@/lib/backend/syncStream"
 
 const FOLDER = "/data/workbench/latex/proj/paper"
@@ -98,6 +99,9 @@ const shownPaths = (manager: RefObject<TabManagerHandle | null>) => manager.curr
 /** The project's rows in the frontmost tab's sidebar, every tab renders its own. */
 const sidebar = (view: RenderResult) => within(view.getAllByLabelText("Proj contents").find((element) => !element.closest("[aria-hidden='true']"))!)
 
+/** The app shell's one subscription that keeps the shared lists current. */
+let stopWatching = () => {}
+
 beforeEach(() => {
   const stored = new Map<string, string>()
   vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value) } })
@@ -108,8 +112,10 @@ beforeEach(() => {
     return [path]
   })
   vi.useFakeTimers({ shouldAdvanceTime: true })
+  stopWatching = watchDocumentLists()
 })
 afterEach(() => {
+  stopWatching()
   cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -127,7 +133,7 @@ describe("deleting a folder entry", () => {
     expect(api.removeDocument).not.toHaveBeenCalled()
     expect(manager.current!.getTabs()).toHaveLength(4)
 
-    // Another tab's sidebar reads the lists while the delete is still undoable and hears no change event of this device's commit.
+    // Another tab's sidebar shows the shared lists while the delete is still undoable and hears no change event of this device's commit.
     act(() => manager.current!.switchToTab(initial.id))
     const expand = view.queryByRole("button", { name: "Expand Proj" })
     if (expand) fireEvent.click(expand)

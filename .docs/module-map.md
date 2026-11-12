@@ -175,6 +175,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   `-- _components/
 |       |       |-- AppShell.tsx      Cross-feature composition and workspace navigation
 |       |       |-- TabContent.tsx    Tab layout: sidebar, surface, overlays and modals
+|       |       |-- TabSidebar.tsx    The tab's Sidebar apart from its chat: memoized, so stream tokens never re-render navigation
 |       |       |-- WorkspaceSurface.tsx Per-mode table of top-bar controls and surface body
 |       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every mode
 |       |       |-- deepLink.ts       Preview/open-target parsing
@@ -294,18 +295,21 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- hooks/                    Feature-independent interaction hooks
 |       |   |-- useEventListener.ts, useEscapeLayer.ts, useOutsidePress.ts
 |       |   |-- useFollowFiles.ts     Follow absolute files and folders on disk, `onChange(path)`
+|       |   |-- useResource.ts        `useResource`, `useResourceState`, `useResourceFamily`: subscribe to a shared resource, first read as a startup read
 |       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the shared omp/learn frame over a tab's slot, previewed tab first
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
 |       |   |-- backend/              HTTP, URL, runtime API base and stream clients
 |       |   |   |-- api/                  Resource endpoints: `index.ts` (public entry `@/lib/backend/api`), `http.ts` (fetch core), one client per route family
+|       |   |   |-- resources.ts          Shared instances of user-global reads (models, prompts, usage, sidebar lists), `refresh*` helpers, `forgetProjectDocuments`, `revalidateOnActivation`, `watchDocumentLists` (takes this device's change events too)
 |       |   |   |-- references.ts         Live document references (attach, write back)
 |       |   |   |-- config.ts
 |       |   |   |-- urls.ts
 |       |   |   |-- canvasStream.ts
 |       |   |   |-- fileEvents.ts         File move and file change events: this device's announcements and other devices' change events
 |       |   |   |-- fileWatch.ts          One ref-counted WebSocket per tab to `/api/files/watch`, reconnect with catch-up, changes into `fileEvents`
-|       |   |   `-- syncStream.ts
+|       |   |   `-- syncStream.ts         Change feed: `subscribeToChanges(listener, { ownDevice })`, `syncCursorReady`
+|       |   |-- resource.ts           `createResource`, `resourceFamily`: one cached value and one request for every tab, `set`/`invalidate`/`refresh` restart a running read, `revalidateStale`
 |       |   |-- domain/               Browser domain types and pure document/graph logic
 |       |   |   |-- types.ts              Chat core, models, omp
 |       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts    `files.ts` holds `isNewFileIn`, a folder entry of a project lists `children`

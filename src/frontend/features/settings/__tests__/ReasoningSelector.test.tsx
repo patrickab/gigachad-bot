@@ -41,6 +41,14 @@ describe("ReasoningSelector", () => {
     expect(screen.getByTestId("effort")).toHaveTextContent("medium")
   })
 
+  it("looks a model's levels up once for every consumer", async () => {
+    fetchReasoningLevels.mockClear()
+    render(<><Harness initialModel="thinker-model" /><Harness initialModel="thinker-model" /></>)
+    await settle()
+    expect(screen.getAllByRole("button", { name: /Reasoning/ })).toHaveLength(2)
+    expect(fetchReasoningLevels).toHaveBeenCalledOnce()
+  })
+
   it("restores the chosen effort after a detour through a model that cannot reason", async () => {
     render(<Harness initialModel="thinker-model" />)
     await settle()

@@ -34,7 +34,6 @@ function renderChat() {
       reasoningEffort: "none",
       prompts: {},
       autosave: async () => {},
-      refreshDocuments: () => {},
       runSlashCommand: async () => false,
     })
     return { chat, turns }

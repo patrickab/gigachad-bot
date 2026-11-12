@@ -1,11 +1,12 @@
 "use client"
 
 import { useCallback, useState, type RefObject } from "react"
-import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useResource } from "@/hooks/useResource"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { attachToComposer } from "@/features/chat/attachToComposer"
-import { fileRootsEnabled, listRootFiles } from "@/lib/backend/api"
+import { listRootFiles } from "@/lib/backend/api"
+import { fileRootsEnabledResource } from "@/lib/backend/resources"
 import type { RootFile } from "@/lib/domain/files"
 import type { WorkspaceItem } from "@/contexts/TabContext"
 import { isNotebookPath } from "@/lib/paths"
@@ -24,24 +25,20 @@ export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: 
   /** Opens a picked notebook in a tab, it has no overlay form. */
   onOpenItem: (item: WorkspaceItem) => void
 }) {
-  const [rootFiles, setRootFiles] = useState<RootFiles>({ enabled: false, files: null })
+  const enabled = useResource("Root files", fileRootsEnabledResource) ?? false
+  const [files, setFiles] = useState<RootFile[] | null>(null)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [standaloneFile, setStandaloneFile] = useState<StandaloneFile | null>(null)
-
-  const applyRootFiles = useCallback(({ enabled, files }: { enabled: boolean; files: RootFile[] }) => setRootFiles({ enabled, files }), [])
-  const applyEnabled = useCallback(({ enabled }: { enabled: boolean }) => setRootFiles((current) => ({ ...current, enabled })), [])
-  useStartupRead("Root files", fileRootsEnabled, applyEnabled)
+  const rootFiles: RootFiles = { enabled, files }
 
   const openFilePicker = useCallback(() => {
     setFilePickerOpen(true)
     // Load on open, so the listing reflects file root changes without walking every root at startup.
-    listRootFiles().then(applyRootFiles).catch(() => {})
-  }, [applyRootFiles])
-
-  /** Mounting or unmounting a root can flip `enabled`, the next open lists the files again anyway. */
-  const refreshRoots = useCallback(() => {
-    fileRootsEnabled().then(applyEnabled).catch(() => {})
-  }, [applyEnabled])
+    listRootFiles().then((listing) => {
+      fileRootsEnabledResource.set(listing.enabled)
+      setFiles(listing.files)
+    }).catch(() => {})
+  }, [])
 
   // Opens a file without a chat: a notebook in a tab, a PDF or a text file standalone
   const openFile = useCallback((path: string) => {
@@ -67,7 +64,6 @@ export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: 
     setFilePickerOpen,
     standaloneFile,
     setStandaloneFile,
-    refreshRoots,
     openFilePicker,
     handleFileSelect,
     openFile,

@@ -43,8 +43,8 @@ export function StartupReadProvider({ children }: { children: ReactNode }) {
   </StartupReadContext.Provider>
 }
 
-/** Bound one startup read and retry it without resetting its consumer's state. Keep `load` stable. A changed `reloadKey` reads again while enabled. */
-export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => Promise<T>, apply: (value: T) => void, enabled = true, reloadKey?: string) {
+/** Bound one startup read and retry it without resetting its consumer's state. Keep `load` stable. */
+export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => Promise<T>, apply: (value: T) => void, enabled = true) {
   const id = useId()
   const report = useContext(StartupReadContext)
   const [state, setState] = useState<{ loading: boolean; error: string | null }>({ loading: enabled, error: null })
@@ -104,10 +104,6 @@ export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => 
       report(id, null)
     }
   }, [enabled, id, label, load, report, retry])
-
-  useEffect(() => {
-    if (enabled && reloadKey !== undefined) retry()
-  }, [enabled, retry, reloadKey])
 
   return useMemo(() => ({ ...state, loading: enabled && state.loading, retry }), [enabled, state, retry])
 }

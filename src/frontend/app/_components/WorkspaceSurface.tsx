@@ -56,7 +56,6 @@ interface WorkspaceSurfaceProps {
   chatColumn: HTMLDivElement | null
   /** The chat, shown in chat mode and whenever another mode has no item to show. */
   chatBody: ReactNode
-  refreshDocuments: () => void
   /** The tab's slash commands an omp tab's composer offers (`/memorize`). */
   ompShellCommands: ShellCommands
   /** First message of an omp session started from the chat, sent by the new-session composer of the omp tab. */
@@ -82,17 +81,16 @@ interface Surface {
 /**
  * The tab's workbench item once prepared: LaTeX or Markdown by the file's kind, mounted on its disk path.
  *
- * - A stored document moves to disk first, the item takes its new path and `onDocumentsChanged` reloads the lists that showed its key
+ * - A stored document moves to disk first and the item takes its new path, the move's change to the project's catalog entry updates the lists
  * - Preparing shows a quiet loading note, a failure its reason and a retry
  * - A Markdown preview's `#file:` link opens its target in this tab, in the workbench or the document editor
  * - A rename gives the item its new path and keeps the editor mounted under the path the item was opened with (`sessionKey`)
  * - A LaTeX item's path may change under the same `sessionKey` too: another file of its project is a buffer switch in the same editor, the item keeps its `texFolder`
  * - A LaTeX item learns its project folder (`texFolder`) from the file's project, so the sidebar can route clicks on the project's files to this tab
  */
-function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
+function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
   item: WorkspaceItem
   onItemChange: (item: WorkspaceItem) => void
-  onDocumentsChanged: () => void
   onModeLabel: (label: string) => void
   drawerOpen: boolean
   onDrawerOpenChange: (open: boolean) => void
@@ -100,10 +98,7 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
   shellCommands: ShellCommands
   modelProps: ModelProps
 }) {
-  const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => {
-    onItemChange({ ...item, path })
-    onDocumentsChanged()
-  }, item.sessionKey)
+  const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => onItemChange({ ...item, path }), item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
   if (!prepared) return <div className="pt-11"><LoadingPlaceholder /></div>
   const sessionKey = item.sessionKey ?? prepared.path
@@ -126,7 +121,7 @@ function WorkbenchItemBody({ item, onItemChange, onDocumentsChanged, onModeLabel
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands, ompLaunch, onOmpLaunched, onOpenItem }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, ompShellCommands, ompLaunch, onOmpLaunched, onOpenItem }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // omp needs host access, other logins keep the PDF's local assistant
@@ -251,7 +246,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               overlay
               persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
               onClose={() => setAppMode("chat")}
-              onSaved={refreshDocuments}
               onModeLabel={setModeLabel}
               onNavigate={(path) => setWorkspaceItem({ ...documentItem, path })}
               model={config.selectedModel}
@@ -294,7 +288,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           <WorkbenchItemBody
             item={workbenchItem}
             onItemChange={setWorkspaceItem}
-            onDocumentsChanged={refreshDocuments}
             onModeLabel={setModeLabel}
             onClose={() => setAppMode("chat")}
             {...workbenchChatProps}

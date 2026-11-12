@@ -1,33 +1,37 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Factory } from "lucide-react"
 import { useHostAccess } from "@/contexts/SettingsContext"
-import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
 import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
-import { fileRootTree, removeFileRoot } from "@/lib/backend/api"
-import { onFileChange, onFileMove } from "@/lib/backend/fileEvents"
-import { isNewFileIn, mountOf, type FileTreeNode } from "@/lib/domain/files"
+import { useResource } from "@/hooks/useResource"
+import { removeFileRoot } from "@/lib/backend/api"
+import { fileRootsEnabledResource, refreshRootTree, revalidateOnActivation, rootTreeResource } from "@/lib/backend/resources"
+import { mountOf, type FileTreeNode } from "@/lib/domain/files"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
 import { useWorktrees } from "./useWorktrees"
 
+/** The tree before its first read. */
+const NO_TREE: FileTreeNode[] = []
+
 interface CodeMountsOptions {
-  onRootsChanged?: () => void
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
 }
 
-/** File mounts of the Code section: their tree, worktrees, omp sessions and archive state. */
-export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions) {
+/** File mounts of the Code section: their tree, worktrees, omp sessions and archive state. Every tab shares the tree and worktrees. */
+export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const hostAccess = useHostAccess()
   const isActive = useTabActive()
   const { schedule } = useUndoDelete()
   const { archived, setArchived } = useArchivedDirectories()
-  const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
+  // The tree read for other worktrees replaces the shown one once it arrives, so picking a worktree never empties the section.
+  const [shownTree, setShownTree] = useState<FileTreeNode[]>()
+  const rootTreeData = shownTree ?? NO_TREE
   const mounts = rootTreeData.map(mountOf)
   const openFactoryRepo = useFactoryRepos(hostAccess)
   const omp = useOmpSidebar({
@@ -47,43 +51,31 @@ export function useCodeMounts({ onRootsChanged, onItemOpen }: CodeMountsOptions)
     }],
   })
   const worktrees = useWorktrees(mounts)
-  const { reload: reloadWorktrees } = worktrees
-  const activeWorktreesKey = worktrees.activeWorktrees.join("\n")
+  const rootTree = rootTreeResource(worktrees.activeWorktrees.join("\n"))
+  const loadedTree = useResource("Sidebar file mounts", rootTree)
+  if (loadedTree !== undefined && loadedTree !== shownTree) setShownTree(loadedTree)
 
-  const worktreeKeys = useMemo(() => activeWorktreesKey.split("\n").filter(Boolean), [activeWorktreesKey])
-  const readRootTree = useCallback((signal?: AbortSignal) => fileRootTree(worktreeKeys, signal), [worktreeKeys])
-  const loadRootTree = useCallback(() => readRootTree().then((result) => setRootTreeData(result.tree)), [readRootTree])
-  useStartupRead("Sidebar file mounts", readRootTree, (result) => setRootTreeData(result.tree), isActive)
-
-  // A file renamed on another device keeps its place in the tree under its new name
-  useEffect(() => onFileMove(({ from }) => {
-    if (isActive && from.startsWith("/")) void loadRootTree().catch(() => {})
-  }), [isActive, loadRootTree])
-
-  // A file created in a mount (a pasted image, a new LaTeX project file) shows up in the tree.
-  const isNewInMounts = useEffectEvent((path: string) => isActive && isNewFileIn(rootTreeData, path))
-  const reloadTree = useEffectEvent(() => { void loadRootTree().catch(() => {}) })
-  useEffect(() => onFileChange((path) => isNewInMounts(path), () => reloadTree()), [])
-
+  // Nothing announces changes on disk or to a worktree's status: the tab coming to the front reads them again for every tab,
+  // and so does showing other worktrees, whose tree may be one read long before.
   useEffect(() => {
-    if (isActive) reloadWorktrees()
-  }, [isActive, reloadWorktrees])
+    if (isActive) revalidateOnActivation()
+  }, [isActive, rootTree])
 
-  /** Run `add`, then reload the tree and report the changed roots. */
+  /** Run `add`, then read the tree again; the file picker's availability may change with it. */
   const mountThen = async (add: () => Promise<unknown>) => {
     await add()
-    await loadRootTree()
-    onRootsChanged?.()
+    await refreshRootTree()
+    fileRootsEnabledResource.invalidate()
   }
 
   const removeMount = (mount: string, name: string) => schedule(`root:${mount}`, name, async () => {
     await removeFileRoot(mount)
-    await loadRootTree()
-    onRootsChanged?.()
+    await refreshRootTree()
+    fileRootsEnabledResource.invalidate()
   })
 
   return {
     hostAccess, omp, rootTreeData, mounts, unmounted: omp.unmountedWorkspaces(mounts), folder: worktrees.folder,
-    archived, setArchived, mountThen, removeMount, reloadRootTree: loadRootTree,
+    archived, setArchived, mountThen, removeMount,
   }
 }

@@ -14,6 +14,7 @@ import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
 import { addFileRoot, cloneFileRoot, createTexProjectFile } from "@/lib/backend/api"
+import { refreshDocumentLists, refreshRootTree } from "@/lib/backend/resources"
 import { cn } from "@/lib/utils"
 import { ArchiveSelector } from "./ArchiveSelector"
 import { useBranches } from "./BranchContext"
@@ -36,8 +37,6 @@ interface SidebarProps {
   /** Open the file `path` of a folder on disk, `scope` is the project it belongs to, null for none. */
   onFileSelect?: (path: string, scope: string | null) => void
   onDiffSelect?: (path: string) => void
-  onRootsChanged?: () => void
-  onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
   /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
   onWorkbenchSelect?: (path: string, scope: string) => void
@@ -58,7 +57,7 @@ interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { onNewChat, activeCanvasPath, renderSettings, appMode } = props
+  const { onNewChat, renderSettings } = props
   const { collapsed, toggleCollapsed } = useSidebar()
   const { tab } = useTab()
   const branches = useBranches()
@@ -75,11 +74,7 @@ export function Sidebar(props: SidebarProps) {
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)
   const { renameOf } = useInlineRename()
-  // A workbench item's path changes when opening moved its stored document to disk, and this device hears no change event for it.
-  const workbenchPath = appMode === "workbench" ? props.activeDocumentPath : null
-  const documents = useWorkspaceDocuments({
-    ...props, projects, moveHistory: branches.moveHistory, reloadKey: `${activeCanvasPath}\n${appMode}\n${workbenchPath}`,
-  })
+  const documents = useWorkspaceDocuments({ ...props, projects, moveHistory: branches.moveHistory })
   const code = useCodeMounts(props)
   const { omp } = code
   const fileRename = useFileRename({
@@ -90,8 +85,7 @@ export function Sidebar(props: SidebarProps) {
     },
     onRenamed: async (oldPath, newPath) => {
       props.onDocumentRenamed?.(oldPath, newPath)
-      await Promise.all([documents.refresh(), code.reloadRootTree()])
-      props.onDocumentsChanged?.()
+      await refreshDocumentLists()
     },
   })
   const selectFile = (path: string) => props.onFileSelect?.(path, owningProject(path, documents.documents, projects, code.mounts))
@@ -99,11 +93,11 @@ export function Sidebar(props: SidebarProps) {
     onFileSelect: selectFile,
     moveToFolder: async (path: string, folder: string) => {
       await documents.moveToFolder(path, folder)
-      await code.reloadRootTree()
+      await refreshRootTree()
     },
     createLatexFile: async (folder: string, name: string) => {
       const path = await createTexProjectFile(folder, texFileName(name))
-      await Promise.all([documents.refresh(), code.reloadRootTree()])
+      await Promise.all([refreshDocumentLists(), refreshRootTree()])
       selectFile(path)
     },
   }

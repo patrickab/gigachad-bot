@@ -1,12 +1,16 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useState } from "react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { WorktreesIcon } from "@/components/ui/WorktreesIcon"
+import { useTabActive } from "@/contexts/TabContext"
+import { useResourceFamily } from "@/hooks/useResource"
 import { useStoredJson } from "@/hooks/useStoredJson"
-import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, openDefaultWorktree, removeWorktree } from "@/lib/backend/api"
-import type { Worktree, WorktreeList } from "@/lib/domain/files"
+import { ApiError, createWorktree, deleteWorktreeBranch, openDefaultWorktree, removeWorktree } from "@/lib/backend/api"
+import { worktreesResource } from "@/lib/backend/resources"
+import type { Worktree } from "@/lib/domain/files"
+import { refresh } from "@/lib/resource"
 import { baseName } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 
@@ -56,19 +60,15 @@ function worktreeStatus(worktree: Worktree): string | undefined {
   return parts.length ? parts.join(" ") : undefined
 }
 
-/** Worktrees of every clone mount: which one each mount shows, and its sidebar "Worktrees" folder. */
+/** Worktrees of every clone mount: which one each mount shows, and its sidebar "Worktrees" folder. Every tab shares the lists. */
 export function useWorktrees(mounts: string[]) {
-  const [lists, setLists] = useState<Record<string, WorktreeList>>({})
+  // A mount whose worktrees fail to load shows no "Worktrees" folder, the tab's next activation tries again.
+  const lists = useResourceFamily(null, worktreesResource, mounts, useTabActive())
   const [removal, setRemoval] = useState<Removal | null>(null)
   const [defaultError, setDefaultError] = useState<{ mount: string; error: string } | null>(null)
   const [active, updateActive] = useStoredJson(ACTIVE_STORAGE_KEY, parseActive)
-  const mountsKey = mounts.join("\n")
 
-  const load = useCallback((mount: string) => fetchWorktrees(mount).then(
-    (list) => setLists((current) => ({ ...current, [mount]: list })),
-    () => {},
-  ), [])
-  const reload = useCallback(() => { for (const mount of mountsKey.split("\n").filter(Boolean)) void load(mount) }, [mountsKey, load])
+  const load = (mount: string) => refresh(worktreesResource(mount))
 
   const setActive = (mount: string, path: string | null) => updateActive((latest) => {
     const next = { ...latest }
@@ -181,7 +181,7 @@ export function useWorktrees(mounts: string[]) {
   }
 
   /** Worktree paths the mounts show instead of their clone, for the file tree request. */
-  const activeWorktrees = mountsKey.split("\n").map((mount) => active[mount]).filter(Boolean)
+  const activeWorktrees = mounts.map((mount) => active[mount]).filter(Boolean)
 
-  return { activeWorktrees, folder, reload }
+  return { activeWorktrees, folder }
 }

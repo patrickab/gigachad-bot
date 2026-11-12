@@ -7,12 +7,12 @@ import { cn, isModKey } from "@/lib/utils"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { fetchPromptList, fetchPromptBlocks, fetchPromptRaw, savePrompt, deletePrompt, savePromptOrder, fetchPrompts } from "@/lib/backend/api"
+import { promptsResource } from "@/lib/backend/resources"
 import type { PromptMeta } from "@/lib/domain/types"
 
 interface PromptEditorProps {
   open: boolean
   onClose: () => void
-  onPromptsChanged: (prompts: Record<string, string>) => void
 }
 
 /** Lowercase kebab-case slug, capped at 64 chars. */
@@ -32,7 +32,7 @@ async function fetchPromptLists(): Promise<PromptLists> {
 }
 
 /** Floating window to edit, reorder, create and delete prompt files, with `{{block}}` insertion. */
-export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorProps) {
+export function PromptEditor({ open, onClose }: PromptEditorProps) {
   const { schedule, pending } = useUndoDelete()
   const [prompts, setPrompts] = useState<PromptMeta[]>([])
   const [blocks, setBlocks] = useState<Record<string, string>>({})
@@ -73,14 +73,14 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     setBlocks(blk)
   }, [showPrompts])
 
-  /** Reload the lists and, with `notify`, tell the owner the resolved prompts changed. Both fetches run together, the lists apply as soon as they land. */
+  /** Reload the lists and, with `notify`, the resolved prompts every tab uses. Both fetches run together, the lists apply as soon as they land. */
   const reload = useCallback(async (notify: boolean) => {
     const resolved = notify ? fetchPrompts() : null
     // Awaited below, the no-op handler only keeps a rejection from going unhandled when the lists fail first.
     resolved?.catch(() => {})
     applyLists(await fetchPromptLists())
-    if (resolved) onPromptsChanged(await resolved)
-  }, [applyLists, onPromptsChanged])
+    if (resolved) promptsResource.set(await resolved)
+  }, [applyLists])
 
   useEffect(() => {
     if (open) fetchPromptLists().then(applyLists)
