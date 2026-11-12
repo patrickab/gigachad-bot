@@ -32,7 +32,7 @@ import config
 from lib.asset_store import Asset, AssetStore
 from lib.changes import UserScope
 from lib.chat_store import ChatStore
-from lib.data_store import DataStore, InvalidStorageKey, Meta, StorageNotFoundError, validate_key
+from lib.data_store import DataStore, InvalidStorageKey, Meta, validate_key
 from lib.db_schema import database_url
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
@@ -44,12 +44,12 @@ from lib.storage_namespace import (
     PDFS,
     PROJECT,
     PROJECT_JSON,
-    WORKBENCH_SESSIONS,
     chat_upload_prefix,
     library_pdf,
     pdf_annotations,
 )
 from lib.workbench import KINDS
+from lib.workbench.links import SessionLinks
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -249,19 +249,7 @@ class References:
                 pass  # the slug folder still holds other documents
             gone.add(str(folder))
         if dropped:
-            self._forget_links(dropped)
-
-    def _forget_links(self, folders: list[Path]) -> None:
-        """Remove the `sessions.json` links of the *folders* and of the files inside them."""
-        try:
-            links, revision = self._json.read_with_revision(WORKBENCH_SESSIONS)
-        except (StorageNotFoundError, ValueError):
-            return
-        if not isinstance(links, dict):
-            return
-        kept = {key: link for key, link in links.items() if not any(_inside(Path(key), folder) for folder in folders)}
-        if kept != links:
-            self._json.write(WORKBENCH_SESSIONS, kept, expected=revision)
+            SessionLinks(self._docs).forget_inside(dropped)
 
     def orphans(self) -> list[str]:
         """Derived keys nothing uses any more, as a release of every one of them would delete them. Nothing is deleted."""

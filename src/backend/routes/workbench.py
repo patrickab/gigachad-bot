@@ -1,6 +1,5 @@
 """Workbench files on disk (`lib.workbench`) and the omp session of each, for logins with host access."""
 
-from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -21,14 +20,14 @@ from backend.routes.fileviewer import resolve_allowed
 import config
 from lib import document_service, latex, latex_templates
 from lib.asset_store import AssetStore
-from lib.data_store import DataStore, InvalidStorageKey, Revision, StorageConflictError, StorageNotFoundError, validate_key
+from lib.data_store import DataStore, InvalidStorageKey, StorageConflictError, StorageNotFoundError, validate_key
 from lib.disk_files import DiskFiles
 from lib.document_service import DocumentNameConflict, DocumentNotFound, Relocate, under
 from lib.file_roots import FileRoots
-from lib.json_docs import JsonDocs
 from lib.project_store import ProjectStore
-from lib.storage_namespace import NOTE, PDFS, WORKBENCH_SESSIONS, library_pdf
+from lib.storage_namespace import NOTE, PDFS, library_pdf
 from lib.workbench import Kind, document_folder, kind_directory, kind_of, new_folder, suffix_of
+from lib.workbench.links import Link, SessionLinks
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"], dependencies=[host_access_only("Workbench")])
 
@@ -102,22 +101,15 @@ class SessionNotice(BaseModel):
     session_id: str
 
 
-def _linked(value: object) -> LinkedSession:
-    """The stored link of one file: `{"active", "sessions", "moved"}`, or a bare session id as stored before sessions were kept."""
-    if isinstance(value, str):
-        return LinkedSession(session_id=value, session_ids=[value])
-    if not isinstance(value, dict):
-        return LinkedSession(session_id=None, session_ids=[])
-    sessions = [session for session in value.get("sessions", []) if isinstance(session, str)]
-    moved = [session for session in value.get("moved", []) if session in sessions]
-    active = value.get("active")
-    return LinkedSession(session_id=active if isinstance(active, str) else None, session_ids=sessions, moved=moved)
+def _linked_session(link: Link) -> LinkedSession:
+    return LinkedSession(session_id=link.active, session_ids=list(link.sessions), moved=list(link.moved))
 
 
-def _stored(linked: LinkedSession) -> dict[str, object]:
-    """The `sessions.json` value of *linked*, without an empty `moved`."""
-    stored: dict[str, object] = {"active": linked.session_id, "sessions": linked.session_ids}
-    return {**stored, "moved": linked.moved} if linked.moved else stored
+def _absolute(path: str) -> str:
+    """*path*, 400 unless it is absolute."""
+    if not PurePosixPath(path).is_absolute():
+        raise HTTPException(status_code=400, detail="Path must be absolute")
+    return path
 
 
 def _kind(name: str) -> Kind:
@@ -288,84 +280,17 @@ def _image_reference(kind: Kind, theme: latex_templates.TemplateSet | None, imag
 def get_session(
     path: str = Query(...), docs: DataStore = Depends(get_document_store), roots: FileRoots = Depends(get_file_roots),
 ) -> LinkedSession:
-    """The omp sessions linked to the absolute file or LaTeX project folder `path`.
-
-    - A folder without a link adopts the links of the LaTeX files inside it (any depth), merged in the order they
-      were stored, once: the root file's active session is the folder's, else the first file's
-    """
-    links, revision = _read_links(docs)
-    if path not in links:
-        adopted = _adopted(links, path, roots)
-        if adopted is not None:
-            merged, folder_link = adopted
-            JsonDocs(docs).write(WORKBENCH_SESSIONS, merged, expected=revision)
-            return folder_link
-    return _linked(links.get(path))
-
-
-def _read_links(docs: DataStore) -> tuple[dict, Revision | None]:
-    """The stored `sessions.json` links and their revision, empty and unrevised when there are none."""
-    try:
-        links, revision = JsonDocs(docs).read_with_revision(WORKBENCH_SESSIONS)
-    except (StorageNotFoundError, ValueError):
-        return {}, None
-    return (links if isinstance(links, dict) else {}), revision
-
-
-def _root_key(files: Iterable[str], roots: FileRoots) -> str | None:
-    """The one of *files* that is the root document of the project they belong to, None when none is."""
-    keys = tuple(files)
-    for key in keys:
-        try:
-            root = latex.project_of(Path(key), ceiling=roots.ceiling_of(Path(key))).root
-        except OSError:
-            continue
-        if root is not None and str(root) in keys:
-            return str(root)
-    return None
-
-
-def _adopted(links: dict, folder: str, roots: FileRoots) -> tuple[dict, LinkedSession] | None:
-    """*links* with the links of the LaTeX files inside *folder* merged into one under *folder*, and that link. None without any."""
-    prefix = f"{folder.rstrip('/')}/"
-    files = {key: _linked(value) for key, value in links.items() if key.startswith(prefix) and kind_of(key) == "latex"}
-    if not files:
-        return None
-    leading = files.get(_root_key(files, roots) or "") or next(iter(files.values()))
-    merged = LinkedSession(
-        session_id=leading.session_id,
-        session_ids=list(dict.fromkeys(session for link in files.values() for session in link.session_ids)),
-        moved=list(dict.fromkeys(session for link in files.values() for session in link.moved)),
-    )
-    return {**{key: value for key, value in links.items() if key not in files}, folder: _stored(merged)}, merged
-
-
-def _update_link(docs: DataStore, path: str, change: Callable[[LinkedSession], LinkedSession]) -> LinkedSession:
-    """Apply *change* to the link of the absolute file *path* and store it when it changed."""
-    if not PurePosixPath(path).is_absolute():
-        raise HTTPException(status_code=400, detail="Path must be absolute")
-    links, revision = _read_links(docs)
-    current = _linked(links.get(path))
-    linked = change(current)
-    if linked != current or not isinstance(links.get(path), dict):
-        JsonDocs(docs).write(WORKBENCH_SESSIONS, {**links, path: _stored(linked)}, expected=revision)
-    return linked
+    """The omp sessions linked to the absolute file or LaTeX project folder `path` (`SessionLinks.of`)."""
+    return _linked_session(SessionLinks(docs).of(path, roots))
 
 
 @router.put("/session")
 def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
     """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
-    def activate(current: LinkedSession) -> LinkedSession:
-        sessions = current.session_ids
-        if body.session_id is not None and body.session_id not in sessions:
-            sessions = [*sessions, body.session_id]
-        return current.model_copy(update={"session_id": body.session_id, "session_ids": sessions})
-    return _update_link(docs, body.path, activate)
+    return _linked_session(SessionLinks(docs).activate(_absolute(body.path), body.session_id))
 
 
 @router.post("/session/informed")
 def post_session_informed(body: SessionNotice, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
     """The session `session_id` knows where the file `path` is now, so its messages stop naming it."""
-    return _update_link(docs, body.path, lambda current: current.model_copy(
-        update={"moved": [session for session in current.moved if session != body.session_id]},
-    ))
+    return _linked_session(SessionLinks(docs).inform(_absolute(body.path), body.session_id))

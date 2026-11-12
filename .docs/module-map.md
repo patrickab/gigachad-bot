@@ -147,7 +147,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- synctex.py                `synctex edit`/`view` wrappers: inverse and forward search, beamer frame refinement, `slide_end` for slide insertion
 |   |   |-- tex_source.py             Plain-text TeX helpers: comment stripping, beamer frame bounds and new-frame insertion point, image placeholder fill
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner
-|   |   |-- workbench/                Workbench kinds, folders, omp prompt and template-set mirror, rename folder moves
+|   |   |-- workbench/                Workbench kinds, folders, omp prompt and template-set mirror, rename folder moves, `links.py` (sole owner of `workbench/sessions.json`)
 |   |   `-- prompts/                  Internal, non-user-facing prompts
 |   |       `-- non_user_prompts.py
 |   |-- c4/                           Separate stateless TypeScript LikeC4 service

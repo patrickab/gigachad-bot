@@ -21,6 +21,7 @@ from lib.json_io import dump_json
 from lib.storage_namespace import (
     ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX, WORKBENCH, WORKBENCH_SESSIONS,
 )
+from lib.workbench.links import owe_new_paths
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -107,7 +108,7 @@ class KeyReference:
 def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value: Callable[[Any], Any]) -> bytes:
     """Rewrite JSON and text documents of app namespaces, leave anything else untouched.
 
-    - Sessions of a workbench file whose path changed owe it the new one (`workbench.owe_new_paths`)
+    - Sessions of a workbench file whose path changed owe it the new one (`lib.workbench.links.owe_new_paths`)
     """
     if key.split("/", 1)[0] not in CONTENT_NAMESPACES or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
         return content
@@ -120,7 +121,7 @@ def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value
         return content
     updated = value(data)
     if key == WORKBENCH_SESSIONS:
-        updated = workbench.owe_new_paths(data, updated)
+        updated = owe_new_paths(data, updated)
     return content if updated == data else dump_json(updated).encode()
 
 
