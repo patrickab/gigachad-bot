@@ -721,13 +721,18 @@ code {
 /* Overlay entrance, mount only. A MenuPopover menu (the element after its trigger) fades and rises
    4px from the trigger: up for a `bottom-full` menu, down otherwise. `backwards` hands the settled
    state back to the element, so a menu also animated by framer-motion keeps its own exit.
-   .motion-fade-in: plain fade, e.g. a side panel mounting. */
+   .motion-fade-in: plain fade, e.g. a side panel mounting.
+   .motion-expand-in: an opened branch's contents fade and settle 2px down, collapse stays instant. */
 @keyframes motion-popover {
   from { opacity: 0; transform: translateY(var(--motion-popover-shift, -4px)) scale(0.98); }
 }
 
 @keyframes motion-fade {
   from { opacity: 0; }
+}
+
+@keyframes motion-expand {
+  from { opacity: 0; transform: translateY(-2px); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -741,6 +746,9 @@ code {
   }
   .motion-fade-in {
     animation: motion-fade 200ms ease-out backwards;
+  }
+  .motion-expand-in {
+    animation: motion-expand 150ms ease-out backwards;
   }
 }
 

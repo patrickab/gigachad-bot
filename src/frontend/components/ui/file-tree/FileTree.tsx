@@ -325,7 +325,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         <ErrorText className="px-1 py-0.5">{renameError.message}</ErrorText>
       </div>}
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
-      {expanded && <div role="group" aria-label={`${item.label} contents`}>
+      {expanded && <div role="group" aria-label={`${item.label} contents`} className="motion-expand-in">
         {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1)}
         {item.children?.length === 0 && creation?.parentId !== item.id && <div
           style={{ marginLeft: INDENT_BASE + (depth + 1) * INDENT_STEP + 20 }} className={cn("flex items-center px-1 text-xs text-ink-faint", rowHeight(depth + 1))}>Empty</div>}
