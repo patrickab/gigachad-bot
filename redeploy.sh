@@ -4,9 +4,9 @@
 # environment, so nothing inherited from the calling shell reaches uv, npm or the unit.
 #
 # Then omp-web (omp tabs): restarts gigachad-bot-omp-web.service when the upstream ref
-# it serves (GIGACHAD_OMP_WEB_REF) moved, origin/main moved past it (the launcher rebases on start),
-# or ompweb-overlay/ or the chat-ui package
-# changed, never while an omp session runs, and restarts its Tailnet gate. The unit's
+# it serves (GIGACHAD_OMP_WEB_REF, default origin/main, fetched here) moved, origin/main
+# moved past a local ref branch (the launcher moves it on start), or ompweb-overlay/ or the
+# chat-ui package changed, never while an omp session runs, and restarts its Tailnet gate. The unit's
 # run-omp-web.sh resets the served worktree to the ref and applies the overlay on start.
 #
 # Then learn mode, unless a learn session is busy: restarts the LiteLLM proxy (its start
@@ -164,8 +164,8 @@ omp_web_started() {
     return 1
 }
 
-# A new origin/main alone also restarts: run-omp-web.sh rebases the branch onto it on start. Not when its
-# auto-update already failed for this branch and origin/main (the stamp's key starts with both), nor offline.
+# With a local branch as the ref, a new origin/main alone also restarts: run-omp-web.sh moves the branch onto it on start.
+# Not when its auto-update already failed for this branch and origin/main (the stamp's key starts with both), nor offline.
 omp_web_behind=false
 if [[ $(prod_setting GIGACHAD_AUTO_UPDATE 1) != 0 ]] \
     && git -C "$omp_web_repo" show-ref --verify --quiet "refs/heads/$omp_web_ref" \

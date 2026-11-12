@@ -231,17 +231,9 @@ cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 ```
 
-- Serve a ref containing the upstream seams the overlay uses. Until PR #332
-  (issue #314) is merged that is its branch on `patrickab/ompweb-fork`.
-  Production serves the fork's copy directly (`PRODUCTION_OMP_WEB_REF` in
-  `deploy/lib.sh`, not the env file), so it needs only the remote. Switch the
-  constant to `origin/main` once #332 is merged:
-
-```bash
-git -C "$HOME/git/ompweb_original" remote add fork https://github.com/patrickab/ompweb-fork.git
-git -C "$HOME/git/ompweb_original" remote set-url --push fork git@github.com:patrickab/ompweb-fork.git
-git -C "$HOME/git/ompweb_original" fetch fork
-```
+- Serve upstream `main`. Production's ref is `PRODUCTION_OMP_WEB_REF` in
+  `deploy/lib.sh`, `origin/main`, not the env file. `redeploy.sh` fetches it,
+  the clone above needs no other remote.
 
 - Run `"$PROD/deploy/install-systemd-service.sh"` once after adding a unit (e.g.
   `gigachad-bot-omp-web-host.service`), `redeploy.sh` then starts it.
@@ -252,13 +244,15 @@ git -C "$HOME/git/ompweb_original" fetch fork
 - Packing compiles with `src/frontend`'s TypeScript and types, so production
   needs `src/frontend/node_modules`. `redeploy.sh` installs it (`npm ci
   --ignore-scripts`) when missing or when the lockfile changed.
-- Before serving, `run-omp-web.sh` fetches `origin` and, when the ref branch
-  lacks `origin/main`, rebases a copy onto it in a temporary worktree, runs the
-  overlay checks (`tsc`, overlay node tests) and moves the branch (and its clean
-  worktree) there. Local only, never pushed. A conflict, failed check, dirty
-  branch worktree or offline start keeps the branch and prints one
-  `omp-web auto-update:` line why; the start goes on. Details:
-  `.docs/integration-ompweb.md`, "Automatic upstream rebase".
+- Before serving a local ref branch (development's `main`), `run-omp-web.sh`
+  fetches `origin` and, when the branch lacks `origin/main`, moves a copy onto it
+  in a temporary worktree (a fast-forward for `main`, a rebase for a topic
+  branch), runs the overlay checks (`tsc`, overlay node tests) and moves the
+  branch (and its clean worktree) there. Local only, never pushed. A conflict,
+  failed check, dirty branch worktree or offline start keeps the branch and
+  prints one `omp-web auto-update:` line why; the start goes on. A
+  remote-tracking ref (production's `origin/main`) is served as fetched.
+  Details: `.docs/integration-ompweb.md`, "Automatic upstream update".
 - Install/build initially and rebuild on source changes (`npm run build`, Bun, seconds).
 - Restart after updates: an existing listener is reused, its update applies at
   its next start.
@@ -267,7 +261,7 @@ git -C "$HOME/git/ompweb_original" fetch fork
 | --- | --- |
 | `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb_original`, upstream checkout |
 | `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb-upstream`, served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `refactor/314-ui-customization-seams` (local branch, auto-rebased); production uses `PRODUCTION_OMP_WEB_REF` in `deploy/lib.sh`, `fork/refactor/314-ui-customization-seams`. A remote-tracking ref is fetched by `redeploy.sh` |
+| `GIGACHAD_OMP_WEB_REF` | `main` (local branch, auto-updated); production uses `PRODUCTION_OMP_WEB_REF` in `deploy/lib.sh`, `origin/main`. A remote-tracking ref is fetched by `redeploy.sh` |
 | `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` |
 | `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
 | `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177`, upstream for backend/gate |
@@ -316,14 +310,14 @@ systemctl --user restart gigachad-bot.service
 - Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`,
   the embed UI in `ompweb-overlay/`. Both ship with the gigachad-bot commit, so
   `redeploy.sh` restarts omp-web when they or the served ref change.
-- Production serves `fork/refactor/314-ui-customization-seams` as pushed: `redeploy.sh`
-  fetches the fork, production never rebases it.
-  Rebase and run the overlay checks locally, then push.
+- Production serves upstream `main` as fetched: `redeploy.sh` fetches `origin`,
+  the launcher never moves it. Run the overlay checks against `origin/main`
+  before a redeploy (`.docs/integration-ompweb.md`, "Private overlay check checkout").
 - `redeploy.sh` exits with an error instead of serving a broken omp-web:
   - before the restart, when `seams.patch` does not apply to the new commit
     (checked in a throwaway index, the old omp-web keeps serving)
   - right after it, when the unit fails to start (systemd restarted it once), printing its log.
-    omp-web is down until a fixed commit is pushed and redeployed, runs survive in the daemon.
+    omp-web is down until a fixed overlay or upstream commit is redeployed, runs survive in the daemon.
 - The protocol is unversioned: a stale omp-web silently drops messages it does
   not know until restarted.
 
@@ -332,7 +326,7 @@ Manual update:
 1. Prefer an idle omp-web (`curl -s http://127.0.0.1:30177/api/sessions`, empty
    `runningSessionIds`). Runs survive a server restart (`gigachad-bot-omp-web-host.service`
    holds them), never restart the host unit during one.
-2. Push the PR branch to the fork and commit Gigachad, whose overlay the restart applies.
+2. Run the overlay checks against `origin/main` and commit gigachad-bot, whose overlay the restart applies.
 3. Run `redeploy.sh` (or restart `gigachad-bot-omp-web.service`) and verify
    `curl -sf http://127.0.0.1:30177/login`.
 4. Reload the frontend.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Serves omp-web, the chat and settings surface of the frontend's omp tabs.
 #
-#   source    upstream kahme247/ompweb (GIGACHAD_OMP_WEB_REPO, ref GIGACHAD_OMP_WEB_REF), never modified there
+#   source    upstream kahme247/ompweb (GIGACHAD_OMP_WEB_REPO) at GIGACHAD_OMP_WEB_REF, default the clone's main branch,
+#             unpatched there
 #   checkout  a dedicated detached worktree (GIGACHAD_OMP_WEB_DIR) owned by this script: every start resets it to
 #             the ref, so its build never touches the source checkout's dev server
 #   overlay   ompweb-overlay/ becomes the worktree's custom/ (embed mode, postMessage bridge, module overrides),
@@ -11,8 +12,8 @@
 #             worktree's manifest or lock
 #   framing   omp-web refuses frames unless OMP_WEB_FRAME_ANCESTORS lists the frontend origin (custom/framing.ts),
 #             the server reads it at start
-#   update    before serving, the ref branch is rebased locally onto origin/main when it lacks it (auto_update below),
-#             GIGACHAD_AUTO_UPDATE=0 opts out
+#   update    before serving, the ref branch moves onto origin/main when it lacks it, only after the overlay checks pass:
+#             main fast-forwards, a topic branch rebases (auto_update below). GIGACHAD_AUTO_UPDATE=0 opts out
 #   host      `ompweb host`, the daemon that runs this machine's omp sessions, is started beside the server and survives its
 #             restarts, log: <GIGACHAD_OMP_WEB_DIR>.host.log, GIGACHAD_OMP_WEB_HOST=0 opts out
 #
@@ -26,7 +27,7 @@ source "$root_dir/deploy/lib.sh"
 bind="${GIGACHAD_OMP_WEB_BIND:-127.0.0.1:30177}"
 repo="${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb_original}"
 dir="${GIGACHAD_OMP_WEB_DIR:-$HOME/.local/share/gigachad-bot/ompweb-upstream}"
-ref="${GIGACHAD_OMP_WEB_REF:-refactor/314-ui-customization-seams}"
+ref="${GIGACHAD_OMP_WEB_REF:-main}"
 frame_ancestors="${GIGACHAD_OMP_WEB_FRAME_ANCESTORS:-http://127.0.0.1:2999 http://localhost:2999}"
 overlay="$root_dir/ompweb-overlay"
 
@@ -70,10 +71,10 @@ overlay_checks() (
         && node --experimental-strip-types --test custom/*.test.mjs
 )
 
-# Rebases a copy of the ref branch onto origin/main in a temporary worktree, runs the overlay checks on it, then moves
-# the branch (and the clean worktree holding it) there. Local only, never pushes. Every failure keeps the branch and
-# notes why: a start is never blocked. A failed rebase or check is remembered per (branch, origin/main, overlay and
-# chat-ui sources), so later starts skip the npm ci and checks until one of them changes.
+# Rebases a copy of the ref branch onto origin/main in a temporary worktree (a fast-forward for main), runs the overlay
+# checks on it, then moves the branch (and the clean worktree holding it) there. Local only, never pushes. Every failure
+# keeps the branch and notes why: a start is never blocked. A failed rebase or check is remembered per (branch,
+# origin/main, overlay and chat-ui sources), so later starts skip the npm ci and checks until one of them changes.
 auto_update() {
     local branch="refs/heads/$ref" old main held="" wt="" line key stamp="$dir.auto-update-failed" error
     local log="$dir.auto-update.log" work reason="" new="" seen_key="" seen_reason=""

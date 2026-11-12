@@ -22,7 +22,7 @@ case "${1:-}" in
         if [[ -z ${GIGACHAD_OMP_WEB_FRAME_ANCESTORS:-} && -n ${GIGACHAD_CORS_ORIGINS:-} ]]; then
             export GIGACHAD_OMP_WEB_FRAME_ANCESTORS="${GIGACHAD_CORS_ORIGINS//,/ }"
         fi
-        # Production serves exactly what the fork holds: redeploy.sh fetches it, the launcher never rebases a remote ref.
+        # Production serves upstream main as redeploy.sh fetched it, the launcher never moves a remote-tracking ref.
         export GIGACHAD_OMP_WEB_REF="${GIGACHAD_OMP_WEB_REF:-$PRODUCTION_OMP_WEB_REF}"
         exec "${repo_root}/run-omp-web.sh"
         ;;

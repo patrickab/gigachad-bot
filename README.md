@@ -46,7 +46,7 @@ The launcher installs dependencies, including Node.js, and starts the developmen
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
 
-`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup clones upstream `kahme247/ompweb` into `~/git/ompweb_original`. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path and `GIGACHAD_OMP_WEB_REF` for the served ref (default `integration_patrick_ab`, upstream plus the seams of PR #314). Existing checkouts are left untouched.
+`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup clones upstream `kahme247/ompweb` into `~/git/ompweb_original`. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path and `GIGACHAD_OMP_WEB_REF` for the served ref (default `main`, the checkout's local branch). Each start moves that branch onto upstream `main` once the overlay checks pass (a fast-forward for `main`, a local rebase for a topic branch, `GIGACHAD_AUTO_UPDATE=0` opts out), nothing else in the checkout changes.
 
 The first start builds it in a separate worktree with this repository's overlay (`ompweb-overlay/`), which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
 

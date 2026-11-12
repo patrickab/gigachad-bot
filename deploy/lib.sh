@@ -1,8 +1,8 @@
 # Shared helpers for the launcher scripts. Source it, do not run it.
 
-# The omp-web ref production serves: PR #332's branch on the fork, so a redeploy serves exactly what the fork holds
-# (redeploy.sh fetches it, run-omp-web.sh never rebases a remote ref). Switch to origin/main once #332 is merged.
-PRODUCTION_OMP_WEB_REF=fork/refactor/314-ui-customization-seams
+# The omp-web ref production serves: upstream main as redeploy.sh last fetched it (run-omp-web.sh never moves a
+# remote-tracking ref).
+PRODUCTION_OMP_WEB_REF=origin/main
 
 # Succeeds when host:port accepts a TCP connection.
 port_open() {

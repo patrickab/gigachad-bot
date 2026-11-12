@@ -9,7 +9,8 @@ import pytest
 from tests.conftest import git
 from tests.shell import REPOSITORY, environment_with, fake_command, run_script
 
-REF = "refactor/314-ui-customization-seams"
+# A topic branch carrying an unmerged upstream change, served through GIGACHAD_OMP_WEB_REF instead of the default main.
+TOPIC = "refactor/ui-seam"
 # npm leaves the stamps the launcher's install and build checks read, node packs an empty chat-ui and serves nothing.
 # The installed tsc is the auto-update's overlay check: it fails in a checkout holding `break-check`.
 FAKE_NPM = (
@@ -59,22 +60,27 @@ def fake_binaries(tmp_path: Path) -> Path:
     return binaries
 
 
+def seams_upstream(repository: Path, root: Path) -> None:
+    """An upstream repository on main whose one commit holds the files the seams patch applies to."""
+    git(repository.parent, "init", "--initial-branch=main", str(repository))
+    for path, content in seams_preimages((root / "ompweb-overlay" / "seams.patch").read_text()).items():
+        (repository / path).parent.mkdir(parents=True, exist_ok=True)
+        (repository / path).write_text(content)
+    (repository / "package-lock.json").write_text("{}\n")
+    git(repository, "add", ".")
+    git(repository, "commit", "-m", "Upstream")
+
+
 def commit(repository: Path, path: str, content: str, message: str) -> None:
     (repository / path).write_text(content)
     git(repository, "add", path)
     git(repository, "commit", "-m", message)
 
 
-def test_bootstrap_applies_overlay_preserves_checkout_and_rejects_unrelated_directory(tmp_path):
+def test_bootstrap_serves_main_applies_overlay_preserves_checkout_and_rejects_unrelated_directory(tmp_path):
     root = launcher_root(tmp_path)
     source = tmp_path / "source"
-    git(tmp_path, "init", f"--initial-branch={REF}", str(source))
-    for path, content in seams_preimages((root / "ompweb-overlay" / "seams.patch").read_text()).items():
-        (source / path).parent.mkdir(parents=True, exist_ok=True)
-        (source / path).write_text(content)
-    (source / "package-lock.json").write_text("{}\n")
-    git(source, "add", ".")
-    git(source, "commit", "-m", "Fixture")
+    seams_upstream(source, root)
 
     binaries = fake_binaries(tmp_path)
     checkout = tmp_path / "nested" / "checkout"
@@ -84,19 +90,19 @@ def test_bootstrap_applies_overlay_preserves_checkout_and_rejects_unrelated_dire
         GIGACHAD_OMP_WEB_REPO=str(checkout),
         GIGACHAD_OMP_WEB_DIR=str(worktree),
         GIGACHAD_OMP_WEB_HOST="0",
-        GIGACHAD_OMP_WEB_REF=REF,
         GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
         GIT_CONFIG_COUNT="1",
         GIT_CONFIG_KEY_0=f"url.{source.as_uri()}.insteadOf",
         GIT_CONFIG_VALUE_0="https://github.com/kahme247/ompweb.git",
     )
+    environment.pop("GIGACHAD_OMP_WEB_REF", None)
 
     def launch():
         return run_script(root / "run-omp-web.sh", environment, timeout=15)
 
     initial = launch()
     assert initial.returncode == 0, initial.stdout + initial.stderr
-    assert git(checkout, "branch", "--show-current") == REF
+    assert git(checkout, "branch", "--show-current") == "main"
     assert git(worktree, "rev-parse", "HEAD") == git(source, "rev-parse", "HEAD")
     assert "<CustomRoot />" in (worktree / "app" / "client.tsx").read_text()
     assert "customOverrides(root)" in (worktree / "scripts" / "build-client.ts").read_text()
@@ -158,21 +164,15 @@ def offline_upstream(upstream: Path, branch_worktree: Path) -> None:
 def test_auto_update_rebases_branch_onto_upstream_main_or_keeps_it(tmp_path, change, updated, message):
     root = launcher_root(tmp_path)
     upstream = tmp_path / "upstream"
-    git(tmp_path, "init", "--initial-branch=main", str(upstream))
-    for path, content in seams_preimages((root / "ompweb-overlay" / "seams.patch").read_text()).items():
-        (upstream / path).parent.mkdir(parents=True, exist_ok=True)
-        (upstream / path).write_text(content)
-    (upstream / "package-lock.json").write_text("{}\n")
-    git(upstream, "add", ".")
-    git(upstream, "commit", "-m", "Upstream")
+    seams_upstream(upstream, root)
 
-    # The user's clone: main checked out, the integration branch (upstream main + a local commit) in its own worktree.
+    # The user's clone: main checked out, a topic branch (upstream main + an unmerged change) in its own worktree.
     checkout = tmp_path / "checkout"
     git(tmp_path, "clone", "--quiet", str(upstream), str(checkout))
     branch_worktree = tmp_path / "branch-worktree"
-    git(checkout, "worktree", "add", "--quiet", "-b", REF, str(branch_worktree), "origin/main")
+    git(checkout, "worktree", "add", "--quiet", "-b", TOPIC, str(branch_worktree), "origin/main")
     commit(branch_worktree, "ours.txt", "our pending upstream PR\n", "Our change")
-    before = git(checkout, "rev-parse", REF)
+    before = git(checkout, "rev-parse", TOPIC)
     if change:
         change(upstream, branch_worktree)
 
@@ -182,7 +182,7 @@ def test_auto_update_rebases_branch_onto_upstream_main_or_keeps_it(tmp_path, cha
         GIGACHAD_OMP_WEB_REPO=str(checkout),
         GIGACHAD_OMP_WEB_DIR=str(served),
         GIGACHAD_OMP_WEB_HOST="0",
-        GIGACHAD_OMP_WEB_REF=REF,
+        GIGACHAD_OMP_WEB_REF=TOPIC,
         GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
         **IDENTITY,
     )
@@ -191,12 +191,12 @@ def test_auto_update_rebases_branch_onto_upstream_main_or_keeps_it(tmp_path, cha
     assert result.returncode == 0, result.stdout + result.stderr
     output = result.stdout + result.stderr
 
-    after = git(checkout, "rev-parse", REF)
+    after = git(checkout, "rev-parse", TOPIC)
     assert git(served, "rev-parse", "HEAD") == after
     assert git(branch_worktree, "rev-parse", "HEAD") == after
     if updated:
         assert after != before
-        assert git(checkout, "rev-parse", f"{REF}~1") == git(checkout, "rev-parse", "origin/main")
+        assert git(checkout, "rev-parse", f"{TOPIC}~1") == git(checkout, "rev-parse", "origin/main")
         assert (branch_worktree / "upstream.txt").read_text() == "new upstream\n"
         assert (branch_worktree / "ours.txt").read_text() == "our pending upstream PR\n"
     else:
@@ -217,4 +217,38 @@ def test_auto_update_rebases_branch_onto_upstream_main_or_keeps_it(tmp_path, cha
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
         assert "(as on the last start)" in repeated.stderr
         assert "rebasing" not in repeated.stdout
-        assert git(checkout, "rev-parse", REF) == before
+        assert git(checkout, "rev-parse", TOPIC) == before
+
+
+@pytest.mark.parametrize(
+    ("change", "updated"), [(advance_upstream, True), (break_check_upstream, False)], ids=["fast-forward", "failed-check"]
+)
+def test_auto_update_fast_forwards_the_default_main_after_the_overlay_checks(tmp_path, change, updated):
+    root = launcher_root(tmp_path)
+    upstream = tmp_path / "upstream"
+    seams_upstream(upstream, root)
+    checkout = tmp_path / "checkout"
+    git(tmp_path, "clone", "--quiet", str(upstream), str(checkout))
+    before = git(checkout, "rev-parse", "main")
+    change(upstream, checkout)
+
+    served = tmp_path / "served"
+    environment = environment_with(
+        fake_binaries(tmp_path),
+        GIGACHAD_OMP_WEB_REPO=str(checkout),
+        GIGACHAD_OMP_WEB_DIR=str(served),
+        GIGACHAD_OMP_WEB_HOST="0",
+        GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
+        **IDENTITY,
+    )
+    for variable in ("GIGACHAD_OMP_WEB_REF", "GIGACHAD_AUTO_UPDATE"):
+        environment.pop(variable, None)
+    result = run_script(root / "run-omp-web.sh", environment, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    after = git(checkout, "rev-parse", "main")
+    assert after == (git(checkout, "rev-parse", "origin/main") if updated else before)
+    # The clone's own worktree holds main and moves with it.
+    assert git(checkout, "rev-parse", "HEAD") == after
+    assert (checkout / "upstream.txt").exists() == updated
+    assert git(served, "rev-parse", "HEAD") == after
