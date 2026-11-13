@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -31,6 +31,9 @@ const hasTail = () => tailCount > 0;
 const currentSlot = () => slot;
 const never = () => false;
 const noSlot = () => null;
+
+/** ChatWindow's `hideToolActivity` (upstream default on): the running turn folds its thinking and tool calls into "Process details". */
+export const ToolActivityHidden = createContext(true);
 
 /** Count a mounted host or tail for as long as `active`. */
 function useRegistration(active: boolean, change: (delta: number) => void) {
