@@ -142,6 +142,17 @@ html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) > div:nth-child(2)
   max-width: 672px !important;
 }
 
+/* Extension statuses above the transcript (`ExtensionStatusBar`, its chips are the only `div.ui-compact-surface`) stay one line:
+   a status whose text changes length (DAP "reconnecting…" ↔ "connected") would otherwise rewrap and shift the whole transcript.
+   The text already ellipsizes, chips may now shrink to let it */
+html.cf-embed [role=log] div:has(> div.ui-compact-surface) {
+  flex-wrap: nowrap !important;
+
+  & > div.ui-compact-surface {
+    min-width: 0;
+  }
+}
+
 /* Tasks and Subagents close the chat history (`custom/overrides/components/ComposerPanels.tsx`), as Q&A cards
    (`packages/chat-ui/src/turn.css`): `.gc-turn` surface and spacing, `.gc-turn-header` row with a round 28px avatar,
    subagents as `.gc-turn-tool` insets. `!important` beats upstream's inline styles */
