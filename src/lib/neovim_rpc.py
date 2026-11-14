@@ -33,7 +33,7 @@
   refused, no swap or undo file. `:sav` or `:file` gets the virtual name back and the buffer left under it is wiped (`:e #`). The
   buffer keeps an empty `buftype`, else `vim.fs.root` would not use its name. `<C-CR>` saves (`:w`) and on success sends a `run_cell`
   notification with the id and the cursor line, `<S-CR>` then moves the cursor to the next cell's first line, appending a cell
-  after the last one
+  after the last one. Diagnostics on its IPython lines (magics, shell escapes, cell magic cells) are dropped, those are not Python
 - `more` is off and `messagesopt` makes messages time out after the user's config ran, a hit-enter prompt would stop every request
 """
 
@@ -316,6 +316,32 @@ local saved = false
 
 -- `# %%`, alone or followed by whitespace and a title or kind
 local function is_marker(line) return line == "# %%" or line:match("^# %%%%%s") ~= nil end
+
+-- 0-based rows of a notebook text that are IPython, not Python: line magics (`%time f()`), shell escapes (`!pip`), assigned ones
+-- (`files = !ls`) and every line of a cell from a cell magic (`%%bash`) on
+local function ipython_rows(buffer)
+  local rows, in_cell_magic = {}, false
+  for row, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
+    if is_marker(line) then
+      in_cell_magic = false
+    else
+      in_cell_magic = in_cell_magic or line:match("^%%%%") ~= nil
+      if in_cell_magic or line:match("^%s*[%%!]") or line:match("^%s*[%w_.,%s]+=%s*[%%!]") then rows[row - 1] = true end
+    end
+  end
+  return rows
+end
+
+-- Diagnostics starting on a notebook text's IPython rows are dropped: there an LSP or linter only reports Python syntax errors
+local set_diagnostics = vim.diagnostic.set
+vim.diagnostic.set = function(namespace, bufnr, diagnostics, opts)
+  local buffer = (bufnr == nil or bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+  if virtual_names[buffer] ~= nil and vim.api.nvim_buf_is_loaded(buffer) then
+    local rows = ipython_rows(buffer)
+    diagnostics = vim.tbl_filter(function(diagnostic) return not rows[diagnostic.lnum] end, diagnostics)
+  end
+  return set_diagnostics(namespace, bufnr, diagnostics, opts)
+end
 
 -- Saves the notebook text (`:w`), then tells the caller to run the cell at the cursor. With `advance` the cursor moves on to the
 -- first line of the next cell, a new cell is appended after the last one.

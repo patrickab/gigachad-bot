@@ -1303,9 +1303,9 @@ def _notebook(directory: Path) -> tuple[Path, Path]:
 
 
 @contextlib.asynccontextmanager
-async def _notebook_text(home: Path, text_name: Path, save=_store, on_run_cell=None):
+async def _notebook_text(home: Path, text_name: Path, save=_store, on_run_cell=None, text=NOTEBOOK_TEXT):
     """A connected session on the notebook text *text_name* (path = that name), closed afterwards."""
-    session = NeovimSession.spawn(text_name.name, NOTEBOOK_TEXT, rows=24, cols=80, cwd=home, path=str(text_name), notebook=text_name)
+    session = NeovimSession.spawn(text_name.name, text, rows=24, cols=80, cwd=home, path=str(text_name), notebook=text_name)
     drain = asyncio.create_task(_drain(session))
     try:
         await asyncio.wait_for(session.connect(save, lambda text: None, None, None, None, on_run_cell), 15)
@@ -1350,6 +1350,28 @@ async def test_opening_a_notebook_text_without_its_notebook_is_refused(neovim_ho
 
     await asyncio.wait_for(serving, 10)
     assert browser.closed == 1003
+
+
+@requires_nvim
+async def test_diagnostics_on_ipython_lines_of_a_notebook_text_are_dropped(neovim_home, tmp_path):
+    text = "# %%\n%load_ext autoreload\n  !pip install k3d\nfiles = !ls\nx = 1\n\n# %%\n%%bash\necho hi\n\n# %%\ny = 2\n"
+    _notebook_file, name = _notebook(tmp_path)
+    async with _notebook_text(neovim_home, name, text=text) as session:
+        rows = await session._rpc.request(
+            "nvim_exec_lua",
+            """
+            local namespace = vim.api.nvim_create_namespace("test")
+            local diagnostics = {}
+            for row = 0, vim.api.nvim_buf_line_count(0) - 1 do
+              table.insert(diagnostics, { lnum = row, col = 0, message = "syntax error" })
+            end
+            vim.diagnostic.set(namespace, 0, diagnostics)
+            return vim.tbl_map(function(diagnostic) return diagnostic.lnum end, vim.diagnostic.get(0, { namespace = namespace }))
+            """,
+            [],
+        )
+
+    assert sorted(rows) == [0, 4, 5, 6, 10, 11]  # markers, `x = 1`, the blank line, `y = 2`
 
 
 @requires_nvim
