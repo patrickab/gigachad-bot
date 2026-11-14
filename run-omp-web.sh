@@ -226,12 +226,27 @@ if [[ "$(cat node_modules/.gigachad-chat-ui.sha256 2>/dev/null)" != "$chat_ui_di
     printf '%s' "$chat_ui_digest" >node_modules/.gigachad-chat-ui.sha256
 fi
 
+# omp-web runs its own omp build (`ompweb-omp`, runner/): a source checkout never downloads it, without it no model
+# lists and no session starts. Built once per runner tree (upstream pins the omp packages in runner/omp-build.json).
+# The running host daemon keeps its old build until it is restarted.
+runner_tree="$(git rev-parse HEAD:runner 2>/dev/null || true)"
+if [[ -n $runner_tree && "$(cat runner/release/gigachad-runner-tree 2>/dev/null || true)" != "$runner_tree" ]]; then
+    printf "Building omp-web's omp runner\n"
+    (
+        PATH="$dir/node_modules/.bin:$PATH"
+        bun runner/scripts/use-omp-build.ts
+        (cd runner && bun install --frozen-lockfile)
+        bun runner/scripts/build-binary.ts
+    )
+    printf '%s' "$runner_tree" >runner/release/gigachad-runner-tree
+fi
+
 # Bun bundles the client into dist/ (scripts/build-client.ts) with no build cache. The frame origins are read at server start,
 # so only the packed chat-ui and the sources decide a rebuild.
 build_stamp=dist/gigachad-build
 export OMP_WEB_FRAME_ANCESTORS="$frame_ancestors"
 if [[ ! -f dist/index.html ]] \
-    || [[ -n "$(find . \( -path ./dist -o -path ./build -o -path ./node_modules -o -path ./.git \) -prune -o -type f -newer dist/index.html -print -quit)" ]] \
+    || [[ -n "$(find . \( -path ./dist -o -path ./build -o -path ./node_modules -o -path ./runner -o -path ./.git \) -prune -o -type f -newer dist/index.html -print -quit)" ]] \
     || [[ "$(cat "$build_stamp" 2>/dev/null || true)" != "$chat_ui_digest" ]]; then
     printf 'Building omp-web\n'
     npm run build

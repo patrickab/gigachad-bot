@@ -242,6 +242,11 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 - `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
   applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
   `@gigachad/chat-ui` into it. The source checkout stays untouched.
+- omp-web runs its own omp build (`ompweb-omp`). A source checkout never downloads it, so `run-omp-web.sh` builds
+  `runner/release/ompweb-omp-<os>-<arch>` with upstream's scripts whenever the served `runner/` tree changes (about a
+  minute, needs GitHub). Without it omp-web answers "Model list is temporarily unavailable" and starts no session.
+- `redeploy.sh` restarts `gigachad-bot-omp-web-host.service` with a new served commit: a daemon of the old checkout
+  stays linked (`needs-upgrade` in `/api/hosts`) but runs nothing.
 - Packing compiles with `src/frontend`'s TypeScript and types, so production
   needs `src/frontend/node_modules`. `redeploy.sh` installs it (`npm ci
   --ignore-scripts`) when missing or when the lockfile changed.

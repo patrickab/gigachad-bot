@@ -206,12 +206,16 @@ if [[ $omp_web_old != "$omp_web_new" ]] || $omp_web_behind || ! git diff --quiet
             printf "%s did not come up within 10 min\n" "$omp_web_unit" >&2
             exit 1
         fi
+        # A daemon of the old checkout stays linked but cannot run the new server's sessions. None is running here.
+        if [[ $omp_web_old != "$omp_web_new" ]]; then
+            systemctl --user restart "$omp_web_host_unit"
+        fi
     fi
 fi
 printf "%s is up on %s at %s\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)"
 
-# The daemon outlives the server restarts above (the new server adopts its runs) and is never restarted here: a protocol
-# mismatch makes it exit and its unit's Restart=always brings it back from the served checkout. Starting is a no-op when active.
+# The daemon outlives the server restarts above (the new server adopts its runs), it is restarted only with a new served
+# commit. Starting is a no-op when active.
 systemctl --user start "$omp_web_host_unit"
 printf "%s is running (from %s)\n" "$omp_web_host_unit" "$omp_web_dir"
 
