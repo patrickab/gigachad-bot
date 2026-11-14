@@ -32,9 +32,12 @@ export function TopBar({ left, center, right, raised = false }: { left?: ReactNo
   </header>
 }
 
-/** Group controls on a solid pill that masks content scrolling underneath. A `raised` bar lifts it off busy content (`chip-raised`). Hidden when empty. `ref` serves as a portal slot. */
-export function TopBarPill({ children, ref }: { children?: ReactNode; ref?: Ref<HTMLDivElement> }) {
-  return <div ref={ref} className="pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1 empty:hidden before:pointer-events-none before:absolute before:-inset-x-2 before:inset-y-0 before:-z-10 before:rounded-full before:bg-paper group-data-[raised=true]/topbar:before:chip-raised">
+/**
+ * Group controls on a solid pill that masks content scrolling underneath. Hidden when empty. `ref` serves as a portal slot.
+ * A `raised` bar lifts every pill off busy content (`chip-raised`), `raised` on the pill lifts only this one.
+ */
+export function TopBarPill({ children, ref, raised = false }: { children?: ReactNode; ref?: Ref<HTMLDivElement>; raised?: boolean }) {
+  return <div ref={ref} className={`pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1 empty:hidden before:pointer-events-none before:absolute before:-inset-x-2 before:inset-y-0 before:-z-10 before:rounded-full ${raised ? "before:chip-raised" : "before:bg-paper group-data-[raised=true]/topbar:before:chip-raised"}`}>
     {children}
   </div>
 }

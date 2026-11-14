@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
-import { PANE_TOP_PX } from "@/features/workbench/WorkbenchSplit"
 import { dirName } from "@/lib/paths"
 import { appMarkdownFactory } from "./markdownRenderer"
 import type { NotebookTextStore } from "./notebookTextStore"
@@ -19,9 +18,6 @@ import { useNotebookFile } from "./useNotebookFile"
 import type { SharedNotebookLike } from "./notebookSync"
 import { useNotebookKernel } from "./useNotebookKernel"
 import "./notebook-theme.css"
-
-/** The notebook runs under the top bar: its cells start where the markdown preview's page does (see `notebook-theme.css`). */
-const NOTEBOOK_TOP = { "--gc-nb-top": `${PANE_TOP_PX}px` } as React.CSSProperties
 
 /** Ctrl or Cmd+S inside `root` saves through the file API: the library's own save command talks to a Jupyter contents API this app does not expose. */
 function useSaveShortcut(root: React.RefObject<HTMLElement | null>, save: () => Promise<unknown>) {
@@ -119,7 +115,7 @@ export function NotebookEditor({ path, tabId, textStore }: { path: string; tabId
   if (file.error) return <LoadFailure message={file.error} onRetry={file.reload} />
 
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col bg-paper">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col bg-page">
       <NotebookToolbar
         notebookId={tabId}
         specs={kernel.specs}
@@ -129,10 +125,10 @@ export function NotebookEditor({ path, tabId, textStore }: { path: string; tabId
         onRestartKernel={() => void restartKernel()}
       />
       <div className="relative min-h-0 flex-1">
-        <ErrorText className="absolute inset-x-0 top-11 z-10 bg-paper px-6 py-1.5 text-center">{kernel.error ?? file.saveError}</ErrorText>
+        <ErrorText className="absolute inset-x-0 top-0 z-10 bg-page px-6 py-1.5 text-center">{kernel.error ?? file.saveError}</ErrorText>
         {initial ? (
-          <div className="gc-nb absolute inset-0" style={NOTEBOOK_TOP}>
-            <JupyterReactTheme colormode={theme} useBaseStyles={false} backgroundColor="var(--paper)">
+          <div className="gc-nb absolute inset-0">
+            <JupyterReactTheme colormode={theme} useBaseStyles={false} backgroundColor="var(--page)">
               <Notebook
                 id={tabId}
                 nbformat={initial}

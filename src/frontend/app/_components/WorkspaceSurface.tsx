@@ -198,7 +198,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         ...workbenchBar,
         center: centerSlot,
         runsUnderTopBar: true,
-        raised: true,
         body: <NotebookWorkbench
           path={documentItem.path}
           tabId={tab.id}

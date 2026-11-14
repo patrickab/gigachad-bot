@@ -1,13 +1,11 @@
 "use client"
 
 import type { IRenderMime } from "@jupyterlab/rendermime-interfaces"
-import type { Message } from "@lumino/messaging"
 import { Widget } from "@lumino/widgets"
 import { createRoot, type Root } from "react-dom/client"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { PREVIEW_PAGE } from "@/features/workbench/pages"
 
-/** A Lumino widget whose body is the app's own markdown pipeline (KaTeX, code blocks, diagrams), so notebook text reads like every other document. A markdown cell shows it on the preview's page, an output as it is. */
+/** A Lumino widget whose body is the app's own markdown pipeline (KaTeX, code blocks, diagrams), so notebook text reads like every other document. */
 class AppMarkdown extends Widget implements IRenderMime.IRenderer {
   private root: Root | null = null
 
@@ -20,12 +18,6 @@ class AppMarkdown extends Widget implements IRenderMime.IRenderer {
     const source = String(model.data["text/markdown"] ?? "")
     this.root ??= createRoot(this.node)
     this.root.render(<LaTeXMarkdown content={source} imageDirectory={this.imageDirectory} />)
-  }
-
-  protected onAfterAttach(msg: Message): void {
-    super.onAfterAttach(msg)
-    const inCell = this.node.closest(".jp-MarkdownCell") !== null
-    for (const name of PREVIEW_PAGE.split(" ")) this.node.classList.toggle(name, inCell)
   }
 
   dispose(): void {

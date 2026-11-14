@@ -10,10 +10,10 @@ import { fileLead } from "@/features/omp/fileLead"
 import { fetchNotebookDirectory } from "@/lib/backend/api"
 import { baseName, extOf } from "@/lib/paths"
 import { cn, errorMessage } from "@/lib/utils"
-import { EDITOR_PAGE } from "./pages"
+import { EDITOR_PAGE, NOTEBOOK_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
-import { EditorNote, WorkbenchFrame } from "./WorkbenchFrame"
+import { EditorNote, PanePage, WorkbenchFrame } from "./WorkbenchFrame"
 import { useWorkbenchView } from "./WorkbenchSplit"
 
 /** The fence language of lines picked in the notebook's Neovim buffer `path` (`<notebook>.ipynb.py`), named by its extension. */
@@ -100,8 +100,15 @@ function PreparedNotebookWorkbench({ path, tabId, cwd, ...chatProps }: NotebookW
       view={view}
       onViewChange={setView}
       editor={neovim.enabled ? neovimPage : null}
-      renderPane={() => <NotebookDocument editor={editor} tabId={tabId} textStore={textStore} />}
+      renderPane={(layout) => (
+        <PanePage layout={layout}>
+          <div className={cn("relative min-h-0 flex-1", NOTEBOOK_PAGE)}>
+            <NotebookDocument editor={editor} tabId={tabId} textStore={textStore} />
+          </div>
+        </PanePage>
+      )}
       chat={<WorkbenchChat state={chat} {...chatProps} />}
+      raised
     />
   )
 }

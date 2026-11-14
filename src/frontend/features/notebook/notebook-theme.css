@@ -233,10 +233,6 @@ html.light:root {
 /* The panel's empty toolbar would keep an 8 px band above the cells (the lumino layout places the notebook below it) */
 .gc-nb .jp-NotebookPanel-toolbar { display: none; }
 .gc-nb .jp-NotebookPanel > .jp-Notebook { top: 0 !important; height: 100% !important; }
-/* The box runs under the app's top bar like the markdown preview: the cells start below it and scroll on underneath (`--gc-nb-top` from `NotebookEditor`) */
-.gc-nb .jp-WindowedPanel-outer { scroll-padding-top: var(--gc-nb-top, 0px); }
-/* `.jp-Notebook` in the selector: the library's `.jp-Notebook .jp-WindowedPanel-viewport` padding comes later */
-.gc-nb .jp-Notebook .jp-WindowedPanel-viewport { padding-top: var(--gc-nb-top, 0px); }
 
 /* 256-color and truecolor ANSI arrive as inline styles, which only a filter reaches: keep their hue but calm it, and lift (dark) or deepen (light) it so it reads on the paper */
 .gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0.6) brightness(1.25); }
@@ -247,6 +243,3 @@ html.light .gc-nb .jp-RenderedText pre span[style*="color"] { filter: saturate(0
 .jp-Completer .jp-Completer-item.jp-mod-active { background: var(--hover-overlay-strong); color: var(--ink); }
 .jp-Completer .jp-Completer-type[data-color-index] { background: var(--surface-elevated); color: var(--ink-muted); }
 .jp-Completer .jp-Completer-typeExtended { color: var(--ink-subtle); }
-
-/* --- A markdown cell's text sits on the split view's preview page (markdownRenderer.tsx): JupyterLab's unlayered `.jp-MarkdownOutput` padding would beat the page's Tailwind padding --- */
-.gc-nb .jp-MarkdownCell .gc-nb-markdown.jp-MarkdownOutput { padding: revert-layer; }

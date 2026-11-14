@@ -194,12 +194,11 @@ fi
 
 # The Jupyter service runs the one Jupyter Server and the notebooks' kernels every backend worker shares
 # (src/backend/jupyter_service.py). One process, no reload: kernels outlive backend reloads, not this script.
-# Its Unix socket sits in the user's private runtime folder, which nobody else can enter.
-if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -d "$XDG_RUNTIME_DIR" ]]; then
-    printf 'error: XDG_RUNTIME_DIR is not set; the Jupyter service needs a private folder for its socket\n' >&2
-    exit 1
-fi
-export GIGACHAD_JUPYTER_SOCKET="$XDG_RUNTIME_DIR/gigachad-jupyter-$profile.sock"
+# Its Unix socket sits in a folder only this user can enter (XDG_RUNTIME_DIR is missing in tmux and cron shells).
+socket_dir="$HOME/.local/share/gigachad-bot/run"
+mkdir -p "$socket_dir"
+chmod 700 "$socket_dir"
+export GIGACHAD_JUPYTER_SOCKET="$socket_dir/jupyter-$profile.sock"
 printf 'Starting Jupyter service on %s\n' "$GIGACHAD_JUPYTER_SOCKET"
 uvicorn backend.jupyter_service:app --app-dir "$root_dir/src" --uds "$GIGACHAD_JUPYTER_SOCKET" --no-access-log &
 jupyter_pid=$!

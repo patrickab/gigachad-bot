@@ -10,10 +10,10 @@ import { WorkbenchViewSwitch, usePaneLayout, type PaneLayout, type WorkbenchView
  * The workbench layout: Neovim's page and the rendered pane share the width and line up at the top, the chat drawer on the right.
  *
  * - A hidden pane stays mounted, so Neovim keeps its session and the pane its state
- * - The view switch and `status` render into the top bar's `workbenchStatus` slot, `center` into its `center` slot
+ * - The view switch and `status` render into the top bar's `workbenchStatus` slot, `center` into its `center` slot, lifted off the bar with `raised`
  * - The owner holds the view (`useWorkbenchView`), so it can bring a hidden pane back itself
  */
-export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, renderPane, chat, status, center }: {
+export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, renderPane, chat, status, center, raised = false }: {
   /** The chosen view, `render` whatever it is without an editor. */
   view: WorkbenchView
   onViewChange: (view: WorkbenchView) => void
@@ -27,6 +27,8 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
   status?: ReactNode
   /** Controls in the `center` top-bar slot. */
   center?: ReactNode
+  /** Lift the status and center pills off the bar (`chip-raised`), like the notebook's controls. */
+  raised?: boolean
 }) {
   const hasEditor = editor !== null
   const view = hasEditor ? workbenchView : "render"
@@ -39,10 +41,8 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
       <div className={cn("flex min-w-0 flex-1", hasEditor && "px-3")}>
         <div ref={splitRef} className="flex min-w-0 flex-1">
           {hasEditor && (
-            <div className={cn("flex min-w-0 flex-1 flex-col items-center", view === "render" && "hidden")}>
-              <div className="flex flex-col" style={{ marginTop: layout.top, width: layout.width, height: layout.height }}>
-                {editor}
-              </div>
+            <div className={cn("min-w-0 flex-1", view === "render" && "hidden")}>
+              <PanePage layout={layout}>{editor}</PanePage>
             </div>
           )}
           <div className={cn("relative min-w-0 flex-1", view === "editor" && "hidden")}>
@@ -53,7 +53,7 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
       {chat}
       {(hasEditor || status != null) && (
         <InTopBar name="workbenchStatus">
-          <TopBarPill>
+          <TopBarPill raised={raised}>
             {hasEditor && <WorkbenchViewSwitch view={workbenchView} onChange={onViewChange} />}
             {status}
           </TopBarPill>
@@ -61,9 +61,20 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
       )}
       {center != null && (
         <InTopBar name="center">
-          <TopBarPill>{center}</TopBarPill>
+          <TopBarPill raised={raised}>{center}</TopBarPill>
         </InTopBar>
       )}
+    </div>
+  )
+}
+
+/** A page of the split: `layout.width` wide and `layout.height` tall below the top bar, centered in its pane. Neovim's and the notebook's, so both sides line up. */
+export function PanePage({ layout, children }: { layout: PaneLayout; children: ReactNode }) {
+  return (
+    <div className="flex h-full min-w-0 flex-col items-center">
+      <div className="flex flex-col" style={{ marginTop: layout.top, width: layout.width, height: layout.height }}>
+        {children}
+      </div>
     </div>
   )
 }

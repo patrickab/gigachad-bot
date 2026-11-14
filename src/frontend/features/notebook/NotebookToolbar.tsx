@@ -55,7 +55,7 @@ export function NotebookToolbar({ notebookId, specs, kernelName, kernelFailed, o
   const status = useNotebookStore((state) => state.selectKernelStatus(notebookId))
   const idle = status === "idle"
   return <InTopBar name="center">
-    <TopBarPill>
+    <TopBarPill raised>
       <div role="toolbar" aria-label="Notebook" className="flex items-center gap-0.5">
         <IconButton icon={Play} label="Run cell" disabled={!idle} onClick={() => notebookStore.getState().run(notebookId)} />
         <IconButton icon={FastForward} label="Run all cells" disabled={!idle} onClick={() => notebookStore.getState().runAll(notebookId)} />
