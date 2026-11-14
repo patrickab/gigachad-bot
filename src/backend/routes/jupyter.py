@@ -23,11 +23,9 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel
-from starlette.websockets import WebSocketDisconnect, WebSocketState
-from websockets.exceptions import ConnectionClosed
 
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
-from backend.reverse_proxy import streaming_response
+from backend.reverse_proxy import relay_websocket, streaming_response
 from backend.routes.deps import get_file_roots
 from backend.routes.upstream import call_upstream
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket, require_trusted_request
@@ -38,8 +36,6 @@ from lib.upstream import UpstreamRequestFailed, UpstreamUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from websockets.asyncio.client import ClientConnection
 
 log = logging.getLogger(__name__)
 
@@ -153,23 +149,6 @@ async def proxy_http(path: str, request: Request, host: JupyterHost = Depends(ge
     return streaming_response(upstream, jupyter.drops_response_header)
 
 
-async def _browser_to_server(websocket: WebSocket, upstream: ClientConnection) -> None:
-    while True:
-        message = await websocket.receive()
-        if message["type"] == "websocket.disconnect":
-            return
-        data = message.get("bytes")
-        await upstream.send(data if data is not None else message.get("text") or "")
-
-
-async def _server_to_browser(websocket: WebSocket, upstream: ClientConnection) -> None:
-    async for message in upstream:
-        if isinstance(message, bytes):
-            await websocket.send_bytes(message)
-        else:
-            await websocket.send_text(message)
-
-
 @router.websocket("/server/{path:path}")
 async def proxy_websocket(
     websocket: WebSocket,
@@ -190,22 +169,4 @@ async def proxy_websocket(
         log.warning("%s", exc)
         await websocket.close(code=_TRY_AGAIN_LATER)
         return
-    try:
-        await websocket.accept(subprotocol=upstream.subprotocol)
-        relays = [
-            asyncio.create_task(_browser_to_server(websocket, upstream)),
-            asyncio.create_task(_server_to_browser(websocket, upstream)),
-        ]
-        try:
-            await asyncio.wait(relays, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            for relay in relays:
-                relay.cancel()
-            await asyncio.gather(*relays, return_exceptions=True)
-    except (WebSocketDisconnect, ConnectionClosed, RuntimeError):
-        pass
-    finally:
-        await upstream.close()
-        if websocket.client_state == WebSocketState.CONNECTED:
-            with contextlib.suppress(RuntimeError):
-                await websocket.close()
+    await relay_websocket(websocket, upstream)

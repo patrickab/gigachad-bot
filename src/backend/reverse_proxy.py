@@ -1,18 +1,64 @@
-"""Reverse-proxy plumbing shared by the omp-web gate, the LearnHarness gate and the Jupyter proxy route.
+"""Reverse-proxy plumbing shared by the Tailnet gates (omp-web, LearnHarness, factory previews) and the Jupyter proxy route.
 
 - `streaming_response` relays an upstream answer unbuffered, hop-by-hop fields dropped (`lib.upstream.forwardable_headers`)
-- `forward` is the whole request path of the Tailnet gates, standalone Starlette apps whose `app.state.client` has the upstream as
-  `base_url`
+- `forward` is the whole request path of the omp-web and LearnHarness gates, standalone Starlette apps whose
+  `app.state.client` has the upstream as `base_url`
+- `relay_websocket` joins a browser WebSocket to an upstream one the caller opened
 """
 
+import asyncio
 from collections.abc import Callable
+import contextlib
 
 import httpx
 from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
+from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import ConnectionClosed
 
 from lib.upstream import forwardable_headers
+
+
+async def _browser_to_upstream(websocket: WebSocket, upstream: ClientConnection) -> None:
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+        data = message.get("bytes")
+        await upstream.send(data if data is not None else message.get("text") or "")
+
+
+async def _upstream_to_browser(websocket: WebSocket, upstream: ClientConnection) -> None:
+    async for message in upstream:
+        if isinstance(message, bytes):
+            await websocket.send_bytes(message)
+        else:
+            await websocket.send_text(message)
+
+
+async def relay_websocket(websocket: WebSocket, upstream: ClientConnection) -> None:
+    """Accept *websocket* with the subprotocol the open *upstream* chose and relay both ways until either side closes, then close both."""
+    try:
+        await websocket.accept(subprotocol=upstream.subprotocol)
+        relays = [
+            asyncio.create_task(_browser_to_upstream(websocket, upstream)),
+            asyncio.create_task(_upstream_to_browser(websocket, upstream)),
+        ]
+        try:
+            await asyncio.wait(relays, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for relay in relays:
+                relay.cancel()
+            await asyncio.gather(*relays, return_exceptions=True)
+    except (WebSocketDisconnect, ConnectionClosed, RuntimeError):
+        pass
+    finally:
+        await upstream.close()
+        if websocket.client_state == WebSocketState.CONNECTED:
+            with contextlib.suppress(RuntimeError):
+                await websocket.close()
 
 
 def streaming_response(upstream: httpx.Response, drop: Callable[[str], bool] | None = None) -> StreamingResponse:
