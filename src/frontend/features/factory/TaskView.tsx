@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { SidePanelFrame } from "@/components/ui/SidePanel"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { StatusDot } from "@/components/ui/StatusDot"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { discardReviewNotes } from "@/features/editor/diff/review"
@@ -23,18 +23,16 @@ const PANES: readonly { value: TaskPane; label: string }[] = [
   { value: "changes", label: "Changes" },
 ]
 
-const DEFAULT_PANEL_WIDTH = 380
-
 /** Changes only move when a phase run ends, so the diff reloads then and keeps its scroll position in between. */
 function changesKey(task: FactoryTaskDetail): string {
   return `${task.worktree}:${task.phases.filter((phaseRun) => phaseRun.status !== "running").length}`
 }
 
-/** One task: preview or changes on the left, the agent panel on the right. */
+/** One task: preview or changes as the surface, the agent in the tab's file panel. */
 export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: string; onBack: () => void }) {
   const [task, setTask] = useState<FactoryTaskDetail | null>(null)
   const [chosenPane, setChosenPane] = useState<TaskPane | null>(null)
-  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH)
+  const [panelOpen, setPanelOpen] = useState(true)
 
   const refresh = async (changedTaskIds: ReadonlySet<string> | null) => {
     if (changedTaskIds === null || changedTaskIds.has(taskId)) setTask(await fetchFactoryTask(taskId))
@@ -74,6 +72,7 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
             onChange={setChosenPane}
             tabs={{ label: "Task view", idPrefix: "task-tab", panelId: "task-pane" }}
           />
+          {!panelOpen && <PanelToggleButton open={false} onClick={() => setPanelOpen(true)} openLabel="Open agent" closeLabel="Close agent" />}
         </div>
         <ErrorText className="px-3 py-1">{error}</ErrorText>
         <div id="task-pane" role="tabpanel" aria-labelledby={`task-tab-${pane}`} className="min-h-0 flex-1">
@@ -98,11 +97,7 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
           )}
         </div>
       </div>
-      {current && (
-        <SidePanelFrame width={panelWidth} onWidthChange={setPanelWidth} className="border-l border-divider/50 bg-surface">
-          <AgentPanel task={current} onChanged={reload} />
-        </SidePanelFrame>
-      )}
+      {current && panelOpen && <AgentPanel task={current} onChanged={reload} onClose={() => setPanelOpen(false)} />}
     </div>
   )
 }

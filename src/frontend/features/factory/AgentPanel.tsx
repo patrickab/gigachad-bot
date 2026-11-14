@@ -1,16 +1,22 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { useAsyncAction } from "@/hooks/useAsyncAction"
-import { Send } from "lucide-react"
-import { InlineConfirm } from "@/components/ui/InlineConfirm"
-import { cn, errorMessage } from "@/lib/utils"
+import { ListChecks } from "lucide-react"
+import { CopyAction, TurnCard, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
+import "@gigachad/chat-ui/turn.css"
+import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { COMPOSER_ICON_BUTTON, Composer } from "@/components/ui/Composer"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { runFactoryTaskAction, sendFactoryMessage } from "@/lib/backend/api"
+import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
+import { FilePanel } from "@/features/editor/FilePanel"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { runFactoryTaskAction, sendFactoryMessage } from "@/lib/backend/api"
+import { cn, errorMessage } from "@/lib/utils"
+import { AttachImagesButton, StagedImages, toFactoryImages, useImageAttachments } from "./ImageAttachments"
 import { PHASE_LABELS, STATE_LABELS, allowedActions } from "./states"
-import { FIELD_CLASS, ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryTaskDetail, GateResult, PhaseRun, TaskAction } from "@/lib/domain/factory"
+import { PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
+import type { FactoryMessage, FactoryTaskDetail, GateResult, PhaseRun, TaskAction } from "@/lib/domain/factory"
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []
@@ -52,10 +58,8 @@ const RUN_TONE: Record<PhaseRun["status"], StatusTone> = {
   failed: "error",
 }
 
-const SECTION_TITLE_CLASS = "pb-2 text-[11px] font-bold uppercase tracking-[0.2em] text-ink-muted"
-
-/** One phase run on the timeline: a dot on the rail, label, summary and its details. */
-function PhaseEntry({ run }: { run: PhaseRun }) {
+/** One phase run on the timeline: a dot on the rail, label, summary and its details. `hideSummary` when a reply already says it. */
+function PhaseEntry({ run, hideSummary }: { run: PhaseRun; hideSummary: boolean }) {
   const question = typeof run.envelope?.question === "string" ? run.envelope.question : ""
   return (
     <li className="relative pb-3 pl-5 last:pb-0">
@@ -65,7 +69,7 @@ function PhaseEntry({ run }: { run: PhaseRun }) {
         <span className="min-w-0 flex-1 truncate font-medium text-ink">{PHASE_LABELS[run.phase]}{run.round > 0 ? ` · round ${run.round}` : ""}</span>
         <span className={cn("shrink-0 text-[11px]", run.status === "failed" ? "text-danger" : "text-ink-subtle")}>{run.status}</span>
       </div>
-      {run.summary && <p className="mt-0.5 whitespace-pre-wrap text-[11px] leading-relaxed text-ink-muted">{run.summary}</p>}
+      {run.summary && !hideSummary && <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-muted">{run.summary}</p>}
       <ListBlock label="Plan" items={run.phase === "plan" ? stringList(run.envelope?.steps) : []} />
       <ListBlock label="Findings" items={run.phase === "review" ? stringList(run.envelope?.findings) : []} />
       {question && <p className="mt-1 whitespace-pre-wrap text-[11px] text-ink">Question: {question}</p>}
@@ -74,17 +78,77 @@ function PhaseEntry({ run }: { run: PhaseRun }) {
   )
 }
 
-function Composer({ taskId, disabled, onSent, onFailed }: { taskId: string; disabled: boolean; onSent: () => void; onFailed: (message: string) => void }) {
+/** A question to the agent with the work it caused: the request or a later user message, then phase runs and agent replies. */
+interface Turn {
+  key: string
+  question: string
+  phases: PhaseRun[]
+  replies: FactoryMessage[]
+}
+
+/** Group a task into turns: each user message opens one, phase runs and agent replies join the turn open when they started. */
+function turnsOf(task: FactoryTaskDetail): Turn[] {
+  const turns: (Turn & { since: number })[] = [{ key: "request", question: task.request, phases: [], replies: [], since: -Infinity }]
+  for (const message of task.messages) {
+    if (message.role === "user") turns.push({ key: `message-${message.id}`, question: message.text, phases: [], replies: [], since: Date.parse(message.created_at) })
+    else turns[turns.length - 1].replies.push(message)
+  }
+  for (const run of task.phases) {
+    const started = Date.parse(run.started_at)
+    turns.findLast((turn) => turn.since <= started)!.phases.push(run)
+  }
+  return turns
+}
+
+const BLOCKED_PREFIX = "Blocked:"
+
+/** An agent reply: a block reason as plain text in a bounded scroll area (engine errors run long), anything else as Markdown. */
+function Reply({ message }: { message: FactoryMessage }) {
+  if (message.text.startsWith(BLOCKED_PREFIX)) {
+    return <p className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-danger scrollbar-thin">{message.text}</p>
+  }
+  return <LaTeXMarkdown content={message.text} />
+}
+
+function TurnView({ turn }: { turn: Turn }) {
+  return (
+    <TurnCard expanded>
+      <TurnRegion role="question">
+        <LaTeXMarkdown content={turn.question} />
+      </TurnRegion>
+      {turn.phases.length > 0 && (
+        <TurnSurface>
+          <TurnRegion role="answer" tail="activity" icon={<ListChecks size={14} aria-hidden="true" />}>
+            <ol aria-label="Phases">
+              {turn.phases.map((run) => <PhaseEntry key={run.id} run={run} hideSummary={turn.replies.some((reply) => reply.text.includes(run.summary))} />)}
+            </ol>
+          </TurnRegion>
+        </TurnSurface>
+      )}
+      {turn.replies.map((reply) => (
+        <TurnSurface key={reply.id}>
+          <TurnRegion role="answer" actions={<CopyAction text={reply.text} label="Copy reply" />}>
+            <Reply message={reply} />
+          </TurnRegion>
+        </TurnSurface>
+      ))}
+    </TurnCard>
+  )
+}
+
+function MessageComposer({ taskId, disabled, onSent, onFailed }: { taskId: string; disabled: boolean; onSent: () => void; onFailed: (message: string) => void }) {
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
+  const { images, add: addImages, remove: removeImage, clear: clearImages, onPaste } = useImageAttachments(onFailed)
 
   const send = async () => {
     const trimmed = text.trim()
     if (!trimmed || sending || disabled) return
     setSending(true)
     try {
-      await sendFactoryMessage(taskId, trimmed)
+      await sendFactoryMessage(taskId, trimmed, toFactoryImages(images))
       setText("")
+      clearImages()
       onSent()
     } catch (cause) {
       onFailed(errorMessage(cause, "Could not send the message"))
@@ -94,24 +158,19 @@ function Composer({ taskId, disabled, onSent, onFailed }: { taskId: string; disa
   }
 
   return (
-    <div className="flex shrink-0 items-end gap-1 border-t border-divider/50 p-2">
-      <textarea
-        aria-label="Message to the agent"
-        placeholder="Message the agent"
+    <div className="shrink-0 p-3 pt-0">
+      <Composer
         value={text}
-        rows={2}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault()
-            void send()
-          }
-        }}
-        className={cn(FIELD_CLASS, "min-w-0 flex-1 resize-none py-1.5 text-xs")}
-      />
-      <button type="button" aria-label="Send message" disabled={disabled || sending || text.trim() === ""} onClick={() => void send()} className={ICON_BUTTON_CLASS}>
-        <Send className="h-4 w-4" />
-      </button>
+        onValueChange={setText}
+        onSubmit={() => void send()}
+        onPaste={onPaste}
+        label="Message to the agent"
+        placeholder="Message"
+        disabled={disabled || sending}
+        leading={<AttachImagesButton disabled={disabled || sending} onPick={(files) => void addImages(files)} className={COMPOSER_ICON_BUTTON} />}
+      >
+        {images.length > 0 && <div className="pb-2"><StagedImages images={images} onRemove={removeImage} /></div>}
+      </Composer>
     </div>
   )
 }
@@ -124,8 +183,13 @@ const PRIMARY_ACTIONS = [
 
 const actionFailure = (action: TaskAction) => `Could not ${action} the task`
 
-/** Side panel of a task: state actions, request, phase runs with gate results and review findings, messages and the composer. */
-export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onChanged: () => void }) {
+const PANEL_WIDTH_PX = 420
+
+/**
+ * A task's agent in the tab's file panel: state and its actions in the header, the request and later messages as turns
+ * with their phase runs and replies, and the composer while the engine takes messages.
+ */
+export function AgentPanel({ task, onChanged, onClose }: { task: FactoryTaskDetail; onChanged: () => void; onClose: () => void }) {
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const { run, pending: busy, error, setError } = useAsyncAction(async (action: TaskAction) => {
     try {
@@ -137,51 +201,28 @@ export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onCha
   }, actionFailure)
   const scroller = useRef<HTMLDivElement>(null)
   const allowed = allowedActions(task.state)
+  const turns = turnsOf(task)
+  // The block message repeats the task error.
+  const taskError = task.error && !task.messages.some((message) => message.text.includes(task.error!)) ? task.error : ""
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
   }, [task.messages.length])
 
+  const actions = <>
+    <span className="min-w-0 flex-1 truncate">{STATE_LABELS[task.state]}</span>
+    {PRIMARY_ACTIONS.map(({ action, label }) => allowed[action] && <button key={action} type="button" disabled={busy} onClick={() => void run(action)} className={PRIMARY_BUTTON_CLASS}>{label}</button>)}
+    {allowed.cancel && !confirmingCancel && <button type="button" disabled={busy} onClick={() => setConfirmingCancel(true)} className={QUIET_BUTTON_CLASS}>Cancel</button>}
+  </>
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-divider/20 px-4">
-        <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-[0.2em] text-ink-muted">{STATE_LABELS[task.state]}</span>
-        {PRIMARY_ACTIONS.map(({ action, label }) => allowed[action] && <button key={action} type="button" disabled={busy} onClick={() => void run(action)} className={PRIMARY_BUTTON_CLASS}>{label}</button>)}
-        {allowed.cancel && !confirmingCancel && <button type="button" disabled={busy} onClick={() => setConfirmingCancel(true)} className={QUIET_BUTTON_CLASS}>Cancel</button>}
-      </div>
+    <FilePanel label="Agent" bare onClose={onClose} width={PANEL_WIDTH_PX} actions={actions}>
       {confirmingCancel && <div className="px-4 pt-2"><InlineConfirm question="Cancel this task?" busy={busy} onYes={() => void run("cancel")} onNo={() => setConfirmingCancel(false)} /></div>}
-      <ErrorText className="px-4 pt-2 text-[11px]">{error || task.error}</ErrorText>
-      <div ref={scroller} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4 scrollbar-thin">
-        <section aria-label="Request">
-          <h3 className={SECTION_TITLE_CLASS}>Request</h3>
-          <p className="whitespace-pre-wrap rounded-xl border border-divider/40 bg-surface-elevated/60 px-3 py-2.5 text-xs leading-relaxed text-ink">{task.request}</p>
-        </section>
-        {task.phases.length > 0 && (
-          <section aria-label="Phases">
-            <h3 className={SECTION_TITLE_CLASS}>Phases</h3>
-            <ol>{task.phases.map((phaseRun) => <PhaseEntry key={phaseRun.id} run={phaseRun} />)}</ol>
-          </section>
-        )}
-        {task.messages.length > 0 && (
-          <section aria-label="Messages">
-            <h3 className={SECTION_TITLE_CLASS}>Messages</h3>
-            <ul className="flex flex-col gap-2">
-              {task.messages.map((message) => (
-                <li
-                  key={message.id}
-                  className={cn(
-                    "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed",
-                    message.role === "user" ? "self-end rounded-br-md bg-surface-elevated text-ink" : "self-start rounded-bl-md border border-divider/40 text-ink-muted",
-                  )}
-                >
-                  {message.text}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+      <ErrorText className="max-h-32 overflow-y-auto break-words px-4 pt-2 text-[11px]">{error || taskError}</ErrorText>
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+        {turns.map((turn) => <TurnView key={turn.key} turn={turn} />)}
       </div>
-      {allowed.message && <Composer taskId={task.id} disabled={busy} onSent={onChanged} onFailed={setError} />}
-    </div>
+      {allowed.message && <MessageComposer taskId={task.id} disabled={busy} onSent={onChanged} onFailed={setError} />}
+    </FilePanel>
   )
 }

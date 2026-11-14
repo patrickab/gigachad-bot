@@ -12,7 +12,8 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryOverrides, FactoryWorkflow, MergeMode } from "@/lib/domain/factory"
+import { AttachImagesButton, StagedImages, toFactoryImages, useImageAttachments } from "./ImageAttachments"
+import type { FactoryImage, FactoryOverrides, FactoryWorkflow, MergeMode } from "@/lib/domain/factory"
 
 const INHERIT = ""
 
@@ -32,7 +33,7 @@ function buildOverrides(merge: MergeMode | typeof INHERIT, sandbox: SandboxChoic
   }
 }
 
-/** Modal that creates a factory task from a workflow, a title and a request, started at once or saved to the backlog. */
+/** Modal that creates a factory task from a workflow, a title, a request and optional images, started at once or saved to the backlog. */
 export function NewTaskDialog({ repo, open, onClose }: {
   repo: string
   open: boolean
@@ -46,15 +47,17 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [sandbox, setSandbox] = useState<SandboxChoice>(INHERIT)
   const [overridesOpen, setOverridesOpen] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
-  const { run: create, pending: busy, error, setError } = useAsyncAction(async (start: boolean) => {
-    await createFactoryTask({ repo, workflow: workflowId, title: title.trim(), request: request.trim(), overrides: buildOverrides(merge, sandbox), start })
+  const { run: create, pending: busy, error, setError } = useAsyncAction(async (start: boolean, images: FactoryImage[]) => {
+    await createFactoryTask({ repo, workflow: workflowId, title: title.trim(), request: request.trim(), images, overrides: buildOverrides(merge, sandbox), start })
     onClose()
   }, "Could not create the task")
+  const { images, add: addImages, remove: removeImage, clear: clearImages, onPaste } = useImageAttachments(setError)
 
   // Every opening starts from an empty form.
   useResetOnOpen(open, () => {
     setTitle("")
     setRequest("")
+    clearImages()
     setMerge(INHERIT)
     setSandbox(INHERIT)
     setOverridesOpen(false)
@@ -70,7 +73,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const workflow = workflows?.find((candidate) => candidate.id === workflowId)
   const canSubmit = !busy && workflow !== undefined && title.trim() !== "" && request.trim() !== ""
   const submit = (start: boolean) => {
-    if (canSubmit) void create(start)
+    if (canSubmit) void create(start, toFactoryImages(images))
   }
 
   const mergeOptions = [
@@ -110,9 +113,14 @@ export function NewTaskDialog({ repo, open, onClose }: {
           placeholder="What should the agent do?"
           value={request}
           onChange={(event) => setRequest(event.target.value)}
+          onPaste={onPaste}
           rows={6}
           className={cn(FIELD_CLASS, "resize-none")}
         />
+        <div className="flex items-start gap-2">
+          <AttachImagesButton onPick={(files) => void addImages(files)} />
+          <StagedImages images={images} onRemove={removeImage} />
+        </div>
         <div>
           <button
             type="button"

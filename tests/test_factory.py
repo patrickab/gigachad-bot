@@ -110,3 +110,15 @@ def test_invalid_requests_never_reach_the_engine(monkeypatch, client):
     assert client.get("/api/factory/tasks/a.b").status_code == 422
     assert client.get("/api/factory/workflows", params={"repo": "../etc"}).status_code == 422
     assert engine.requests == []
+
+
+def test_images_reach_the_engine_with_the_task_and_the_message(monkeypatch, client):
+    message = {"id": 2, "role": "user", "text": "Like this", "phase_run_id": None, "created_at": "2026-10-21T08:06:00Z"}
+    engine = Engine(monkeypatch, {"POST /v1/tasks": (200, TASK), f"POST /v1/tasks/{TASK_ID}/messages": (200, message)})
+    images = [{"filename": "shot.png", "data_base64": "aGk="}]
+    new_task = {"repo": "gigachad-bot", "workflow": "code", "title": "Rename", "request": "See the image", "images": images}
+
+    assert client.post("/api/factory/tasks", json=new_task).status_code == 200
+    assert client.post(f"/api/factory/tasks/{TASK_ID}/messages", json={"text": "Like this", "images": images}).status_code == 200
+
+    assert [json.loads(request.content)["images"] for request in engine.requests] == [images, images]

@@ -50,11 +50,18 @@ export interface FactoryWorkflow {
   preview: boolean
 }
 
+/** An image sent with a task request or message, `data_base64` is the file content without a `data:` prefix. */
+export interface FactoryImage {
+  filename: string
+  data_base64: string
+}
+
 export interface TaskCreate {
   repo: string
   workflow: string
   title: string
   request: string
+  images: FactoryImage[]
   overrides: FactoryOverrides
   /** False saves the task to the backlog instead of starting it. */
   start: boolean

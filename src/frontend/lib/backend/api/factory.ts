@@ -1,7 +1,7 @@
 // Factory engine routes.
 import { toQuery } from "../urls"
 import { post, put, request } from "./http"
-import type { FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate } from "@/lib/domain/factory"
+import type { FactoryDefaults, FactoryEvent, FactoryImage, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate } from "@/lib/domain/factory"
 
 export function fetchLatestFactoryEventSeq(): Promise<number> {
   return request<{ seq: number }>("/factory/events/latest").then((cursor) => cursor.seq)
@@ -48,8 +48,8 @@ export function runFactoryTaskAction(id: string, action: TaskAction): Promise<Fa
   return post<FactoryTask>(`/factory/tasks/${encodeURIComponent(id)}/${action}`, {})
 }
 
-export function sendFactoryMessage(id: string, text: string): Promise<FactoryMessage> {
-  return post<FactoryMessage>(`/factory/tasks/${encodeURIComponent(id)}/messages`, { text })
+export function sendFactoryMessage(id: string, text: string, images: FactoryImage[] = []): Promise<FactoryMessage> {
+  return post<FactoryMessage>(`/factory/tasks/${encodeURIComponent(id)}/messages`, { text, images })
 }
 
 export function restartFactoryPreview(id: string): Promise<FactoryPreview> {

@@ -257,6 +257,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
+|       |   |   |-- ImageAttachments.tsx Images staged on a new task or task message (picker, paste), sent as base64 `images`
 |       |   |   `-- TaskView.tsx
 |       |   |-- memory/               Memory window, review panel and memory commands
 |       |   |   |-- MemoryViewer.tsx  Memory window shell and view switching

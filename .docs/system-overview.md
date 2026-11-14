@@ -168,8 +168,8 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 The independent Agents-in-a-box engine runs agent workflows in task git worktrees. GigaChad provides repository boards, task messages, review findings, gates, diffs, and previews.
 
 1. Open a repository's factory board and register the repository if needed.
-2. Choose a workflow and submit a request. Use native OMP `provider/model` overrides, not `litellm_proxy/` model names.
-3. Follow phases, findings, gate results, messages, and changes. Approve, retry, cancel, or send feedback when the task's state permits.
+2. Choose a workflow and submit a request, optionally with images (file picker or paste). Use native OMP `provider/model` overrides, not `litellm_proxy/` model names.
+3. Follow phases, findings, gate results, messages, and changes. Approve, retry, cancel, or send feedback (text, optionally with images) when the task's state permits.
 4. Review task diffs and send selected-code comments during human review or when blocked. Host users can inspect admitted factory worktrees without first creating a mount.
 5. Open a preview when the workflow provides one. Preview data starts empty; a task scenario can seed representative content and select a chat, document, canvas, or architecture deep link.
 
