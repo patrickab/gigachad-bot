@@ -35,6 +35,8 @@
    --surface-elevated: var(--gc-dark-surface-elevated);
    /* Document pages (PDF, Neovim): a step above --paper, dark at --surface-elevated, light at the sidebar's --surface */
    --page:             var(--gc-dark-surface-elevated);
+   /* Top-bar chips over busy content (canvas, PDF pages): differs from --paper and --page in both themes */
+   --chip-raised:      var(--gc-dark-surface);
    --overlay:          oklch(10.5% 0.005 70);
 
    --danger:      var(--gc-dark-danger);
@@ -84,6 +86,7 @@
     --surface:          var(--gc-light-surface);
     --surface-elevated: var(--gc-light-surface-elevated);
     --page:             var(--gc-light-surface);
+    --chip-raised:      var(--gc-light-surface-elevated);
     --overlay:          oklch(96%   0.015 85);
   
     --danger:      var(--gc-light-danger);
@@ -160,6 +163,12 @@
   --radius-xl: 0.75rem;
 
   /* Shadows use mode-specific definitions from :root / .light */
+}
+
+/* Chip of a raised top bar: its own fill and a soft shadow stand it off canvas and PDF pages */
+@utility chip-raised {
+  background-color: var(--chip-raised);
+  box-shadow: var(--shadow-sm);
 }
 
 @keyframes shimmer {

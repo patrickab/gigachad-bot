@@ -59,7 +59,7 @@ export function ModelDropdown({ models, pickModels, loadError, selectedModel, on
   return <div ref={rootRef} data-compact={compact} className="group/model min-w-0">
     <PopoverSelector
     triggerLabel={`Model: ${fullLabel}`}
-    triggerClassName="h-8.5 gap-0 bg-paper px-[11px] group-data-[raised=true]/topbar:bg-surface hover:bg-surface-elevated"
+    triggerClassName="h-8.5 gap-0 bg-paper px-[11px] group-data-[raised=true]/topbar:chip-raised hover:bg-surface-elevated"
     triggerContent={<>
       <Cpu className="h-3 w-3 shrink-0" />
       <span ref={labelRef} className="block max-w-[146px] overflow-hidden opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-[[data-compact=true]:not(:hover):not(:focus-within)]/model:max-w-0 group-[[data-compact=true]:not(:hover):not(:focus-within)]/model:opacity-0">

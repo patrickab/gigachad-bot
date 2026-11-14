@@ -141,7 +141,7 @@ function PdfTextSwitch({ showText, onChange }: { showText: boolean; onChange: (s
   return <div role="group" aria-label="Show" className="flex items-center gap-px rounded-md p-0.5">
     {([[false, "PDF"], [true, "Text"]] as const).map(([value, label]) => (
       <button key={label} type="button" aria-pressed={showText === value} onClick={() => onChange(value)}
-        className={cn("rounded px-2 py-0.5 text-[10px] font-medium transition-colors", showText === value ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink")}>
+        className={cn("rounded px-2 py-0.5 text-[10px] font-medium transition-colors", showText === value ? "bg-hover text-ink" : "text-ink-subtle hover:text-ink")}>
         {label}
       </button>
     ))}
