@@ -5,7 +5,7 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { restartFactoryPreview } from "@/lib/backend/api"
 import { allowedActions } from "./states"
-import { ICON_BUTTON_CLASS } from "./styles"
+import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 import type { FactoryTaskDetail } from "@/lib/domain/factory"
 
 function Message({ children }: { children: React.ReactNode }) {
@@ -21,7 +21,18 @@ export function PreviewPane({ task, onChanged }: { task: FactoryTaskDetail; onCh
     onChanged()
   }, "Could not restart the preview")
 
-  if (!preview) return <Message>No preview for this task</Message>
+  // The engine keeps previews in memory: after its restart a task in review has none until it is started again.
+  if (!preview) {
+    if (!canRestart) return <Message>No preview for this task</Message>
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2">
+        {restarting
+          ? <Message>Starting the preview</Message>
+          : <button type="button" onClick={() => void restart()} className={PRIMARY_BUTTON_CLASS}>Start preview</button>}
+        <ErrorText>{error}</ErrorText>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full flex-col">
