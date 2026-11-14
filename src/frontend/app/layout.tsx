@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import localFont from "next/font/local"
 import "./globals.css"
+import { appPath } from "@/lib/paths"
 
 // Latin subsets self-hosted from Google Fonts, so builds never fetch fonts over the network.
 const outfit = localFont({
@@ -37,7 +38,7 @@ const symbolsNerdFont = localFont({
 export const metadata: Metadata = {
   title: "GigaChad Bot",
   description: "Personal AI chat interface with branching, deep research, and multi-model support",
-  icons: "/assets/icon.png",
+  icons: appPath("/assets/icon.png"),
   openGraph: {
     title: "GigaChad Bot",
     description: "Personal AI chat interface",

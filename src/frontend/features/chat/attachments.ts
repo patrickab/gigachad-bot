@@ -1,5 +1,5 @@
 import type { Attachment, ChatRequest, Message, ToolCallRecord } from "@/lib/domain/types"
-import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "@/lib/backend/urls"
+import { apiRoot, chatFileUrl, fileViewerRawUrl } from "@/lib/backend/urls"
 import { ApiError } from "@/lib/backend/api"
 import { writeReference } from "@/lib/backend/references"
 import { toolPayload } from "./toolCalls"
@@ -43,11 +43,11 @@ const isActiveImage = (a: Attachment) => a.active && isImageAttachment(a)
 // (e.g. an old localhost dev backend), so trusting them breaks loads on other origins.
 // Path+query is the only reliable locator: chat_id/slug are NOT stable, since uploads
 // stay under the project active at send time even when a chat is moved or branched.
-// Rebase onto the current origin, and rebuild from (chatId, slug) only without a stored URL.
+// Rebase its `/api/...` path onto the current backend, and rebuild from (chatId, slug) only without a stored URL.
 function rebaseOnApiOrigin(url: string): string | null {
   try {
     const u = new URL(url)
-    return `${apiOrigin()}${u.pathname}${u.search}`
+    return `${apiRoot()}${u.pathname.slice(Math.max(0, u.pathname.indexOf("/api/")))}${u.search}`
   } catch {
     return null
   }

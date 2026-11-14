@@ -1,3 +1,5 @@
+import { appPath } from "@/lib/paths"
+
 export type PresentRole = "audience" | "presenter"
 
 /** One presentation window: the PDF it shows, its role and the BroadcastChannel its slide position syncs on. */
@@ -9,7 +11,7 @@ export interface PresentParams {
 
 /** The `/present` route of one presentation window. */
 export function presentHref({ pdfUrl, role, channel }: PresentParams): string {
-  return `/present?${new URLSearchParams({ pdf: pdfUrl, role, channel })}`
+  return `${appPath("/present")}?${new URLSearchParams({ pdf: pdfUrl, role, channel })}`
 }
 
 /** Open one presentation window as a popup, so it can be moved to another screen. Null when the browser blocks it. */

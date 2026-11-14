@@ -5,7 +5,7 @@ import { memo, useContext, useMemo, useRef, type CSSProperties, type RefObject }
 import { HostScaleContext } from "@/contexts/HostScaleContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { useViewportReframe } from "@/hooks/useViewportReframe"
-import { apiOrigin } from "@/lib/backend/urls"
+import { apiRoot } from "@/lib/backend/urls"
 import { offsetToCamera } from "@/lib/domain/viewport"
 import { CitationPill, type CitationSource } from "./diagrams/CitationPill"
 import "katex/dist/katex.min.css"
@@ -46,7 +46,7 @@ const SHELL_COMPONENTS: MarkdownComponents = {
   // resolve against the backend, not whichever origin serves the frontend.
   img: ({ src, alt, ...props }) => (
     // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
-    <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
+    <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiRoot()}${src}` : src} {...props} />
   ),
 }
 

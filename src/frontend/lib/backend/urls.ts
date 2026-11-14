@@ -18,9 +18,9 @@ export function toQuery(params: Record<string, QueryValue>): string {
   return s ? `?${s}` : ""
 }
 
-/** Origin of the backend, for asset URLs the backend emits as root-relative paths. */
-export function apiOrigin(): string {
-  return new URL(getApiBase()).origin
+/** What the backend's root-relative paths (`/api/assets/...`) resolve against: its origin, plus the prefix a proxy serves it under. */
+export function apiRoot(): string {
+  return getApiBase().replace(/\/api$/, "")
 }
 
 // Asset URLs use database-native namespaces. Local filesystem layout is never

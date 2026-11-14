@@ -15,6 +15,16 @@ export function shortPath(path: string): string {
   return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~")
 }
 
+/**
+ * `path` (with its leading slash) of this app under the base path it is served at.
+ *
+ * - A factory preview sits under `NEXT_PUBLIC_BASE_PATH` behind the preview gate, next.config.mjs reads the same variable
+ * - Next prefixes its own links and bundles, not `public/` files or URLs opened by hand
+ */
+export function appPath(path: string): string {
+  return `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}${path}`
+}
+
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
 
 export type FileKind = "image" | "pdf" | "markdown" | "text"

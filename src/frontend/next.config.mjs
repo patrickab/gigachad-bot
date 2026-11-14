@@ -25,6 +25,8 @@ for (const [name, source] of Object.entries(PUBLIC_RUNTIME_FILES)) {
 const nextConfig = {
   output: isTauriBuild ? "export" : "standalone",
   outputFileTracingRoot: frontendDir,
+  // A factory preview is served under a path of the preview gate (factory.yaml sets it), `appPath` reads the same variable.
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   // The notebook editor is client-only (`features/notebook`), these are the build seams `@datalayer/jupyter-react` needs
   // (see its `examples/next-js/next.config.mjs`). `options.webpack` is Next's own webpack: a second copy breaks every module.
   transpilePackages: ["@jupyterlab/settingregistry", "@jupyterlite/settings"],

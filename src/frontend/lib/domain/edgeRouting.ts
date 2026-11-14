@@ -4,6 +4,7 @@
 // each other. Routing is synchronous once the library has loaded. Also the
 // unrouted fallback geometry: attach slots on card sides, elbows, rounded paths.
 import { AvoidLib } from "libavoid-js"
+import { appPath } from "@/lib/paths"
 
 /** How connections are drawn: a preference of the window or canvas hosting the graph. */
 export type EdgeStyle = "curved" | "elbow"
@@ -76,7 +77,7 @@ let avoid: Avoid | null = null
 let loading: Promise<boolean> | null = null
 
 /** Loads libavoid once; resolves false (and logs why) if it cannot load, leaving connections unrouted. */
-export function loadRouter(wasmUrl = "/libavoid.wasm"): Promise<boolean> {
+export function loadRouter(wasmUrl = appPath("/libavoid.wasm")): Promise<boolean> {
   loading ??= AvoidLib.load(wasmUrl).then(() => {
     avoid = AvoidLib.getInstance() as unknown as Avoid
     return true
