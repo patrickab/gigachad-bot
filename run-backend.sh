@@ -8,6 +8,7 @@ tailscale=false
 postgres_started=false
 backend_pid=''
 c4_pid=''
+jupyter_pid=''
 
 usage() {
     printf 'usage: %s [--prod] [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
@@ -76,7 +77,7 @@ tree() {
 stop_children() {
     local pid alive
     local -a pids
-    for pid in "$backend_pid" "$c4_pid"; do
+    for pid in "$backend_pid" "$c4_pid" "$jupyter_pid"; do
         if [[ -n "$pid" ]]; then
             mapfile -t pids < <(tree "$pid")
             kill -TERM "$pid" 2>/dev/null || true
@@ -94,6 +95,7 @@ stop_children() {
     done
     backend_pid=''
     c4_pid=''
+    jupyter_pid=''
 }
 
 cleanup() {
@@ -190,6 +192,31 @@ if ! wait_until 60 0.5 c4_ready; then
     exit 1
 fi
 
+# The Jupyter service runs the one Jupyter Server and the notebooks' kernels every backend worker shares
+# (src/backend/jupyter_service.py). One process, no reload: kernels outlive backend reloads, not this script.
+# Its Unix socket sits in the user's private runtime folder, which nobody else can enter.
+if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -d "$XDG_RUNTIME_DIR" ]]; then
+    printf 'error: XDG_RUNTIME_DIR is not set; the Jupyter service needs a private folder for its socket\n' >&2
+    exit 1
+fi
+export GIGACHAD_JUPYTER_SOCKET="$XDG_RUNTIME_DIR/gigachad-jupyter-$profile.sock"
+printf 'Starting Jupyter service on %s\n' "$GIGACHAD_JUPYTER_SOCKET"
+uvicorn backend.jupyter_service:app --app-dir "$root_dir/src" --uds "$GIGACHAD_JUPYTER_SOCKET" --no-access-log &
+jupyter_pid=$!
+jupyter_ready() {
+    curl -sf -o /dev/null --unix-socket "$GIGACHAD_JUPYTER_SOCKET" http://jupyter-service/health && return 0
+    if ! kill -0 "$jupyter_pid" 2>/dev/null; then
+        printf 'error: the Jupyter service exited during startup\n' >&2
+        jupyter_pid=''
+        exit 1
+    fi
+    return 1
+}
+if ! wait_until 60 0.5 jupyter_ready; then
+    printf 'error: the Jupyter service did not become healthy within 30s\n' >&2
+    exit 1
+fi
+
 if [[ "$tailscale" == true ]]; then
     printf 'Configuring Tailnet-only HTTPS ingress\n'
     "$root_dir/deploy/tailscale-serve.sh" "$port"
@@ -206,9 +233,9 @@ else
 fi
 backend_pid=$!
 
-# Either process ending takes the other down with it and fails the script, so systemd's
-# Restart=on-failure brings both back instead of leaving a backend without its C4 service.
-wait -n "$backend_pid" "$c4_pid" || true
+# Any process ending takes the others down with it and fails the script, so systemd's Restart=on-failure
+# brings them all back instead of leaving a backend without its C4 or Jupyter service.
+wait -n "$backend_pid" "$c4_pid" "$jupyter_pid" || true
 if ! kill -0 "$backend_pid" 2>/dev/null; then
     if wait "$backend_pid"; then
         backend_pid=''
@@ -217,6 +244,11 @@ if ! kill -0 "$backend_pid" 2>/dev/null; then
     status=$?
     backend_pid=''
     exit "$status"
+fi
+if ! kill -0 "$jupyter_pid" 2>/dev/null; then
+    printf 'error: the Jupyter service exited; stopping the backend so it is restarted together\n' >&2
+    jupyter_pid=''
+    exit 1
 fi
 printf 'error: the C4 service exited; stopping the backend so it is restarted together\n' >&2
 c4_pid=''

@@ -13,7 +13,9 @@ from pathlib import Path
 import shutil
 import signal
 import stat
+import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -36,19 +38,21 @@ from backend.routes.deps import (
     get_relocate,
 )
 import config
-from lib import jupyter
+from lib import jupyter, jupyter_service
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
 from lib.chat_store import ChatStore
 from lib.disk_files import DiskFiles
 from lib.jupyter import JupyterHost
+from lib.jupyter_service import RemoteJupyterHost
 from lib.postgres_data_store import PostgresDataStore
 from lib.process_owner import reap_orphans
 from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.references import References
-from lib.upstream import UpstreamContractError, UpstreamRequestFailed, forwardable_headers
+from lib.upstream import UpstreamContractError, UpstreamRequestFailed
 from tests.conftest import (
+    SRC,
     create_user_and_device,
     mounted_roots,
     request_identity,
@@ -282,7 +286,7 @@ def test_browser_credentials_never_reach_the_server_and_its_cookies_never_reach_
     ]  # fmt: skip
     response = [("Set-Cookie", "a=b"), ("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*"), ("Etag", '"1"')]
 
-    assert forwardable_headers(request, jupyter._DROPPED_REQUEST_HEADERS) == [("Content-Type", "application/json")]
+    assert jupyter.browser_request_headers(request) == [("Content-Type", "application/json")]
     assert [name for name, _ in response if not jupyter.drops_response_header(name.lower())] == ["Content-Type", "Etag"]
 
 
@@ -319,7 +323,7 @@ def world(tmp_path_factory):
         patch.setenv("JUPYTER_PATH", str(base / "extra"))
         patch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
         host = JupyterHost()
-        patch.setattr(jupyter, "_host", host)
+        patch.setattr(jupyter_service, "_host", host)  # the documents routes' hooks
         with client_for(host) as client:
             yield World(host, home, project, client)
         host.stop()
@@ -457,7 +461,7 @@ def test_a_moved_notebook_keeps_its_kernel(world):
     nb = notebook(world.project / "folder" / "a.ipynb")
     kernel = start(world, nb, "python3")
 
-    jupyter.move_kernel(str(nb), str(nb.with_name("renamed.ipynb")))
+    world.host.move_kernel(str(nb), str(nb.with_name("renamed.ipynb")))
 
     assert start(world, nb.with_name("renamed.ipynb"), "python3") == kernel
     assert world.client.get(f"{SERVER}/api/kernels/{kernel['kernel_id']}").status_code == 200
@@ -469,7 +473,7 @@ def test_deleting_a_folder_shuts_down_the_kernels_of_its_notebooks_only(world):
     gone = start(world, doomed, "python3")
     kept = start(world, sibling, "python3")
 
-    jupyter.shutdown_kernels_under(str(doomed.parent))
+    world.host.shutdown_kernels_under(str(doomed.parent))
 
     assert world.client.get(f"{SERVER}/api/kernels/{gone['kernel_id']}").status_code == 404
     assert world.client.get(f"{SERVER}/api/kernels/{kept['kernel_id']}").status_code == 200
@@ -569,13 +573,13 @@ def test_a_notebook_has_one_kernel_whichever_way_its_path_is_spelled(world):
     assert [key for key in world.host._kernels if key.endswith("/a.ipynb") and "/real/" in key] == [str(nb)]
     assert execute(world.client, first["kernel_id"], "import os; print(os.getcwd())").strip() == str(real)
 
-    jupyter.move_kernel(str(link / "a.ipynb"), str(link / "b.ipynb"))
+    world.host.move_kernel(str(link / "a.ipynb"), str(link / "b.ipynb"))
     assert start(world, real / "b.ipynb", "python3") == first
     assert world.client.delete("/api/jupyter/kernel", params={"path": str(link / "b.ipynb")}).status_code == 204
     assert world.client.get(f"{SERVER}/api/kernels/{first['kernel_id']}").status_code == 404
 
     again = start(world, real / "b.ipynb", "python3")
-    jupyter.shutdown_kernels_under(str(link))
+    world.host.shutdown_kernels_under(str(link))
     assert world.client.get(f"{SERVER}/api/kernels/{again['kernel_id']}").status_code == 404
 
 
@@ -894,3 +898,59 @@ def test_deleting_a_document_folder_shuts_down_the_kernels_of_its_notebooks(worl
 
     assert removed == [str(nb.parent)]
     assert world.client.get(f"{SERVER}/api/kernels/{kernel['kernel_id']}").status_code == 404
+
+
+@pytest.fixture
+def jupyter_service_socket(tmp_path, home, monkeypatch):
+    """The Jupyter service running as its own process on a Unix socket, stopped (with its kernels) afterwards."""
+    folder = Path(tempfile.mkdtemp(prefix="gj-"))  # a socket path must stay below ~100 bytes
+    socket = folder / "service.sock"
+    environment = {**os.environ, "HOME": str(home), "GIGACHAD_JUPYTER_HOME": str(tmp_path / "jupyter")}
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-m", "uvicorn", "backend.jupyter_service:app", "--app-dir", str(SRC), "--uds", str(socket),
+         "--no-access-log"],
+        env=environment,
+    )
+    try:
+        with httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)), base_url="http://jupyter-service") as probe:
+            deadline = time.monotonic() + 30
+            while not (socket.exists() and probe.get("/health").status_code == 200):
+                assert process.poll() is None and time.monotonic() < deadline, "the Jupyter service did not start"
+                time.sleep(0.1)
+        monkeypatch.setenv(jupyter_service.SOCKET_VARIABLE, str(socket))
+        yield socket
+    finally:
+        process.terminate()
+        process.wait(30)
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def test_backend_workers_share_the_kernels_of_the_jupyter_service(jupyter_service_socket, home, monkeypatch):
+    """Two workers (each its own `RemoteJupyterHost`): a kernel one starts, the other binds a session to, runs code in and renames."""
+    monkeypatch.setattr(websocket_origin, "CORS_ORIGINS", ["*"])
+    nb = notebook(home / "nb" / "a.ipynb")
+    with client_for(RemoteJupyterHost(), home) as first, client_for(RemoteJupyterHost(), home) as second:
+        started = first.post("/api/jupyter/kernel", json={"path": str(nb), "name": "python3"})
+        assert started.status_code == 200, started.text
+        kernel_id = started.json()["kernel_id"]
+
+        body = {"path": "a.ipynb", "type": "notebook", "name": "a.ipynb", "kernel": {"id": kernel_id}}
+        assert second.post(f"{SERVER}/api/sessions", json=body).status_code == 201
+        assert execute(second, kernel_id, "print(6 * 7)").strip() == "42"
+
+        renamed = nb.with_name("b.ipynb")
+        nb.rename(renamed)
+        jupyter_service.RemoteJupyterHost().move_kernel(str(nb), str(renamed))
+        again = second.post("/api/jupyter/kernel", json={"path": str(renamed), "name": "python3"})
+        assert again.json()["kernel_id"] == kernel_id
+
+        assert first.delete("/api/jupyter/kernel", params={"path": str(renamed)}).status_code == 204
+        assert second.get(f"{SERVER}/api/kernels/{kernel_id}").status_code == 404
+
+
+def test_a_worker_without_its_jupyter_service_answers_unavailable(home, tmp_path, monkeypatch):
+    monkeypatch.setenv(jupyter_service.SOCKET_VARIABLE, str(tmp_path / "missing.sock"))
+    nb = notebook(home / "a.ipynb")
+    with client_for(RemoteJupyterHost(), home) as client:
+        assert client.get("/api/jupyter/kernelspecs", params={"path": str(nb)}).status_code == 503
+        assert client.get(f"{SERVER}/api/kernels").status_code == 503

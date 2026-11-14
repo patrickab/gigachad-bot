@@ -39,6 +39,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- sync.py                   PostgreSQL notification broker
 |   |   |-- omp_web_gate.py           Identity-checking omp-web frame proxy
 |   |   |-- learnharness_gate.py      Identity-checking LearnHarness frame proxy, refuses its credential routes
+|   |   |-- jupyter_service.py        Jupyter service: the one process (Unix socket) holding the Jupyter Server, its token and kernel map for all workers
 |   |   |-- preview_gate.py           Identity-checking proxy to every factory preview, picked by the port in the path
 |   |   |-- reverse_proxy.py          Streaming and WebSocket proxy plumbing shared by the gates and the Jupyter proxy route
 |   |   |-- install_deps.py           gigachad-install entry point
@@ -139,7 +140,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- pty_process.py            `PtyProcess` (child on a PTY, output queue, resize, foreground check, hangup on close) and the PTY helpers Neovim shares
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
 |   |   |-- neovim_rpc.py             Neovim msgpack-RPC client and Lua bridge (saves, yanks, selections, buffer switches, hunk apply, notebook text buffer)
-|   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs, kernel per path, proxy allowlist, `move_kernel`/`shutdown_kernels_under`
+|   |   |-- jupyter.py                Only Jupyter knowledge: supervised private `jupyter_server`, kernelspecs, kernel per path, proxy allowlist (runs in the Jupyter service)
+|   |   |-- jupyter_service.py        `RemoteJupyterHost`: the workers' client of the Jupyter service, `JupyterHost`'s methods over its Unix socket
 |   |   |-- process_owner.py          Host children never outlive the backend: `owned_environment` mark, `stop_owned` at shutdown, `reap_orphans` at startup
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
 |   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`

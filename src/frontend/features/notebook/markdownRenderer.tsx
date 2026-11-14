@@ -11,7 +11,7 @@ import { PREVIEW_PAGE } from "@/features/workbench/pages"
 class AppMarkdown extends Widget implements IRenderMime.IRenderer {
   private root: Root | null = null
 
-  constructor() {
+  constructor(private readonly imageDirectory: string) {
     super()
     this.addClass("gc-nb-markdown")
   }
@@ -19,7 +19,7 @@ class AppMarkdown extends Widget implements IRenderMime.IRenderer {
   async renderModel(model: IRenderMime.IMimeModel): Promise<void> {
     const source = String(model.data["text/markdown"] ?? "")
     this.root ??= createRoot(this.node)
-    this.root.render(<LaTeXMarkdown content={source} />)
+    this.root.render(<LaTeXMarkdown content={source} imageDirectory={this.imageDirectory} />)
   }
 
   protected onAfterAttach(msg: Message): void {
@@ -37,10 +37,15 @@ class AppMarkdown extends Widget implements IRenderMime.IRenderer {
   }
 }
 
-/** Ranks below the library's own markdown renderer (60), so it takes every `text/markdown` cell and output. */
-export const appMarkdownFactory: IRenderMime.IRendererFactory = {
-  safe: true,
-  mimeTypes: ["text/markdown"],
-  defaultRank: 10,
-  createRenderer: () => new AppMarkdown(),
+/**
+ * Markdown of a notebook in `notebookDirectory`, whose relative image paths (`images/a.png`) resolve against that folder.
+ * Ranks below the library's own markdown renderer (60), so it takes every `text/markdown` cell and output.
+ */
+export function appMarkdownFactory(notebookDirectory: string): IRenderMime.IRendererFactory {
+  return {
+    safe: true,
+    mimeTypes: ["text/markdown"],
+    defaultRank: 10,
+    createRenderer: () => new AppMarkdown(notebookDirectory),
+  }
 }

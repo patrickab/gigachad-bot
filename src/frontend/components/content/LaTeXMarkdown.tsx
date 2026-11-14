@@ -1,11 +1,11 @@
 "use client"
 
-import { CodeBlock, MarkdownRenderer, MarkmapDiagram, MermaidDiagram, type CodeBlockProps, type CodeRenderers, type MarkdownComponents, type MarkmapViewport } from "@gigachad/chat-ui"
+import { CodeBlock, MarkdownRenderer, MarkmapDiagram, MermaidDiagram, type CodeBlockProps, type CodeRenderers, type LinkPolicy, type MarkdownComponents, type MarkmapViewport } from "@gigachad/chat-ui"
 import { memo, useContext, useMemo, useRef, type CSSProperties, type RefObject } from "react"
 import { HostScaleContext } from "@/contexts/HostScaleContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { useViewportReframe } from "@/hooks/useViewportReframe"
-import { apiRoot } from "@/lib/backend/urls"
+import { apiRoot, fileViewerRawUrl } from "@/lib/backend/urls"
 import { offsetToCamera } from "@/lib/domain/viewport"
 import { CitationPill, type CitationSource } from "./diagrams/CitationPill"
 import "katex/dist/katex.min.css"
@@ -41,14 +41,28 @@ const CODE_RENDERERS: CodeRenderers = {
   markmap: ShellMarkmap,
 }
 
-const SHELL_COMPONENTS: MarkdownComponents = {
-  // Backend-emitted image paths (e.g. /mineru/images/...) are root-relative and
-  // resolve against the backend, not whichever origin serves the frontend.
-  img: ({ src, alt, ...props }) => (
-    // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
-    <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiRoot()}${src}` : src} {...props} />
-  ),
+/** A path relative to the document (`images/a.png`, `./a.png`, `../a.png`): no scheme, not root-relative, no fragment. */
+function isRelativePath(src: string): boolean {
+  return src !== "" && !/^[a-z][a-z\d+.-]*:/i.test(src) && !src.startsWith("/") && !src.startsWith("#")
 }
+
+/** `src` as the browser loads it: backend-emitted root-relative paths (e.g. /mineru/images/...) against the backend, not whichever origin serves the frontend, relative ones against `imageDirectory` through the file API. */
+function imageUrl(src: unknown, imageDirectory: string | undefined): unknown {
+  if (typeof src !== "string") return src
+  if (src.startsWith("/") && !src.startsWith("//")) return `${apiRoot()}${src}`
+  if (imageDirectory !== undefined && isRelativePath(src)) return fileViewerRawUrl(`${imageDirectory}/${src}`)
+  return src
+}
+
+function imageComponent(imageDirectory: string | undefined): MarkdownComponents["img"] {
+  return function Image({ src, alt, ...props }) {
+    // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
+    return <img alt={alt ?? ""} src={imageUrl(src, imageDirectory) as typeof src} {...props} />
+  }
+}
+
+// Streamdown's hardening blocks relative image paths, a document that resolves them itself turns it off.
+const RELATIVE_LINKS: LinkPolicy = { harden: false }
 
 function LaTeXMarkdownInner({
   content,
@@ -57,6 +71,7 @@ function LaTeXMarkdownInner({
   compact,
   onContentChange,
   style,
+  imageDirectory,
 }: {
   content: string
   citationMap?: Record<string, CitationSource>
@@ -64,14 +79,16 @@ function LaTeXMarkdownInner({
   compact?: boolean
   onContentChange?: (newContent: string) => void
   style?: CSSProperties
+  /** Host folder relative image paths resolve against, the document's own. Without it they stay blocked. */
+  imageDirectory?: string
 }) {
   const components = useMemo<MarkdownComponents>(() => ({
-    ...SHELL_COMPONENTS,
+    img: imageComponent(imageDirectory),
     a({ children, ...props }) {
       const info = citationMap?.[String(children)]
       return info ? <CitationPill source={info}>{children}</CitationPill> : <a {...props}>{children}</a>
     },
-  }), [citationMap])
+  }), [citationMap, imageDirectory])
 
   return (
     <MarkdownRenderer
@@ -81,6 +98,7 @@ function LaTeXMarkdownInner({
       style={style}
       codeRenderers={CODE_RENDERERS}
       components={components}
+      linkPolicy={imageDirectory === undefined ? undefined : RELATIVE_LINKS}
       onContentChange={onContentChange}
       checkboxClassName="mr-1.5 accent-ink cursor-pointer"
     />

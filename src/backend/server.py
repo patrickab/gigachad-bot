@@ -43,7 +43,7 @@ from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib import jupyter, omp_source
+from lib import jupyter_service, omp_source
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.file_attach import router as file_attach_router
@@ -114,8 +114,8 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_client()
     kill_all_mineru_servers()
-    await jupyter.shutdown()
-    if stopped := stop_owned():  # what the Jupyter Server and Neovim sessions left running: language servers, programs they ran
+    await jupyter_service.aclose()
+    if stopped := stop_owned():  # what Neovim sessions left running: language servers, programs they ran
         log.info("Stopped %d processes the backend's children left running: %s", len(stopped), stopped)
     await extract_queue.stop()
     await get_change_broker().stop()

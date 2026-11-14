@@ -4,11 +4,12 @@ import { JupyterReactTheme, Notebook, NotebookCommandIds, notebookStore } from "
 import type { INotebookContent } from "@jupyterlab/nbformat"
 import type { NotebookModel } from "@jupyterlab/notebook"
 import type { ServiceManager, Session } from "@jupyterlab/services"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useThemeName } from "@/hooks/useThemeName"
 import { PANE_TOP_PX } from "@/features/workbench/WorkbenchSplit"
+import { dirName } from "@/lib/paths"
 import { appMarkdownFactory } from "./markdownRenderer"
 import type { NotebookTextStore } from "./notebookTextStore"
 import { NotebookToolbar } from "./NotebookToolbar"
@@ -19,7 +20,6 @@ import type { SharedNotebookLike } from "./notebookSync"
 import { useNotebookKernel } from "./useNotebookKernel"
 import "./notebook-theme.css"
 
-const RENDERERS = [appMarkdownFactory]
 /** The notebook runs under the top bar: its cells start where the markdown preview's page does (see `notebook-theme.css`). */
 const NOTEBOOK_TOP = { "--gc-nb-top": `${PANE_TOP_PX}px` } as React.CSSProperties
 
@@ -69,6 +69,8 @@ export function NotebookEditor({ path, tabId, textStore }: { path: string; tabId
   const file = useNotebookFile(path)
   const kernel = useNotebookKernel(path, file.initial !== null)
   const theme = useThemeName()
+  const notebookDirectory = dirName(path)
+  const renderers = useMemo(() => [appMarkdownFactory(notebookDirectory)], [notebookDirectory])
   const rootRef = useRef<HTMLDivElement>(null)
   const serviceManager = useNotebookServiceManager()
   useSaveShortcut(rootRef, file.save)
@@ -136,7 +138,7 @@ export function NotebookEditor({ path, tabId, textStore }: { path: string; tabId
                 nbformat={initial}
                 serviceManager={serviceManager}
                 kernelId={kernel.kernelId ?? undefined}
-                renderers={RENDERERS}
+                renderers={renderers}
                 editorExtensions={NOTEBOOK_EDITOR_EXTENSIONS}
                 cellSidebarMargin={0}
                 height="100%"

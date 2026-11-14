@@ -10,7 +10,8 @@
 Every HTTP route refuses requests that no page of the app sent (`backend.websocket_origin.require_trusted_request`): changes need
 a trusted `Origin`, reads may not be cross-site.
 
-How the server runs, what the specs are and where kernels live is `lib.jupyter`.
+These routes check the browser (host access, trusted origin, file roots) and hand the rest to the Jupyter service, the one process
+all workers share (`lib.jupyter_service`). How the server runs, what the specs are and where kernels live is `lib.jupyter`.
 """
 
 from __future__ import annotations
@@ -29,9 +30,10 @@ from backend.reverse_proxy import relay_websocket, streaming_response
 from backend.routes.deps import get_file_roots
 from backend.routes.upstream import call_upstream
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket, require_trusted_request
-from lib import jupyter
+from lib import jupyter, jupyter_service
 from lib.file_roots import FileRoots
-from lib.jupyter import JupyterHost, KernelRef, KernelSpecList
+from lib.jupyter import KernelRef, KernelSpecList
+from lib.jupyter_service import RemoteJupyterHost
 from lib.upstream import UpstreamRequestFailed, UpstreamUnavailable
 
 if TYPE_CHECKING:
@@ -57,8 +59,8 @@ class NotebookDirectory(BaseModel):
     path: str
 
 
-def get_jupyter_host() -> JupyterHost:
-    return jupyter.host()
+def get_jupyter_host() -> RemoteJupyterHost:
+    return jupyter_service.host()  # type: ignore[return-value]  # tests put an in-process JupyterHost in its place
 
 
 def _allowed_notebook(roots: FileRoots, path: str) -> str:
@@ -86,14 +88,14 @@ async def notebook_directory(path: str = Query(...), roots: FileRoots = Depends(
 
 @router.get("/kernelspecs", response_model=KernelSpecList, dependencies=[_host_only, _trusted])
 async def list_kernelspecs(
-    path: str = Query(...), host: JupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
+    path: str = Query(...), host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> KernelSpecList:
     return await call_upstream(asyncio.to_thread(host.kernelspecs, _allowed_notebook(roots, path)))
 
 
 @router.post("/kernel", response_model=KernelRef, dependencies=[_host_only, _trusted])
 async def start_kernel(
-    req: StartKernelRequest, host: JupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
+    req: StartKernelRequest, host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> KernelRef:
     notebook = _allowed_notebook(roots, req.path)
     return await call_upstream(asyncio.to_thread(host.start_kernel, notebook, req.name, _working_directory(roots, notebook)))
@@ -101,7 +103,7 @@ async def start_kernel(
 
 @router.delete("/kernel", status_code=204, dependencies=[_host_only, _trusted])
 async def shutdown_kernel(
-    path: str = Query(...), host: JupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
+    path: str = Query(...), host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> Response:
     await call_upstream(asyncio.to_thread(host.shutdown_kernel, _allowed_notebook(roots, path)))
     return Response(status_code=204)
@@ -132,7 +134,7 @@ async def _replay(body: bytes) -> AsyncIterator[bytes]:
 
 
 @router.api_route("/server/{path:path}", methods=_PROXIED_METHODS, dependencies=[_host_only, _trusted])
-async def proxy_http(path: str, request: Request, host: JupyterHost = Depends(get_jupyter_host)) -> Response:
+async def proxy_http(path: str, request: Request, host: RemoteJupyterHost = Depends(get_jupyter_host)) -> Response:
     if not jupyter.is_proxied_path(path):
         raise _denied(path)
     if not jupyter.allows_method(request.method, path):
@@ -154,7 +156,7 @@ async def proxy_websocket(
     websocket: WebSocket,
     path: str,
     identity: RequestIdentity = Depends(get_request_identity),
-    host: JupyterHost = Depends(get_jupyter_host),
+    host: RemoteJupyterHost = Depends(get_jupyter_host),
 ) -> None:
     if not is_allowed_websocket(websocket, identity):
         await websocket.close(code=POLICY_VIOLATION)

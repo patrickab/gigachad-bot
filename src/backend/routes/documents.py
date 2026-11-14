@@ -28,7 +28,7 @@ from backend.routes.deps import (
     get_relocate,
 )
 from backend.routes.schemas import FileListResponse, FileMeta, file_meta, folder_meta
-from lib import document_service, jupyter
+from lib import document_service, jupyter_service
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
 from lib.attachments import kind_of, sync_pdf
@@ -266,7 +266,7 @@ def remove_document(
     files.record_removed(key for key in removed if Path(key).is_absolute())
     for key in removed:
         if Path(key).is_absolute():
-            jupyter.shutdown_kernels_under(key)
+            jupyter_service.host().shutdown_kernels_under(key)
     return {"status": "ok", "removed": removed}
 
 
@@ -340,7 +340,7 @@ def rename_document(
     if Path(req.path).is_absolute():
         with http_errors(*errors):
             target, changed = document_service.rename_on_disk(store, relocate, roots, files, scope, req.path, req.name)
-        jupyter.move_kernel(req.path, str(target))
+        jupyter_service.host().move_kernel(req.path, str(target))
         document_service.follow_library_pdf(assets, references, Path(req.path).name, target.name, target.read_bytes)
         return RenamedDocument(**file_meta(str(target), name=target.name).model_dump(), changed=[str(path) for path in changed])
     key = _valid_key(req.path)

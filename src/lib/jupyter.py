@@ -1,10 +1,11 @@
 """Jupyter notebooks on the host: a private Jupyter Server, kernelspecs, one kernel per notebook, and the proxy to reach it.
 
-The backend is the only client of the server, so everything that knows Jupyter lives here.
+`JupyterHost` runs in one process, the Jupyter service (`backend.jupyter_service`), which is the only client of the server, so
+everything that knows Jupyter lives here. Backend workers reach it through `lib.jupyter_service`.
 
-- **Server**: `python -m jupyter_server` from the app venv on a free loopback port, started on first use, stopped with the backend
-  (also when the backend is killed, kernels with it, see `_BOOTSTRAP`, and marked for `lib.process_owner.reap_orphans`) and
-  started again after it died. The token exists only in the backend and the server's memory (never in its environment, its
+- **Server**: `python -m jupyter_server` from the app venv on a free loopback port, started on first use, stopped with the service
+  (also when the service is killed, kernels with it, see `_BOOTSTRAP`, and marked for `lib.process_owner.reap_orphans`) and
+  started again after it died. The token exists only in the service's and the server's memory (never in its environment, its
   argv or a file its kernels could read), requests the browser sends through the proxy get it injected. Its kernelspecs and log
   live in `jupyter_home()` (private to the user), its runtime files in a temporary folder, and config files are ignored. Kernels
   nobody is connected to are culled after `_KERNEL_CULL_IDLE_SECONDS`, so a reload reattaches by path and a closed browser frees them.
@@ -224,6 +225,11 @@ def _upstream_target(path: str, query: Iterable[tuple[str, str]]) -> str:
 def allows_method(method: str, path: str) -> bool:
     """Whether the browser may send *method* to the proxied upstream *path*: reads anywhere, changes only where listed."""
     return method in _READ_METHODS or any(method in methods and pattern.fullmatch(path) for pattern, methods in _WRITE_PATHS)
+
+
+def browser_request_headers(headers: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The browser's request *headers* that go on upstream: without hop-by-hop fields and the browser's own credentials."""
+    return forwardable_headers(headers, _DROPPED_REQUEST_HEADERS)
 
 
 def drops_response_header(name: str) -> bool:
@@ -613,7 +619,7 @@ class JupyterHost:
         request = self._async_client.build_request(
             method,
             f"{server.http_base}{_upstream_target(path, query)}",
-            headers=[*forwardable_headers(headers, _DROPPED_REQUEST_HEADERS), *server.headers.items()],
+            headers=[*browser_request_headers(headers), *server.headers.items()],
             content=body,
         )
         with unreachable("Jupyter server"):
@@ -645,7 +651,7 @@ _host_lock = threading.Lock()
 
 
 def host() -> JupyterHost:
-    """The process-wide `JupyterHost`."""
+    """The process-wide `JupyterHost`, used only by the Jupyter service (`backend.jupyter_service`)."""
     global _host
     with _host_lock:
         if _host is None:
@@ -654,24 +660,8 @@ def host() -> JupyterHost:
         return _host
 
 
-def move_kernel(old: str, new: str) -> None:
-    """The notebook *old* moved to *new*: its kernel follows."""
-    with _host_lock:
-        current = _host
-    if current is not None:
-        current.move_kernel(old, new)
-
-
-def shutdown_kernels_under(path: str) -> None:
-    """The notebook *path* (or the folder of notebooks) is gone: shut down its kernels."""
-    with _host_lock:
-        current = _host
-    if current is not None:
-        current.shutdown_kernels_under(path)
-
-
 async def shutdown() -> None:
-    """Stop the server (and the kernels) and close the proxy client, for the end of the backend."""
+    """Stop the server (and the kernels) and close the proxy client, for the end of the Jupyter service."""
     with _host_lock:
         current = _host
     if current is not None:
