@@ -190,6 +190,7 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 | OMP auth broker / gateway | `127.0.0.1:8765` / `127.0.0.1:4000` | Same defaults, reuse existing listeners |
 | omp-web / its gate | `127.0.0.1:30177` / - | Same omp-web, gate `127.0.0.1:30179` (Serve `:8443`) |
 | LearnHarness / LiteLLM proxy / gate | `127.0.0.1:30181` / `127.0.0.1:30183` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
+| Factory engine / preview gate | `127.0.0.1:8090` / `127.0.0.1:30185` | Same defaults, one instance per machine, gate behind Serve `:8445` |
 
 Inspect failures rather than exposing another listener:
 
@@ -349,17 +350,26 @@ Units, environment, gate, backup and restore: `.docs/integration-learnharness.md
 | Dependencies | Agents-in-a-box checkout and production PostgreSQL `factory` database |
 | Backend upstream | Set `GIGACHAD_FACTORY_URL` to the engine base URL, default `http://127.0.0.1:8090` |
 | Startup | Provision missing checkout/dependencies/config/database. Preserve existing state. `run.sh` never starts this production engine. |
-| Previews | Disable in production: remote browsers cannot reach host-loopback ports 8100–8199. Boards, diffs, messages, and merges remain usable. |
+| Previews | `gigachad-bot-preview-gate.service` runs `run-preview-gate.sh --prod` on loopback `:30185`. Serve `:8445` points at it, `GIGACHAD_PREVIEW_URL` names that address for the backend. Preview processes stay on loopback ports 8100–8199. |
 
 - Configure once per production host, before service startup:
 
 ```bash
-install -d -m 0700 ~/.config/agent-sandbox/factory
-printf 'preview: false\n' > ~/.config/agent-sandbox/factory/defaults.yaml
 "$PROD/deploy/install-systemd-service.sh"
-systemctl --user start gigachad-bot-factory.service
+systemctl --user start gigachad-bot-factory.service gigachad-bot-preview-gate.service
 curl -sf http://127.0.0.1:8090/v1/repos
+"$PROD/deploy/tailscale-serve.sh" 30185 8445
 ```
+
+- Add to `$ENV` and restart the backend:
+
+```dotenv
+GIGACHAD_PREVIEW_URL=https://<tailnet-hostname>:8445
+```
+
+- Check: `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30185/` prints `403` (no Tailnet login).
+- A host that disabled previews earlier (`preview: false` in `~/.config/agent-sandbox/factory/defaults.yaml`) turns them
+  on again in the factory settings dialog or by removing that line.
 
 - Update with `git -C ~/git/Agents-in-a-box pull --ff-only`.
 - Restart `gigachad-bot-factory.service` only when no task is running.
@@ -380,7 +390,7 @@ tailscale serve status
 - Expect persistent private HTTPS from the helper:
   `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
 - The frame gates get their own HTTPS ports with the same helper: omp-web
-  `30179 8443`, LearnHarness `30182 8444` (see their sections). Serve accepts any
+  `30179 8443`, LearnHarness `30182 8444`, factory previews `30185 8445` (see their sections). Serve accepts any
   HTTPS port, only Funnel is limited to 443, 8443 and 10000.
 - Verify from another permitted Tailnet device. Never add a public fallback:
 

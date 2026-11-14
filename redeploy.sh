@@ -33,6 +33,9 @@ proxy_unit=gigachad-bot-litellm-proxy.service
 learn_unit=gigachad-bot-learnharness.service
 learn_gate_unit=gigachad-bot-learnharness-gate.service
 
+preview_gate_unit=gigachad-bot-preview-gate.service
+preview_gate_url=http://127.0.0.1:30185
+
 if [[ -z ${GIGACHAD_REDEPLOY_FRESH:-} ]]; then
     exec env -i \
         GIGACHAD_REDEPLOY_FRESH=1 GIGACHAD_PROD_DIR="$prod" \
@@ -86,6 +89,10 @@ learn_up() {
 
 learn_gate_up() {
     systemctl --user is-active --quiet "$learn_gate_unit" && [[ $(curl -s -o /dev/null -w '%{http_code}' "$learn_gate_url/") == 403 ]]
+}
+
+preview_gate_up() {
+    systemctl --user is-active --quiet "$preview_gate_unit" && [[ $(curl -s -o /dev/null -w '%{http_code}' "$preview_gate_url/") == 403 ]]
 }
 
 busy_learn_sessions() {
@@ -277,3 +284,16 @@ if ! wait_until 30 1 learn_gate_up; then
 fi
 printf "%s is up on %s\n" "$learn_gate_unit" "$learn_gate_url"
 systemctl --user start gigachad-bot-learnharness-backup.timer
+
+# Factory previews
+if ! systemctl --user cat "$preview_gate_unit" >/dev/null 2>&1; then
+    printf "%s is not installed: run %s/deploy/install-systemd-service.sh\n" "$preview_gate_unit" "$prod" >&2
+    exit 1
+fi
+systemctl --user restart "$preview_gate_unit"
+if ! wait_until 30 1 preview_gate_up; then
+    systemctl --user --no-pager status "$preview_gate_unit" >&2 || true
+    printf "%s did not come up within 30s\n" "$preview_gate_unit" >&2
+    exit 1
+fi
+printf "%s is up on %s\n" "$preview_gate_unit" "$preview_gate_url"

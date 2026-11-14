@@ -5,18 +5,24 @@
 - Responses are validated against the contract models below, a changed engine shape fails loudly with the field name
 - Listings and new tasks name their repo, task ids are engine-wide and the other calls forward them unchecked
 - `GIGACHAD_FACTORY_URL` is the engine (default 127.0.0.1:8090)
+- Previews listen on loopback ports the browser cannot reach: their URLs are rewritten onto the preview gate
+  (`backend/preview_gate.py`), `GIGACHAD_PREVIEW_URL` is where the browser reaches it (default 127.0.0.1:30185)
 """
 
 from datetime import datetime
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from lib.upstream import UpstreamClient
+from lib.upstream import UpstreamClient, upstream_url
 
 DEFAULT_URL = "http://127.0.0.1:8090"
 # The engine's default readiness wait (180) plus its scenario run (120) plus headroom for starting the preview's processes.
 PREVIEW_RESTART_TIMEOUT_SECONDS = 330.0
+# Loopback ports the engine starts previews on (`preview_ports` of its config, written by `run-factory.sh`).
+PREVIEW_PORTS = range(8100, 8200)
+DEFAULT_PREVIEW_URL = "http://127.0.0.1:30185"
 
 _client = UpstreamClient(env="GIGACHAD_FACTORY_URL", default=DEFAULT_URL, label="factory engine")
 
@@ -125,11 +131,28 @@ class Message(ContractModel):
     created_at: datetime
 
 
+def preview_gate_url() -> str:
+    """Base URL the browser reaches the preview gate at."""
+    return upstream_url("GIGACHAD_PREVIEW_URL", DEFAULT_PREVIEW_URL)
+
+
+def through_gate(url: str) -> str:
+    """Move a preview's loopback URL onto the preview gate, keeping path and query. Any other URL stays as it is."""
+    parts = urlsplit(url)
+    if parts.hostname != "127.0.0.1" or parts.port not in PREVIEW_PORTS:
+        return url
+    return f"{preview_gate_url()}{url.removeprefix(f'{parts.scheme}://{parts.netloc}')}"
+
+
 class Preview(ContractModel):
+    """A task's preview, `url` and `open_url` (its scenario's entry view) are browser-reachable gate URLs."""
+
     status: Literal["starting", "ready", "failed", "stopped"]
     url: str
     open_url: str
     error: str | None
+
+    _reachable = field_validator("url", "open_url")(through_gate)
 
 
 class Task(ContractModel):

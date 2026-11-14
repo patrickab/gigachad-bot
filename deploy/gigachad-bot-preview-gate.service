@@ -1,0 +1,18 @@
+[Unit]
+Description=gigachad-bot factory preview Tailnet identity gate
+Wants=network-online.target gigachad-bot-factory.service
+After=network-online.target gigachad-bot-factory.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+ExecStart=%h/git/gigachad-bot-prod/run-preview-gate.sh --prod
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

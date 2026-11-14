@@ -9,8 +9,8 @@ fi
 
 if (($# < 1 || $# > 2)); then
     printf 'usage: %s <local-port> [https-port]\n' "${BASH_SOURCE[0]}" >&2
-    printf '  backend: %s 8002, omp-web gate: %s 30179 8443, LearnHarness gate: %s 30182 8444\n' \
-        "${BASH_SOURCE[0]}" "${BASH_SOURCE[0]}" "${BASH_SOURCE[0]}" >&2
+    printf '  backend: %s 8002, omp-web gate: %s 30179 8443, LearnHarness gate: %s 30182 8444, preview gate: %s 30185 8445\n' \
+        "${BASH_SOURCE[0]}" "${BASH_SOURCE[0]}" "${BASH_SOURCE[0]}" "${BASH_SOURCE[0]}" >&2
     exit 2
 fi
 

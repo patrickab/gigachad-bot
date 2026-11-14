@@ -8,21 +8,25 @@ hooks:
   before_remove: []
 gates:
   - ["{repo_path}/.venv/bin/python3", -m, pytest, -q]
+# The browser reaches a preview only through the preview gate (`src/backend/preview_gate.py`), which picks it by the port in
+# the path: the frontend is served under `/preview/<port>`, its API base is the gate path of the backend (a path, resolved
+# against the gate's origin in the browser). Both processes listen on loopback only, they run agent-written code.
 preview:
   processes:
     - name: backend
       argv: ["{repo_path}/.venv/bin/python3", -m, uvicorn, src.backend.server:app, --host, 127.0.0.1, --port, "{port.backend}"]
       ready_url: "http://127.0.0.1:{port.backend}/healthz"
     - name: frontend
-      argv: [npm, --prefix, src/frontend, exec, --, next, dev, --webpack, -p, "{port.frontend}", src/frontend]
-      ready_url: "http://127.0.0.1:{port.frontend}/"
+      argv: [npm, --prefix, src/frontend, exec, --, next, dev, --webpack, -H, 127.0.0.1, -p, "{port.frontend}", src/frontend]
+      ready_url: "http://127.0.0.1:{port.frontend}/preview/{port.frontend}"
   env:
     GIGACHAD_ENV: development
     GIGACHAD_DEV_USER: factory-preview
     GIGACHAD_DATABASE_URL: "{database_url}"
     GIGACHAD_BASE_DIR: "{data_dir}"
-    NEXT_PUBLIC_API_BASE: "http://127.0.0.1:{port.backend}/api"
+    NEXT_PUBLIC_BASE_PATH: "/preview/{port.frontend}"
+    NEXT_PUBLIC_API_BASE: "/preview-api/{port.backend}/api"
   database: true
-  url: "http://127.0.0.1:{port.frontend}"
+  url: "http://127.0.0.1:{port.frontend}/preview/{port.frontend}"
   api_url: "http://127.0.0.1:{port.backend}/api"
   ready_timeout_s: 180

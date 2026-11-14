@@ -314,7 +314,9 @@ agents:        built-ins / user defaults / .omp/agents/<name>.md
 | Agent instructions | `.omp/agents/coder.md` supplies conventions and scenarios |
 | Protected paths | Engine reverts task-agent changes to `factory.yaml`, `.factory/**`, `.omp/agents/**`. Put phase JSON/scenarios in ignored `.factory/out/`, never commits. |
 | Startup | `run-factory.sh` provisions missing checkout/dependencies/config and `factory` database in selected dev/prod PostgreSQL, preserving state. `GIGACHAD_FACTORY=0` skips development startup. |
-| Previews | Engine alone starts ports 8100–8199. Use empty database/development identity, frontend `NEXT_PUBLIC_API_BASE`, scenario API `preview.api_url`. Disable remote-production previews because host-loopback URLs are unreachable. |
+| Previews | Engine alone starts loopback ports 8100–8199, with an empty database and a development identity. It starts the previews of tasks in review again when it starts, and stops them on SIGTERM/SIGINT. |
+| Preview gate | `src/backend/preview_gate.py` (`run-preview-gate.sh`, `127.0.0.1:30185`) is the only way a browser reaches a preview. `/preview/<port>/…` goes to the frontend with the path kept (`NEXT_PUBLIC_BASE_PATH`, Next `basePath`), `/preview-api/<port>/…` to the backend with the prefix stripped, HTTP and WebSocket. Only the dev login or a Tailnet login with the host capability passes: a preview runs agent-written code as the host user. Its own origin keeps that code off the real API's origin. |
+| Preview URLs | `factory.yaml` gives the preview frontend a path as `NEXT_PUBLIC_API_BASE`, resolved against the page origin (`lib/backend/config.ts`). `lib/factory.py` rewrites the engine's loopback `url`/`open_url` onto `GIGACHAD_PREVIEW_URL` (default `http://127.0.0.1:30185`). Frontend code reaches `public/` files and hand-built routes through `appPath` (`lib/paths.ts`), root-relative backend paths through `apiRoot` (`lib/backend/urls.ts`), or they break under the base path. Scenario API stays `preview.api_url` on loopback. |
 | Scenario output | Final stdout `{"open":"<path and query>"}` selects initial view |
 
 Encode one payload as `?open=<base64url JSON>`:

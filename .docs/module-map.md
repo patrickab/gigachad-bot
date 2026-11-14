@@ -39,7 +39,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- sync.py                   PostgreSQL notification broker
 |   |   |-- omp_web_gate.py           Identity-checking omp-web frame proxy
 |   |   |-- learnharness_gate.py      Identity-checking LearnHarness frame proxy, refuses its credential routes
-|   |   |-- reverse_proxy.py          Streaming proxy plumbing shared by the omp-web and LearnHarness gates and the Jupyter proxy route
+|   |   |-- preview_gate.py           Identity-checking proxy to every factory preview, picked by the port in the path
+|   |   |-- reverse_proxy.py          Streaming and WebSocket proxy plumbing shared by the gates and the Jupyter proxy route
 |   |   |-- install_deps.py           gigachad-install entry point
 |   |   |-- sidecar.py                Desktop (Tauri) entry: prints `{"event":"ready","port":…}` once FastAPI listens
 |   |   `-- routes/                   HTTP, SSE and WebSocket boundaries
@@ -364,6 +365,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
 |-- run-litellm-proxy.sh              LiteLLM proxy, learn mode's model endpoint
 |-- run-factory.sh                    External factory engine launcher
+|-- run-preview-gate.sh               Factory preview gate launcher
 |-- factory.yaml                      Factory hooks, test gate and preview configuration
 `-- deploy/                           Production units and service/ingress helpers
     |-- gigachad-bot.service
@@ -411,7 +413,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | `factory.yaml`, `run-factory.sh`, `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` |
+| Factory integration | `factory.yaml`, `run-factory.sh`, `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 

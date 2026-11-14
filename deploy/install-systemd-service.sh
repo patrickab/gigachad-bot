@@ -22,6 +22,7 @@ require_runner backend "${worktree}/run-backend.sh"
 require_runner OMP "${script_dir}/run-production-omp.sh"
 require_runner omp-web "${script_dir}/run-production-omp-web.sh"
 require_runner factory "${worktree}/run-factory.sh"
+require_runner "preview gate" "${worktree}/run-preview-gate.sh"
 require_runner "learn mode" "${script_dir}/run-production-learnharness.sh"
 require_runner "LearnHarness backup" "${script_dir}/backup-learnharness.sh"
 
@@ -32,6 +33,7 @@ readonly units=(
     gigachad-bot-omp-web-host.service
     gigachad-bot-omp-web-gate.service
     gigachad-bot-factory.service
+    gigachad-bot-preview-gate.service
     gigachad-bot-litellm-proxy.service
     gigachad-bot-learnharness.service
     gigachad-bot-learnharness-gate.service

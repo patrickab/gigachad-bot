@@ -31,7 +31,8 @@ class RequestIdentity:
     has_host_access: bool = False
 
 
-def _development_login() -> str | None:
+def development_login() -> str | None:
+    """The login every local request acts as, None outside a development checkout."""
     return os.environ.get("GIGACHAD_DEV_USER") if is_development() else None
 
 
@@ -48,7 +49,7 @@ def is_host_capability_granted(capabilities_header: str | None) -> bool:
 
 def has_host_access(login: str, capabilities_header: str | None) -> bool:
     """The local dev login always acts as the host user, tailnet logins only with the granted capability."""
-    return login == _development_login() or is_host_capability_granted(capabilities_header)
+    return login == development_login() or is_host_capability_granted(capabilities_header)
 
 
 def get_request_identity(
@@ -57,7 +58,7 @@ def get_request_identity(
     device_id: str | None = Header(default=None, alias="X-Device-Id"),
 ) -> RequestIdentity:
     """Resolve a proxy-injected Tailscale login to one database user."""
-    login = tailscale_login or _development_login()
+    login = tailscale_login or development_login()
     if not login:
         raise HTTPException(status_code=401, detail="Tailscale identity is required")
     # EventSource cannot send headers, so a device id is optional: it only labels
