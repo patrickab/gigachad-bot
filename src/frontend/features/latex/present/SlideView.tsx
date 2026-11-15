@@ -25,8 +25,13 @@ export function SlideView({ pageNumber, aspects, pdf }: { pageNumber: number; as
   const pageAspect = aspects[pageNumber - 1] ?? FALLBACK_ASPECT
   const shownWidth = Math.floor(Math.min(width, height / pageAspect))
 
-  // The keyboard goes to the shown applet, and back to the deck on a slide without one
+  const tellFramesWhetherShown = () => {
+    for (const { page, url } of embeds) framesRef.current.get(frameKey(page, url))?.contentWindow?.postMessage({ type: "deck-shown", shown: page === pageNumber }, "*")
+  }
+
+  // A hidden applet pauses. The keyboard goes to the shown applet, and back to the deck on a slide without one
   useEffect(() => {
+    tellFramesWhetherShown()
     const frame = shownFrame()
     if (frame) frame.focus()
     else if (document.activeElement instanceof HTMLIFrameElement) document.activeElement.blur()
@@ -59,7 +64,10 @@ export function SlideView({ pageNumber, aspects, pdf }: { pageNumber: number; as
           src={url}
           title="Slide applet"
           tabIndex={page === pageNumber ? 0 : -1}
-          onLoad={() => shownFrame()?.focus()}
+          onLoad={() => {
+            tellFramesWhetherShown()
+            shownFrame()?.focus()
+          }}
           className={cn("absolute border-0", page === pageNumber ? "pointer-events-auto" : "invisible")}
           style={{ left: `${100 * left}%`, top: `${100 * top}%`, width: `${100 * width}%`, height: `${100 * height}%` }}
         />)}
