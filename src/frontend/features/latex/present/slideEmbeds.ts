@@ -27,22 +27,28 @@ export function slideEmbeds(annotations: LinkAnnotation[], view: number[]): Slid
   })
 }
 
-/** The embeds of page `pageNumber`, none without `pdf` or while they load. */
-export function usePageEmbeds(pdf: PdfDocument | undefined, pageNumber: number): SlideEmbed[] {
-  const [loaded, setLoaded] = useState<{ pageNumber: number; embeds: SlideEmbed[] } | null>(null)
+/** A deck's embeds with the page each one sits on. */
+export type DeckEmbed = SlideEmbed & { page: number }
+
+/** Every embed of the deck in page order, none without `pdf` or while they load. */
+export function useDeckEmbeds(pdf: PdfDocument | undefined): DeckEmbed[] {
+  const [loaded, setLoaded] = useState<{ pdf: PdfDocument; embeds: DeckEmbed[] } | null>(null)
   useEffect(() => {
     if (!pdf) return
     let current = true
-    pdf.getPage(pageNumber)
-      .then(async (page) => slideEmbeds(await page.getAnnotations(), page.view), () => [])
-      .then((embeds) => {
-        if (current) setLoaded({ pageNumber, embeds })
+    const pageEmbeds = async (pageNumber: number): Promise<DeckEmbed[]> => {
+      const page = await pdf.getPage(pageNumber)
+      return slideEmbeds(await page.getAnnotations(), page.view).map((embed) => ({ ...embed, page: pageNumber }))
+    }
+    Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pageEmbeds(index + 1).catch(() => [])))
+      .then((pages) => {
+        if (current) setLoaded({ pdf, embeds: pages.flat() })
       })
     return () => {
       current = false
     }
-  }, [pdf, pageNumber])
-  return pdf && loaded?.pageNumber === pageNumber ? loaded.embeds : []
+  }, [pdf])
+  return pdf && loaded?.pdf === pdf ? loaded.embeds : []
 }
 
 /** The key an embedded applet hands back to the deck with `postMessage({ type: "deck-key", key })`, null for any other message. */
