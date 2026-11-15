@@ -1,10 +1,9 @@
 import { useEffect, useEffectEvent, useMemo } from "react";
-import type { ExtensionUiDialogRequest } from "@/hooks/useAgentSession-stream";
+import type { UiDialogRequest, UiDialogValue } from "@/lib/types";
 import type { SelectRequest } from "@gigachad/chat-ui/protocol";
 import { onShellMessage, postToShell } from "./channel";
 
-type SelectDialog = Extract<ExtensionUiDialogRequest, { method: "select" }>;
-type SelectResponse = { value: string } | { cancelled: true };
+type SelectDialog = Extract<UiDialogRequest, { method: "select" }>;
 
 /**
  * Hand the session's pending extension `select` to the shell's finder, answer it with the shell's pick.
@@ -15,13 +14,13 @@ type SelectResponse = { value: string } | { cancelled: true };
 export function useShellSelect(
   embedded: boolean,
   sessionId: string | null,
-  dialog: ExtensionUiDialogRequest | null,
-  respond: (request: SelectDialog, response: SelectResponse) => void,
+  dialog: UiDialogRequest | null,
+  respond: (request: UiDialogRequest, value: UiDialogValue | undefined) => unknown,
 ): boolean {
   const select = embedded && dialog?.method === "select" ? dialog : null;
-  const requestId = select?.id ?? null;
+  const requestId = select ? String(select.id) : null;
   const request = useMemo<SelectRequest | null>(
-    () => (select ? { id: select.id, title: select.title, options: select.options } : null),
+    () => (select ? { id: String(select.id), title: select.args[0], options: select.args[1].map((item) => (typeof item === "string" ? item : item.label)) } : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one request per id
     [requestId],
   );
@@ -33,8 +32,8 @@ export function useShellSelect(
   }, [embedded, sessionId, request]);
 
   const answer = useEffectEvent((answeredSessionId: string | null, id: string, value: string | null) => {
-    if (!select || answeredSessionId !== sessionId || id !== select.id) return;
-    respond(select, value === null ? { cancelled: true } : { value });
+    if (!select || answeredSessionId !== sessionId || id !== String(select.id)) return;
+    void respond(select, value ?? undefined);
   });
   useEffect(() => {
     if (!embedded) return;

@@ -229,7 +229,7 @@ fi
 # omp-web runs its own omp build (`ompweb-omp`, runner/): a source checkout never downloads it, without it no model
 # lists and no session starts. Built once per runner tree (upstream pins the omp packages in runner/omp-build.json).
 # The running host daemon keeps its old build until it is restarted.
-runner_tree="$(git rev-parse HEAD:runner 2>/dev/null || true)"
+runner_tree="$(git rev-parse --verify --quiet HEAD:runner || true)"
 if [[ -n $runner_tree && "$(cat runner/release/gigachad-runner-tree 2>/dev/null || true)" != "$runner_tree" ]]; then
     printf "Building omp-web's omp runner\n"
     (
