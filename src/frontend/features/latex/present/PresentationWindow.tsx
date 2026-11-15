@@ -9,6 +9,7 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { cn } from "@/lib/utils"
 import type { PresentParams } from "./presentParams"
 import { PresenterView } from "./PresenterView"
+import { deckKey } from "./slideEmbeds"
 import { FALLBACK_ASPECT, SlideView } from "./SlideView"
 import { useAudienceWindow } from "./useAudienceWindow"
 import { useSlidePosition } from "./useSlidePosition"
@@ -65,6 +66,12 @@ export function PresentationWindow({ pdfUrl, role, channel }: PresentParams) {
     handler()
   })
 
+  // An embedded applet holds the keyboard and hands back the keys it does not use
+  useEventListener("window", "message", (event) => {
+    const key = deckKey(event.data)
+    if (key !== null) keyHandlers[key]?.()
+  })
+
   const load = async (pdf: PdfDocument) => setDeck({ pdf, aspects: await readPageAspects(pdf, FALLBACK_ASPECT) })
 
   return <Document
@@ -76,7 +83,7 @@ export function PresentationWindow({ pdfUrl, role, channel }: PresentParams) {
   >
     {deck && (role === "audience"
       ? <main aria-label="Slide" className="h-full" onClick={enterFullscreen}>
-        <SlideView pageNumber={page} aspects={deck.aspects} />
+        <SlideView pageNumber={page} aspects={deck.aspects} pdf={deck.pdf} />
       </main>
       : <PresenterView pdf={deck.pdf} aspects={deck.aspects} page={page} timerResets={timerResets} audience={audience} />)}
   </Document>

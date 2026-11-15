@@ -17,6 +17,7 @@ vi.mock("react-pdf", async () => {
     numPages: 3,
     getPage: async (pageNumber: number) => ({
       getViewport: () => ({ width: 160, height: 90 }),
+      view: [0, 0, 160, 90],
       getAnnotations: async () => deck.annotations.get(pageNumber) ?? [],
     }),
   }
@@ -111,6 +112,29 @@ describe("PresentationWindow", () => {
     await waitFor(() => expect(notes.textContent).toBe(""))
     expect(shownPages(screen.getByRole("region", { name: "Next slide" }))).toEqual([])
     expect(screen.getByRole("region", { name: "Next slide" }).textContent).toBe("End")
+  })
+
+  it("covers a slide's embed links with live frames on the current slide only, and takes the keys a frame hands back", async () => {
+    deck.annotations.set(2, [
+      { subtype: "Link", url: "https://applets.example/plasma?embed=1", rect: [40, 9, 120, 54] },
+      { subtype: "Link", url: "https://arxiv.org/abs/2605.15284", rect: [0, 0, 10, 10] },
+    ])
+    render(<PresentationWindow pdfUrl="/deck.pdf" role="presenter" channel={freshChannel()} />)
+    const current = await screen.findByRole("region", { name: "Current slide" })
+    await waitFor(() => expect(shownPages(screen.getByRole("region", { name: "Next slide" }))).toEqual([2]))
+    expect(document.querySelectorAll("iframe")).toHaveLength(0)
+
+    press("ArrowRight")
+    const frame = await within(current).findByTitle("Slide applet") as HTMLIFrameElement
+    expect(document.querySelectorAll("iframe")).toHaveLength(1)
+    expect(frame.src).toBe("https://applets.example/plasma?embed=1")
+    expect(frame.style).toMatchObject({ left: "25%", top: "40%", width: "50%", height: "50%" })
+
+    fireEvent(window, new MessageEvent("message", { data: { type: "deck-key", key: "ArrowRight" } }))
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeTruthy())
+    await waitFor(() => expect(document.querySelectorAll("iframe")).toHaveLength(0))
+    fireEvent(window, new MessageEvent("message", { data: { type: "other", key: "ArrowLeft" } }))
+    expect(screen.getByText("3 / 3")).toBeTruthy()
   })
 
   it("opens the audience window on the presenter's channel by button and by A, then hides the button", async () => {

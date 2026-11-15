@@ -54,7 +54,7 @@ export function PresenterView({ pdf, aspects, page, timerResets, audience }: { p
   return <div className="flex h-full flex-col gap-4 p-6">
     <div className="flex min-h-0 flex-1 gap-6">
       <section aria-label="Current slide" className="min-w-0 flex-[3]">
-        <SlideView pageNumber={page} aspects={aspects} />
+        <SlideView pageNumber={page} aspects={aspects} pdf={pdf} />
       </section>
       <div className="flex min-w-0 flex-[2] flex-col gap-6">
         <section aria-label="Next slide" className="h-2/5 shrink-0 opacity-80">
