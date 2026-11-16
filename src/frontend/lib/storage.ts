@@ -15,3 +15,12 @@ export function writeStorage(key: string, value: string): void {
     // Unavailable or over quota
   }
 }
+
+/** `localStorage.removeItem(key)`, silently skipped when storage is unavailable. */
+export function removeStorage(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Unavailable
+  }
+}

@@ -179,6 +179,15 @@ async def overview() -> OmpOverview:
     )
 
 
+async def session_cwd(session_id: str) -> str:
+    """Working directory of the session, LookupError when omp-web lists none with that id."""
+    sessions = (await _request("GET", "/api/sessions", _SessionList)).sessions
+    cwd = next((session.cwd for session in sessions if session.id == session_id), None)
+    if cwd is None:
+        raise LookupError(f"No omp session {session_id}")
+    return cwd
+
+
 async def archived_sessions() -> list[OmpArchivedSession]:
     return (await _request("GET", "/api/sessions/archive", _ArchiveList)).archives
 

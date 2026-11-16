@@ -40,6 +40,8 @@ export interface AttachmentActions {
 
 interface ChatContainerProps {
   chatId: string
+  /** Conversation the composer keeps its unsent text for, see `ChatInput`. */
+  draftKey?: string | null
   messages: Message[]
   /** The chat's saved history is still loading: its empty `messages` must not show the empty state. */
   historyLoading?: boolean
@@ -68,6 +70,7 @@ interface ChatContainerProps {
 
 export function ChatContainer({
   chatId,
+  draftKey,
   messages,
   historyLoading = false,
   isStreaming,
@@ -201,6 +204,7 @@ export function ChatContainer({
             <ChatInput
               ref={chatInputRef}
               chatId={chatId}
+              draftKey={draftKey}
               onSend={handleSend}
               disabled={isStreaming || extracting}
               extracting={extracting}

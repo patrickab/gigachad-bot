@@ -1,11 +1,12 @@
 "use client"
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType, type ReactNode } from "react"
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type ElementType, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { Mic, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeechInput } from "@/hooks/useSpeechInput"
 import type { Attachment } from "@/lib/domain/types"
+import { useElementSize } from "@/hooks/useElementSize"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, InactiveAttachments, type ContextAttachment } from "./AttachmentChip"
 import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
@@ -13,9 +14,12 @@ import { COMPOSER_ICON_BUTTON } from "@/components/ui/Composer"
 import { AttachMenu, SendButton, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
 import { useDraftAttachments } from "./useDraftAttachments"
+import { useComposerDraft } from "./useComposerDraft"
 
 interface ChatInputProps {
   chatId: string
+  /** Conversation the unsent text is kept for across closing the tab (`useComposerDraft`), none keeps it in memory only. */
+  draftKey?: string | null
   onSend: (text: string, attachments: Attachment[]) => void
   disabled?: boolean
   extracting?: boolean
@@ -39,6 +43,8 @@ interface ChatInputProps {
   attachMenuItems?: AttachMenuItem[]
   /** Extra controls of the action row after the "+" menu, e.g. the folder an omp session starts in. */
   leading?: ReactNode
+  /** Takes pasted videos (omp tabs store them for an `@` mention), without it a pasted video is ignored. */
+  onPasteVideo?: (video: File) => void
 }
 
 /** Attachments already in the chat with their context actions. */
@@ -66,6 +72,7 @@ export interface ChatInputHandle {
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
+  draftKey = null,
   onSend,
   disabled,
   extracting,
@@ -81,41 +88,38 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   context,
   attachMenuItems = [],
   leading,
+  onPasteVideo,
 }, ref) {
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
-  const [text, setText] = useState("")
+  const [text, setText] = useComposerDraft(draftKey)
   const [drawing, setDrawing] = useState<DrawingMode | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const adjustHeight = useCallback(() => {
+  // Fit every text and width change: a restored draft, a panel springing open from zero width. Reset first so scrollHeight can shrink
+  const { width: textareaWidth } = useElementSize(textareaRef)
+  useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    // Reset first so scrollHeight can shrink
     el.style.height = "0"
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [])
-  const adjustHeightNextFrame = useCallback(() => { requestAnimationFrame(() => adjustHeight()) }, [adjustHeight])
+  }, [text, textareaWidth])
 
-  const replaceText = useCallback((next: string) => {
-    setText(next)
-    adjustHeightNextFrame()
-  }, [adjustHeightNextFrame])
-  const completions = useCompletions(complete, textareaRef, replaceText)
+  const completions = useCompletions(complete, textareaRef, setText)
   const focusDraft = useCallback(() => textareaRef.current?.focus(), [])
-  const clearDraft = useCallback(() => replaceText(""), [replaceText])
+  const clearDraft = useCallback(() => setText(""), [setText])
   const draftPicker = useDraftPicker(picker, text, focusDraft, clearDraft)
-  const { isListening, toggleListening } = useSpeechInput(text, setText, adjustHeightNextFrame)
+  const { isListening, toggleListening } = useSpeechInput(text, setText)
 
   useImperativeHandle(ref, () => ({
     addAttachment: drafts.add,
     updateText: (update) => {
       setText(update)
-      requestAnimationFrame(() => { adjustHeight(); textareaRef.current?.focus() })
+      requestAnimationFrame(() => textareaRef.current?.focus())
     },
     addFiles: (files) => { for (const file of files) upload(file, file.name) },
     focus: () => textareaRef.current?.focus(),
-  }), [adjustHeight, drafts.add, upload])
+  }), [drafts.add, setText, upload])
 
   const handleSubmit = () => {
     const trimmed = text.trim()
@@ -124,7 +128,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onSend(trimmed || "", attachments)
     setText("")
     drafts.clear()
-    adjustHeightNextFrame()
   }
 
   // Escape layers (completion menu, dialogs) take Escape first, a free Escape leaves the draft
@@ -134,8 +137,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (e.key === "Enter" && !e.shiftKey && !submitBlocked) { e.preventDefault(); handleSubmit() }
   }
 
-  // Only the first pasted image is attached
+  // Videos go to `onPasteVideo`, only the first pasted image is attached
   const handlePaste = (e: React.ClipboardEvent) => {
+    const videos = onPasteVideo ? [...e.clipboardData.files].filter((file) => file.type.startsWith("video/")) : []
+    if (videos.length > 0) {
+      e.preventDefault()
+      for (const video of videos) onPasteVideo?.(video)
+      return
+    }
     for (const item of e.clipboardData.items) {
       if (item.type.startsWith("image/")) {
         e.preventDefault()
@@ -210,7 +219,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             ref={textareaRef}
             rows={1}
             value={text}
-            onChange={(e) => { setText(e.target.value); adjustHeight(); if (!picker) completions.request(e.target.value, e.target.selectionStart) }}
+            onChange={(e) => { setText(e.target.value); if (!picker) completions.request(e.target.value, e.target.selectionStart) }}
             onKeyDown={handleKeyDown}
             onBlur={completions.close}
             onPaste={handlePaste}

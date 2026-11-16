@@ -1,16 +1,20 @@
 """omp-web answers become gigachad's snake_case contract, and a changed shape or refusal is reported, not hidden."""
 
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 import httpx
 import pytest
 
 from backend.identity import get_request_identity
+from backend.routes.deps import get_disk_files, get_file_roots
 from backend.routes.omp import router
 from lib import omp_web
+from lib.disk_files import DiskFiles
 from lib.upstream import UpstreamContractError
-from tests.conftest import request_identity, route_client
+from tests.conftest import mounted_roots, request_identity, route_client
+from tests.fakes import RecordingScope
 
 # Trimmed from a live omp-web 0.5.2 (patrickab fork) response.
 SESSIONS = {
@@ -159,3 +163,42 @@ def test_session_ids_outside_the_uuid_alphabet_never_reach_omp_web(monkeypatch, 
     _serve(monkeypatch, {})
     assert client.get("/api/omp/sessions/..%2Fprojects/system-prompt").status_code == 404
     assert client.get("/api/omp/sessions/a.b/system-prompt").status_code == 422
+
+
+def _paste_client(mount: Path) -> TestClient:
+    roots = mounted_roots(mount)
+    return route_client(router, overrides={
+        get_request_identity: request_identity(True), get_file_roots: roots, get_disk_files: DiskFiles(roots, RecordingScope()),
+    })
+
+
+def _session_in(cwd: Path) -> dict:
+    return {"sessions": [{**SESSIONS["sessions"][0], "cwd": str(cwd)}]}
+
+
+def test_a_pasted_video_lands_in_the_sessions_folder_under_a_server_made_name(monkeypatch, tmp_path):
+    _serve(monkeypatch, {"GET /api/sessions": (200, _session_in(tmp_path))})
+    session_id = SESSIONS["sessions"][0]["id"]
+
+    video = {"file": ("../my clip!.MP4", b"video", "video/mp4")}
+    response = _paste_client(tmp_path).post(f"/api/omp/pastes?session_id={session_id}", files=video)
+
+    mention = response.json()["mention"]
+    assert mention.startswith(".omp/pastes/") and mention.endswith("-my_clip_.mp4")
+    assert (tmp_path / mention).read_bytes() == b"video"
+
+
+def test_pastes_refuse_unknown_sessions_non_videos_and_symlinked_folders(monkeypatch, tmp_path):
+    workspace, elsewhere = tmp_path / "workspace", tmp_path / "elsewhere"
+    workspace.mkdir()
+    elsewhere.mkdir()
+    _serve(monkeypatch, {"GET /api/sessions": (200, _session_in(workspace))})
+    client = _paste_client(tmp_path)
+    video = {"file": ("clip.mp4", b"video", "video/mp4")}
+
+    assert client.post("/api/omp/pastes?session_id=nope", files=video).status_code == 404
+    assert client.post(f"/api/omp/pastes?cwd={workspace}", files={"file": ("notes.sh", b"rm -rf", "text/plain")}).status_code == 400
+    assert client.post("/api/omp/pastes?cwd=workspace", files=video).status_code == 400
+    (workspace / ".omp").symlink_to(elsewhere)
+    assert client.post(f"/api/omp/pastes?cwd={workspace}", files=video).status_code == 400
+    assert list(elsewhere.iterdir()) == []

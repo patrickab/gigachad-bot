@@ -78,6 +78,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const chatBody = (
     <ChatContainer
       chatId={chatId}
+      draftKey={tab.historyFile && `chat:${projectSlug ?? ""}:${tab.historyFile}`}
       onChatColumnChange={setChatColumn}
       messages={chat.messages}
       historyLoading={historyLoading}

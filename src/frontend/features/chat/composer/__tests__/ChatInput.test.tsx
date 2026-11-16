@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { File as FileIcon } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
@@ -166,5 +166,51 @@ describe("ChatInput while streaming", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }))
     expect(onSend).toHaveBeenLastCalledWith("and this", [])
     expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument()
+  })
+})
+
+describe("ChatInput draft", () => {
+  beforeEach(() => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value) },
+      removeItem: (key: string) => { stored.delete(key) },
+    })
+  })
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  const draftOf = () => screen.getByRole("textbox") as HTMLTextAreaElement
+
+  it("keeps unsent text of its conversation across closing, and drops it once sent", () => {
+    const onSend = vi.fn()
+    const first = render(<ChatInput chatId="c1" draftKey="chat:a" onSend={onSend} />)
+    fireEvent.change(draftOf(), { target: { value: "half a thought" } })
+    first.unmount()
+
+    render(<ChatInput chatId="c2" draftKey="chat:b" onSend={onSend} />)
+    expect(draftOf().value).toBe("")
+    cleanup()
+
+    render(<ChatInput chatId="c3" draftKey="chat:a" onSend={onSend} />)
+    expect(draftOf().value).toBe("half a thought")
+    fireEvent.keyDown(draftOf(), { key: "Enter" })
+    expect(onSend).toHaveBeenCalledWith("half a thought", [])
+    cleanup()
+
+    render(<ChatInput chatId="c4" draftKey="chat:a" onSend={onSend} />)
+    expect(draftOf().value).toBe("")
+  })
+})
+
+describe("ChatInput video paste", () => {
+  afterEach(cleanup)
+
+  it("hands pasted videos to onPasteVideo", () => {
+    const onPasteVideo = vi.fn()
+    render(<ChatInput chatId="c1" onSend={() => {}} onPasteVideo={onPasteVideo} />)
+    const video = new File(["v"], "clip.mp4", { type: "video/mp4" })
+    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { files: [video], items: [] } })
+    expect(onPasteVideo).toHaveBeenCalledWith(video)
   })
 })

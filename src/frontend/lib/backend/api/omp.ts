@@ -1,5 +1,6 @@
 // omp session routes.
-import { post, request, requestVoid } from "./http"
+import { toQuery } from "../urls"
+import { fileForm, post, request, requestVoid } from "./http"
 import type { Message, OmpArchivedSession, OmpOverview, OmpSystemPrompt } from "@/lib/domain/types"
 
 export async function fetchOmpOverview(signal?: AbortSignal): Promise<OmpOverview> {
@@ -33,4 +34,11 @@ export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystem
 /** An omp session's active branch as a chat history: user and assistant text, no thinking or tool calls. */
 export async function fetchOmpSessionHistory(sessionId: string): Promise<Pick<Message, "role" | "content">[]> {
   return request<Pick<Message, "role" | "content">[]>(`/omp/sessions/${encodeURIComponent(sessionId)}/history`)
+}
+
+/** Store `video` in `.omp/pastes/` of an omp session's folder (`cwd` for a session not started yet), resolves to its `@` mention path. */
+export async function pasteOmpVideo(video: File, folder: { sessionId: string } | { cwd: string }): Promise<string> {
+  const query = toQuery("sessionId" in folder ? { session_id: folder.sessionId } : { cwd: folder.cwd })
+  const data = await request<{ mention: string }>(`/omp/pastes${query}`, { method: "POST", body: fileForm(video) })
+  return data.mention
 }

@@ -9,7 +9,7 @@ import type { CompleteDraft, ComposerCompletion, DraftPicker } from "@/features/
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
-import { parseFiles } from "@/lib/backend/api"
+import { parseFiles, pasteOmpVideo } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -194,10 +194,23 @@ function useComposerFor(view: OmpView) {
   }
 }
 
+/** Conversation `view` keeps its unsent composer text for: the session, or a new session's folder. */
+function draftKeyOf(view: OmpView): string | null {
+  if (view.kind === "session") return `omp:${view.sessionId}`
+  return view.kind === "new" ? `omp-new:${view.cwd}` : null
+}
+
+/** Folder a video pasted in `view` is stored in: the session's, or a new session's `cwd`. None for settings. */
+function pasteFolderOf(view: OmpView): Parameters<typeof pasteOmpVideo>[1] | null {
+  if (view.kind === "session") return { sessionId: view.sessionId }
+  return view.kind === "new" ? { cwd: view.cwd } : null
+}
+
 /**
  * gigachad's composer for an omp tab. omp-web's own one stays hidden in the frame and submits what this one sends.
  *
  * - Images go as omp images, documents as text the way gigachad chats send them
+ * - A pasted video is stored in the session's `.omp/pastes/` and mentioned as `@<path>`, omp attaches its frames and metadata
  * - Text and images omp hands back land in this composer
  * - `/skill:` drills into the skills in the same menu, a pick becomes the draft `/skill:<name> `
  * - `shellCommands` (`/memorize`) share the `/` menu, the shell runs them instead of sending them
@@ -237,6 +250,12 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
   const submit = async (text: string, attachments: Attachment[]) => {
     if (!(await shellCommands.run(text.trim()))) await send(text, attachments)
   }
+  const pasteFolder = pasteFolderOf(view)
+  const { run: pasteVideo, pending: pasting, error: pasteError } = useAsyncAction(async (video: File) => {
+    if (!pasteFolder) return
+    const mention = await pasteOmpVideo(video, pasteFolder)
+    inputRef.current?.updateText((current) => `${current}${/(^|\s)$/.test(current) ? "" : " "}@${mention} `)
+  }, "Could not paste this video")
   useComposerLaunch(launch, state !== null && view.kind === "new", onLaunched, (text, attachments) => { void submit(text, attachments) })
 
   return (
@@ -244,10 +263,11 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
       <ChatInput
         ref={inputRef}
         chatId={chatId}
+        draftKey={draftKeyOf(view)}
         slug={slug}
         onSend={(text, attachments) => { void submit(text, attachments) }}
         disabled={!state || preparing}
-        extracting={preparing}
+        extracting={preparing || pasting}
         isStreaming={state?.streaming ?? false}
         sendWhileStreaming
         onCancel={() => sendToComposer({ type: "composer-abort", sessionId })}
@@ -256,8 +276,9 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
         complete={complete}
         picker={picker}
         hint={shellHint}
+        onPasteVideo={pasteFolder ? (video) => { void pasteVideo(video) } : undefined}
       />
-      <ErrorText className="mx-auto mt-1 max-w-2xl px-1">{error}</ErrorText>
+      <ErrorText className="mx-auto mt-1 max-w-2xl px-1">{error || pasteError}</ErrorText>
     </div>
   )
 }
