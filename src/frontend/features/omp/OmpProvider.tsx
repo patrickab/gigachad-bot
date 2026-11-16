@@ -352,7 +352,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
           src={frameUrl(ompWebUrl, loadedView)}
           title="omp"
           allow="clipboard-read; clipboard-write"
-          className={`fixed border-0 ${insets.backdrop === "surface" ? "bg-surface" : "bg-paper"} ${insets.backdrop === "surface" && !showsModal ? "rounded-b-2xl" : ""} ${showsModal ? "z-[91]" : "z-0"}`}
+          // outline-none: focus inside the frame shows on omp-web's own controls, a ring around the whole frame is noise
+          className={`fixed border-0 outline-none ${insets.backdrop === "surface" ? "bg-surface" : "bg-paper"} ${insets.backdrop === "surface" && !showsModal ? "rounded-b-2xl" : ""} ${showsModal ? "z-[91]" : "z-0"}`}
           // Position and size come from useFrameOverSlot, React never writes them. Hidden by opacity, not visibility:
           // Chrome stops rendering a visibility-hidden cross-origin frame, and omp-web then never reports ready
           inert={!visible}
