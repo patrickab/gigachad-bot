@@ -1,9 +1,12 @@
 "use client"
 
-import { ChevronDown, Plus } from "lucide-react"
+import { useState } from "react"
+import { ChevronDown, Plus, Trash2 } from "lucide-react"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { MenuPopover } from "@/components/ui/MenuPopover"
+import { deleteOmpSession } from "@/lib/backend/api"
 import type { OmpSession, OmpView } from "@/lib/domain/types"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
 import { withoutFileLead } from "./fileLead"
 import { useOmp } from "./OmpProvider"
 import { sessionTitle } from "./sessions"
@@ -23,7 +26,8 @@ function sessionsOf(sessionIds: readonly string[], known: readonly OmpSession[])
 /**
  * Chat panel header of a file: the shown session with a menu of every session of the file, and a button starting a new one.
  *
- * - The menu lists only sessions omp-web still has, an archived one drops out
+ * - The menu lists only sessions omp-web still has, an archived or deleted one drops out
+ * - The trash button deletes a session for good, deleting the shown one starts a new session
  */
 export function ChatSessionMenu({ view, sessionIds, onSelect, onReset }: {
   view: OmpView | null
@@ -31,9 +35,20 @@ export function ChatSessionMenu({ view, sessionIds, onSelect, onReset }: {
   onSelect: (sessionId: string) => void
   onReset: () => void
 }) {
-  const { overview } = useOmp()
+  const { overview, refreshOverview } = useOmp()
+  const [error, setError] = useState<string | null>(null)
   const sessions = sessionsOf(sessionIds, overview?.sessions ?? [])
   const activeId = view?.kind === "session" ? view.sessionId : null
+  const remove = async (sessionId: string) => {
+    try {
+      await deleteOmpSession(sessionId)
+      setError(null)
+      refreshOverview()
+      if (sessionId === activeId) onReset()
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not delete the session"))
+    }
+  }
   const active = sessions.find((session) => session.id === activeId)
   const label = active ? titleOf(active) : view?.kind === "new" ? "New session" : "Chat"
 
@@ -58,20 +73,29 @@ export function ChatSessionMenu({ view, sessionIds, onSelect, onReset }: {
         {(open, close) => open && (
           <ul className="absolute left-0 top-full z-50 mt-1 flex max-h-[60vh] w-72 max-w-[80vw] flex-col overflow-y-auto rounded-2xl border border-divider/50 bg-surface p-1 text-xs shadow-[var(--shadow-lg)]">
             {sessions.map((session) => (
-              <li key={session.id}>
+              <li key={session.id} className="group flex items-center rounded-xl transition-colors hover:bg-hover">
                 <button
                   type="button"
                   aria-current={session.id === activeId ? "true" : undefined}
                   onClick={() => { close(); if (session.id !== activeId) onSelect(session.id) }}
                   className={cn(
-                    "w-full truncate rounded-xl px-2.5 py-1.5 text-left transition-colors hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
+                    "min-w-0 flex-1 truncate rounded-xl px-2.5 py-1.5 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
                     session.id === activeId ? "text-ink" : "text-ink-subtle",
                   )}
                 >
                   {titleOf(session)}
                 </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${titleOf(session)}`}
+                  onClick={() => void remove(session.id)}
+                  className={cn(ICON_BUTTON, "mr-1 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+                >
+                  <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                </button>
               </li>
             ))}
+            {error && <ErrorText className="px-2.5 py-1">{error}</ErrorText>}
           </ul>
         )}
       </MenuPopover>
