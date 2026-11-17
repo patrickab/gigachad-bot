@@ -52,8 +52,6 @@ export interface WorkbenchProps extends WorkbenchChatProps {
   path: string
   /** The directory a new chat session starts in. */
   cwd: string
-  /** Where the omp instructions of a LaTeX project live when `cwd` is its mount, the first message points the session there. */
-  guide?: string | null
   /** The project every file of the workbench belongs to: its folder's chat is shared by them all. Without one the chat belongs to the shown file. */
   project?: WorkbenchProject
   /** Neovim shows another file than `path` (`:bnext`), `path` should follow. Also asks to go back to the shown file when another one could not open. */
@@ -86,9 +84,9 @@ export interface WorkbenchProps extends WorkbenchChatProps {
  * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots, `center` into its `center` slot while Neovim is enabled
  * - One notice in the status says why the latest thing beside the editor did not work, the owner's and the editor's alike
  */
-export function Workbench({ path, cwd, guide, project, onPathChange, onClose, renderPane, status, center, notices, onSaved, quoteLanguage, onForwardSearch, ...chatProps }: WorkbenchProps) {
+export function Workbench({ path, cwd, project, onPathChange, onClose, renderPane, status, center, notices, onSaved, quoteLanguage, onForwardSearch, ...chatProps }: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  const chat = useWorkbenchChat(project?.folder ?? path, cwd, project ? projectLead(project.folder, project.root, cwd, guide) : fileLead(path, cwd), chatProps)
+  const chat = useWorkbenchChat(project?.folder ?? path, cwd, project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd), chatProps)
   const [view, setView, show] = useWorkbenchView()
   const { notice, report } = notices
 

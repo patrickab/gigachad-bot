@@ -1,7 +1,8 @@
 """Disk layout of workbench documents: one omp session directory per kind, one folder per document inside it.
 
 - `<root>/<kind>/.omp/` holds the kind's omp prompt and config, mirrored from `omp/` on every backend start
-- `<root>/latex/.templates/<set>/` holds every LaTeX template set without its `example.pdf` and `previews/`, mirrored on every backend start too
+- `<root>/latex/.omp/templates/<set>/` holds every LaTeX template set without its `example.pdf` and `previews/`, mirrored on every backend start too
+- A mounted LaTeX project folder gets the same `.omp/` (`mounted_latex_session`), with a config that keeps its repository's `AGENTS.md`
 - `<root>/<kind>/<slug>/<stem>/<stem>.<ext>` is a document of project `slug`
 - PDFs are only read, never moved: `pdf` sessions run in `<root>/pdf` and read the PDF where it is
 """
@@ -16,7 +17,8 @@ import shutil
 from typing import TYPE_CHECKING, Literal, get_args
 
 import config
-from lib import latex_templates
+from lib import latex, latex_templates
+from lib.git import GitError, exclude_locally, repository_top
 from lib.naming import segment
 
 if TYPE_CHECKING:
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
 Kind = Literal["latex", "markdown", "pdf"]
 KINDS: tuple[Kind, ...] = get_args(Kind)
 OMP_DIRECTORY = ".omp"
-TEMPLATE_DIRECTORY = ".templates"
+TEMPLATE_DIRECTORY = "templates"
 # `.tex` first, it is the suffix of a new latex document. The others are the supporting files of a LaTeX project.
 _SUFFIXES: dict[str, Kind] = {".tex": "latex", ".bib": "latex", ".sty": "latex", ".cls": "latex", ".md": "markdown", ".pdf": "pdf"}
 _PROMPTS = config.TEMPLATES / "omp"
@@ -72,23 +74,49 @@ def _write_changed(path: Path, content: bytes) -> None:
 
 
 def mirror_omp(root: Path) -> None:
-    """Make `.omp/SYSTEM.md` and `.omp/config.yml` of every kind directory equal the committed prompt files, `latex/.templates/` the template sets.
+    """Make `.omp/SYSTEM.md` and `.omp/config.yml` of every kind directory equal the committed prompt files, `latex/.omp/templates/` the template sets.
 
     - A file already equal is left untouched, so its mtime stays and file sync uploads nothing
     - A kind that fails is logged and skipped, the others are still mirrored
     """
     for kind in KINDS:
         try:
-            directory = kind_directory(root, kind) / OMP_DIRECTORY
-            directory.mkdir(parents=True, exist_ok=True)
-            _write_changed(directory / "SYSTEM.md", (_PROMPTS / f"{kind}.md").read_bytes())
-            _write_changed(directory / "config.yml", (_PROMPTS / "config.yml").read_bytes())
+            _mirror_prompt(kind_directory(root, kind) / OMP_DIRECTORY, kind, "config.yml")
         except OSError:
             log.exception("Could not mirror the %s omp prompt into %s", kind, root)
     try:
-        _mirror_template_sets(kind_directory(root, "latex") / TEMPLATE_DIRECTORY)
+        _mirror_template_sets(kind_directory(root, "latex") / OMP_DIRECTORY / TEMPLATE_DIRECTORY)
     except OSError:
         log.exception("Could not mirror the LaTeX template sets into %s", root)
+
+
+def _mirror_prompt(directory: Path, kind: Kind, config_name: str) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    _write_changed(directory / "SYSTEM.md", (_PROMPTS / f"{kind}.md").read_bytes())
+    _write_changed(directory / "config.yml", (_PROMPTS / config_name).read_bytes())
+
+
+def mounted_latex_session(path: Path, mount: Path) -> Path | None:
+    """The folder an omp session on the mounted LaTeX file *path* starts in: its project folder, given the LaTeX `.omp/`.
+
+    - omp then takes the LaTeX prompt instead of its coding prompt, `@` lists the project's files and the repository's `AGENTS.md` still loads
+    - The `.omp/` is ignored through the repository's `info/exclude`, so there is nothing to commit
+    - None when the folder is *mount* or a repository top, whose `.omp/` is the user's, or when writing fails (logged)
+    """
+    folder = latex.project_of(path, ceiling=mount).folder
+    top = repository_top(folder)
+    if folder in (mount, top):
+        return None
+    try:
+        directory = folder / OMP_DIRECTORY
+        _mirror_prompt(directory, "latex", "mounted.yml")
+        _mirror_template_sets(directory / TEMPLATE_DIRECTORY)
+        if top is not None:
+            exclude_locally(top, directory)
+    except (OSError, GitError):
+        log.exception("Could not give the LaTeX project %s its omp prompt", folder)
+        return None
+    return folder
 
 
 def _mirror_template_sets(directory: Path) -> None:

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 10
 
@@ -52,3 +52,23 @@ def git_ok(directory: Path, *args: str) -> bool:
     except GitError:
         return False
     return True
+
+
+def repository_top(directory: Path) -> Path | None:
+    """The top of the work tree holding *directory*, None outside one."""
+    try:
+        return Path(git_text(directory, "rev-parse", "--show-toplevel").strip())
+    except GitError:
+        return None
+
+
+def exclude_locally(top: Path, directory: Path) -> None:
+    """Ignore *directory* of the work tree at *top* through the repository's `info/exclude`, so no `.gitignore` needs committing."""
+    exclude = Path(git_text(top, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").strip())
+    entry = f"/{directory.relative_to(top).as_posix()}/"
+    existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    if entry in existing.splitlines():
+        return
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    separator = "" if not existing or existing.endswith("\n") else "\n"
+    exclude.write_text(f"{existing}{separator}{entry}\n", encoding="utf-8")

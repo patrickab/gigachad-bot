@@ -26,7 +26,7 @@ from lib.document_service import DocumentNameConflict, DocumentNotFound, Relocat
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
 from lib.storage_namespace import NOTE, PDFS, library_pdf
-from lib.workbench import Kind, document_folder, kind_directory, kind_of, new_folder, suffix_of
+from lib.workbench import Kind, document_folder, kind_directory, kind_of, mounted_latex_session, new_folder, suffix_of
 from lib.workbench.links import Link, SessionLinks
 
 router = APIRouter(prefix="/api/workbench", tags=["workbench"], dependencies=[host_access_only("Workbench")])
@@ -44,15 +44,11 @@ class FilePath(BaseModel):
 
 
 class PreparedFile(BaseModel):
-    """The file on disk, the omp session cwd of its kind and the kind.
-
-    `guide` is the kind's directory holding `.omp/SYSTEM.md` and the template sets, set only when `cwd` is a mount instead, whose session cannot read them there.
-    """
+    """The file on disk, the omp session cwd of its kind and the kind."""
 
     path: str
     cwd: str
     kind: Kind
-    guide: str | None = None
 
 
 class NewDocument(BaseModel):
@@ -123,19 +119,19 @@ def _kind(name: str) -> Kind:
     return kind
 
 
-def _prepared(path: Path | str, kind: Kind, mount: Path | None = None) -> PreparedFile:
-    guide = kind_directory(config.WORKBENCH, kind)
-    return PreparedFile(path=str(path), cwd=str(mount or guide), kind=kind, guide=str(guide) if mount else None)
+def _prepared(path: Path | str, kind: Kind, cwd: Path | None = None) -> PreparedFile:
+    return PreparedFile(path=str(path), cwd=str(cwd or kind_directory(config.WORKBENCH, kind)), kind=kind)
 
 
-def _mount_of_latex(path: Path, kind: Kind, roots: FileRoots) -> Path | None:
-    """The file root (or worktree) holding a LaTeX file, so the omp session starts in its project and `@` suggests its files."""
+def _mounted_latex_session(path: Path, kind: Kind, roots: FileRoots) -> Path | None:
+    """The project folder a mounted LaTeX file's session starts in (`mounted_latex_session`), None for other files."""
     if kind != "latex":
         return None
     try:
-        return roots.root_of(str(path))
+        mount = roots.root_of(str(path))
     except ValueError:
         return None
+    return mounted_latex_session(path, mount)
 
 
 def _pdf_on_disk(key: str, assets: AssetStore) -> Path:
@@ -159,7 +155,7 @@ def post_prepare(
 ) -> PreparedFile:
     """The disk file to open for `path`: an absolute file resolved in place, a stored project document moved into its workbench folder.
 
-    - A mounted LaTeX file opens its omp session in the mount it lives in, other kinds in their kind's directory
+    - A mounted LaTeX file opens its omp session in its project folder, given the LaTeX prompt there (`mounted_latex_session`). Otherwise a session starts in its kind's directory
     - A stored PDF is never moved, its library copy on disk is read where it is
     - Notes stay stored and open in the document editor, so their keys answer 400
     - A workbench folder the file roots cannot reach answers 403 and nothing moves
@@ -167,7 +163,7 @@ def post_prepare(
     if PurePosixPath(body.path).is_absolute():
         resolved = resolve_allowed(body.path, roots)
         kind = _kind(resolved.name)
-        return _prepared(resolved, kind, _mount_of_latex(resolved, kind, roots))
+        return _prepared(resolved, kind, _mounted_latex_session(resolved, kind, roots))
     with http_errors((InvalidStorageKey, 400, None)):
         key = validate_key(body.path)
     if under(key, NOTE):

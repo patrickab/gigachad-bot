@@ -7,8 +7,6 @@ import type { StoredImage } from "@/lib/domain/latex"
 export interface PreparedWorkbench {
   path: string
   cwd: string
-  /** The directory holding the omp instructions of the file's kind, when `cwd` is a mount instead. */
-  guide?: string | null
 }
 
 /** Get the workbench file *path* ready: a stored document moves to disk first, its new path comes back. */

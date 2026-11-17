@@ -340,7 +340,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               `-- package.json      Package-local dependencies and distribution contract
 |-- templates/                        Shipped sources read through `config.TEMPLATES` (bundled in frozen builds)
 |   |-- prompts/                      User-selectable seed prompts (`_order`, `_blocks/` fragments, e.g. `tutor.md`)
-|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md` and `config.yml` (source of truth)
+|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md`, `config.yml` and `mounted.yml` (mounted LaTeX projects) (source of truth)
 |   `-- latex/                        LaTeX template sets, rules in `templates/latex/AGENTS.md`
 |       |-- render.py                 Primitives -> `example.tex`/`example.pdf` -> preview PNGs
 |       |-- presentation/             Beamer set: theme `.sty`, `skeleton.tex`, `STYLE.md`, `primitives/<group>/`, generated example and previews

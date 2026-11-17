@@ -46,7 +46,7 @@ export function usePreparedWorkbench(path: string, onMoved: (path: string) => vo
   const [requestedPath, setRequestedPath] = useState(path)
   const [attempt, setAttempt] = useState(0)
   const session = sessionKey ?? path
-  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey || prepared.session === session) ? { path, cwd: prepared.cwd, guide: prepared.guide } : null
+  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey || prepared.session === session) ? { path, cwd: prepared.cwd } : null
   const ready = current !== null
   const reportMoved = useEffectEvent(onMoved)
 

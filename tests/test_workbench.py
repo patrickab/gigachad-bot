@@ -19,6 +19,7 @@ from lib import latex, latex_templates, workbench
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 from lib.disk_files import DiskFiles
+from lib.git import run_git
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
 from tests.conftest import PRESENTATION_SOURCE, mounted_roots, request_identity, route_client
@@ -110,7 +111,7 @@ def test_a_stored_pdf_is_read_from_its_library_copy_on_disk_and_never_moved(root
     client = workbench_client(projects, docs, mounted_roots(vault, root), assets=assets)
 
     prepared = client.post("/api/workbench/prepare", json={"path": "PDFs/paper.pdf"}).json()
-    assert prepared == {"path": str(documents / "PDFs" / "paper.pdf"), "cwd": str(root / "pdf"), "kind": "pdf", "guide": None}
+    assert prepared == {"path": str(documents / "PDFs" / "paper.pdf"), "cwd": str(root / "pdf"), "kind": "pdf"}
     assert (documents / "PDFs" / "paper.pdf").read_bytes() == b"%PDF-1"
     assert "PDFs/paper.pdf" in assets.assets
 
@@ -124,15 +125,39 @@ def test_a_stored_pdf_is_read_from_its_library_copy_on_disk_and_never_moved(root
 def test_a_mounted_pdf_is_read_in_place_and_new_pdfs_are_refused(client, vault, root):
     pdf = vault / "slides.pdf"
     pdf.write_bytes(b"%PDF-1")
-    assert client.post("/api/workbench/prepare", json={"path": str(pdf)}).json() == {"path": str(pdf), "cwd": str(root / "pdf"), "kind": "pdf", "guide": None}
+    assert client.post("/api/workbench/prepare", json={"path": str(pdf)}).json() == {"path": str(pdf), "cwd": str(root / "pdf"), "kind": "pdf"}
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "x.pdf"}).status_code == 400
 
 
-def test_a_mounted_tex_file_starts_its_omp_session_in_its_mount_and_names_where_its_instructions_are(client, vault, root):
-    tex = vault / "report" / "main.tex"
-    tex.parent.mkdir()
-    tex.write_text("x")
-    assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json() == {"path": str(tex), "cwd": str(vault), "kind": "latex", "guide": str(root / "latex")}
+def test_a_mounted_latex_project_gets_its_session_in_its_folder_with_the_latex_prompt_ignored_by_git(client, vault, template_sets):
+    run_git(vault, "init", "-q")
+    folder = vault / "report"
+    folder.mkdir()
+    tex = folder / "main.tex"
+    tex.write_text("\\documentclass{beamer}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
+
+    for _ in range(2):
+        assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json() == {"path": str(tex), "cwd": str(folder), "kind": "latex"}
+
+    omp = folder / ".omp"
+    assert (omp / "SYSTEM.md").read_bytes() == (config.TEMPLATES / "omp" / "latex.md").read_bytes()
+    assert (omp / "config.yml").read_bytes() == (config.TEMPLATES / "omp" / "mounted.yml").read_bytes()
+    assert (omp / "templates" / "demo" / "skeleton.tex").is_file()
+    assert (vault / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines().count("/report/.omp/") == 1
+    assert run_git(vault, "status", "--porcelain", "--untracked-files=all").stdout.strip() == "?? report/main.tex"
+
+
+def test_a_latex_project_at_a_mount_or_repository_top_keeps_the_workbench_session(client, vault, root):
+    tex = vault / "main.tex"
+    tex.write_text("\\documentclass{article}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
+    assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json()["cwd"] == str(root / "latex")
+
+    repository = vault / "paper"
+    repository.mkdir()
+    run_git(repository, "init", "-q")
+    (repository / "main.tex").write_text(tex.read_text(encoding="utf-8"), encoding="utf-8")
+    assert client.post("/api/workbench/prepare", json={"path": str(repository / "main.tex")}).json()["cwd"] == str(root / "latex")
+    assert not (repository / ".omp").exists()
 
 
 @pytest.mark.parametrize(("path", "kind"), [("/x/B.TEX", "latex"), ("refs.bib", "latex"), ("n.md", "markdown"),
@@ -180,7 +205,7 @@ def test_mirror_continues_past_a_failing_kind(tmp_path):
 
 
 def test_mirror_copies_the_template_sets_without_their_example_pdf_and_previews_and_prunes_the_rest(tmp_path, template_sets):
-    mirror = tmp_path / "workbench" / "latex" / workbench.TEMPLATE_DIRECTORY
+    mirror = tmp_path / "workbench" / "latex" / workbench.OMP_DIRECTORY / workbench.TEMPLATE_DIRECTORY
     (mirror / "demo" / "primitives" / "old").mkdir(parents=True)
     (mirror / "demo" / "primitives" / "old" / "01-gone.tex").write_text("stale", encoding="utf-8")
     (mirror / "demo" / "STYLE.md").write_text("hand edit", encoding="utf-8")
@@ -234,7 +259,7 @@ def test_prepare_moves_a_stored_project_file_into_its_folder(client, root, docs,
     response = client.post("/api/workbench/prepare", json={"path": key})
 
     source = root / "latex" / "thesis" / "paper" / "paper.tex"
-    assert response.json() == {"path": str(source), "cwd": str(root / "latex"), "kind": "latex", "guide": None}
+    assert response.json() == {"path": str(source), "cwd": str(root / "latex"), "kind": "latex"}
     assert source.read_bytes() == b"\\documentclass{article}"
     assert projects.list_files("thesis") == [str(source)]
     assert not docs.exists(key)
@@ -304,7 +329,7 @@ def test_prepare_leaves_an_absolute_file_in_place(client, root, vault):
 
     response = client.post("/api/workbench/prepare", json={"path": str(source)})
 
-    assert response.json() == {"path": str(source), "cwd": str(root / "markdown"), "kind": "markdown", "guide": None}
+    assert response.json() == {"path": str(source), "cwd": str(root / "markdown"), "kind": "markdown"}
     assert source.read_text(encoding="utf-8") == "# Repo"
 
 
@@ -521,7 +546,7 @@ def test_supporting_latex_files_prepare_in_place_but_are_not_created(client, vau
 
     prepared = client.post("/api/workbench/prepare", json={"path": str(bibliography)}).json()
 
-    assert prepared == {"path": str(bibliography), "cwd": str(vault), "kind": "latex", "guide": str(root / "latex")}
+    assert prepared == {"path": str(bibliography), "cwd": str(root / "latex"), "kind": "latex"}
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "refs.bib"}).status_code == 400
 
 
