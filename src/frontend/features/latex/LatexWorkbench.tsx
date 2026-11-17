@@ -1,9 +1,7 @@
 "use client"
 
-import { useEffect, useEffectEvent, useState } from "react"
-import { RotateCw } from "lucide-react"
+import { useEffect, useEffectEvent } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
-import { IconButton } from "@/components/ui/IconButton"
 import { Workbench, type WorkbenchProps } from "@/features/workbench/Workbench"
 import { useWorkbenchNotice } from "@/features/workbench/useWorkbenchNotice"
 import { pdfFileNameOf, type TexProject } from "@/lib/domain/latex"
@@ -73,12 +71,6 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
   const slideGap = useSlideGap(project.root, notices.report)
   const { trigger } = build
   useEffect(() => { void trigger() }, [trigger])
-  // Counts the reloads of the PDF pane: each one starts the viewer over, whatever state it was left in
-  const [viewerEpoch, setViewerEpoch] = useState(0)
-  const reloadPdf = () => {
-    setViewerEpoch((epoch) => epoch + 1)
-    void trigger()
-  }
 
   const pdfFailure = build.failure?.message ?? (build.result && !build.result.ok ? "Build failed" : null)
   return (
@@ -92,7 +84,6 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
         <LatexPdfPane
           url={build.pdfUrl}
           documentKey={build.pdfPath}
-          epoch={viewerEpoch}
           building={build.building}
           emptyMessage={pdfFailure ?? (project.root === null ? NO_ROOT : null)}
           pageBox={layout}
@@ -107,7 +98,6 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
       )}
       status={<>
         <LatexBuildStatus build={build} path={props.path} folder={project.folder} />
-        {project.root !== null && <IconButton icon={RotateCw} label="Reload PDF" onClick={reloadPdf} disabled={!build.pdfUrl} />}
         {project.root !== null && <DownloadPdfButton pdfUrl={build.pdfUrl} fileName={pdfFileNameOf(project.root)} />}
         {project.root !== null && <PresentButton pdfUrl={build.pdfUrl} />}
       </>}

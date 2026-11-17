@@ -1,26 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { useState, type ComponentProps, type ReactNode } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import type { PdfWord } from "@/components/content/pdf/pdfText"
 
-// The viewer is out of scope: it lays out two pages, draws the pane's overlay over each, reports a double-click on them,
-// names the page it opened at and scrolls to page 3 on request
+// The viewer is out of scope: it lays out two pages, draws the pane's overlay over each and reports a double-click on them
 vi.mock("@/components/content/LazyPdfViewer", () => ({
-  LazyPdfViewer: ({ renderPageOverlay, onPageDoubleClick, initialPage, onPageChange }: {
+  LazyPdfViewer: ({ renderPageOverlay, onPageDoubleClick }: {
     renderPageOverlay?: (page: number, pageWidth: number, pageCount: number) => ReactNode
     onPageDoubleClick?: (page: number, x: number, y: number, word: PdfWord) => void
-    initialPage?: number
-    onPageChange?: (page: number) => void
-  }) => {
-    const [openedAt] = useState(initialPage)
-    return (
-      <div onDoubleClick={() => onPageDoubleClick?.(1, 0, 0, { text: "", offset: 0, occurrence: 0 })}>
-        <output aria-label="Opened at page">{openedAt}</output>
-        <button type="button" onClick={() => onPageChange?.(3)}>Scroll to page 3</button>
-        {[1, 2].map((page) => <div key={page}>{renderPageOverlay?.(page, 600, 2)}</div>)}
-      </div>
-    )
-  },
+  }) => (
+    <div onDoubleClick={() => onPageDoubleClick?.(1, 0, 0, { text: "", offset: 0, occurrence: 0 })}>
+      {[1, 2].map((page) => <div key={page}>{renderPageOverlay?.(page, 600, 2)}</div>)}
+    </div>
+  ),
 }))
 
 import { LatexPdfPane } from "../LatexPdfPane"
@@ -28,12 +20,11 @@ import { LatexPdfPane } from "../LatexPdfPane"
 afterEach(cleanup)
 
 /** The pane showing a built PDF with `slideGap`. */
-function paneOf(slideGap?: ComponentProps<typeof LatexPdfPane>["slideGap"], onPageDoubleClick = vi.fn(), epoch = 0) {
+function paneOf(slideGap?: ComponentProps<typeof LatexPdfPane>["slideGap"], onPageDoubleClick = vi.fn()) {
   return (
     <LatexPdfPane
       url="slides.pdf"
       documentKey="slides"
-      epoch={epoch}
       building={false}
       emptyMessage={null}
       pageBox={{ width: 600, top: 0, bottom: 0 }}
@@ -75,17 +66,5 @@ describe("LatexPdfPane slide gaps", () => {
     render(paneOf())
 
     expect(screen.queryByRole("button", { name: /^Gap after/ })).toBeNull()
-  })
-})
-
-describe("LatexPdfPane reload", () => {
-  it("starts the viewer over on the page it showed when the epoch changes, and not before", () => {
-    const view = render(paneOf())
-    fireEvent.click(screen.getByRole("button", { name: "Scroll to page 3" }))
-    expect(screen.getByRole("status", { name: "Opened at page" })).toHaveTextContent("1")
-
-    view.rerender(paneOf(undefined, vi.fn(), 1))
-
-    expect(screen.getByRole("status", { name: "Opened at page" })).toHaveTextContent("3")
   })
 })
