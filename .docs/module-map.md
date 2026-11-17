@@ -144,7 +144,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- jupyter_service.py        `RemoteJupyterHost`: the workers' client of the Jupyter service, `JupyterHost`'s methods over its Unix socket
 |   |   |-- process_owner.py          Host children never outlive the backend: `owned_environment` mark, `stop_owned` at shutdown, `reap_orphans` at startup
 |   |   |-- text_merge.py             `merge_theirs`: `git merge-file --theirs`, the incoming side wins
-|   |   |-- latex.py                  latexmk build, TeX error parsing, atomic `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
+|   |   |-- latex.py                  latexmk build, TeX error parsing, atomic content-named `.view.pdf` publish, tex project root resolution (`project_of`, `set_root`), build-output test, `NEW_DOCUMENT`
 |   |   |-- latex_references.py       `rewrite_references`: repoint `\input`, `\include`, `\includegraphics`, `\bibliography` and `\addbibresource` references of a LaTeX project after a rename
 |   |   |-- latex_templates.py        `TemplateSet`s of `templates/latex/`: presentation detection (`presentation_theme`), primitives, document population, image macro
 |   |   |-- synctex.py                `synctex edit`/`view` wrappers: inverse and forward search, beamer frame refinement, `slide_end` for slide insertion

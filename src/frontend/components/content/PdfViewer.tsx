@@ -50,7 +50,7 @@ function ignore() {}
  *
  * - A build's PDF shows after a few range requests, on a slow link the full download of a deck with images takes tens of seconds
  *   and a background download of the rest competes with those ranges
- * - A file replaced by a newer build may mix into a page first drawn before the viewer swaps to that build
+ * - A `url` must name bytes that never change: ranges of a file replaced between requests mix two builds into an invalid PDF
  * - One object for all viewers: react-pdf reloads the document when `options` changes identity
  */
 const RANGE_LOADING = { disableStream: true, disableAutoFetch: true }

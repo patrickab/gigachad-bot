@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -42,6 +43,8 @@ NEW_DOCUMENT = """\
 
 _BUILD_TIMEOUT_SECONDS = 120
 _LOG_TAIL_LINES = 40
+_PUBLISHED_HASH_LENGTH = 16
+_KEPT_PUBLISHED_COPIES = 3
 MAGIC_COMMENT_LINES = 5
 _ANCESTOR_LEVELS = 2
 ROOT_COMMENT = re.compile(r"^(?P<head>\s*%\s*!TEX\s+root\s*=\s*)(?P<root>\S.*?)(?P<tail>\s*)$", re.IGNORECASE)
@@ -196,7 +199,7 @@ async def build(source: Path) -> LatexBuild:
         code, output = await _run_latexmk(_command(source, output_directory, engine), source.parent)
         if code == 0:
             await asyncio.to_thread(_publish, output_directory / f"{source.stem}.pdf")
-        pdf = _published(output_directory / f"{source.stem}.pdf")
+        published = await asyncio.to_thread(_published_copies, output_directory / f"{source.stem}.pdf")
         duration_ms = round((time.monotonic() - started) * 1000)
     if code is None:
         errors = [LatexIssue(None, f"The build was stopped after {_BUILD_TIMEOUT_SECONDS} seconds")]
@@ -208,25 +211,38 @@ async def build(source: Path) -> LatexBuild:
         )
     return LatexBuild(
         ok=code == 0,
-        pdf_path=str(pdf) if pdf.is_file() else None,
+        pdf_path=str(published[0]) if published else None,
         errors=errors,
         log_tail="" if code == 0 else _tail(output),
         duration_ms=duration_ms,
     )
 
 
-def _published(pdf: Path) -> Path:
-    """The copy of *pdf* the viewer reads: TeX rewrites *pdf* in place while it builds."""
-    return pdf.with_suffix(".view.pdf")
+def _published_copies(pdf: Path) -> list[Path]:
+    """The published copies of *pdf* (`<stem>.<content hash>.view.pdf`), newest first."""
+    if not pdf.parent.is_dir():
+        return []
+    name = re.compile(rf"{re.escape(pdf.stem)}\.[0-9a-f]{{{_PUBLISHED_HASH_LENGTH}}}\.view\.pdf")
+    copies = [path for path in pdf.parent.iterdir() if name.fullmatch(path.name)]
+    return sorted(copies, key=lambda path: path.stat().st_mtime_ns, reverse=True)
 
 
 def _publish(pdf: Path) -> None:
-    """Replace the published copy of *pdf* in one step, so a reader never sees a half-written file."""
+    """Publish *pdf* under a name of its content, written in one step, and drop all but the newest copies.
+
+    - TeX rewrites *pdf* in place while it builds, a reader never sees a half-written file
+    - The viewer loads a PDF by byte ranges, so a published copy never changes under a reader
+    - Earlier copies stay a while: the viewer reads the shown build until the new one swaps in
+    """
     if not pdf.is_file():
         return
     staging = pdf.with_suffix(".view.tmp")
     shutil.copyfile(pdf, staging)
-    staging.replace(_published(pdf))
+    with staging.open("rb") as file:
+        digest = hashlib.file_digest(file, "sha256").hexdigest()[:_PUBLISHED_HASH_LENGTH]
+    staging.replace(pdf.with_suffix(f".{digest}.view.pdf"))
+    for stale in _published_copies(pdf)[_KEPT_PUBLISHED_COPIES:]:
+        stale.unlink(missing_ok=True)
 
 
 def _read_log(log: Path) -> str:

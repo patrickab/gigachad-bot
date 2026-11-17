@@ -3,9 +3,10 @@
 import { useCallback, useMemo, useState } from "react"
 import { useFollowFiles } from "@/hooks/useFollowFiles"
 import { ApiError, buildLatex } from "@/lib/backend/api"
+import { fileViewerRawUrl } from "@/lib/backend/urls"
 import type { LatexBuild } from "@/lib/domain/latex"
 import { errorMessage } from "@/lib/utils"
-import { createBuildQueue, pdfUrlOf } from "./latexBuild"
+import { createBuildQueue } from "./latexBuild"
 
 const SERVICE_UNAVAILABLE = 503
 
@@ -20,19 +21,18 @@ export interface LatexBuildState {
   /** The last build that ran, null before the first. */
   result: LatexBuild | null
   failure: LatexFailure | null
-  /** Raw URL of the latest good PDF, a new one with every successful build. Null while there is none. */
+  /** Raw URL of the latest good PDF. Null while there is none. */
   pdfUrl: string | null
-  /** The PDF's path, the same across builds of one root. */
+  /** The PDF's path, a new one for every build with new content, so its bytes never change under a reader. */
   pdfPath: string | null
 }
 
 interface InternalState extends Omit<LatexBuildState, "pdfUrl"> {
-  revision: number
   /** The root this state belongs to. */
   root: string | null
 }
 
-const initialState = (root: string | null): InternalState => ({ building: false, result: null, failure: null, pdfPath: null, revision: 0, root })
+const initialState = (root: string | null): InternalState => ({ building: false, result: null, failure: null, pdfPath: null, root })
 
 /**
  * Build the project's `root` `.tex` on demand, and again whenever a file in its `folder` changes.
@@ -59,7 +59,6 @@ export function useLatexBuild(root: string | null, { folder }: { folder: string 
         result,
         failure: null,
         pdfPath: result.pdf_path ?? current.pdfPath,
-        revision: result.ok || (result.pdf_path !== null && result.pdf_path !== current.pdfPath) ? current.revision + 1 : current.revision,
       })
     } catch (error) {
       const notInstalled = error instanceof ApiError && error.status === SERVICE_UNAVAILABLE
@@ -69,6 +68,6 @@ export function useLatexBuild(root: string | null, { folder }: { folder: string 
   const trigger = useMemo(() => createBuildQueue(run), [run])
   useFollowFiles([], () => { void trigger() }, root === null ? [] : [folder])
 
-  const pdfUrl = state.pdfPath ? pdfUrlOf(state.pdfPath, state.revision) : null
+  const pdfUrl = state.pdfPath ? fileViewerRawUrl(state.pdfPath) : null
   return { building: state.building, result: state.result, failure: state.failure, pdfPath: state.pdfPath, pdfUrl, trigger }
 }

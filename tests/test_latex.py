@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 import stat
 
@@ -118,7 +119,7 @@ def test_failed_build_reports_errors_and_keeps_serving_the_last_good_pdf(tex_cli
     failure.write_text(PDFLATEX_FAILURE, encoding="utf-8")
     # TeX truncates its output PDF while it runs, the viewer must keep reading the last good one
     fake_latexmk(bin_directory, monkeypatch, f': > .latex-build/main.pdf\ncat "{failure}"\nexit 12')
-    previous = document.parent / ".latex-build" / "main.view.pdf"
+    previous = document.parent / ".latex-build" / "main.0123456789abcdef.view.pdf"
     previous.parent.mkdir()
     previous.write_bytes(b"%PDF-old")
 
@@ -147,7 +148,7 @@ def test_build_runs_latexmk_in_the_files_directory_with_the_engine_from_the_magi
 
     assert body == {
         "ok": True,
-        "pdf_path": str(document.parent / ".latex-build" / "main.view.pdf"),
+        "pdf_path": str(document.parent / ".latex-build" / f"main.{hashlib.sha256(b'pdf\n').hexdigest()[:16]}.view.pdf"),
         "errors": [],
         "log_tail": "",
         "duration_ms": body["duration_ms"],
@@ -158,6 +159,23 @@ def test_build_runs_latexmk_in_the_files_directory_with_the_engine_from_the_magi
         f"-g -pdfxe -interaction=nonstopmode -halt-on-error -file-line-error -synctex=1 -outdir={document.parent}/.latex-build main.tex"
     )
 
+
+def test_every_build_publishes_its_pdf_under_its_own_path_and_keeps_the_newest_three(tex_client, document, tmp_path, monkeypatch):
+    # The viewer reads a PDF by byte ranges, a path whose bytes changed between two requests mixes two builds
+    bin_directory = tmp_path / "bin"
+    bin_directory.mkdir()
+    counter = tmp_path / "count"
+    fake_latexmk(
+        bin_directory,
+        monkeypatch,
+        f'n=$(($(cat "{counter}" 2>/dev/null || echo 0) + 1))\necho $n > "{counter}"\nmkdir -p .latex-build && echo "pdf $n" > .latex-build/main.pdf',
+    )
+
+    paths = [Path(tex_client.post("/api/latex/build", json={"path": str(document)}).json()["pdf_path"]) for _ in range(4)]
+
+    assert len(set(paths)) == 4
+    assert not paths[0].exists()
+    assert [path.read_text() for path in paths[1:]] == ["pdf 2\n", "pdf 3\n", "pdf 4\n"]
 
 
 def test_errors_raised_inside_a_package_are_reported_with_the_package_file():

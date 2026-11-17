@@ -1,5 +1,3 @@
-import { fileViewerRawUrl } from "@/lib/backend/urls"
-
 /**
  * Run `build` one at a time. The returned trigger resolves once a build that started after the call has finished.
  *
@@ -27,9 +25,4 @@ export function createBuildQueue(build: () => Promise<void>): () => Promise<void
     running = drain()
     return running
   }
-}
-
-/** Raw URL of the built PDF, `revision` makes the browser and the viewer load the new bytes. */
-export function pdfUrlOf(pdfPath: string, revision: number): string {
-  return `${fileViewerRawUrl(pdfPath)}&v=${revision}`
 }
