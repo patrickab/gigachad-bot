@@ -39,10 +39,12 @@ function SlideGapButton({ page, marked, onClick }: { page: number; marked: boole
  * - `onPageDoubleClick` gets the double-clicked page, the spot on it in PDF points from its top-left corner, and the word selected there or the page's word nearest it (empty when none) with the clicked character's offset in it and its occurrence on its rendered line
  * - `reveal` scrolls to a spot and marks it, a new `key` repeats it
  * - `slideGap` makes the gaps between pages clickable (`onChoose` gets the page above), keeps a line in the gap below its `marked` page, Escape in the pane clears it (`onClear`)
+ * - A new `epoch` starts the viewer over on the page it showed: it loads the current `url` from scratch
  */
-export function LatexPdfPane({ url, documentKey, building, emptyMessage, pageBox, onPageDoubleClick, reveal, slideGap }: {
+export function LatexPdfPane({ url, documentKey, epoch = 0, building, emptyMessage, pageBox, onPageDoubleClick, reveal, slideGap }: {
   url: string | null
   documentKey: string | null
+  epoch?: number
   building: boolean
   emptyMessage: string | null
   pageBox: PdfPageBox
@@ -52,6 +54,8 @@ export function LatexPdfPane({ url, documentKey, building, emptyMessage, pageBox
 }) {
   // The url whose pages are on screen, null before the first PDF drew
   const [drawnUrl, setDrawnUrl] = useState<string | null>(null)
+  // The page on screen, where a viewer started over by a new `epoch` opens
+  const [page, setPage] = useState(1)
   const settling = drawnUrl !== null && url !== null && url !== drawnUrl
   useEffect(() => {
     if (!settling || url === null) return
@@ -87,8 +91,11 @@ export function LatexPdfPane({ url, documentKey, building, emptyMessage, pageBox
       {url && documentKey ? (
         <div className="h-full">
           <LazyPdfViewer
+            key={epoch}
             url={url}
             documentKey={documentKey}
+            initialPage={page}
+            onPageChange={setPage}
             topInset={TOP_BAR_PX}
             pageBox={pageBox}
             onPageRendered={setDrawnUrl}
