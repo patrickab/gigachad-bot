@@ -45,6 +45,16 @@ type PdfLayout = { url: string; pdf: PdfDocument; aspects: number[] }
 /** Callback for the incoming layer, whose pages stay out of the page window until they swap in. */
 function ignore() {}
 
+/**
+ * Loads only the byte ranges the pages near the viewport need, instead of streaming the whole file.
+ *
+ * - A build's PDF shows after a few range requests, on a slow link the full download of a deck with images takes tens of seconds
+ *   and a background download of the rest competes with those ranges
+ * - A file replaced by a newer build may mix into a page first drawn before the viewer swaps to that build
+ * - One object for all viewers: react-pdf reloads the document when `options` changes identity
+ */
+const RANGE_LOADING = { disableStream: true, disableAutoFetch: true }
+
 /** PDF viewer with zoom and page tracking.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
@@ -425,6 +435,7 @@ export function PdfViewer({
                 onItemClick={goToPage}
                 externalLinkTarget="_blank"
                 externalLinkRel="noopener noreferrer"
+                options={RANGE_LOADING}
                 loading={documentKey === undefined ? undefined : null}
               >
                 {loaded && aspects && (
