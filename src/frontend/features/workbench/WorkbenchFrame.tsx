@@ -7,9 +7,10 @@ import { cn } from "@/lib/utils"
 import { WorkbenchViewSwitch, usePaneLayout, type PaneLayout, type WorkbenchView } from "./WorkbenchSplit"
 
 /**
- * The workbench layout: Neovim's page and the rendered pane share the width and line up at the top, the chat drawer on the right.
+ * The workbench layout: Neovim's page and the rendered pane share the width, top and bottom edge, the chat drawer on the right.
  *
  * - A hidden pane stays mounted, so Neovim keeps its session and the pane its state
+ * - The rendered pane scrolls inside its box, below the top bar, so both panes keep the same height. The box clips to the page's width with the pages' rounded corners, so a page cut at the box's edge keeps them
  * - The view switch and `status` render into the top bar's `workbenchStatus` slot, `center` into its `center` slot, lifted off the bar with `raised`
  * - The owner holds the view (`useWorkbenchView`), so it can bring a hidden pane back itself
  */
@@ -19,7 +20,7 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
   onViewChange: (view: WorkbenchView) => void
   /** Neovim's page content. Null: no editor pane, no view switch, the pane takes the width. */
   editor: ReactNode | null
-  /** The rendered pane, laid out against Neovim's page. */
+  /** The rendered pane, laid out against Neovim's page inside a box of the page's height (`top` and `bottom` are 0). */
   renderPane: (layout: PaneLayout) => ReactNode
   /** The chat drawer, `<WorkbenchChat .../>`. */
   chat: ReactNode
@@ -45,8 +46,11 @@ export function WorkbenchFrame({ view: workbenchView, onViewChange, editor, rend
               <PanePage layout={layout}>{editor}</PanePage>
             </div>
           )}
-          <div className={cn("relative min-w-0 flex-1", view === "editor" && "hidden")}>
-            {renderPane(layout)}
+          <div
+            className={cn("relative min-w-0 flex-1", view === "editor" && "hidden")}
+            style={{ marginTop: layout.top, height: layout.height, clipPath: `inset(0 max(0px, calc((100% - ${layout.width}px) / 2)) round var(--radius-2xl))` }}
+          >
+            {renderPane({ ...layout, top: 0, bottom: 0 })}
           </div>
         </div>
       </div>

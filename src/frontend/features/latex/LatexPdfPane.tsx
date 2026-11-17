@@ -5,7 +5,6 @@ import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
 import type { PdfPageBox, PdfReveal } from "@/components/content/PdfViewer"
 import { PAGE_GAP } from "@/components/content/pdf/pdfLayout"
 import type { PdfWord } from "@/components/content/pdf/pdfText"
-import { TOP_BAR_PX } from "@/features/workbench/WorkbenchSplit"
 
 /** Longest time the progress bar waits for a new PDF to swap in, e.g. one that failed to load never does. */
 const SETTLE_TIMEOUT_MS = 2000
@@ -80,7 +79,7 @@ export function LatexPdfPane({ url, documentKey, building, emptyMessage, pageBox
       }}
     >
       {(building || settling) && (
-        <div role="progressbar" aria-label="Building" className="absolute inset-x-0 top-11 z-10 h-0.5 overflow-hidden">
+        <div role="progressbar" aria-label="Building" className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden">
           <div className="indeterminate-bar h-full rounded-full bg-ink-faint" />
         </div>
       )}
@@ -89,7 +88,6 @@ export function LatexPdfPane({ url, documentKey, building, emptyMessage, pageBox
           <LazyPdfViewer
             url={url}
             documentKey={documentKey}
-            topInset={TOP_BAR_PX}
             pageBox={pageBox}
             onPageRendered={setDrawnUrl}
             onPageDoubleClick={onPageDoubleClick}

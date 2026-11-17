@@ -130,11 +130,14 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
-  // The workbench's bar, a notebook's too: the surface renders its controls into the agent and status slots, the chat drawer opens at the right end
+  // The workbench's bar, a notebook's too: the surface renders its controls into the agent, status and center slots, the chat drawer opens at the right end
   const workbenchBar = {
     left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
-    right: <>
+    center: <>
       <TopBarSlot name="workbenchStatus">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+      <TopBarSlot name="center">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+    </>,
+    right: <>
       <TopBarTransparent>
         <ThemeToggle />
         <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
@@ -144,8 +147,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
     </>,
   }
-  // Only LaTeX workbenches and notebooks render into the center slot, the others keep the plain two-sided bar
-  const centerSlot = <TopBarSlot name="center">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
   const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands: ompShellCommands, modelProps }
 
   const surfaces: Record<AppSurface, () => Surface> = {
@@ -197,7 +198,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       const isPdfDocument = !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
       if (!diffItem && documentItem && isNotebookPath(documentItem.path)) return {
         ...workbenchBar,
-        center: centerSlot,
         runsUnderTopBar: true,
         body: <NotebookWorkbench
           path={documentItem.path}
@@ -282,7 +282,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       const workbenchItem = itemOf(tab, "workbench")
       return {
         ...workbenchBar,
-        center: workbenchItem && workbenchKindOf(workbenchItem.path) === "latex" ? centerSlot : undefined,
         runsUnderTopBar: true,
         raised: !!workbenchItem && workbenchKindOf(workbenchItem.path) === "latex",
         body: workbenchItem ? (

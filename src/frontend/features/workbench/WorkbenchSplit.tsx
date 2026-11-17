@@ -36,14 +36,14 @@ export const TOP_BAR_PX = 44
 /** Space around each pane's content. With the split area's own 12 px padding every gap is 24 px, twice the sidebar's inset. */
 const MARGIN_X = 12
 const MARGIN_Y = 12
-/** Where a pane's content starts: below the top bar and the margin. Rendered Markdown and PDF pages scroll on underneath the bar, Neovim's and the notebook's page stay below it. */
+/** Where both panes' boxes start: below the top bar and the margin. */
 const PANE_TOP_PX = TOP_BAR_PX + MARGIN_Y
 
 /**
  * Where Neovim and the rendered file sit in a pane of the split in `areaRef`: same width, same top edge.
  *
  * - Width fills the pane up to the PDF viewer's `RENDER_WIDTH` cap, centered, so opening a side panel only changes the width
- * - The rendered pages scroll on below, `height` is the editor's: down to the bottom margin
+ * - `height` runs down to the bottom margin, the rendered pane scrolls inside it
  */
 export function usePaneLayout(areaRef: RefObject<HTMLElement | null>, view: WorkbenchView): PaneLayout {
   const area = useElementSize(areaRef)
