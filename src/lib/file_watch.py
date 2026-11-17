@@ -44,6 +44,12 @@ def _reported_in_folder(change: Change, path: str) -> bool:
     return change is Change.deleted or not target.is_dir()
 
 
+def _is_below(path: str, folders: Iterable[str]) -> bool:
+    """Whether *path* lies inside one of *folders*, at any depth."""
+    parents = {str(parent) for parent in Path(path).parents}
+    return not parents.isdisjoint(folders)
+
+
 class FileWatcher:
     """Reports changed paths to *on_change* for one watch set that `replace` swaps as a whole.
 
@@ -63,12 +69,16 @@ class FileWatcher:
         """Watch exactly the absolute *files* and *folders* from now on, what the previous set held reports nothing more.
 
         The folders of the files and the folders themselves must exist, one that vanished later is logged and not watched.
+        A file below a watched folder is reported once, by the folder's watch, unless that watch skips it (build output).
         """
         self._stop.set()
         stop = self._stop = threading.Event()
-        watched_files = frozenset(str(file) for file in files)
-        file_folders = {str(Path(file).parent) for file in watched_files}
         watched_folders = {str(folder) for folder in folders}
+        watched_files = frozenset(
+            path for path in (str(file) for file in files)
+            if not (_is_below(path, watched_folders) and _reported_in_folder(Change.modified, path))
+        )
+        file_folders = {str(Path(file).parent) for file in watched_files}
         if file_folders:
             self._start(stop, file_folders, lambda _change, path: path in watched_files, recursive=False)
         if watched_folders:

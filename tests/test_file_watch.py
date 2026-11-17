@@ -184,6 +184,35 @@ async def test_folder_reports_nested_files_but_not_build_output_internals_or_edi
         assert changed(await socket.collect()) == {str(intro)}
 
 
+async def test_file_watched_by_itself_and_through_its_folder_is_reported_once(vault):
+    project = vault / "paper"
+    project.mkdir()
+    main = project / "main.tex"
+    main.write_text("one")
+    async with Socket(mounted_roots(vault)) as socket:
+        await socket.watch(files=[main], folders=[project])
+        await socket.running(main)
+
+        main.write_text("two")
+
+        assert [frame["path"] for frame in await socket.collect() if frame["type"] == "changed"] == [str(main)]
+
+
+async def test_build_output_watched_as_a_file_is_reported_inside_a_watched_folder(vault):
+    project = vault / "paper"
+    project.mkdir()
+    (project / "main.tex").write_text(r"\documentclass{article}")
+    built = project / "main.view.pdf"
+    built.write_text("one")
+    async with Socket(mounted_roots(vault)) as socket:
+        await socket.watch(files=[built], folders=[project])
+        await socket.running(built)
+
+        built.write_text("two")
+
+        assert changed(await socket.collect()) == {str(built)}
+
+
 async def test_new_watch_set_replaces_the_old_one(vault):
     old = vault / "old.md"
     new = vault / "new.md"
