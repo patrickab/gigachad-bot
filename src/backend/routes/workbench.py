@@ -44,11 +44,15 @@ class FilePath(BaseModel):
 
 
 class PreparedFile(BaseModel):
-    """The file on disk, the omp session cwd of its kind and the kind."""
+    """The file on disk, the omp session cwd of its kind and the kind.
+
+    `guide` is the kind's directory holding `.omp/SYSTEM.md` and the template sets, set only when `cwd` is a mount instead, whose session cannot read them there.
+    """
 
     path: str
     cwd: str
     kind: Kind
+    guide: str | None = None
 
 
 class NewDocument(BaseModel):
@@ -119,8 +123,19 @@ def _kind(name: str) -> Kind:
     return kind
 
 
-def _prepared(path: Path | str, kind: Kind) -> PreparedFile:
-    return PreparedFile(path=str(path), cwd=str(kind_directory(config.WORKBENCH, kind)), kind=kind)
+def _prepared(path: Path | str, kind: Kind, mount: Path | None = None) -> PreparedFile:
+    guide = kind_directory(config.WORKBENCH, kind)
+    return PreparedFile(path=str(path), cwd=str(mount or guide), kind=kind, guide=str(guide) if mount else None)
+
+
+def _mount_of_latex(path: Path, kind: Kind, roots: FileRoots) -> Path | None:
+    """The file root (or worktree) holding a LaTeX file, so the omp session starts in its project and `@` suggests its files."""
+    if kind != "latex":
+        return None
+    try:
+        return roots.root_of(str(path))
+    except ValueError:
+        return None
 
 
 def _pdf_on_disk(key: str, assets: AssetStore) -> Path:
@@ -144,13 +159,15 @@ def post_prepare(
 ) -> PreparedFile:
     """The disk file to open for `path`: an absolute file resolved in place, a stored project document moved into its workbench folder.
 
+    - A mounted LaTeX file opens its omp session in the mount it lives in, other kinds in their kind's directory
     - A stored PDF is never moved, its library copy on disk is read where it is
     - Notes stay stored and open in the document editor, so their keys answer 400
     - A workbench folder the file roots cannot reach answers 403 and nothing moves
     """
     if PurePosixPath(body.path).is_absolute():
         resolved = resolve_allowed(body.path, roots)
-        return _prepared(resolved, _kind(resolved.name))
+        kind = _kind(resolved.name)
+        return _prepared(resolved, kind, _mount_of_latex(resolved, kind, roots))
     with http_errors((InvalidStorageKey, 400, None)):
         key = validate_key(body.path)
     if under(key, NOTE):

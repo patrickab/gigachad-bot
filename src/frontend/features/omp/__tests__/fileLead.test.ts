@@ -24,6 +24,14 @@ describe("projectLead", () => {
   })
 })
 
+describe("projectLead with a guide", () => {
+  it("tells the session where its instructions are and stays one line", () => {
+    const lead = projectLead("/repo/deck", "/repo/deck/main.tex", "/repo", "/data/workbench/latex")
+    expect(lead).toBe("Project: deck, root: main.tex. Instructions: read /data/workbench/latex/.omp/SYSTEM.md first, the template sets are in /data/workbench/latex/.templates/")
+    expect(withoutFileLead(`${lead}\n\nFix it`)).toBe("Fix it")
+  })
+})
+
 describe("withoutFileLead", () => {
   it("drops the file line put before a first message, so the title is the request", () => {
     expect(withoutFileLead("File: proj/plan/plan.md\n\nTighten the intro")).toBe("Tighten the intro")

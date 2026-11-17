@@ -30,6 +30,26 @@ export function slideEmbeds(annotations: LinkAnnotation[], view: number[]): Slid
 /** A deck's embeds with the page each one sits on. */
 export type DeckEmbed = SlideEmbed & { page: number }
 
+/** One live frame of the deck. A link whose address repeats on consecutive pages, as on a slide's overlays, keeps one frame
+ * across them: `pages` are those pages in order, and the frame tells its applet which of them shows as its step. */
+export type DeckFrame = { key: string; url: string; pages: DeckEmbed[] }
+
+/** The deck's frames: every embed starts a frame, unless the page before has a frame with the same address, which it joins. */
+export function deckFrames(embeds: DeckEmbed[]): DeckFrame[] {
+  const frames: DeckFrame[] = []
+  for (const embed of [...embeds].sort((a, b) => a.page - b.page)) {
+    const run = frames.find((frame) => frame.url === embed.url && frame.pages[frame.pages.length - 1].page === embed.page - 1)
+    if (run) run.pages.push(embed)
+    else frames.push({ key: `${embed.page} ${embed.url}`, url: embed.url, pages: [embed] })
+  }
+  return frames
+}
+
+/** Which of a frame's pages shows, its step, or -1 while its pages are off screen. */
+export function frameStep(frame: DeckFrame, pageNumber: number): number {
+  return frame.pages.findIndex((embed) => embed.page === pageNumber)
+}
+
 /** Every embed of the deck in page order, none without `pdf` or while they load. */
 export function useDeckEmbeds(pdf: PdfDocument | undefined): DeckEmbed[] {
   const [loaded, setLoaded] = useState<{ pdf: PdfDocument; embeds: DeckEmbed[] } | null>(null)

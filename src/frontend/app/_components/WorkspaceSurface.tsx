@@ -105,6 +105,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
   const props = {
     path: prepared.path,
     cwd: prepared.cwd,
+    guide: prepared.guide,
     ompView: item.omp,
     onViewChange: (omp: OmpView) => onItemChange({ ...item, omp }),
     onPathChange: (path: string) => onItemChange({ ...item, path, sessionKey }),

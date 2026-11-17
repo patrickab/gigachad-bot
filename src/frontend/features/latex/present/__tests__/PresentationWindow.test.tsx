@@ -140,6 +140,23 @@ describe("PresentationWindow", () => {
     expect(screen.getByText("3 / 3")).toBeTruthy()
   })
 
+  it("keeps one frame across consecutive pages that link the same applet and tells it which of them shows", async () => {
+    for (const page of [1, 2, 3]) deck.annotations.set(page, [{ subtype: "Link", url: "https://applets.example/crops?embed=1", rect: [40, 9, 120, 54] }])
+    render(<PresentationWindow pdfUrl="/deck.pdf" role="presenter" channel={freshChannel()} />)
+    const current = await screen.findByRole("region", { name: "Current slide" })
+    const frame = await within(current).findByTitle("Slide applet") as HTMLIFrameElement
+    expect(within(current).getAllByTitle("Slide applet")).toHaveLength(1)
+    const post = vi.spyOn(frame.contentWindow!, "postMessage")
+    const lastStep = () => (post.mock.calls.at(-1)?.[0] as { step: number } | undefined)?.step
+
+    press("ArrowRight")
+    await waitFor(() => expect(lastStep()).toBe(1))
+    press("ArrowRight")
+    await waitFor(() => expect(lastStep()).toBe(2))
+    expect(within(current).getByTitle("Slide applet")).toBe(frame)
+    expect(post).toHaveBeenLastCalledWith({ type: "deck-shown", shown: true, step: 2 }, "*")
+  })
+
   it("opens the audience window on the presenter's channel by button and by A, then hides the button", async () => {
     const audience = { closed: false, focus: vi.fn() }
     const open = vi.spyOn(window, "open").mockReturnValue(audience as unknown as Window)
