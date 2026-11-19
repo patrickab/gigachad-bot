@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { motion } from "framer-motion"
 import { Brain } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -15,7 +14,7 @@ import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
 import { addFileRoot, cloneFileRoot, createTexProjectFile } from "@/lib/backend/api"
 import { refreshDocumentLists, refreshRootTree } from "@/lib/backend/resources"
-import { cn } from "@/lib/utils"
+import { SidePanel, SidePanelScroll } from "@/components/ui/SidePanel"
 import { ArchiveSelector } from "./ArchiveSelector"
 import { useBranches } from "./BranchContext"
 import { ChatBranchPreview } from "./ChatBranchPreview"
@@ -58,7 +57,7 @@ interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
   const { onNewChat, renderSettings } = props
-  const { collapsed, toggleCollapsed } = useSidebar()
+  const { collapsed, toggleCollapsed, width, setWidth } = useSidebar()
   const { tab } = useTab()
   const branches = useBranches()
   const { projects, createProject } = useProject()
@@ -114,54 +113,52 @@ export function Sidebar(props: SidebarProps) {
   }) : projectTree
   const codeContext = { ...props, ...code, ...fileRename, ...folderRows, renameOf, projects, pending }
 
-  return <motion.aside
-    initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.2, ease: "easeOut" }}
-    className={cn("relative shrink-0 flex flex-col transition-[margin,background-color,box-shadow,border-color] duration-200",
-      collapsed ? "border-0" : "m-3 mr-0 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]")}
-  >
-    {!collapsed && <>
-      <div className="motion-fade-in flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
+  return <>
+    <SidePanel side="left" open={!collapsed} width={width} onWidthChange={setWidth} label="Sidebar" className="z-10">
+      <div className="flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
         <button onClick={openMemoryViewer} aria-label="Open memory"
           className="rounded-md p-1 text-ink-subtle hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted transition-colors">
           <Brain className="h-4 w-4" />
         </button>
         <PanelToggleButton side="left" open onClick={toggleCollapsed} openLabel="Open sidebar" closeLabel="Close sidebar" />
       </div>
-      <nav aria-label="Workspace" className="motion-fade-in min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        <FileTree label="Projects" items={items} controller={controller} loading={branches.historiesLoading}
-          headerActions={<ArchiveSelector
-            noun="projects"
-            entries={projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: project.slug, name: project.name, archived: Boolean(project.archived) }))}
-            onRestore={(slug) => projectActions.changeArchive(slug, false)}
-          />}
-          create={{ label: "New project", placeholder: "Project name", onSubmit: async (name) => {
-            const slug = await createProject(name)
-            controller.expand(slug)
-            onNewChat?.(slug)
-          } }}
-          renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
-          onMoveToRoot={(path) => documents.move(path, "")}
-        />
-        <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>
-        <ErrorText className="px-2 py-1">{documents.fileError}</ErrorText>
-        <div role="separator" className="my-3 border-t border-divider/50" />
-        <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
-          headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}
-          labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
-          create={code.hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
-        />
-        <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
-        {code.hostAccess && <>
+      <nav aria-label="Workspace" className="flex min-h-0 flex-1 flex-col">
+        <SidePanelScroll className="px-2 pb-3">
+          <FileTree label="Projects" items={items} controller={controller} loading={branches.historiesLoading}
+            headerActions={<ArchiveSelector
+              noun="projects"
+              entries={projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: project.slug, name: project.name, archived: Boolean(project.archived) }))}
+              onRestore={(slug) => projectActions.changeArchive(slug, false)}
+            />}
+            create={{ label: "New project", placeholder: "Project name", onSubmit: async (name) => {
+              const slug = await createProject(name)
+              controller.expand(slug)
+              onNewChat?.(slug)
+            } }}
+            renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
+            onMoveToRoot={(path) => documents.move(path, "")}
+          />
+          <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>
+          <ErrorText className="px-2 py-1">{documents.fileError}</ErrorText>
           <div role="separator" className="my-3 border-t border-divider/50" />
-          <LearnSection section={learn.section} />
-        </>}
+          <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
+            headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}
+            labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
+            create={code.hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
+          />
+          <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
+          {code.hostAccess && <>
+            <div role="separator" className="my-3 border-t border-divider/50" />
+            <LearnSection section={learn.section} />
+          </>}
+        </SidePanelScroll>
       </nav>
       <ProviderUsage />
-      {renderSettings && <div className="motion-fade-in shrink-0 p-2">{renderSettings()}</div>}
-    </>}
+      {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
+    </SidePanel>
     <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)}
       onConfirm={(path) => code.mountThen(() => addFileRoot(path))} onClone={(url) => code.mountThen(() => cloneFileRoot(url))} />
     <CreateDocumentPanel open={documents.createTarget != null} onClose={() => documents.setCreateTarget(null)}
       onCreate={(name) => void documents.createDocument(name)} />
-  </motion.aside>
+  </>
 }

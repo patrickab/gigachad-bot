@@ -152,15 +152,14 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
               </div>
             </div>
           </div>
-          {sidebarOpen && (
-            <EditorSidebar
-              content={output}
-              model={model}
-              width={sidebarWidth}
-              onWidthChange={setSidebarWidth}
-              onApply={handleSidebarApply}
-            />
-          )}
+          <EditorSidebar
+            open={sidebarOpen}
+            content={output}
+            model={model}
+            width={sidebarWidth}
+            onWidthChange={setSidebarWidth}
+            onApply={handleSidebarApply}
+          />
         </div>
       </motion.div>
     </AnimatePresence>

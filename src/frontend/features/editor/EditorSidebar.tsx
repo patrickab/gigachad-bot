@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Check, X } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
-import { SidePanelFrame } from "@/components/ui/SidePanel"
+import { SidePanel } from "@/components/ui/SidePanel"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const SYS_NOTE_EDIT = (doc: string) =>
@@ -14,6 +14,7 @@ const SYS_INLINE_EDIT = (sel: string) =>
   `You are an AI writing assistant. The user selected this text:\n\n<selection>\n${sel}\n</selection>\n\nRespond with ONLY the replacement text. No code fences, no explanations.`
 
 interface EditorSidebarProps {
+  open: boolean
   content: string
   model: string
   width: number
@@ -29,18 +30,18 @@ function ApplyButton({ onClick }: { onClick: () => void }) {
   )
 }
 
-/** Chat sidebar for AI edits of the document. Apply replaces the whole document with a reply. */
-export function EditorSidebar({ content, model, width, onWidthChange, onApply }: EditorSidebarProps) {
+/** Chat sidebar for AI edits of the document. Apply replaces the whole document with a reply. Closed it keeps its conversation. */
+export function EditorSidebar({ open, content, model, width, onWidthChange, onApply }: EditorSidebarProps) {
   const chat = useAssistantChat(model, SYS_NOTE_EDIT(content))
   return (
-    <SidePanelFrame width={width} onWidthChange={onWidthChange} className="border-l border-divider bg-paper">
+    <SidePanel side="right" open={open} width={width} onWidthChange={onWidthChange} label="Edit chat">
       <AssistantChat
         chat={chat}
         inputLabel="Edit instruction"
         placeholder="Edit instruction…"
         renderActions={(reply) => <ApplyButton onClick={() => onApply(reply)} />}
       />
-    </SidePanelFrame>
+    </SidePanel>
   )
 }
 

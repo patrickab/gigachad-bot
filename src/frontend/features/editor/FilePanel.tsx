@@ -5,12 +5,11 @@ import { createPortal } from "react-dom"
 import { X } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
-import { SidePanelFrame } from "@/components/ui/SidePanel"
+import { SidePanel } from "@/components/ui/SidePanel"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { writeRootFile } from "@/lib/backend/api"
 import { baseName, extOf, kindOf } from "@/lib/paths"
-import { cn } from "@/lib/utils"
 import { fenceCode } from "@gigachad/chat-ui"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { RawFileView } from "./RawFileView"
@@ -94,10 +93,10 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * The panel itself, placed right after the tab's main surface, styled like the left sidebar.
+ * The panel itself, placed right after the tab's main surface: the right `SidePanel`.
  *
  * - Opens at half the width the two share, keeps a dragged width until closed, never wider than the drag limit
- * - Closed or collapsed it springs to zero width, so the slot stays mounted for the portal
+ * - Closed or collapsed it eases shut and stays mounted, so the slot keeps its portal content
  */
 export function FilePanelSlot() {
   const { slot, setSlot, ownerId, ownerWidth, collapsed } = useFilePanelContext()
@@ -107,7 +106,7 @@ export function FilePanelSlot() {
   const expanded = shown && !collapsed
 
   useLayoutEffect(() => {
-    const panel = slot?.parentElement
+    const panel = slot?.closest("aside")
     const main = panel?.previousElementSibling
     if (!shown || !panel || !main) return
     const measureShared = () => Math.round(main.getBoundingClientRect().width + panel.getBoundingClientRect().width)
@@ -127,15 +126,9 @@ export function FilePanelSlot() {
   }, [shown, slot, ownerWidth])
 
   return (
-    <SidePanelFrame
-      width={expanded ? openWidth : 0}
-      onWidthChange={setOpenWidth}
-      maxWidth={Math.round(sharedWidth * MAX_SHARE)}
-      className={cn("transition-[margin,background-color,box-shadow,border-color] duration-200",
-        expanded ? "m-3 ml-0 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]" : "pointer-events-none border-0")}
-    >
-      <div ref={setSlot} inert={!expanded} aria-hidden={!expanded} className="flex min-h-0 flex-1 flex-col" />
-    </SidePanelFrame>
+    <SidePanel side="right" open={expanded} width={openWidth} onWidthChange={setOpenWidth} maxWidth={Math.round(sharedWidth * MAX_SHARE)} label="File panel">
+      <div ref={setSlot} className="flex min-h-0 flex-1 flex-col" />
+    </SidePanel>
   )
 }
 

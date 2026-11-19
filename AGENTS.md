@@ -41,6 +41,7 @@ Clean, calm UI that lets the user focus on the content (chat, document, canvas).
 - **Consistent**: new controls copy the shape, size, colors and states of their neighbors.
 - **Stable**: adding a control must not shift or resize existing ones.
 - **Shared primitives**: reuse the components in `src/frontend/components/ui/` before writing custom markup. Extend a primitive if it falls short, rather than forking a one-off.
+- **Sidebars**: every sidebar is a `SidePanel` (`components/ui/SidePanel.tsx`, floating card, eased open/close, optional drag-resize), its scrolling content a `SidePanelScroll` (edge fades, overlay thumb). No hand-rolled `<aside>` panels.
 - **Accessible**: icon-only buttons have an `aria-label`. Keyboard focus is always visible.
 
 ## omp-web integration
