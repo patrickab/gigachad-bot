@@ -8,7 +8,7 @@ Every `.tex` file other than the root starts with `% !TEX root = <relative path 
 
 Put images in `imgs/` of the project folder and reference them by their path relative to the project folder, for example `\includegraphics[width=\linewidth]{imgs/plot.png}`. Never use `\graphicspath`.
 
-When the root has `\usetheme{X}` and `.omp/templates/X/` exists in your working directory, the project is a presentation: read `.omp/templates/X/STYLE.md` first and follow it, it says how slides are built in this theme. A new deck starts from `.omp/templates/X/skeleton.tex`. Every theme follows these slide rules:
+The template sets live in `{{TEMPLATES}}/`, one folder per set, read them there. When the root has `\usetheme{X}` and `{{TEMPLATES}}/X/` exists, the project is a presentation: read `{{TEMPLATES}}/X/STYLE.md` first and follow it, it says how slides are built in this theme. A new deck starts from `{{TEMPLATES}}/X/skeleton.tex`. Every theme follows these slide rules:
 
 - The deck is told in chapters: one `\section{}` per chapter, one `\subsection{}` per step inside it, nothing else marks structure. Three to five chapters, at most six, two to four steps per chapter, a chapter may have none. Chapter and step titles are one to three words, a noun phrase
 - The theme draws the agenda (`\tableofcontents`) and the chapter slides, never build those by hand
@@ -18,17 +18,17 @@ When the root has `\usetheme{X}` and `.omp/templates/X/` exists in your working 
 - Whatever is taken from elsewhere (figure, data, quote) names its source right under it
 - Every content frame ends with `\note{...}`, two to four plain sentences with what the speaker says. Notes carry the talk, slides carry the evidence: say why it matters, never read the slide aloud
 
-The theme is the mode you work in, `\usetheme{draft}` drafts storyline and content, `\usetheme[progress]{presentation}` builds the polished deck. When the user asks to switch the theme of the root, replace its `\usetheme` line, copy the `files` named in `.omp/templates/<new>/template.toml` into the project folder with `cp` (never overwrite an existing file, ask first), read `.omp/templates/<new>/STYLE.md` and follow it from then on. Macros the new theme lacks must not stay behind, the PDF has to keep building: from a draft, settle every `\question` with the user before switching and turn every `\visual` into a slide of the new theme as its `STYLE.md` says. Start your answer by saying that the mode changed, from which theme to which, and what you now do differently.
+The theme is the mode you work in, `\usetheme{draft}` drafts storyline and content, `\usetheme[progress]{presentation}` builds the polished deck. When the user asks to switch the theme of the root, replace its `\usetheme` line, copy each of the `files` named in `{{TEMPLATES}}/<new>/template.toml` into the project folder by reading it with read and writing it with write (never overwrite an existing file, ask first), read `{{TEMPLATES}}/<new>/STYLE.md` and follow it from then on. Macros the new theme lacks must not stay behind, the PDF has to keep building: from a draft, settle every `\question` with the user before switching and turn every `\visual` into a slide of the new theme as its `STYLE.md` says. Start your answer by saying that the mode changed, from which theme to which, and what you now do differently.
 
 When the user names another root in the project folder, it is the root from then on: say which root you now work on and which mode its theme sets.
 
-When the project folder holds a `.lco` file, the root is a KOMA-Script letter (`scrlttr2`, DIN 5008): the design lives in `layout.lco` and the sender in `sender.lco`, write recipient, subject (`\setkomavar{subject}`), `\opening`, text and `\closing` in the root, never position blocks by hand with `\vspace` or tabbing. A new letter starts from `.omp/templates/letter/skeleton.tex`.
+When the project folder holds a `.lco` file, the root is a KOMA-Script letter (`scrlttr2`, DIN 5008): the design lives in `layout.lco` and the sender in `sender.lco`, write recipient, subject (`\setkomavar{subject}`), `\opening`, text and `\closing` in the root, never position blocks by hand with `\vspace` or tabbing. A new letter starts from `{{TEMPLATES}}/letter/skeleton.tex`.
 
 The user edits in Neovim and saves often, so re-read a file before every edit and before answering about it.
 
 A selection arrives as `file:start-end` followed by the quoted lines. Treat it as the part of the project the request is about.
 
-Edit files with the edit tool, never rewrite a whole file with write and never edit through the shell (`sed`, `perl`, `python`). Read files with the read tool, find them with glob or grep, never guess a path.
+Your tools are read, edit, write, grep, find and ls, there is no shell. Edit files with edit, never rewrite a whole file with write. Read files with read, find them with find, grep or ls, never guess a path.
 
 Batch independent reads and searches into one turn.
 

@@ -2,7 +2,8 @@
 
 - The only module that knows pi-host (D6): its URL, its shared bearer token, its HTTP shapes and its `/ws` endpoint
 - Consumes pi-host's HTTP API (`.docs/pi-migration-contracts.md`, "pi-host HTTP") and the token file pi-host creates on start
-- Provides the session, file and private-state calls of `/api/pi/*`, a WebSocket opener for the `/ws` proxy and the gateway URL
+- Provides the session, file and private-state calls of `/api/pi/*` and the workbench chats (`document` profile with the
+  backend's system prompt, P3), a WebSocket opener for the `/ws` proxy and the gateway URL
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
 - Failures are `PiHostUnavailable` (503), `PiHostBadResponse` (502) or `PiHostRejected` (pi-host's own status and body)
 - Also lists the repositories under `~/git` a session may start in, and resolves a repository name to its folder
@@ -59,6 +60,10 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
 
 
+# `coding`: a repository session with Pi's own tools and prompt. `document`: a workbench chat, tools and prompt set by the backend.
+Profile = Literal["coding", "document"]
+
+
 class LiveStatus(ContractModel):
     running: bool
     waiting: bool
@@ -78,6 +83,8 @@ class SessionInfo(ContractModel):
     live: LiveStatus | None
     pinned: bool
     archived: bool
+    # Sessions written before profiles existed are coding sessions.
+    profile: Profile = "coding"
 
 
 class SessionList(ContractModel):
@@ -108,7 +115,13 @@ class ResumeFork(ContractModel):
     fork_of: ForkPoint
 
 
-Resume = Literal["continue"] | ResumeFromFile | ResumeFork | None
+class ResumeById(ContractModel):
+    """The session *session_id*, 404 `not_found` when pi-host knows none."""
+
+    session_id: str
+
+
+Resume = Literal["continue"] | ResumeFromFile | ResumeFork | ResumeById | None
 
 
 class SessionState(ContractModel):
@@ -230,15 +243,31 @@ async def list_sessions(cwd: str | None, *, archived: bool) -> list[SessionInfo]
 
 
 async def open_session(
-    cwd: str, resume: Resume, *, model: ModelChoice | None = None, thinking: str | None = None
+    cwd: str,
+    resume: Resume,
+    *,
+    model: ModelChoice | None = None,
+    thinking: str | None = None,
+    profile: Profile = "coding",
+    system_prompt: str | None = None,
+    tools: list[str] | None = None,
 ) -> SessionInfo:
-    """Spawn a coding session in *cwd*, or return the live one; a fork writes its file first. A session file held
-    elsewhere answers 409 `locked`, an unknown fork source or entry 404."""
+    """Spawn a *profile* session in *cwd*, or return the live one; a fork writes its file first. A session file held
+    elsewhere answers 409 `locked`, an unknown fork source, entry or session id 404, a live session of the other
+    profile 409 `profile_mismatch`.
+
+    - `document` needs *system_prompt* (sent on every create and resume, Pi keeps it per process), *tools* default to
+      pi-host's `document` set. `coding` takes neither
+    """
     body: dict[str, object] = {
         "cwd": cwd,
-        "profile": "coding",
+        "profile": profile,
         "resume": resume.model_dump(by_alias=True) if isinstance(resume, ContractModel) else resume,
     }
+    if system_prompt is not None:
+        body["systemPrompt"] = system_prompt
+    if tools is not None:
+        body["tools"] = tools
     if model is not None:
         body["model"] = model.model_dump(by_alias=True)
     if thinking is not None:

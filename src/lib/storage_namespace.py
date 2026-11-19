@@ -26,8 +26,12 @@ MINERU = "Mineru"
 SANDBOX = "sandbox"
 PDF_ANNOTATION = "pdf-annotation"
 WORKBENCH = "workbench"
-# Per-user omp session of each workbench file, `{absolute file path: session id}`.
+# Per-user omp sessions of each workbench file (`lib.workbench.links`), kept unchanged since chats moved to Pi.
 WORKBENCH_SESSIONS = f"{WORKBENCH}/sessions.json"
+# Per-user Pi `document` sessions of each workbench file, same shape (`lib.workbench.links`).
+WORKBENCH_CHATS = f"{WORKBENCH}/chats.json"
+# Every store of workbench session links, rewritten by relocations alike.
+WORKBENCH_LINK_KEYS = (WORKBENCH_SESSIONS, WORKBENCH_CHATS)
 PROJECT_JSON = "project.json"
 # The project catalog (names, slugs, archived flags), at the chat namespace root.
 META_JSON = "projects-meta.json"

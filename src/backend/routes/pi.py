@@ -2,6 +2,8 @@
 
 - Consumes `lib.pi_host`, the only module that knows pi-host (D6). These routes never build pi-host URLs
 - `repo` is a checkout name under `~/git`, resolved to the session folder here (`pi_host.resolve_repository`)
+- `GET /files` also takes an absolute `cwd` for the `@` completion of workbench chats: inside the file roots or the
+  workbench folder only
 - pi-host failures map to HTTP: unreachable 503, unknown shape 502, refusal keeps its status and answers
   `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`, 409 stale state with the current `{revision, data}`)
 - `WS /api/pi/ws`: byte-transparent proxy to pi-host's `/ws` (M16), nothing is parsed. Either side closing closes both
@@ -12,6 +14,7 @@ Host code execution: `host_access_only` on HTTP, the origin and host-access gate
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
 import logging
+from pathlib import Path as FilePath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, WebSocket
@@ -21,8 +24,11 @@ from pydantic import BaseModel
 
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.reverse_proxy import relay_websocket
+from backend.routes.deps import get_file_roots
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
+import config
 from lib import pi_host
+from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
 
@@ -143,12 +149,31 @@ async def get_search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> pi
     return pi_host.SearchResult(hits=await _call(pi_host.search_sessions(q, limit)))
 
 
+def _allowed_cwd(cwd: str, roots: FileRoots) -> str:
+    """The absolute folder *cwd* resolved, 400 when relative, 404 unless it is a folder in the file roots or the workbench."""
+    folder = FilePath(cwd)
+    if not folder.is_absolute():
+        raise HTTPException(status_code=400, detail="cwd must be absolute")
+    folder = folder.resolve()
+    if not folder.is_dir() or not (folder.is_relative_to(config.WORKBENCH.resolve()) or roots.contains(folder)):
+        raise HTTPException(status_code=404, detail=f"Unknown folder {cwd}")
+    return str(folder)
+
+
 @http_router.get("/files")
-async def get_files(repo: str, q: str = "", limit: int | None = Query(default=None, ge=1, le=500)) -> pi_host.FileList:
-    """Files of *repo* fuzzy-ranked against *q* (50 unless *limit*), for `@` completion. Without *q* the whole
-    list unranked unless *limit* is given (K6: the UI ranks it)."""
-    cwd = await asyncio.to_thread(_cwd, repo)
-    return pi_host.FileList(files=await _call(pi_host.find_files(cwd, q, limit)))
+async def get_files(
+    roots: Annotated[FileRoots, Depends(get_file_roots)],
+    repo: str | None = None,
+    cwd: str | None = None,
+    q: str = "",
+    limit: int | None = Query(default=None, ge=1, le=500),
+) -> pi_host.FileList:
+    """Files of *repo*, or of the absolute folder *cwd* of a workbench chat, fuzzy-ranked against *q* (50 unless
+    *limit*), for `@` completion. Without *q* the whole list unranked unless *limit* is given (K6: the UI ranks it)."""
+    if (repo is None) == (cwd is None):
+        raise HTTPException(status_code=400, detail="Give either repo or cwd")
+    folder = await asyncio.to_thread(_cwd, repo) if repo is not None else await asyncio.to_thread(_allowed_cwd, cwd, roots)
+    return pi_host.FileList(files=await _call(pi_host.find_files(folder, q, limit)))
 
 
 @router.websocket("/ws")

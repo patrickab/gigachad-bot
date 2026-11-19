@@ -22,6 +22,7 @@ from lib.disk_files import DiskFiles
 from lib.git import run_git
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_SESSIONS
+from lib.workbench import prompts
 from tests.conftest import PRESENTATION_SOURCE, mounted_roots, request_identity, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope, StoredAsset
 
@@ -140,7 +141,7 @@ def test_a_mounted_latex_project_gets_its_session_in_its_folder_with_the_latex_p
         assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json() == {"path": str(tex), "cwd": str(folder), "kind": "latex"}
 
     omp = folder / ".omp"
-    assert (omp / "SYSTEM.md").read_bytes() == (config.TEMPLATES / "omp" / "latex.md").read_bytes()
+    assert (omp / "SYSTEM.md").read_text(encoding="utf-8") == prompts.render("latex")
     assert (omp / "config.yml").read_bytes() == (config.TEMPLATES / "omp" / "mounted.yml").read_bytes()
     assert (omp / "templates" / "demo" / "skeleton.tex").is_file()
     assert (vault / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines().count("/report/.omp/") == 1

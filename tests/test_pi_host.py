@@ -16,9 +16,12 @@ from websockets.exceptions import ConnectionClosed
 
 from backend import websocket_origin
 from backend.identity import get_request_identity
+from backend.routes.deps import get_file_roots
 from backend.routes.pi import router
+import config
 from lib import pi_host
-from tests.conftest import request_identity, route_client
+from lib.file_roots import FileRoots
+from tests.conftest import mounted_roots, request_identity, route_client
 
 TOKEN = "secret-token"
 ORIGIN = "http://localhost:2999"
@@ -77,8 +80,9 @@ def _serve(monkeypatch, routes: dict[str, tuple[int, object]]) -> FakeHost:
     return host
 
 
-def _client(has_host_access: bool = True) -> TestClient:
-    return route_client(router, overrides={get_request_identity: request_identity(has_host_access)})
+def _client(has_host_access: bool = True, roots: FileRoots | None = None) -> TestClient:
+    overrides = {get_request_identity: request_identity(has_host_access), get_file_roots: roots or mounted_roots()}
+    return route_client(router, overrides=overrides)
 
 
 def test_urls_follow_the_environment(monkeypatch):
@@ -112,7 +116,7 @@ def test_sessions_pass_through_camel_case_with_the_repo_resolved(monkeypatch, re
     response = _client().get("/api/pi/sessions", params={"repo": "app", "archived": "true"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"sessions": [{**SESSION, "parentSession": None}]}
+    assert response.json() == {"sessions": [{**SESSION, "parentSession": None, "profile": "coding"}]}
     assert dict(host.requests[0].url.params) == {"cwd": str(repositories / "app"), "archived": "1"}
 
 
@@ -133,7 +137,7 @@ def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     response = _client().get("/api/pi/search", params={"q": "fix tests"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None}}]}
+    assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None, "profile": "coding"}}]}
     assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
     assert _client().get("/api/pi/search").status_code == 422
 
@@ -166,6 +170,46 @@ def test_open_session_passes_a_fork_through(monkeypatch, repositories):
     assert json.loads(host.requests[0].content) == {"cwd": str(repositories / "app"), "profile": "coding", "resume": {"forkOf": fork_of}}
     invalid = {"repo": "app", "resume": {"forkOf": {"sessionPath": "/s/source.jsonl"}}}
     assert _client().post("/api/pi/sessions", json=invalid).status_code == 422
+
+
+async def test_document_sessions_carry_their_prompt_and_resume_by_id(monkeypatch):
+    host = _serve(monkeypatch, {"POST /sessions": (200, {"session": {**SESSION, "profile": "document"}})})
+
+    session = await pi_host.open_session(
+        "/w/markdown", pi_host.ResumeById(session_id=SESSION_ID), profile="document", system_prompt="Edit it.", tools=["read"],
+    )
+
+    assert session.profile == "document"
+    assert json.loads(host.requests[0].content) == {
+        "cwd": "/w/markdown", "profile": "document", "resume": {"sessionId": SESSION_ID},
+        "systemPrompt": "Edit it.", "tools": ["read"],
+    }
+
+
+def test_sessions_without_a_profile_are_coding_sessions():
+    assert pi_host.SessionInfo.model_validate(SESSION).profile == "coding"
+
+
+def test_files_of_an_absolute_cwd_inside_the_file_roots_or_the_workbench(monkeypatch, tmp_path):
+    host = _serve(monkeypatch, {"GET /files": (200, {"files": [{"path": "notes.md", "score": 1}]})})
+    vault, workbench, outside = tmp_path / "vault", tmp_path / "workbench", tmp_path / "outside"
+    for folder in (vault / "docs", workbench / "markdown", outside):
+        folder.mkdir(parents=True)
+    monkeypatch.setattr(config, "WORKBENCH", workbench)
+    client = _client(roots=mounted_roots(vault))
+
+    found = {"files": [{"path": "notes.md", "score": 1}]}
+    for folder in (vault / "docs", workbench / "markdown"):
+        assert client.get("/api/pi/files", params={"cwd": str(folder), "q": "n"}).json() == found
+    assert [dict(request.url.params)["cwd"] for request in host.requests] == [str(vault / "docs"), str(workbench / "markdown")]
+
+    assert client.get("/api/pi/files", params={"cwd": str(outside)}).status_code == 404
+    assert client.get("/api/pi/files", params={"cwd": str(vault / "docs" / ".." / ".." / "outside")}).status_code == 404
+    assert client.get("/api/pi/files", params={"cwd": str(vault / "missing")}).status_code == 404
+    assert client.get("/api/pi/files", params={"cwd": "vault/docs"}).status_code == 400
+    assert client.get("/api/pi/files").status_code == 400
+    assert client.get("/api/pi/files", params={"cwd": str(vault), "repo": "app"}).status_code == 400
+    assert len(host.requests) == 2
 
 
 def test_unknown_repositories_are_refused_before_pi_host(monkeypatch, repositories):

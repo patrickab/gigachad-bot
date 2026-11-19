@@ -15,7 +15,7 @@ from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import KeyReference, PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
-from lib.storage_namespace import WORKBENCH_SESSIONS
+from lib.storage_namespace import WORKBENCH_LINK_KEYS, WORKBENCH_SESSIONS
 from tests.conftest import create_user
 
 
@@ -37,19 +37,20 @@ def workbench_folders(root):
     return paper, plan
 
 
-def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root):
+@pytest.mark.parametrize("links", WORKBENCH_LINK_KEYS)
+def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root, links):
     paper = f"{workbench_root}/latex/old/paper/paper.tex"
     moved = f"{workbench_root}/latex/new/paper/paper.tex"
     other = f"{workbench_root}/latex/older/a.tex"
     refs = ProjectReferences("old", "new", [(f"{workbench_root}/latex/old", f"{workbench_root}/latex/new")])
     rows = [
         ("chat/old/project.json", json.dumps({"name": "Old", "files": [paper, {"path": other, "name": "A"}]}).encode(), False),
-        (WORKBENCH_SESSIONS, json.dumps({paper: "s1", other: "s2"}).encode(), False),
+        (links, json.dumps({paper: "s1", other: "s2"}).encode(), False),
         ("note/links.md", f"[p]({paper}) {other} x{paper}".encode(), False),
     ]
     changed = {target: content for _, target, content in renamed_documents(rows, refs, "New", [])}
     assert json.loads(changed["chat/new/project.json"])["files"] == [moved, {"path": other, "name": "A"}]
-    assert json.loads(changed[WORKBENCH_SESSIONS]) == {moved: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, other: "s2"}
+    assert json.loads(changed[links]) == {moved: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, other: "s2"}
     assert changed["note/links.md"].decode() == f"[p]({moved}) {other} x{paper}"
 
 

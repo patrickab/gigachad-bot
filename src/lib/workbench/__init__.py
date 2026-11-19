@@ -1,6 +1,6 @@
 """Disk layout of workbench documents: one omp session directory per kind, one folder per document inside it.
 
-- `<root>/<kind>/.omp/` holds the kind's omp prompt and config, mirrored from `omp/` on every backend start
+- `<root>/<kind>/.omp/` holds the kind's omp prompt (`prompts.render`, as Pi chats get it) and config, mirrored on every start
 - `<root>/latex/.omp/templates/<set>/` holds every LaTeX template set without its `example.pdf` and `previews/`, mirrored on every backend start too
 - A mounted LaTeX project folder gets the same `.omp/` (`mounted_latex_session`), with a config that keeps its repository's `AGENTS.md`
 - `<root>/<kind>/<slug>/<stem>/<stem>.<ext>` is a document of project `slug`
@@ -21,6 +21,7 @@ import config
 from lib import latex, latex_templates
 from lib.git import GitError, exclude_locally, repository_top
 from lib.naming import segment
+from lib.workbench.prompts import render
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -31,7 +32,7 @@ OMP_DIRECTORY = ".omp"
 TEMPLATE_DIRECTORY = "templates"
 # `.tex` first, it is the suffix of a new latex document. The others are the supporting files of a LaTeX project.
 _SUFFIXES: dict[str, Kind] = {".tex": "latex", ".bib": "latex", ".sty": "latex", ".cls": "latex", ".md": "markdown", ".pdf": "pdf"}
-_PROMPTS = config.TEMPLATES / "omp"
+_OMP_CONFIGS = config.TEMPLATES / "omp"
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +94,8 @@ def mirror_omp(root: Path) -> None:
 
 def _mirror_prompt(directory: Path, kind: Kind, config_name: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    _write_changed(directory / "SYSTEM.md", (_PROMPTS / f"{kind}.md").read_bytes())
-    _write_changed(directory / "config.yml", (_PROMPTS / config_name).read_bytes())
+    _write_changed(directory / "SYSTEM.md", render(kind).encode())
+    _write_changed(directory / "config.yml", (_OMP_CONFIGS / config_name).read_bytes())
 
 
 def mounted_latex_session(path: Path, mount: Path) -> Path | None:
