@@ -43,7 +43,7 @@ from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib import jupyter_service, omp_source
+from lib import jupyter_service, pi_models
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.file_attach import router as file_attach_router
@@ -51,6 +51,7 @@ from backend.routes.file_git import router as file_git_router
 from backend.routes.factory import router as factory_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.omp import router as omp_router
+from backend.routes.pi import router as pi_router
 from backend.routes.learn import router as learn_router
 from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
@@ -96,9 +97,9 @@ async def lifespan(app: FastAPI):
         log.warning("Stopped %d processes an earlier backend left running: %s", len(reaped), reaped)
     widen_default_executor()
     # Must precede the first LiteLLM call: it teaches the `litellm_proxy/`
-    # prefix where the local OMP gateway lives, which is how OMP-sourced
-    # models (including OAuth subscription quota) reach a provider.
-    omp_source.configure_litellm_proxy()
+    # prefix where pi-host's gateway lives, which is how Pi's logins
+    # (including the Anthropic subscription) reach chat.
+    pi_models.configure_litellm_proxy()
     # LLMClient imports LiteLLM (~1.5 s, most of the backend's import time): load it beside serving, not before.
     asyncio.get_running_loop().run_in_executor(None, _warm_client)
     upgrade(database_url())
@@ -199,6 +200,7 @@ app.include_router(projects_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
 app.include_router(omp_router)
+app.include_router(pi_router)
 app.include_router(learn_router)
 app.include_router(factory_router)
 

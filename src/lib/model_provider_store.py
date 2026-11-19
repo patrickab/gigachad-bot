@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
-from lib import omp_source
+from lib import pi_models
 from lib.data_store import DataStore, StorageNotFoundError, overwrite_text, read_text
 from lib.storage_namespace import MODEL
 
@@ -33,10 +33,10 @@ DEFAULT_MODEL_DEFAULTS = dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL)
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Shape the stored catalog for the browser.
 
-    Folds legacy per-login OMP rows into one, and adds the OpenAI default only
+    Folds legacy per-login gateway rows into one, and adds the OpenAI default only
     when its LiteLLM credential is available.
     """
-    visible = omp_source.fold_provider_rows(providers)
+    visible = pi_models.fold_provider_rows(providers)
     if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in visible:
         return {**visible, "OpenAI": OPENAI_PROVIDER}
     return visible
@@ -67,7 +67,7 @@ class Provider:
 
     litellm_id: str
     models: list[str]
-    # Where the models came from (today only "omp"), so the browser can group provider rows.
+    # Where the models came from (today only `pi_models.SOURCE`, the gateway row), so the browser can group provider rows.
     # Absent for hand-entered providers, so existing catalogs round-trip byte-wise.
     source: str | None = None
 

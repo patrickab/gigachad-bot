@@ -241,6 +241,29 @@ def _accumulate_tool_calls(pending: dict[int, dict[str, Any]], deltas: list[Any]
             slot["arguments"] += function.arguments
 
 
+def _block_field(block: object, key: str) -> object:
+    return block.get(key) if isinstance(block, dict) else getattr(block, key, None)
+
+
+def _accumulate_thinking_blocks(blocks: list[dict[str, Any]], deltas: list[Any]) -> None:
+    """Join streamed thinking fragments into signed blocks: a signature closes the block it ends.
+
+    Anthropic needs them back with the tool result, else the turn after a tool call runs without thinking, so the
+    signed blocks go back verbatim on the next request (`.docs/pi-migration.md`, "Gateway details").
+    """
+    for block in deltas:
+        if _block_field(block, "type") == "redacted_thinking":
+            if isinstance(data := _block_field(block, "data"), str) and data:
+                blocks.append({"type": "redacted_thinking", "data": data})
+            continue
+        if not blocks or blocks[-1]["type"] != "thinking" or blocks[-1]["signature"]:
+            blocks.append({"type": "thinking", "thinking": "", "signature": ""})
+        if isinstance(thinking := _block_field(block, "thinking"), str):
+            blocks[-1]["thinking"] += thinking
+        if isinstance(signature := _block_field(block, "signature"), str) and signature:
+            blocks[-1]["signature"] = signature
+
+
 def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> ToolCall | None:
     """Parse a text-mode tool call, accepting only names registered in *catalog*."""
     try:
@@ -291,6 +314,7 @@ def _start_stream(
 class _Round:
     text: str = ""
     call: ToolCall | None = None
+    thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
 
 
@@ -342,6 +366,8 @@ async def _run_round(
                     held = None
         if getattr(delta, "tool_calls", None):
             _accumulate_tool_calls(pending, delta.tool_calls)
+        if getattr(delta, "thinking_blocks", None):
+            _accumulate_thinking_blocks(out.thinking_blocks, delta.thinking_blocks)
 
     if in_reasoning:
         yield ("token", "\n</thought>")
@@ -400,19 +426,17 @@ async def stream_tool_turn[ContextT](
 
     if first.call:
         call = first.call
-        messages.append(
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
-                    }
-                ],
-            }
-        )
+        assistant: dict[str, Any] = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": json.dumps(call.arguments)}}
+            ],
+        }
+        # Only signed (or redacted) blocks are valid input, an unsigned fragment would be rejected.
+        if signed := [block for block in first.thinking_blocks if block.get("signature") or block.get("data")]:
+            assistant["thinking_blocks"] = signed
+        messages.append(assistant)
         yield ("tool_call", asdict(call))
         async for execution_event in catalog.execute_with_progress(
             call.name, call.arguments, context_for_call(call.id), enabled=enabled

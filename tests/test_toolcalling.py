@@ -1,5 +1,6 @@
 """The tool loop is the only new chat primitive, so its event order is what gets tested."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import litellm
@@ -69,6 +70,69 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
     assert sent[1][3] == {"role": "tool", "tool_call_id": "call_a", "content": "[ap] evidence"}
     assert sentinel_script not in str(sent[1])
     assert source_evidence not in str(sent[1])
+
+
+def _thinking_chunk(reasoning: str, *blocks: dict[str, Any]) -> SimpleNamespace:
+    """A streamed gateway chunk: reasoning text next to the signed thinking blocks it belongs to."""
+    delta = SimpleNamespace(content=None, tool_calls=None, reasoning_content=reasoning, thinking_blocks=list(blocks))
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None)
+
+
+@pytest.mark.asyncio
+async def test_signed_thinking_goes_back_with_the_tool_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fragments join into signed blocks on the assistant tool turn, unsigned leftovers are dropped."""
+    rounds = [
+        iter([
+            _thinking_chunk("Let me ", {"type": "thinking", "thinking": "Let me "}),
+            _thinking_chunk("search.", {"type": "thinking", "thinking": "search."}),
+            _thinking_chunk("", {"type": "thinking", "thinking": "", "signature": "sig-1"}),
+            _thinking_chunk("", {"type": "redacted_thinking", "data": "opaque"}),
+            _thinking_chunk("unsigned", {"type": "thinking", "thinking": "unsigned"}),
+            tool_chunk(0, "call_a", "web_search", '{"query": "x"}'),
+        ]),
+        iter([text_chunk("Answer")]),
+    ]
+    sent: list[list[dict[str, Any]]] = []
+
+    def fake_completion(**kwargs: Any) -> Any:
+        sent.append(list(kwargs["messages"]))
+        return rounds.pop(0)
+
+    async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
+        return toolcalling.ToolOutcome(content="evidence")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
+
+    events = await collect_tool_turn()
+
+    assert ("token", "Let me ") in events
+    assistant = sent[1][2]
+    assert assistant["role"] == "assistant"
+    assert assistant["thinking_blocks"] == [
+        {"type": "thinking", "thinking": "Let me search.", "signature": "sig-1"},
+        {"type": "redacted_thinking", "data": "opaque"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_tool_turn_without_thinking_sends_no_thinking_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    rounds = [iter([tool_chunk(0, "call_a", "web_search", '{"query": "x"}')]), iter([text_chunk("Answer")])]
+    sent: list[list[dict[str, Any]]] = []
+
+    def fake_completion(**kwargs: Any) -> Any:
+        sent.append(list(kwargs["messages"]))
+        return rounds.pop(0)
+
+    async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
+        return toolcalling.ToolOutcome(content="evidence")
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
+
+    await collect_tool_turn()
+
+    assert "thinking_blocks" not in sent[1][2]
 
 
 @pytest.mark.asyncio

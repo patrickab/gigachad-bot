@@ -51,25 +51,28 @@ def test_non_reasoning_model_has_no_levels(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.parametrize(
-    ("omp_levels", "expected"),
+    ("ladder", "expected"),
     [
-        (["low", "medium", "high", "xhigh", "max"], ["none", "low", "medium", "high", "xhigh", "max"]),
+        (["off", "minimal", "low", "medium", "high"], ["none", "minimal", "low", "medium", "high"]),
+        (["minimal", "low", "medium", "high", "xhigh", "max"], ["minimal", "low", "medium", "high", "xhigh", "max"]),
         ([], []),
         (None, ["none", "low", "medium", "high"]),
     ],
 )
-def test_omp_models_use_omp_registry_before_litellm(monkeypatch: pytest.MonkeyPatch, omp_levels: list[str] | None, expected: list[str]) -> None:
-    """OMP's ladder wins, an empty one means no reasoning, an unknown model falls back to LiteLLM."""
+def test_gateway_models_use_pis_ladder_before_litellm(
+    monkeypatch: pytest.MonkeyPatch, ladder: list[str] | None, expected: list[str]
+) -> None:
+    """Pi's ladder wins (its `off` is the app's `none`, absent when thinking cannot be off), an unknown model falls back to LiteLLM."""
     _stub_litellm(monkeypatch, supports_reasoning=True, model_info={})
     requested: list[str] = []
 
     def thinking_levels(model_id: str) -> list[str] | None:
         requested.append(model_id)
-        return omp_levels
+        return ladder
 
-    monkeypatch.setattr(reasoning_levels.omp_source, "thinking_levels", thinking_levels)
-    assert asyncio.run(resolve("litellm_proxy/openai-codex/gpt-6-astra")) == expected
-    assert requested == ["openai-codex/gpt-6-astra"]
+    monkeypatch.setattr(reasoning_levels.pi_models, "thinking_levels", thinking_levels)
+    assert asyncio.run(resolve("litellm_proxy/anthropic/claude-opus-4-5")) == expected
+    assert requested == ["anthropic/claude-opus-4-5"]
 
 
 @pytest.fixture
@@ -92,16 +95,16 @@ def _request_levels(model: str) -> tuple[list[str], BackgroundTasks]:
 
 
 def test_stored_levels_answer_first_and_revalidate_in_background(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:
-    live = {"omp/model": ["none", "low", "medium"]}
+    live = {"provider/model": ["none", "low", "medium"]}
     _stub_live_levels(monkeypatch, live)
-    assert _request_levels("omp/model")[0] == ["none", "low", "medium"]
+    assert _request_levels("provider/model")[0] == ["none", "low", "medium"]
 
-    live["omp/model"] = ["none", "low", "medium", "high"]
-    levels, background_tasks = _request_levels("omp/model")
+    live["provider/model"] = ["none", "low", "medium", "high"]
+    levels, background_tasks = _request_levels("provider/model")
     assert levels == ["none", "low", "medium"]
 
     asyncio.run(background_tasks())
-    assert _request_levels("omp/model")[0] == ["none", "low", "medium", "high"]
+    assert _request_levels("provider/model")[0] == ["none", "low", "medium", "high"]
 
 
 def test_failed_lookup_keeps_stored_levels(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:

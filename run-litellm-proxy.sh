@@ -8,8 +8,8 @@
 #             fails (gateway down, unknown login, empty catalog) the last config and settings are served unchanged
 #   auth      loopback only (127.0.0.1 or localhost), the master key (master.key, created once) is the bearer.
 #             LearnHarness gets it as CUSTOM_OPENAI_API_KEY (run-learnharness.sh)
-#   secrets   config.yaml holds none: it names LITELLM_MASTER_KEY and GIGACHAD_OMP_GATEWAY_TOKEN, exported here. Provider
-#             keys come from this environment (~/.secrets), OMP models go to the OMP gateway
+#   secrets   config.yaml holds none: it names LITELLM_MASTER_KEY and GIGACHAD_PI_GATEWAY_TOKEN, exported here. Provider
+#             keys come from this environment (~/.secrets), Pi models go to pi-host's gateway
 #   package   litellm[proxy] cannot share the project venv (it needs starlette >= 1, MinerU's gradio < 1, and rich < 14,
 #             llm-baseclient >= 14.2), so `uv tool run` serves it from uv's cache: the LiteLLM version uv.lock pins, the
 #             venv's Python, and the index as of a day after that LiteLLM's upload (`proxy-tool-pin`)
@@ -27,7 +27,7 @@ bind="${GIGACHAD_LITELLM_PROXY_BIND:-127.0.0.1:30183}"
 home="${GIGACHAD_LITELLM_PROXY_HOME:-$HOME/.local/share/gigachad-bot/litellm-proxy}"
 python="$root_dir/.venv/bin/python"
 
-# The proxy's environment holds every provider key and the OMP gateway token.
+# The proxy's environment holds every provider key and the pi-host token.
 case "${bind%:*}" in
     127.0.0.1 | localhost) ;;
     *)
@@ -56,8 +56,9 @@ if ! generator write-config; then
 fi
 
 LITELLM_MASTER_KEY="$(generator master-key)"
-GIGACHAD_OMP_GATEWAY_TOKEN="$(PYTHONPATH="$root_dir/src" "$python" -c 'from lib import omp_source; print(omp_source.gateway_token())')"
-export LITELLM_MASTER_KEY GIGACHAD_OMP_GATEWAY_TOKEN
+GIGACHAD_PI_GATEWAY_TOKEN="$(PYTHONPATH="$root_dir/src" "$python" -c 'from lib import pi_host; print(pi_host.token())' 2>/dev/null)" ||
+    printf 'warning: pi-host has no token yet, Pi models fail until the LiteLLM proxy restarts after pi-host\n' >&2
+export LITELLM_MASTER_KEY GIGACHAD_PI_GATEWAY_TOKEN
 pin="$(generator proxy-tool-pin "$root_dir/uv.lock")"
 read -r requirement python_version exclude_newer <<<"$pin"
 printf 'Starting the LiteLLM proxy (%s) on %s\n' "$requirement" "$bind"

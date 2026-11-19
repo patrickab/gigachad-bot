@@ -1,146 +1,129 @@
-"""Subscription rate-limit usage per provider account, read from `omp usage --json`."""
+"""Subscription rate-limit usage of Pi's login, read from pi-host's `/usage`.
+
+- Consumes `GET /usage` on pi-host: `{provider, limits: [{window, label?, usedPercent, resetsAt}], fetchedAt}`, which
+  pi-host caches for 60 s (`?refresh=1` bypasses it), or a non-200 `{error: {message}}` when the provider refuses
+- Provides `provider_usage(refresh)`, the route's shape: the worst limit per window, with the last good report
+  standing in for an hour while the usage endpoint fails (a rate-limited usage API is common)
+"""
 
 from __future__ import annotations
 
-import json
-import subprocess
+from datetime import datetime
 import threading
 import time
 from typing import Any
 
-from lib.omp_cli import run_omp
-from lib.ttl_cache import TtlCache
+import httpx
 
-_CLI_TIMEOUT_SECONDS = 30
-_CACHE_SECONDS = 5 * 60
-# A provider whose usage fetch fails drops out of `omp usage`; its last report stands in this long.
+from lib import pi_host
+
+_REQUEST_TIMEOUT_SECONDS = 30.0
 _STALE_REPORT_SECONDS = 60 * 60
-_WINDOW_DURATIONS_MS = {"5h": 5 * 3_600_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000}
-# omp's own window ids, folded onto the three the UI shows.
-_WINDOW_ALIASES = {"monthly": "30d", "daily": "5h"}
+_WINDOW_ORDER = ("5h", "7d")
 
-# Spans the CLI fetch and the `_last_reports` update, so concurrent callers apply reports in fetch order.
-_lock = threading.RLock()
-_usage_output = TtlCache[str](_CACHE_SECONDS)
-_last_reports: dict[str, tuple[float, dict[str, Any]]] = {}
+# Spans the fetch and the `_last_good` update, so concurrent callers apply answers in fetch order.
+_lock = threading.Lock()
+_last_good: tuple[float, dict[str, Any]] | None = None
 
 
 class UsageUnavailable(RuntimeError):
-    """The omp CLI is missing, failed, or printed something unreadable."""
+    """pi-host or the provider's usage endpoint did not answer, or answered something unreadable."""
 
 
-def _run_omp(*arguments: str) -> str:
+def _error_message(response: httpx.Response) -> str:
     try:
-        return run_omp(*arguments, timeout=_CLI_TIMEOUT_SECONDS)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise UsageUnavailable(str(exc)) from exc
+        error = response.json().get("error") or {}
+        message = error.get("message") if isinstance(error, dict) else error
+    except (ValueError, AttributeError):
+        message = None
+    return f"usage {response.status_code}: {message or response.text[:200]}"
 
 
-def _fetch_output(refresh: bool) -> str:
-    if refresh:
-        _run_omp("usage", "invalidate")
-    return _run_omp("usage", "--json")
+def _fetch(refresh: bool) -> object:
+    """pi-host's `/usage` body. Raises `UsageUnavailable`."""
+    try:
+        response = httpx.get(
+            f"{pi_host.base_url()}/usage",
+            params={"refresh": 1} if refresh else None,
+            headers={"Authorization": f"Bearer {pi_host.token()}"},
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+    except (pi_host.PiHostUnavailable, httpx.HTTPError) as exc:
+        raise UsageUnavailable(f"pi-host does not answer ({exc})") from exc
+    if not response.is_success:
+        raise UsageUnavailable(_error_message(response))
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise UsageUnavailable("pi-host usage returned invalid JSON") from exc
 
 
-def _output(refresh: bool) -> str:
-    """Raw CLI output, cached for a few minutes; *refresh* makes omp refetch from the providers first."""
-    return _usage_output.get(lambda: _fetch_output(refresh), refresh=refresh)
+def _minutes_until(resets_at: object, now: float) -> int | None:
+    if not isinstance(resets_at, str):
+        return None
+    try:
+        return max(0, round((datetime.fromisoformat(resets_at).timestamp() - now) / 60))
+    except ValueError:
+        return None
 
 
-def _window_id(limit: dict[str, Any]) -> str | None:
-    scope, window = limit.get("scope") or {}, limit.get("window") or {}
-    window_id = _WINDOW_ALIASES.get(scope.get("windowId"), scope.get("windowId"))
-    if window_id in _WINDOW_DURATIONS_MS:
-        return window_id
-    duration = window.get("durationMs")
-    if isinstance(duration, (int, float)):
-        return next((name for name, expected in _WINDOW_DURATIONS_MS.items() if abs(duration - expected) <= 3_600_000), None)
-    return None
-
-
-def _summarize(report: dict[str, Any], now_ms: float) -> dict[str, Any]:
-    """One account: its worst limit per window, or `no_limits` when omp reports none."""
-    worst: dict[str, tuple[float, float | None]] = {}
-    for limit in report.get("limits") or []:
-        fraction = (limit.get("amount") or {}).get("usedFraction")
-        window_id = _window_id(limit)
-        if window_id is None or not isinstance(fraction, (int, float)):
+def parse_usage(payload: object, now: float) -> dict[str, Any]:
+    """One report for the login: its worst limit per window (several 7d limits exist, one per model family)."""
+    if not isinstance(payload, dict) or not payload.get("provider"):
+        raise UsageUnavailable("pi-host usage returned an invalid response")
+    worst: dict[str, tuple[float, object]] = {}
+    for limit in payload.get("limits") or []:
+        if not isinstance(limit, dict):
             continue
-        if window_id not in worst or fraction > worst[window_id][0]:
-            worst[window_id] = (fraction, (limit.get("window") or {}).get("resetsAt"))
-    metadata = report.get("metadata") or {}
-    return {
-        "provider": report.get("provider"),
-        # Email only: the account id is an opaque UUID.
-        "account": metadata.get("email") or None,
+        window_id, percent = limit.get("window"), limit.get("usedPercent")
+        if window_id not in _WINDOW_ORDER or not isinstance(percent, (int, float)):
+            continue
+        if window_id not in worst or percent > worst[window_id][0]:
+            worst[window_id] = (percent, limit.get("resetsAt"))
+    report = {
+        "provider": payload["provider"],
+        "account": None,
         "no_limits": not worst,
         "windows": [
-            {
-                "id": window_id,
-                "percent": fraction * 100,
-                "resets_in_minutes": max(0, round((resets_at - now_ms) / 60_000)) if isinstance(resets_at, (int, float)) else None,
-            }
-            for window_id, (fraction, resets_at) in sorted(worst.items(), key=lambda item: list(_WINDOW_DURATIONS_MS).index(item[0]))
+            {"id": window_id, "percent": float(percent), "resets_in_minutes": _minutes_until(resets_at, now)}
+            for window_id, (percent, resets_at) in sorted(worst.items(), key=lambda item: _WINDOW_ORDER.index(item[0]))
         ],
     }
+    return {"generated_at": payload.get("fetchedAt"), "reports": [report]}
 
 
-def parse_usage(output: str, now_ms: float) -> dict[str, Any]:
-    try:
-        payload = json.loads(output)
-    except ValueError as exc:
-        raise UsageUnavailable("omp usage returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise UsageUnavailable("omp usage returned an invalid response")
-    reports = [
-        _summarize(report, now_ms) for report in payload.get("reports") or [] if isinstance(report, dict) and report.get("provider")
-    ]
-    # Accounts whose usage fetch failed this time, e.g. a rate-limited provider usage API.
-    reports += [
-        {
-            "provider": account["provider"], "account": account.get("email") or None,
-            "no_limits": False, "unavailable": True, "windows": [],
-        }
-        for account in payload.get("accountsWithoutUsage") or []
-        if isinstance(account, dict) and account.get("provider")
-    ]
-    return {"generated_at": payload.get("generatedAt"), "reports": reports}
-
-
-def _aged_report(report: dict[str, Any], elapsed_minutes: int) -> dict[str, Any]:
-    """*report* with every window's reset countdown reduced by the minutes since it was read."""
-    windows = [
-        window if window["resets_in_minutes"] is None
-        else {**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)}
-        for window in report["windows"]
-    ]
-    return {**report, "windows": windows}
-
-
-def _with_dropped_providers(usage: dict[str, Any], now: float) -> dict[str, Any]:
-    """Replace providers this fetch could not read with their last report, so a failed fetch does not hide them."""
-    fresh = [report for report in usage["reports"] if not report.get("unavailable")]
-    present = {report["provider"] for report in fresh}
-    for report in fresh:
-        _last_reports[report["provider"]] = (now, report)
-    reports = list(fresh)
-    for provider, (seen_at, report) in list(_last_reports.items()):
-        if provider in present:
-            continue
-        if now - seen_at > _STALE_REPORT_SECONDS:
-            del _last_reports[provider]
-            continue
-        reports.append(_aged_report(report, round((now - seen_at) / 60)))
-    known = {report["provider"] for report in reports}
-    reports += [report for report in usage["reports"] if report.get("unavailable") and report["provider"] not in known]
-    return {**usage, "reports": reports}
+def _aged(usage: dict[str, Any], elapsed_minutes: int) -> dict[str, Any]:
+    """*usage* with every window's reset countdown reduced by the minutes since it was read."""
+    return {
+        **usage,
+        "reports": [
+            {
+                **report,
+                "windows": [
+                    window if window["resets_in_minutes"] is None
+                    else {**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)}
+                    for window in report["windows"]
+                ],
+            }
+            for report in usage["reports"]
+        ],
+    }
 
 
 def provider_usage(refresh: bool = False) -> dict[str, Any]:
     """Usage per account, the shape the route returns as is.
 
-    `{"generated_at", "reports": [{"provider", "account", "no_limits", "unavailable"?, "windows": [window]}]}`,
+    `{"generated_at", "reports": [{"provider", "account", "no_limits", "windows": [window]}]}`,
     a window being `{"id", "percent", "resets_in_minutes"}`.
     """
+    global _last_good
     with _lock:
-        return _with_dropped_providers(parse_usage(_output(refresh), time.time() * 1000), time.monotonic())
+        now = time.monotonic()
+        try:
+            usage = parse_usage(_fetch(refresh), time.time())
+        except UsageUnavailable:
+            if _last_good is None or now - _last_good[0] > _STALE_REPORT_SECONDS:
+                raise
+            return _aged(_last_good[1], round((now - _last_good[0]) / 60))
+        _last_good = (now, usage)
+        return usage

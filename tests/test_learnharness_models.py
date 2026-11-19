@@ -6,29 +6,29 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import stat
 import threading
-import urllib.error
 
 import litellm
 import pytest
 import yaml
 
-from lib import learnharness_config, omp_source, reasoning_levels
+from lib import learnharness_config, pi_models, reasoning_levels
 
 PROVIDERS = {
     "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.5-flash"]},
     "DeepSeek": {"litellm_id": "deepseek", "models": ["deepseek-chat"]},
     "OpenRouter": {"litellm_id": "openrouter", "models": []},
-    "OMP": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "ollama-cloud/devstral-2:123b"], "source": "omp"},
+    "OMP": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-3-haiku"], "source": "omp"},
 }
 OLLAMA = ["ollama/gemma3:4b"]
-OMP_ENTRIES = {
+GATEWAY_ENTRIES = {
     "anthropic/claude-sonnet-5-5": {
         "id": "anthropic/claude-sonnet-5-5",
-        "input_modalities": ["text", "image"],
-        "context_length": 200000,
-        "max_output_tokens": 64000,
+        "input": ["text", "image"],
+        "context_window": 200000,
+        "max_tokens": 64000,
+        "thinking_levels": ["off", "low", "medium", "high"],
     },
-    "ollama-cloud/devstral-2:123b": {"id": "ollama-cloud/devstral-2:123b", "input_modalities": ["text"], "context_length": 262144},
+    "anthropic/claude-3-haiku": {"id": "anthropic/claude-3-haiku", "input": ["text"], "context_window": 262144, "thinking_levels": []},
 }
 OLLAMA_DETAILS = {
     "gemma3:4b": {
@@ -53,7 +53,7 @@ BASE_URL = "http://127.0.0.1:30183"
 
 @pytest.fixture
 def models(monkeypatch):
-    """The fixture catalog served, with LiteLLM's registry and the OMP gateway faked."""
+    """The fixture catalog served, with LiteLLM's registry and the Pi gateway faked."""
 
     def model_info(model):
         if model not in REGISTRY:
@@ -62,11 +62,11 @@ def models(monkeypatch):
 
     monkeypatch.setattr(litellm, "get_model_info", model_info)
     monkeypatch.setattr(litellm, "supports_vision", lambda model: REGISTRY.get(model, {}).get("vision", False))
-    monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_URL", "http://127.0.0.1:4000/v1")
-    monkeypatch.setenv("GIGACHAD_OMP_GATEWAY_TOKEN", "gateway-token")
+    monkeypatch.setenv("GIGACHAD_PI_HOST_URL", "http://127.0.0.1:8300")
+    monkeypatch.setenv("GIGACHAD_PI_GATEWAY_TOKEN", "gateway-token")
     return [
         learnharness_config.served_model(
-            selector, reasoning=selector in REASONING, omp_entries=OMP_ENTRIES, ollama_details=OLLAMA_DETAILS
+            selector, reasoning=selector in REASONING, gateway_entries=GATEWAY_ENTRIES, ollama_details=OLLAMA_DETAILS
         )
         for selector in learnharness_config.catalog_selectors(PROVIDERS, OLLAMA)
     ]
@@ -93,7 +93,7 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
         "gemini/gemini-3.5-flash",
         "deepseek/deepseek-chat",
         "litellm_proxy/anthropic/claude-sonnet-5-5",
-        "litellm_proxy/ollama-cloud/devstral-2:123b",
+        "litellm_proxy/anthropic/claude-3-haiku",
         "ollama/gemma3:4b",
     ]
     assert [route["model_name"] for route in config["model_list"]] == expected
@@ -102,8 +102,8 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
     # Secrets are named, the proxy launcher exports them: config.yaml holds none.
     assert routes["litellm_proxy/anthropic/claude-sonnet-5-5"] == {
         "model": "litellm_proxy/anthropic/claude-sonnet-5-5",
-        "api_base": "http://127.0.0.1:4000/v1",
-        "api_key": "os.environ/GIGACHAD_OMP_GATEWAY_TOKEN",
+        "api_base": "http://127.0.0.1:8300/v1",
+        "api_key": "os.environ/GIGACHAD_PI_GATEWAY_TOKEN",
     }
     assert routes["ollama/gemma3:4b"] == {"model": "ollama/gemma3:4b", "api_base": learnharness_config.OLLAMA_BASE_URL}
     # Provider keys stay in the proxy's environment, where LiteLLM looks them up like gigachad's own calls.
@@ -130,7 +130,7 @@ def test_proxy_and_learnharness_serve_the_same_selector_strings(models, tmp_path
     assert not list(tmp_path.rglob("*.tmp"))
 
 
-def test_capabilities_come_from_the_omp_gateway_ollama_and_litellm(models, tmp_path):
+def test_capabilities_come_from_the_pi_gateway_ollama_and_litellm(models, tmp_path):
     _, settings, _ = write(models, tmp_path)
 
     assert {row["id"]: row for row in settings["customProvider"]["models"]} == {
@@ -156,8 +156,8 @@ def test_capabilities_come_from_the_omp_gateway_ollama_and_litellm(models, tmp_p
             "maxTokens": 64000,
         },
         # The gateway omits its max output, Ollama never reports one: assumed, never LearnHarness's 4096.
-        "litellm_proxy/ollama-cloud/devstral-2:123b": {
-            "id": "litellm_proxy/ollama-cloud/devstral-2:123b",
+        "litellm_proxy/anthropic/claude-3-haiku": {
+            "id": "litellm_proxy/anthropic/claude-3-haiku",
             "image": False,
             "reasoning": False,
             "context": 262144,
@@ -171,11 +171,11 @@ def test_capabilities_come_from_the_omp_gateway_ollama_and_litellm(models, tmp_p
             "maxTokens": learnharness_config.ASSUMED_MAX_TOKENS,
         },
     }
-    assert [model.id for model in models if model.assumed_limits] == ["litellm_proxy/ollama-cloud/devstral-2:123b", "ollama/gemma3:4b"]
+    assert [model.id for model in models if model.assumed_limits] == ["litellm_proxy/anthropic/claude-3-haiku", "ollama/gemma3:4b"]
 
 
 def test_a_model_no_source_describes_gets_assumed_limits_not_8k(models):
-    unknown = learnharness_config.served_model("openrouter/new/model", reasoning=False, omp_entries={}, ollama_details={})
+    unknown = learnharness_config.served_model("openrouter/new/model", reasoning=False, gateway_entries={}, ollama_details={})
     assert unknown.assumed_limits
     assert unknown.snapshot() == {
         "id": "openrouter/new/model",
@@ -371,53 +371,50 @@ def test_concurrent_runs_agree_on_one_master_key_and_one_binding(models, tmp_pat
 
 @pytest.fixture
 def catalog(monkeypatch):
-    """The fixture catalog without Ollama, its OMP sources answering, counted."""
-    calls = {"gateway": 0, "registry": 0}
+    """The fixture catalog without Ollama, the Pi gateway answering, counted."""
+    calls = {"gateway": 0}
 
     def gateway():
         calls["gateway"] += 1
-        return list(OMP_ENTRIES.values())
-
-    def registry():
-        calls["registry"] += 1
-        return {"anthropic/claude-sonnet-5-5": ["low", "medium", "high"], "ollama-cloud/devstral-2:123b": []}
+        return list(GATEWAY_ENTRIES.values())
 
     async def resolve(model):
         return ["none", "high"] if model in REASONING else []
 
     monkeypatch.setattr(learnharness_config, "_host_catalog", lambda login: (PROVIDERS, DEFAULTS))
     monkeypatch.setattr(learnharness_config, "discover_ollama_models", list)
-    monkeypatch.setattr(omp_source, "catalog_entries", gateway)
-    monkeypatch.setattr(omp_source, "thinking_registry", registry)
+    monkeypatch.setattr(pi_models, "catalog_entries", gateway)
     monkeypatch.setattr(reasoning_levels, "resolve", resolve)
     monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": 100000, "max_output_tokens": 8000})
     monkeypatch.setattr(litellm, "supports_vision", lambda model: False)
     return calls
 
 
-def test_omp_models_are_described_from_one_gateway_and_one_registry_read(catalog):
+def test_gateway_models_are_described_from_one_gateway_read(catalog):
     models, defaults = asyncio.run(learnharness_config.served_catalog("host"))
 
-    assert catalog == {"gateway": 1, "registry": 1}
+    assert catalog == {"gateway": 1}
     by_id = {model.id: model for model in models}
     assert by_id["litellm_proxy/anthropic/claude-sonnet-5-5"].reasoning
     assert by_id["litellm_proxy/anthropic/claude-sonnet-5-5"].image
-    assert not by_id["litellm_proxy/ollama-cloud/devstral-2:123b"].reasoning
+    assert not by_id["litellm_proxy/anthropic/claude-3-haiku"].reasoning
     assert defaults == DEFAULTS
 
 
 @pytest.mark.parametrize(
-    ("source", "failure", "message"),
+    ("answer", "message"),
     [
-        ("catalog_entries", urllib.error.URLError("refused"), "no OMP gateway"),
-        ("thinking_registry", OSError("omp timed out"), "OMP's model registry"),
+        (pi_models.GatewayUnavailable("no Pi gateway at http://127.0.0.1:8300/v1 (refused)"), "no Pi gateway"),
+        ([], "lists no model"),
     ],
 )
-def test_an_omp_source_down_fails_instead_of_degrading(catalog, monkeypatch, source, failure, message):
+def test_a_pi_gateway_down_or_empty_fails_instead_of_degrading(catalog, monkeypatch, answer, message):
     def down():
-        raise failure
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
-    monkeypatch.setattr(omp_source, source, down)
+    monkeypatch.setattr(pi_models, "catalog_entries", down)
     with pytest.raises(learnharness_config.ConfigUnavailable, match=message):
         asyncio.run(learnharness_config.served_catalog("host"))
 
@@ -431,12 +428,12 @@ def test_an_unanswered_reasoning_lookup_fails_instead_of_counting_as_no(catalog,
         asyncio.run(learnharness_config.served_catalog("host"))
 
 
-def test_an_omp_model_the_gateway_does_not_list_is_warned_about(catalog, monkeypatch, capsys):
-    monkeypatch.setattr(omp_source, "catalog_entries", lambda: [OMP_ENTRIES["anthropic/claude-sonnet-5-5"]])
+def test_a_gateway_model_the_gateway_does_not_list_is_warned_about(catalog, monkeypatch, capsys):
+    monkeypatch.setattr(pi_models, "catalog_entries", lambda: [GATEWAY_ENTRIES["anthropic/claude-sonnet-5-5"]])
     asyncio.run(learnharness_config.served_catalog("host"))
     err = capsys.readouterr().err
-    assert "the OMP gateway does not list ollama-cloud/devstral-2:123b" in err
-    assert "no context or max output figure for litellm_proxy/ollama-cloud/devstral-2:123b" in err
+    assert "the Pi gateway does not list anthropic/claude-3-haiku" in err
+    assert "no context or max output figure for litellm_proxy/anthropic/claude-3-haiku" in err
 
 
 def test_an_empty_catalog_fails(catalog, monkeypatch):
@@ -489,11 +486,11 @@ def test_write_config_against_a_dead_gateway_keeps_the_last_good_files(catalog, 
     assert "host's catalog: 4 (1 image, 2 reasoning, 1 with assumed limits)" in capsys.readouterr().out
 
     def refused():
-        raise urllib.error.URLError("connection refused")
+        raise pi_models.GatewayUnavailable("no Pi gateway at http://127.0.0.1:8300/v1 (connection refused)")
 
-    monkeypatch.setattr(omp_source, "catalog_entries", refused)
+    monkeypatch.setattr(pi_models, "catalog_entries", refused)
     assert learnharness_config.main(["write-config", "--login", "host"]) == 1
-    assert "no OMP gateway" in capsys.readouterr().err
+    assert "no Pi gateway" in capsys.readouterr().err
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == good
 
 

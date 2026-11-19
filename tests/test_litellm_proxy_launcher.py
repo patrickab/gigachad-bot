@@ -11,7 +11,7 @@ from tests.shell import REPOSITORY, environment_with, fake_command, run_script
 PIN = "litellm[proxy]==1.98.0 3.12 2026-08-23T22:19:21Z"
 # The project venv's python: write-config succeeds unless WRITE_CONFIG_FAILS, check-proxy fails when PROXY_STALE.
 FAKE_PYTHON = f"""case "$*" in
-    *gateway_token*) echo gateway-token; exit ;;
+    *pi_host.token*) echo gateway-token; exit ;;
     *master-key*) echo sk-master; exit ;;
     *proxy-tool-pin*) echo "{PIN}"; exit ;;
 esac
@@ -23,7 +23,7 @@ fi
 [[ -z ${{WRITE_CONFIG_FAILS:-}} ]] || exit 1
 echo 'model_list: []' >"$GIGACHAD_LITELLM_PROXY_HOME/config.yaml"
 """
-FAKE_UV = 'echo "uv $* cwd=$PWD key=$LITELLM_MASTER_KEY token=$GIGACHAD_OMP_GATEWAY_TOKEN path=${PYTHONPATH:-}" >>"$LOG"\n'
+FAKE_UV = 'echo "uv $* cwd=$PWD key=$LITELLM_MASTER_KEY token=$GIGACHAD_PI_GATEWAY_TOKEN path=${PYTHONPATH:-}" >>"$LOG"\n'
 
 
 def launcher_copy(tmp_path: Path) -> Path:
@@ -56,7 +56,7 @@ def launch(tmp_path: Path, bind: str = "127.0.0.1:1", **variables: str):
     environment = environment_with(
         binaries, HOME=str(user), GIGACHAD_LITELLM_PROXY_HOME=str(home), GIGACHAD_LITELLM_PROXY_BIND=bind, LOG=str(log), **variables
     )
-    for name in ("PYTHONPATH", "LITELLM_MASTER_KEY", "GIGACHAD_OMP_GATEWAY_TOKEN"):
+    for name in ("PYTHONPATH", "LITELLM_MASTER_KEY", "GIGACHAD_PI_GATEWAY_TOKEN"):
         environment.pop(name, None)
     result = run_script(root / "run-litellm-proxy.sh", environment, timeout=15)
     return result, root, home, log.read_text().splitlines() if log.exists() else []

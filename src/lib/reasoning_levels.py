@@ -6,12 +6,13 @@ from typing import Any
 import httpx
 
 from config import OLLAMA_BASE_URL
-from lib import omp_source
+from lib import pi_models
 from lib.postgres_pool import get_postgres_pool
 
 # The app's "off": a chat request at this level omits `reasoning_effort` entirely.
 NONE = "none"
 OLLAMA_LEVELS = [NONE, "low", "medium", "high"]
+PI_OFF = "off"
 
 
 async def _ollama_supports_reasoning(model: str) -> bool | None:
@@ -60,18 +61,19 @@ async def resolve(model: str) -> list[str] | None:
     """Live lookup of the levels `model` accepts, None when the lookup itself failed.
 
     - Ollama tags (`ollama/<tag>`, incl. cloud) aren't in LiteLLM's registry, ask the live server
-    - OMP gateway models (`litellm_proxy/<provider>/<model>`) neither, use OMP's own registry
+    - Pi gateway models (`litellm_proxy/<provider>/<model>`) neither, use Pi's ladder from the gateway's `/v1/models`:
+      its `off` (present only when the model can run without thinking) is the app's `none`
     """
     if model.startswith("ollama/"):
         supported = await _ollama_supports_reasoning(model.removeprefix("ollama/"))
         if supported is None:
             return None
         return OLLAMA_LEVELS if supported else []
-    omp_prefix = f"{omp_source.LITELLM_ID}/"
-    if model.startswith(omp_prefix):
-        omp_levels = await asyncio.to_thread(omp_source.thinking_levels, model.removeprefix(omp_prefix))
-        if omp_levels is not None:
-            return [NONE, *omp_levels] if omp_levels else []
+    gateway_prefix = f"{pi_models.LITELLM_ID}/"
+    if model.startswith(gateway_prefix):
+        gateway_levels = await asyncio.to_thread(pi_models.thinking_levels, model.removeprefix(gateway_prefix))
+        if gateway_levels is not None:
+            return [NONE if level == PI_OFF else level for level in gateway_levels]
     return litellm_levels(model)
 
 

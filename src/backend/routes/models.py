@@ -6,7 +6,7 @@ from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from lib import omp_source, reasoning_levels
+from lib import pi_models, reasoning_levels
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
 from lib.provider_usage import UsageUnavailable, provider_usage
@@ -61,7 +61,7 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
 
 @router.get("/provider-usage")
 async def get_provider_usage(refresh: bool = False) -> dict:
-    """Subscription rate-limit usage per OMP login; `refresh` refetches instead of using the 5 minute cache."""
+    """Subscription rate-limit usage of Pi's login; `refresh` bypasses pi-host's 60 s cache."""
     with http_errors((UsageUnavailable, 502, None)):
         return await asyncio.to_thread(provider_usage, refresh)
 
@@ -83,7 +83,7 @@ async def get_reasoning_levels(model: str, background_tasks: BackgroundTasks) ->
 class ProviderDefinition(BaseModel):
     litellm_id: str
     models: list[str]
-    # Marks where the models came from, e.g. "omp". Absent for hand-entered
+    # Marks where the models came from (`pi_models.SOURCE`, the gateway row). Absent for hand-entered
     # providers. The store drops the key rather than persisting a null.
     source: str | None = None
 
@@ -125,13 +125,12 @@ async def save_model_tab_order(body: OrderBody, store: ModelProviderStore = Depe
 
 @router.get("/models/omp")
 async def get_omp_models(refresh: bool = False) -> dict:
-    """Providers OMP is logged into, and the models each one can serve.
+    """Providers pi-host's gateway serves, and their models.
 
-    Reachability is part of the payload, never an HTTP error: OMP can be
-    installed while its gateway is stopped, and the settings panel renders
-    that difference instead of failing to load.
+    Reachability is part of the payload, never an HTTP error: pi-host can be
+    stopped, and the settings panel renders that instead of failing to load.
     """
-    return await asyncio.to_thread(omp_source.catalog, refresh=refresh)
+    return await asyncio.to_thread(pi_models.catalog, refresh=refresh)
 
 
 @router.get("/prompts")

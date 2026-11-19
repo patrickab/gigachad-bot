@@ -1,6 +1,6 @@
 """Generator of LearnHarness's model configuration, the LiteLLM proxy config and its master key.
 
-- Consumes the host user's model catalog (Postgres), OMP's gateway and registry, Ollama and LiteLLM's model registry
+- Consumes the host user's model catalog (Postgres), pi-host's gateway (`lib.pi_models`), Ollama and LiteLLM's model registry
 - Provides `python -m lib.learnharness_config <command>` for the launchers:
   (`write-config`, `master-key`, `check-proxy`, `proxy-tool-pin`)
 - Standalone from the sessions adapter `lib.learnharness`: it may import from it, never the reverse
@@ -21,12 +21,10 @@ import os
 from pathlib import Path
 import re
 import secrets
-import subprocess
 import sys
 import time
 import tomllib
 from typing import TYPE_CHECKING, Any
-import urllib.error
 
 import httpx
 from llm_baseclient.config import discover_ollama_models
@@ -35,7 +33,7 @@ from psycopg_pool import PoolTimeout
 import yaml
 
 from config import OLLAMA_BASE_URL
-from lib import omp_source
+from lib import pi_host, pi_models
 from lib.changes import UserScope
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.postgres_data_store import PostgresDataStore
@@ -58,13 +56,13 @@ if TYPE_CHECKING:
 # run-litellm-proxy.sh is its only caller, right before it starts the proxy: the proxy's routes and LearnHarness's
 # snapshot never come from different catalog reads. `check-proxy` tells a reused proxy that serves another list apart.
 # - proxy `config.yaml`: an explicit model list (wildcards would list literal `*` rows), `drop_params` because LearnHarness
-#   always sends `store: false`. It holds no secret: the master key and the OMP gateway token are `os.environ/`
+#   always sends `store: false`. It holds no secret: the master key and the pi-host token are `os.environ/`
 #   references the proxy launcher exports, provider keys come from the proxy's environment like gigachad's own calls
 # - LearnHarness `settings.json`: the `customProvider` snapshot with capabilities, because the proxy's `/models` publishes
 #   none, and the strong/cheap/vision tiers, seeded when empty or no longer served. Every other key is LearnHarness's
 # - LearnHarness `auth.json`: the binding that enables the endpoint. The key itself is the master key, passed as
 #   `CUSTOM_OPENAI_API_KEY` by run-learnharness.sh, never stored there
-# A catalog that cannot be read whole (no such login, an empty catalog, the OMP gateway, OMP's registry or Ollama not
+# A catalog that cannot be read whole (no such login, an empty catalog, pi-host's gateway or Ollama not
 # answering) writes nothing and exits non-zero: unknown capabilities are never stored as "no", the last good files stay.
 
 DEFAULT_PROXY_BIND = "127.0.0.1:30183"
@@ -75,7 +73,7 @@ CUSTOM_AUTH_BINDING = "__learnharness_custom_provider_binding"
 SETTINGS_VERSION = 1
 # The proxy launcher exports these, config.yaml only names them.
 MASTER_KEY_ENV = "LITELLM_MASTER_KEY"
-GATEWAY_TOKEN_ENV = "GIGACHAD_OMP_GATEWAY_TOKEN"
+GATEWAY_TOKEN_ENV = "GIGACHAD_PI_GATEWAY_TOKEN"
 # LearnHarness tier ← the gigachad default that seeds it.
 TIER_DEFAULTS = {"strong": "default_model", "cheap": "small_model", "vision": "vision_model"}
 # Limits of a model no source describes. LearnHarness's own fallback (8192 context, 4096 output) would compact every
@@ -173,21 +171,21 @@ def served_model(
     selector: str,
     *,
     reasoning: bool,
-    omp_entries: Mapping[str, Mapping[str, Any]],
+    gateway_entries: Mapping[str, Mapping[str, Any]],
     ollama_details: Mapping[str, Mapping[str, Any]],
 ) -> ServedModel:
-    """Route and capabilities of *selector*: OMP's gateway rows, Ollama's `/api/show`, else LiteLLM's registry."""
-    omp_prefix = f"{omp_source.LITELLM_ID}/"
-    if selector.startswith(omp_prefix):
-        entry = omp_entries.get(selector.removeprefix(omp_prefix)) or {}
-        params = {"model": selector, "api_base": omp_source.gateway_url(), "api_key": f"os.environ/{GATEWAY_TOKEN_ENV}"}
+    """Route and capabilities of *selector*: the Pi gateway's rows, Ollama's `/api/show`, else LiteLLM's registry."""
+    gateway_prefix = f"{pi_models.LITELLM_ID}/"
+    if selector.startswith(gateway_prefix):
+        entry = gateway_entries.get(selector.removeprefix(gateway_prefix)) or {}
+        params = {"model": selector, "api_base": pi_host.gateway_url(), "api_key": f"os.environ/{GATEWAY_TOKEN_ENV}"}
         return ServedModel(
             selector,
             params,
-            image="image" in (entry.get("input_modalities") or []),
+            image="image" in (entry.get("input") or []),
             reasoning=reasoning,
-            context=_positive(entry.get("context_length")),
-            max_tokens=_positive(entry.get("max_output_tokens")),
+            context=_positive(entry.get("context_window")),
+            max_tokens=_positive(entry.get("max_tokens")),
         )
     if selector.startswith("ollama/"):
         details = ollama_details.get(selector.removeprefix("ollama/")) or {}
@@ -488,24 +486,15 @@ def _host_catalog(login: str) -> tuple[dict[str, dict[str, Any]], dict[str, str]
         close_postgres_pool()
 
 
-def _omp_entries() -> dict[str, dict[str, Any]]:
-    """The OMP gateway's `/models` rows by `<provider>/<model>`."""
+def _gateway_entries() -> dict[str, dict[str, Any]]:
+    """The Pi gateway's `/v1/models` rows by `<provider>/<model>`, capabilities and effort ladder included."""
     try:
-        entries = omp_source.catalog_entries()  # raw rows: group_by_provider drops max_output_tokens
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise ConfigUnavailable(f"no OMP gateway at {omp_source.gateway_url()} ({exc}), OMP models are undescribed") from exc
+        entries = pi_models.catalog_entries()  # raw rows: group_by_provider drops max_tokens and thinking_levels
+    except pi_models.GatewayUnavailable as exc:
+        raise ConfigUnavailable(f"{exc}, gateway models are undescribed") from exc
+    if not entries:
+        raise ConfigUnavailable(f"the Pi gateway at {pi_host.gateway_url()} lists no model")
     return {str(entry.get("id") or "").lstrip("/"): entry for entry in entries}
-
-
-def _omp_thinking() -> dict[str, list[str]]:
-    """OMP's effort ladders by `<provider>/<model>`: one `omp models --json` for every model, and its failure raised."""
-    try:
-        levels = omp_source.thinking_registry()
-    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as exc:
-        raise ConfigUnavailable(f"OMP's model registry (`omp models --json`) did not answer ({exc})") from exc
-    if not levels:
-        raise ConfigUnavailable("OMP's model registry (`omp models --json`) lists no model")
-    return levels
 
 
 async def _ollama_show(client: httpx.AsyncClient, tag: str) -> dict[str, Any]:
@@ -520,15 +509,15 @@ async def _ollama_show(client: httpx.AsyncClient, tag: str) -> dict[str, Any]:
     return details
 
 
-async def _reasons(selector: str, omp_levels: Mapping[str, list[str]]) -> bool:
-    """gigachad's own answer (OMP registry, Ollama, LiteLLM). A failed lookup raises, it never counts as "no"."""
+async def _reasons(selector: str, gateway_entries: Mapping[str, dict[str, Any]]) -> bool:
+    """gigachad's own answer (the gateway's ladder, Ollama, LiteLLM). A failed lookup raises, it never counts as "no"."""
     from lib import reasoning_levels  # imports litellm, see _litellm_info
 
-    omp_prefix = f"{omp_source.LITELLM_ID}/"
-    if selector.startswith(omp_prefix):
-        levels = omp_levels.get(selector.removeprefix(omp_prefix))
-        # A model the registry lacks falls back to LiteLLM's flags, as reasoning_levels.resolve does.
-        return bool(levels if levels is not None else reasoning_levels.litellm_levels(selector))
+    gateway_prefix = f"{pi_models.LITELLM_ID}/"
+    if selector.startswith(gateway_prefix):
+        entry = gateway_entries.get(selector.removeprefix(gateway_prefix))
+        # A model the gateway lacks falls back to LiteLLM's flags, as reasoning_levels.resolve does.
+        return bool(pi_models.entry_thinking_levels(entry) if entry is not None else reasoning_levels.litellm_levels(selector))
     levels = await reasoning_levels.resolve(selector)
     if levels is None:
         raise ConfigUnavailable(f"no reasoning answer for {selector}")
@@ -543,20 +532,19 @@ async def served_catalog(login: str) -> tuple[list[ServedModel], dict[str, str]]
     selectors = catalog_selectors(providers, ollama)
     if not selectors:
         raise ConfigUnavailable(f"{login}'s catalog has no model")
-    omp_prefix = f"{omp_source.LITELLM_ID}/"
-    omp_models = [selector.removeprefix(omp_prefix) for selector in selectors if selector.startswith(omp_prefix)]
-    omp_entries: dict[str, dict[str, Any]] = {}
-    omp_levels: dict[str, list[str]] = {}
-    if omp_models:
-        omp_entries, omp_levels = await asyncio.gather(asyncio.to_thread(_omp_entries), asyncio.to_thread(_omp_thinking))
-        if unlisted := [model for model in omp_models if model not in omp_entries]:
-            _warn(f"the OMP gateway does not list {', '.join(unlisted)}: served as text-only")
+    gateway_prefix = f"{pi_models.LITELLM_ID}/"
+    gateway_models = [selector.removeprefix(gateway_prefix) for selector in selectors if selector.startswith(gateway_prefix)]
+    gateway_entries: dict[str, dict[str, Any]] = {}
+    if gateway_models:
+        gateway_entries = await asyncio.to_thread(_gateway_entries)
+        if unlisted := [model for model in gateway_models if model not in gateway_entries]:
+            _warn(f"the Pi gateway does not list {', '.join(unlisted)}: served as text-only")
     tags = [selector.removeprefix("ollama/") for selector in selectors if selector.startswith("ollama/")]
     async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=_OLLAMA_TIMEOUT_SECONDS) as ollama_client:
         shown = await asyncio.gather(*(_ollama_show(ollama_client, tag) for tag in tags))
-    reasoning = await asyncio.gather(*(_reasons(selector, omp_levels) for selector in selectors))
+    reasoning = await asyncio.gather(*(_reasons(selector, gateway_entries) for selector in selectors))
     models = [
-        served_model(selector, reasoning=reasons, omp_entries=omp_entries, ollama_details=dict(zip(tags, shown, strict=True)))
+        served_model(selector, reasoning=reasons, gateway_entries=gateway_entries, ollama_details=dict(zip(tags, shown, strict=True)))
         for selector, reasons in zip(selectors, reasoning, strict=True)
     ]
     if assumed := [model.id for model in models if model.assumed_limits]:
