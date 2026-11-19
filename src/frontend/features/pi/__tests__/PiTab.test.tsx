@@ -38,7 +38,7 @@ vi.mock("../usePiSession", () => ({
 }))
 
 const CATALOG: PiCatalog = {
-  installed: true, online: true, gateway: "", litellm_id: "litellm_proxy", error: null,
+  installed: true, online: true, gateway: "", provider_id: "litellm_proxy", error: null,
   providers: [{
     id: "anthropic",
     label: "Anthropic",

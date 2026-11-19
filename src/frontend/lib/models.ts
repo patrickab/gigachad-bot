@@ -1,12 +1,12 @@
 import type { ModelProvider } from "@/lib/domain/types"
 
-/** LiteLLM prefix used for Pi-sourced models: `litellm_proxy/<pi-provider>/<id>`. */
+/** Stored selector prefix of Pi gateway models, kept from before Pi: `litellm_proxy/<pi-provider>/<id>`. */
 export const PI_LITELLM_ID = "litellm_proxy"
 /** `source` of the catalog row holding every Pi gateway pick (backend `pi_models.SOURCE`). */
 export const PI_MODEL_SOURCE = "pi"
 /** Label of that row, one selector tab listing `<pi-provider>/<model>` (backend `pi_models.PROVIDER_LABEL`). */
 export const PI_PROVIDER_LABEL = "Pi"
-/** Stored selectors keep LiteLLM's provider ids, the gateway names these providers differently. */
+/** Stored selectors keep their pre-Pi provider ids, the gateway names these providers differently. */
 const GATEWAY_PROVIDER_ALIASES: Record<string, string> = { gemini: "google" }
 
 /** The gateway's `<provider>/<id>` of a stored selector, mirror of backend `pi_models.gateway_model_id`: `litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`. */
@@ -18,14 +18,14 @@ export function gatewayModelId(selector: string): string {
   return `${Object.hasOwn(GATEWAY_PROVIDER_ALIASES, provider) ? GATEWAY_PROVIDER_ALIASES[provider] : provider}${selector.slice(slash)}`
 }
 
-/** A provider's models as `litellm_id/model` ids. */
+/** A provider's models as `provider_id/model` ids. */
 export function qualifiedModelIds(provider: ModelProvider): string[] {
-  return provider.models.map((model) => `${provider.litellm_id}/${model}`)
+  return provider.models.map((model) => `${provider.provider_id}/${model}`)
 }
 
 export function displayName(m: string): string {
   // Keep the Pi provider segment (`anthropic/claude-opus-5`) so rows stay distinct under the
-  // single Pi provider tab. Drop only the LiteLLM proxy hop.
+  // single Pi provider tab. Drop only the stored `litellm_proxy/` prefix.
   if (m.startsWith(`${PI_LITELLM_ID}/`)) return m.slice(PI_LITELLM_ID.length + 1)
   const slash = m.indexOf("/")
   return slash === -1 ? m : m.slice(slash + 1)

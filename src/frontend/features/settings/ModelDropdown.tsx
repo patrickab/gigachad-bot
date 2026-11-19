@@ -35,12 +35,13 @@ function shortName(model: string): string {
 
 const byDisplayName = (a: string, b: string) => displayName(a).localeCompare(displayName(b))
 
-/** One tab per provider (Ollama first), models sorted by display name. */
+/** One tab per provider (Ollama first), models sorted by display name, those the gateway does not list left out. */
 function providerTabs(models: ModelsResponse): ProviderTab[] {
+  const unavailable = new Set(models.unavailable)
   return [
-    { label: "Ollama", models: [...models.ollama].sort(byDisplayName) },
-    ...models.providers.map((provider) => ({ label: provider.label, models: qualifiedModelIds(provider).sort(byDisplayName) })),
-  ]
+    { label: "Ollama", models: models.ollama },
+    ...models.providers.map((provider) => ({ label: provider.label, models: qualifiedModelIds(provider) })),
+  ].map((tab) => ({ label: tab.label, models: tab.models.filter((model) => !unavailable.has(model)).sort(byDisplayName) }))
 }
 
 export function ModelDropdown({ models, pickModels, loadError, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {

@@ -21,9 +21,10 @@ vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
 
 const CATALOG: ModelsResponse = {
   ollama: ["ollama/qwen3", "ollama/gemma4"],
-  providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] }],
+  providers: [{ label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] }],
   defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
   tab_order: [],
+  unavailable: [],
 }
 const SERVED: LearnFrameMessage = {
   type: "models",
@@ -107,7 +108,7 @@ it("narrows only the pick list: Manage models edits and saves the full catalog",
   fireEvent.click(screen.getByRole("button", { name: "Add model" }))
 
   await waitFor(() => expect(onProvidersChange).toHaveBeenCalledTimes(1))
-  expect(onProvidersChange.mock.calls[0][0]).toEqual([{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro", "gemini-4"] }])
+  expect(onProvidersChange.mock.calls[0][0]).toEqual([{ label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro", "gemini-4"] }])
 })
 
 it("shows a session's model as a read-only pill, the selector again once it is no longer served", () => {

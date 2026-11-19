@@ -8,16 +8,17 @@ vi.mock("@/lib/backend/api", () => ({ fetchPiCatalog }))
 
 const models: ModelsResponse = {
   ollama: ["ollama/gemma4:31b-cloud"],
-  providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] }],
+  providers: [{ label: "Gemini", provider_id: "gemini", models: ["gemini-3.1-pro"] }],
   defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud", sandbox_model: "ollama/gemma4:31b-cloud" },
   tab_order: [],
+  unavailable: [],
 }
 
 const onlineCatalog: PiCatalog = {
   installed: true,
   online: true,
   gateway: "http://127.0.0.1:4000/v1",
-  litellm_id: "litellm_proxy",
+  provider_id: "litellm_proxy",
   providers: [{ id: "anthropic", label: "Anthropic", models: [{ id: "anthropic/claude-opus-5", name: "Claude Opus 5", vision: true, context_window: 200000, thinking_levels: ["off", "low", "medium", "high"] }] }],
   error: null,
 }
@@ -43,8 +44,8 @@ describe("ModelDropdown Pi source", () => {
 
     await waitFor(() => expect(onProvidersChange).toHaveBeenCalled())
     expect(onProvidersChange.mock.calls[0][0]).toEqual([
-      { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] },
-      { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] },
+      { label: "Gemini", provider_id: "gemini", models: ["gemini-3.1-pro"] },
+      { label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] },
     ])
   })
 
@@ -53,7 +54,7 @@ describe("ModelDropdown Pi source", () => {
     const onProvidersChange = vi.fn().mockResolvedValue(undefined)
     const withPick: ModelsResponse = {
       ...models,
-      providers: [...models.providers, { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] }],
+      providers: [...models.providers, { label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] }],
     }
     render(<ModelDropdown models={withPick} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
 
@@ -90,8 +91,8 @@ describe("ModelDropdown Pi source", () => {
     const withThree: ModelsResponse = {
       ...models,
       providers: [
-        { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] },
-        { label: "DeepSeek", litellm_id: "deepseek", models: ["deepseek-v4"] },
+        { label: "Gemini", provider_id: "gemini", models: ["gemini-3.1-pro"] },
+        { label: "DeepSeek", provider_id: "deepseek", models: ["deepseek-v4"] },
       ],
       tab_order: ["DeepSeek", "Ollama"],
     }
@@ -109,7 +110,7 @@ describe("ModelDropdown Pi source", () => {
     const unsorted: ModelsResponse = {
       ...models,
       ollama: ["ollama/zulu", "ollama/alpha"],
-      providers: [{ label: "Gemini", litellm_id: "gemini", models: ["zeta", "alpha"] }],
+      providers: [{ label: "Gemini", provider_id: "gemini", models: ["zeta", "alpha"] }],
     }
     render(<ModelDropdown models={unsorted} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
@@ -145,6 +146,23 @@ describe("ModelDropdown Pi source", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add model" }))
 
     await waitFor(() => expect(onProvidersChange).toHaveBeenCalledTimes(1))
-    expect(onProvidersChange.mock.calls[0][0]).toEqual([{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro", "gemini-4"] }])
+    expect(onProvidersChange.mock.calls[0][0]).toEqual([{ label: "Gemini", provider_id: "gemini", models: ["gemini-3.1-pro", "gemini-4"] }])
+  })
+
+  it("leaves models the gateway does not list out of the pick list, Manage models still shows them", async () => {
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    const withUnlisted: ModelsResponse = {
+      ...models,
+      providers: [{ label: "Gemini", provider_id: "gemini", models: ["gemini-3.1-pro", "gemini-retired"] }],
+      unavailable: ["gemini/gemini-retired"],
+    }
+    render(<ModelDropdown models={withUnlisted} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Gemini" }))
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["gemini-3.1-pro"])
+    fireEvent.click(screen.getByRole("button", { name: "Manage models" }))
+    fireEvent.click(screen.getByRole("button", { name: "Expand Gemini" }))
+    expect(screen.getByText("gemini-retired")).toBeInTheDocument()
   })
 })

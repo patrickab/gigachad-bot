@@ -16,7 +16,7 @@ from lib.storage_namespace import MODEL
 
 def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(data_store):
     catalog = ModelProviderStore(data_store)
-    providers = {"Together": {"litellm_id": "together_ai", "models": ["meta-llama/Llama-3.3-70B"]}}
+    providers = {"Together": {"provider_id": "together_ai", "models": ["meta-llama/Llama-3.3-70B"]}}
 
     assert catalog.save(providers) == providers
     assert catalog.load() == providers
@@ -24,7 +24,7 @@ def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(data_store):
     assert "Together:" in content.decode()
 
     try:
-        catalog.save({"Together": {"litellm_id": "together_ai", "models": ["a", "a"]}})
+        catalog.save({"Together": {"provider_id": "together_ai", "models": ["a", "a"]}})
     except ValueError as exc:
         assert "duplicate" in str(exc)
     else:
@@ -87,10 +87,10 @@ def test_legacy_gateway_rows_migrate_once_into_the_pi_row(data_store):
     """Pre-Pi `omp` rows, per login or already folded, become one `Pi` row; stored selectors keep their spelling."""
     catalog = ModelProviderStore(data_store)
     catalog.save({
-        "OMP · Anthropic": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "omp"},
-        "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.1-pro"]},
+        "OMP · Anthropic": {"provider_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "omp"},
+        "Gemini": {"provider_id": "gemini", "models": ["gemini-3.1-pro"]},
         "OMP · OpenAI Codex": {
-            "litellm_id": "litellm_proxy",
+            "provider_id": "litellm_proxy",
             "models": ["openai-codex/gpt-5.2", "anthropic/claude-opus-5"],
             "source": "omp",
         },
@@ -101,12 +101,32 @@ def test_legacy_gateway_rows_migrate_once_into_the_pi_row(data_store):
     # Merged in row order at the first legacy row's position, deduped, the other provider untouched.
     assert list(providers) == ["Pi", "Gemini"]
     assert providers["Pi"] == {
-        "litellm_id": "litellm_proxy",
+        "provider_id": "litellm_proxy",
         "models": ["anthropic/claude-opus-5", "openai-codex/gpt-5.2"],
         "source": "pi",
     }
     content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_PROVIDERS_FILE}")
     assert "omp" not in content.decode()
+    assert catalog.load() == providers
+
+
+def test_legacy_litellm_id_key_migrates_once_and_keeps_its_value(data_store):
+    """A pre-Pi `litellm_id` prefix is stored as `provider_id`, the `litellm_proxy` value and row order unchanged."""
+    legacy = {
+        "Pi": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "pi"},
+        "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.1-pro"]},
+    }
+    data_store.write_bytes(f"{MODEL}/{MODEL_PROVIDERS_FILE}", yaml.safe_dump(legacy, sort_keys=False).encode())
+    catalog = ModelProviderStore(data_store)
+
+    providers = catalog.load()
+
+    assert providers == {
+        "Pi": {"provider_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "pi"},
+        "Gemini": {"provider_id": "gemini", "models": ["gemini-3.1-pro"]},
+    }
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_PROVIDERS_FILE}")
+    assert "litellm_id" not in content.decode()
     assert catalog.load() == providers
 
 

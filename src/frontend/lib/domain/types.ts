@@ -175,6 +175,8 @@ export interface ModelsResponse {
   defaults: ModelDefaults
   /** Persisted selector-tab display order, e.g. `["Ollama", "Pi", "OpenAI"]`. Tabs missing from it fall to the end. */
   tab_order: string[]
+  /** Catalog selectors the Pi gateway does not list, so a send would fail: hidden from the pick list, kept under Manage models. */
+  unavailable: string[]
 }
 
 /** Ordered `reasoning_effort` values the model accepts, `none` = off, empty = can't reason. */
@@ -184,8 +186,8 @@ export interface ModelDefaults { default_model: string; small_model: string; vis
 
 export interface ModelProvider {
   label: string
-  litellm_id: string
-  /** Model name without the provider prefix; the selector sends `litellm_id/model`. */
+  provider_id: string
+  /** Model name without the provider prefix; the selector sends `provider_id/model`. */
   models: string[]
   /** Where the models came from. `"pi"` rows were picked from Pi's logins through pi-host's gateway. */
   source?: string | null
@@ -213,8 +215,8 @@ export interface PiCatalog {
   /** Its gateway answered, so these models are callable right now. */
   online: boolean
   gateway: string
-  /** LiteLLM prefix to build a selector with: `${litellm_id}/${model.id}`. */
-  litellm_id: string
+  /** Provider id to build a selector with: `${provider_id}/${model.id}`. */
+  provider_id: string
   providers: PiProvider[]
   error: string | null
 }

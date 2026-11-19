@@ -136,7 +136,7 @@ def _read_catalog() -> dict[str, Any]:
         "installed": _installed(),
         "online": False,
         "gateway": pi_host.gateway_url(),
-        "litellm_id": LITELLM_ID,
+        "provider_id": LITELLM_ID,
         "providers": [],
         "error": None,
     }
@@ -166,10 +166,15 @@ def thinking_registry() -> dict[str, list[str]]:
     return {str(entry.get("id")): entry_thinking_levels(entry) for entry in catalog_entries() if entry.get("id")}
 
 
-def thinking_levels(model_id: str) -> list[str] | None:
-    """Effort levels the gateway accepts for `<provider>/<model>`, None when it is unreachable or lacks the model."""
+def served_ladders() -> dict[str, list[str]] | None:
+    """Every model the gateway serves -> its effort ladder, cached, None when the gateway is unreachable."""
     try:
-        levels = _thinking.get(thinking_registry)
+        return _thinking.get(thinking_registry)
     except GatewayUnavailable:
         return None
-    return levels.get(model_id)
+
+
+def thinking_levels(model_id: str) -> list[str] | None:
+    """Effort levels the gateway accepts for `<provider>/<model>`, None when it is unreachable or lacks the model."""
+    ladders = served_ladders()
+    return None if ladders is None else ladders.get(model_id)

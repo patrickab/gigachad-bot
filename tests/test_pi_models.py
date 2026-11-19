@@ -65,7 +65,7 @@ def test_catalog_groups_gateway_models_by_provider(tmp_path, monkeypatch):
 
     assert str(requests[0].url) == "http://127.0.0.1:8399/v1/models"
     assert requests[0].headers["Authorization"] == "Bearer host-token"
-    assert (catalog["installed"], catalog["online"], catalog["litellm_id"]) == (True, True, "litellm_proxy")
+    assert (catalog["installed"], catalog["online"], catalog["provider_id"]) == (True, True, "litellm_proxy")
     anthropic, openrouter = catalog["providers"]
     assert (anthropic["label"], openrouter["label"]) == ("Anthropic", "OpenRouter")
     # Sorted by id, blank ids dropped, vision from the input modalities, a bare row still has a usable name.
@@ -107,6 +107,7 @@ def test_thinking_registry_raises_where_thinking_levels_reads_unknown(tmp_path, 
     with pytest.raises(pi_models.GatewayUnavailable):
         pi_models.thinking_registry()
     assert pi_models.thinking_levels("anthropic/claude-opus-4-5") is None
+    assert pi_models.served_ladders() is None
 
 
 def test_configure_litellm_proxy_points_the_prefix_at_the_gateway(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
@@ -36,19 +36,22 @@ async def _models_payload(
             store.load_tab_order() if tab_order is None else tab_order,
         )
 
-    def ollama() -> list[str]:
-        """Installed Ollama chat models as selectors, synced into Pi first so the gateway serves a new pull."""
+    def ollama() -> tuple[list[str], dict[str, list[str]] | None]:
+        """Installed Ollama chat models as selectors, synced into Pi first so the gateway lists a new pull, then the gateway's models."""
         ollama_models.sync_pi_provider()
-        return [f"ollama/{tag}" for tag in ollama_models.installed_chat_models()]
+        return [f"ollama/{tag}" for tag in ollama_models.installed_chat_models()], pi_models.served_ladders()
 
     # Ollama's API runs alongside the store reads instead of after them.
-    installed, (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
+    (installed, served), (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
         asyncio.to_thread(ollama), asyncio.to_thread(stored)
     )
     visible = providers_for_ui(all_providers)
+    selectors = installed + [f"{provider['provider_id']}/{model}" for provider in visible.values() for model in provider["models"]]
     return {
         "ollama": installed,
         "providers": [{"label": label, **provider} for label, provider in visible.items()],
+        # Catalog models the gateway does not list (D16), empty while the gateway is unreachable and nothing is known.
+        "unavailable": [] if served is None else [selector for selector in selectors if pi_models.gateway_model_id(selector) not in served],
         "defaults": all_defaults,
         "tab_order": all_tab_order,
     }
@@ -71,21 +74,13 @@ async def get_provider_usage(refresh: bool = False) -> dict:
 
 
 @router.get("/models/reasoning-levels")
-async def get_reasoning_levels(model: str, background_tasks: BackgroundTasks) -> dict:
-    """Ordered `reasoning_effort` levels `model` accepts, empty when it can't reason.
-
-    - Stored levels answer instantly, a background lookup revalidates them
-    - Unknown models resolve live once, failed lookups (e.g. Ollama down) get no levels
-    """
-    stored = await asyncio.to_thread(reasoning_levels.load_stored, model)
-    if stored is not None:
-        background_tasks.add_task(reasoning_levels.refresh, model)
-        return {"levels": stored}
-    return {"levels": await reasoning_levels.refresh(model) or []}
+async def get_reasoning_levels(model: str) -> dict:
+    """Ordered `reasoning_effort` levels `model` accepts per the gateway, empty when it can't reason or isn't listed."""
+    return {"levels": await asyncio.to_thread(reasoning_levels.levels, model)}
 
 
 class ProviderDefinition(BaseModel):
-    litellm_id: str
+    provider_id: str
     models: list[str]
     # Marks where the models came from (`pi_models.SOURCE`, the gateway row). Absent for hand-entered
     # providers. The store drops the key rather than persisting a null.

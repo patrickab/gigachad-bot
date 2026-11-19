@@ -20,7 +20,7 @@ export function learnSelectorModels(models: ModelsResponse, served: readonly Lea
   return {
     ...models,
     ollama: models.ollama.filter(isServed),
-    providers: models.providers.map((provider) => ({ ...provider, models: provider.models.filter((model) => isServed(`${provider.litellm_id}/${model}`)) })),
+    providers: models.providers.map((provider) => ({ ...provider, models: provider.models.filter((model) => isServed(`${provider.provider_id}/${model}`)) })),
   }
 }
 

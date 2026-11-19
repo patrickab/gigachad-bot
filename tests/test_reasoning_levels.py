@@ -1,121 +1,50 @@
 import asyncio
 
-from fastapi import BackgroundTasks
-import litellm
 import pytest
 
 from backend.routes.models import get_reasoning_levels
 from lib import reasoning_levels
-from lib.reasoning_levels import litellm_levels, resolve
+from lib.reasoning_levels import effort_kwargs
 
 
-def _stub_litellm(monkeypatch: pytest.MonkeyPatch, supports_reasoning: bool, model_info: dict | Exception) -> None:
-    """Replace LiteLLM's registry lookups with a fixed answer."""
-    monkeypatch.setattr(litellm, "supports_reasoning", lambda model: supports_reasoning)
-
-    def get_model_info(model: str) -> dict:
-        if isinstance(model_info, Exception):
-            raise model_info
-        return model_info
-
-    monkeypatch.setattr(litellm, "get_model_info", get_model_info)
-
-
-@pytest.mark.parametrize(
-    ("model_info", "expected"),
-    [
-        ({}, ["none", "low", "medium", "high"]),
-        (Exception("not mapped"), ["none", "low", "medium", "high"]),
-        (
-            {"supports_low_reasoning_effort": False, "supports_minimal_reasoning_effort": False, "supports_xhigh_reasoning_effort": True},
-            ["none", "medium", "high", "xhigh"],
-        ),
-        (
-            {"supports_minimal_reasoning_effort": True, "supports_low_reasoning_effort": None},
-            ["none", "minimal", "low", "medium", "high"],
-        ),
-        (
-            {"supports_xhigh_reasoning_effort": True, "supports_max_reasoning_effort": True, "supports_none_reasoning_effort": False},
-            ["none", "low", "medium", "high", "xhigh", "max"],
-        ),
-    ],
-)
-def test_levels_follow_litellm_effort_flags(monkeypatch: pytest.MonkeyPatch, model_info: dict | Exception, expected: list[str]) -> None:
-    _stub_litellm(monkeypatch, supports_reasoning=True, model_info=model_info)
-    assert litellm_levels("some/model") == expected
-
-
-def test_non_reasoning_model_has_no_levels(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_litellm(monkeypatch, supports_reasoning=False, model_info={"supports_xhigh_reasoning_effort": True})
-    assert litellm_levels("some/model") == []
-
-
-@pytest.mark.parametrize(
-    ("ladder", "expected"),
-    [
-        (["off", "minimal", "low", "medium", "high"], ["none", "minimal", "low", "medium", "high"]),
-        (["minimal", "low", "medium", "high", "xhigh", "max"], ["minimal", "low", "medium", "high", "xhigh", "max"]),
-        ([], []),
-        (None, ["none", "low", "medium", "high"]),
-    ],
-)
-def test_gateway_models_use_pis_ladder_before_litellm(
-    monkeypatch: pytest.MonkeyPatch, ladder: list[str] | None, expected: list[str]
-) -> None:
-    """Pi's ladder wins (its `off` is the app's `none`, absent when thinking cannot be off), an unknown model falls back to LiteLLM."""
-    _stub_litellm(monkeypatch, supports_reasoning=True, model_info={})
+def _stub_gateway(monkeypatch: pytest.MonkeyPatch, ladders: dict[str, list[str]]) -> list[str]:
+    """Serve `ladders` as the gateway's `thinking_levels`, returning the gateway ids asked for."""
     requested: list[str] = []
 
     def thinking_levels(model_id: str) -> list[str] | None:
         requested.append(model_id)
-        return ladder
+        return ladders.get(model_id)
 
     monkeypatch.setattr(reasoning_levels.pi_models, "thinking_levels", thinking_levels)
-    assert asyncio.run(resolve("litellm_proxy/anthropic/claude-opus-4-5")) == expected
-    assert requested == ["anthropic/claude-opus-4-5"]
+    return requested
 
 
-@pytest.fixture
-def stored_levels(monkeypatch: pytest.MonkeyPatch, postgres_pool, clean_database):
-    """Route the levels table to the test database, emptied per test."""
-    monkeypatch.setattr(reasoning_levels, "get_postgres_pool", lambda: postgres_pool)
+@pytest.mark.parametrize(
+    ("selector", "gateway_id", "ladder", "expected"),
+    [
+        ("litellm_proxy/anthropic/claude-opus-4-5", "anthropic/claude-opus-4-5", ["off", "minimal", "low", "medium", "high"], ["none", "minimal", "low", "medium", "high"]),
+        ("openai/gpt-5.6", "openai/gpt-5.6", ["minimal", "low", "medium", "high", "xhigh"], ["minimal", "low", "medium", "high", "xhigh"]),
+        ("gemini/gemini-3.1-pro", "google/gemini-3.1-pro", ["off", "low", "high"], ["none", "low", "high"]),
+        ("ollama/qwen3:8b", "ollama/qwen3:8b", [], []),
+    ],
+)
+def test_levels_are_the_gateways_ladder_under_its_model_id(
+    monkeypatch: pytest.MonkeyPatch, selector: str, gateway_id: str, ladder: list[str], expected: list[str]
+) -> None:
+    """Pi's `off` (present only when thinking can be off) is the app's `none`."""
+    requested = _stub_gateway(monkeypatch, {gateway_id: ladder})
+    assert asyncio.run(get_reasoning_levels(selector)) == {"levels": expected}
+    assert requested == [gateway_id]
 
 
-def _stub_live_levels(monkeypatch: pytest.MonkeyPatch, live: dict[str, list[str] | None]) -> None:
-    async def resolve_live(model: str) -> list[str] | None:
-        return live[model]
-
-    monkeypatch.setattr(reasoning_levels, "resolve", resolve_live)
+def test_unlisted_model_or_offline_gateway_has_no_levels(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_gateway(monkeypatch, {})
+    assert reasoning_levels.levels("deepseek/deepseek-chat") == []
 
 
-def _request_levels(model: str) -> tuple[list[str], BackgroundTasks]:
-    background_tasks = BackgroundTasks()
-    response = asyncio.run(get_reasoning_levels(model, background_tasks))
-    return response["levels"], background_tasks
-
-
-def test_stored_levels_answer_first_and_revalidate_in_background(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:
-    live = {"provider/model": ["none", "low", "medium"]}
-    _stub_live_levels(monkeypatch, live)
-    assert _request_levels("provider/model")[0] == ["none", "low", "medium"]
-
-    live["provider/model"] = ["none", "low", "medium", "high"]
-    levels, background_tasks = _request_levels("provider/model")
-    assert levels == ["none", "low", "medium"]
-
-    asyncio.run(background_tasks())
-    assert _request_levels("provider/model")[0] == ["none", "low", "medium", "high"]
-
-
-def test_failed_lookup_keeps_stored_levels(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:
-    live: dict[str, list[str] | None] = {"ollama/thinker": None}
-    _stub_live_levels(monkeypatch, live)
-    assert _request_levels("ollama/thinker")[0] == []
-
-    live["ollama/thinker"] = ["none", "low", "medium", "high"]
-    assert _request_levels("ollama/thinker")[0] == ["none", "low", "medium", "high"]
-
-    live["ollama/thinker"] = None
-    levels, background_tasks = _request_levels("ollama/thinker")
-    asyncio.run(background_tasks())
-    assert levels == _request_levels("ollama/thinker")[0] == ["none", "low", "medium", "high"]
+@pytest.mark.parametrize(
+    ("effort", "expected"),
+    [(None, {}), ("", {}), ("none", {}), ("off", {}), ("high", {"reasoning_effort": "high"}), ("max", {"reasoning_effort": "max"})],
+)
+def test_effort_kwargs_omit_only_an_off_level(effort: str | None, expected: dict) -> None:
+    assert effort_kwargs(effort) == expected

@@ -15,11 +15,12 @@ describe("learnSelectorModels", () => {
   const models: ModelsResponse = {
     ollama: ["ollama/gemma4", "ollama/qwen3"],
     providers: [
-      { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] },
-      { label: "Pi", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
+      { label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] },
+      { label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
     ],
     defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
     tab_order: ["Pi"],
+    unavailable: [],
   }
 
   it("offers only the models LearnHarness serves, matched by gateway id", () => {
@@ -33,8 +34,8 @@ describe("learnSelectorModels", () => {
       ...models,
       ollama: ["ollama/qwen3"],
       providers: [
-        { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash"] },
-        { label: "Pi", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
+        { label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash"] },
+        { label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
       ],
     })
     expect(servedModelOf(served, "ollama/qwen3")).toEqual({ provider: "custom", modelId: "ollama/qwen3" })

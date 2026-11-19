@@ -1,4 +1,4 @@
-"""User-managed LiteLLM model providers."""
+"""User-managed model providers, each a selector prefix and its model names."""
 
 from __future__ import annotations
 
@@ -21,11 +21,11 @@ MODEL_TAB_ORDER_FILE = "model-tab-order.yaml"
 # user's choice: an empty list keeps a provider out of the model selector
 # while still offering it under Providers / Models. Ollama remains dynamic.
 DEFAULT_PROVIDERS = {
-    "Gemini": {"litellm_id": "gemini", "models": []},
-    "DeepSeek": {"litellm_id": "deepseek", "models": []},
-    "OpenRouter": {"litellm_id": "openrouter", "models": []},
+    "Gemini": {"provider_id": "gemini", "models": []},
+    "DeepSeek": {"provider_id": "deepseek", "models": []},
+    "OpenRouter": {"provider_id": "openrouter", "models": []},
 }
-OPENAI_PROVIDER = {"litellm_id": "openai", "models": ["gpt-5.6"]}
+OPENAI_PROVIDER = {"provider_id": "openai", "models": ["gpt-5.6"]}
 # Seed values only: the user picks real models in the model selector, and those are authoritative.
 DEFAULT_MODEL_DEFAULTS = dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL)
 
@@ -36,10 +36,13 @@ LEGACY_LABEL = "OMP"
 # Before Pi the sandbox model default was stored as `omp_model`. Loading rewrites it once as `sandbox_model`.
 LEGACY_SANDBOX_MODEL_KEY = "omp_model"
 SANDBOX_MODEL_KEY = "sandbox_model"
+# Before Pi a provider's selector prefix was stored as `litellm_id`. Loading rewrites it once as `provider_id`.
+LEGACY_PROVIDER_ID_KEY = "litellm_id"
+PROVIDER_ID_KEY = "provider_id"
 
 
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """The stored catalog plus the OpenAI default when its LiteLLM credential is available."""
+    """The stored catalog plus the OpenAI default when `OPENAI_API_KEY` is set."""
     if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in providers:
         return {**providers, "OpenAI": OPENAI_PROVIDER}
     return providers
@@ -53,7 +56,7 @@ def _migrated_providers(providers: dict[str, dict[str, Any]]) -> dict[str, dict[
     models: list[str] = []
     for provider in legacy:
         models.extend(model for model in provider["models"] if model not in models)
-    pi_row = {"litellm_id": legacy[0]["litellm_id"], "models": models, "source": pi_models.SOURCE}
+    pi_row = {"provider_id": legacy[0]["provider_id"], "models": models, "source": pi_models.SOURCE}
     migrated: dict[str, dict[str, Any]] = {}
     for label, provider in providers.items():
         if provider.get("source") != LEGACY_SOURCE:
@@ -89,11 +92,23 @@ def _migrated_defaults(defaults: object) -> dict[str, Any] | None:
     return {SANDBOX_MODEL_KEY if key == LEGACY_SANDBOX_MODEL_KEY else key: value for key, value in defaults.items()}
 
 
+def _renamed_provider_ids(data: object) -> dict[str, Any] | None:
+    """*data* with every legacy `litellm_id` key renamed in place, None when there is nothing to migrate."""
+    if not isinstance(data, dict) or not any(isinstance(raw, dict) and LEGACY_PROVIDER_ID_KEY in raw for raw in data.values()):
+        return None
+    return {
+        label: {PROVIDER_ID_KEY if key == LEGACY_PROVIDER_ID_KEY else key: value for key, value in raw.items()}
+        if isinstance(raw, dict) and PROVIDER_ID_KEY not in raw
+        else raw
+        for label, raw in data.items()
+    }
+
+
 @dataclass
 class Provider:
-    """One catalog entry: a LiteLLM prefix, its model names, and an optional origin marker."""
+    """One catalog entry: a selector prefix, its model names, and an optional origin marker."""
 
-    litellm_id: str
+    provider_id: str
     models: list[str]
     # Where the models came from (today only `pi_models.SOURCE`, the gateway row), so the browser can group provider rows.
     # Absent for hand-entered providers, so existing catalogs round-trip byte-wise.
@@ -103,9 +118,9 @@ class Provider:
     def from_raw(cls, label: str, raw: object) -> Provider:
         if not isinstance(raw, dict):
             raise ValueError(f"Provider '{label}' must be a mapping")
-        litellm_id = _nonempty(raw.get("litellm_id"), f"Provider '{label}' needs a LiteLLM prefix without '/'")
-        if "/" in litellm_id:
-            raise ValueError(f"Provider '{label}' needs a LiteLLM prefix without '/'")
+        provider_id = _nonempty(raw.get(PROVIDER_ID_KEY), f"Provider '{label}' needs a provider id without '/'")
+        if "/" in provider_id:
+            raise ValueError(f"Provider '{label}' needs a provider id without '/'")
         models = raw.get("models")
         if not isinstance(models, list):
             raise ValueError(f"Provider '{label}' needs a list of non-empty model names")
@@ -113,7 +128,7 @@ class Provider:
         if len(cleaned) != len(set(cleaned)):
             raise ValueError(f"Provider '{label}' contains duplicate models")
         source = raw.get("source")
-        return cls(litellm_id, cleaned, None if source is None else _nonempty(source, f"Provider '{label}' has an invalid source"))
+        return cls(provider_id, cleaned, None if source is None else _nonempty(source, f"Provider '{label}' has an invalid source"))
 
     def to_dict(self) -> dict[str, Any]:
         return {key: value for key, value in asdict(self).items() if key != "source" or value}
@@ -155,10 +170,14 @@ class ModelProviderStore:
             return seed
 
     def load(self) -> dict[str, dict[str, Any]]:
-        """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored and migrating legacy gateway rows."""
-        providers = _validate(self._load_or_seed(MODEL_PROVIDERS_FILE, {}, DEFAULT_PROVIDERS, allow_unicode=True))
+        """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored and migrating legacy keys and gateway rows once."""
+        stored = self._load_or_seed(MODEL_PROVIDERS_FILE, {}, DEFAULT_PROVIDERS, allow_unicode=True)
+        renamed = _renamed_provider_ids(stored)
+        providers = _validate(stored if renamed is None else renamed)
         migrated = _migrated_providers(providers)
-        return providers if migrated is None else self.save(migrated)
+        if migrated is not None:
+            return self.save(migrated)
+        return providers if renamed is None else self.save(providers)
 
     def save(self, providers: object) -> dict[str, dict[str, Any]]:
         cleaned = _validate(providers)

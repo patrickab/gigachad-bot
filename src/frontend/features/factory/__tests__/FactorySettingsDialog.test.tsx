@@ -21,11 +21,12 @@ const DEFAULTS: FactoryDefaults = {
 const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
   providers: [
-    { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["openai-codex/fast", "openrouter/vendor/model"] },
-    { label: "OpenRouter", litellm_id: "openrouter", models: ["not-added-from-pi"] },
+    { label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["openai-codex/fast", "openrouter/vendor/model"] },
+    { label: "OpenRouter", provider_id: "openrouter", models: ["not-added-from-pi"] },
   ],
   defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
   tab_order: [],
+  unavailable: [],
 }
 
 beforeEach(() => {

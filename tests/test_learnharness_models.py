@@ -11,10 +11,10 @@ import pytest
 from lib import learnharness_config, ollama_models, pi_models
 
 PROVIDERS = {
-    "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.5-flash"]},
-    "DeepSeek": {"litellm_id": "deepseek", "models": ["deepseek-chat", "deepseek-unserved"]},
-    "OpenRouter": {"litellm_id": "openrouter", "models": []},
-    "Pi": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-3-haiku"], "source": "pi"},
+    "Gemini": {"provider_id": "gemini", "models": ["gemini-3.5-flash"]},
+    "DeepSeek": {"provider_id": "deepseek", "models": ["deepseek-chat", "deepseek-unserved"]},
+    "OpenRouter": {"provider_id": "openrouter", "models": []},
+    "Pi": {"provider_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-3-haiku"], "source": "pi"},
 }
 OLLAMA_TAGS = ["gemma3:4b"]
 GATEWAY_ROWS = {
@@ -407,7 +407,7 @@ def test_ollama_down_leaves_only_its_models_out(catalog, monkeypatch):
 
 def test_an_empty_catalog_fails(catalog, monkeypatch):
     monkeypatch.setattr(
-        learnharness_config, "_host_catalog", lambda login: ({"OpenRouter": {"litellm_id": "openrouter", "models": []}}, DEFAULTS)
+        learnharness_config, "_host_catalog", lambda login: ({"OpenRouter": {"provider_id": "openrouter", "models": []}}, DEFAULTS)
     )
     monkeypatch.setattr(ollama_models, "installed_chat_models", list)
     with pytest.raises(learnharness_config.ConfigUnavailable, match="host's catalog has no model"):

@@ -83,14 +83,14 @@ export function ModelSettingsError({ error }: { error: string | null }) {
   return error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>
 }
 
-function AddProvider({ onAdd }: { onAdd: (label: string, litellmId: string) => void }) {
+function AddProvider({ onAdd }: { onAdd: (label: string, providerId: string) => void }) {
   const [label, setLabel] = useState("")
-  const [litellmId, setLitellmId] = useState("")
-  const submit = () => onAdd(label, litellmId)
+  const [providerId, setProviderId] = useState("")
+  const submit = () => onAdd(label, providerId)
 
   return <div className="grid grid-cols-[1fr_1fr_auto] gap-1 border-t border-divider pt-2">
     <input autoFocus value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Label" className="min-w-0 rounded border border-divider bg-paper px-2 py-1.5 text-xs text-ink outline-none" />
-    <input value={litellmId} onChange={(event) => setLitellmId(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submit() }} placeholder="LiteLLM ID" className="min-w-0 rounded border border-divider bg-paper px-2 py-1.5 text-xs text-ink outline-none" />
+    <input value={providerId} onChange={(event) => setProviderId(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submit() }} placeholder="Provider ID" className="min-w-0 rounded border border-divider bg-paper px-2 py-1.5 text-xs text-ink outline-none" />
     <button aria-label="Add provider" onClick={submit} className="rounded p-1.5 text-ink-muted hover:bg-surface-elevated hover:text-ink"><Plus className="h-4 w-4" /></button>
   </div>
 }
@@ -126,7 +126,7 @@ const patchProvider = (providers: ModelProvider[], label: string, models: (curre
 /** Picks models out of Pi's own logins, including OAuth subscription plans.
  *
  * Every pick lands in the same provider catalog as a hand-entered provider:
- * one `Pi` row prefixed `litellm_proxy` so LiteLLM routes it at pi-host's
+ * one `Pi` row prefixed `litellm_proxy`, which the backend routes to pi-host's
  * gateway, and the selector shows a single Pi tab instead of a tab per login.
  * Nothing downstream of the catalog needs to know Pi exists. The picker still
  * browses by login, because that is how Pi holds credentials; only the
@@ -143,7 +143,7 @@ function PiSection({ catalog, providers, onChange }: {
 
   const piModels = providers.find((item) => item.label === PI_PROVIDER_LABEL)?.models ?? []
   const toggle = (modelId: string) => {
-    if (!providers.some((item) => item.label === PI_PROVIDER_LABEL)) return onChange([...providers, { label: PI_PROVIDER_LABEL, litellm_id: catalog.litellm_id, source: PI_MODEL_SOURCE, models: [modelId] }])
+    if (!providers.some((item) => item.label === PI_PROVIDER_LABEL)) return onChange([...providers, { label: PI_PROVIDER_LABEL, provider_id: catalog.provider_id, source: PI_MODEL_SOURCE, models: [modelId] }])
     return onChange(patchProvider(providers, PI_PROVIDER_LABEL, (models) => models.includes(modelId) ? models.filter((value) => value !== modelId) : [...models, modelId]))
   }
 
@@ -176,10 +176,10 @@ function PiSection({ catalog, providers, onChange }: {
 function ProviderSettings({ providers, piCatalog, onChange }: { providers: ModelProvider[]; piCatalog: PiCatalog | null; onChange: (next: ModelProvider[]) => Promise<boolean> }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const addProvider = async (labelInput: string, litellmIdInput: string) => {
-    const label = labelInput.trim(), litellm_id = litellmIdInput.trim()
-    if (!label || !litellm_id || providers.some((provider) => provider.label.toLowerCase() === label.toLowerCase())) return
-    if (await onChange([...providers, { label, litellm_id, models: [] }])) setAdding(false)
+  const addProvider = async (labelInput: string, providerIdInput: string) => {
+    const label = labelInput.trim(), provider_id = providerIdInput.trim()
+    if (!label || !provider_id || providers.some((provider) => provider.label.toLowerCase() === label.toLowerCase())) return
+    if (await onChange([...providers, { label, provider_id, models: [] }])) setAdding(false)
   }
   return <>
     <div className="space-y-0.5 p-1.5">

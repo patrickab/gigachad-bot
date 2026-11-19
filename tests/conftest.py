@@ -29,7 +29,7 @@ from lib.postgres_data_store import PostgresDataStore
 from lib.process_owner import OWNER_VARIABLE, reap_orphans
 from tests.fakes import RecordingScope
 
-TRUNCATE_ALL = "TRUNCATE changes, assets, vault_roots, devices, documents, users, model_reasoning_levels CASCADE"
+TRUNCATE_ALL = "TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE"
 SRC = Path(__file__).resolve().parents[1] / "src"
 requires_proc = pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="reads processes from /proc (Linux)")
 

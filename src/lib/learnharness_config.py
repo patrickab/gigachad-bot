@@ -103,7 +103,7 @@ class ServedModel:
 
 def catalog_model_ids(providers: Mapping[str, Mapping[str, Any]], ollama_tags: Iterable[str]) -> list[str]:
     """Every model gigachad's selector offers, in its order, as gateway ids: each provider row's models, then Ollama's."""
-    selectors = [f"{provider['litellm_id']}/{model}" for provider in providers.values() for model in provider["models"]]
+    selectors = [f"{provider['provider_id']}/{model}" for provider in providers.values() for model in provider["models"]]
     selectors += [f"ollama/{tag}" for tag in ollama_tags]
     return list(dict.fromkeys(pi_models.gateway_model_id(selector) for selector in selectors))
 

@@ -69,7 +69,7 @@ async def chat(
     project_store: Annotated[ProjectStore, Depends(get_project_store)],
 ) -> EventSourceResponse:
     """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
-    kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort, req.model)
+    kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort)
 
     def prepare() -> tuple[list | bytes | str | None, str, tuple]:
         img = _resolve_images(req, assets)

@@ -14,7 +14,7 @@ export async function fetchReasoningLevels(model: string, signal?: AbortSignal):
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
   return put<ModelsResponse>("/models/providers", {
     providers: Object.fromEntries(
-      providers.map(({ label, litellm_id, models, source }) => [label, { litellm_id, models, source: source ?? null }]),
+      providers.map(({ label, provider_id, models, source }) => [label, { provider_id, models, source: source ?? null }]),
     ),
   })
 }
