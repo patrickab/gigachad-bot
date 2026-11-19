@@ -61,6 +61,7 @@ export default defineConfig([
           crossFeature("latex", "workbench"),
           crossFeature("navigation", "memory"),
           crossFeature("navigation", "omp"),
+          crossFeature("navigation", "pi"),
           crossFeature("workbench", "editor"),
           crossFeature("workbench", "navigation"),
           crossFeature("workbench", "notebook"),
