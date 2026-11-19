@@ -210,8 +210,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         left: <TopBarTransparent>
           <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
         </TopBarTransparent>,
+        center: isPdfDocument ? <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot> : undefined,
         right: <>
-          {isPdfDocument && <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>}
           <TopBarTransparent>
             <ThemeToggle />
             <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
