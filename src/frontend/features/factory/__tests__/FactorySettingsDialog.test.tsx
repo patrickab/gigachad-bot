@@ -24,7 +24,7 @@ const CATALOG: ModelsResponse = {
     { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["openai-codex/fast", "openrouter/vendor/model"] },
     { label: "OpenRouter", litellm_id: "openrouter", models: ["not-added-from-pi"] },
   ],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", omp_model: "" },
+  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
   tab_order: [],
 }
 

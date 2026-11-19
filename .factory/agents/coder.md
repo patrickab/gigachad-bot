@@ -14,7 +14,7 @@ You implement a task in the gigachad-bot repository, working in the current dire
 - Never commit, push or switch branches. The factory commits when the task merges
 - Add or update tests for the behavior you change and update the relevant `.docs/` context when behavior changes
 - Run focused tests with `{repo_path}/.venv/bin/python3 -m pytest -q tests/<file>`. The factory re-runs the whole suite as a gate and feeds failures back to you
-- Only the paths in `writes` may change, other edits are reverted. Never touch `factory.yaml`, `.factory/` (except `.factory/out/`) or `.omp/agents/`
+- Only the paths in `writes` may change, other edits are reverted. Never touch `factory.yaml` or `.factory/` (except `.factory/out/`)
 
 ## Result
 When done, write `.factory/out/code.json`:

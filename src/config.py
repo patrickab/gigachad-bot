@@ -45,7 +45,7 @@ def is_cors_unsafe_for_production() -> bool:
 # The user-editable defaults in `model-defaults.yaml` are the single source of truth for every
 # model the app uses. Nothing here may name a production model.
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
-MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "memory_model", "omp_model")
+MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "memory_model", "sandbox_model")
 # Every test runs against this model, and it seeds a store that has no defaults yet.
 TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_DOWNSCALE_IMAGES = True

@@ -86,7 +86,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
   return (
     <Dialog open={open} onClose={onClose} icon={Settings} title="Factory defaults" widthClassName="max-w-2xl">
       <form onSubmit={(event) => { event.preventDefault(); void save() }} className="flex flex-col gap-4 px-5 pb-5">
-        <p className="-mt-1 text-[11px] text-ink-faint">Repos override these with factory.yaml and .omp/agents/</p>
+        <p className="-mt-1 text-[11px] text-ink-faint">Repos override these with factory.yaml and .factory/agents/</p>
         {draft ? (
           <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1 scrollbar-thin">
             <div className="grid grid-cols-2 gap-3">

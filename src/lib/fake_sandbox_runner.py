@@ -8,7 +8,7 @@ import json
 import tarfile
 
 from agent_sandbox import SandboxInvocation, SandboxManifest, SandboxRun, StreamEvent, WorkspaceArchive
-from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, PiSessionState, WorkspaceRef
 
 from lib.sandbox_service import write_temp_tar
 
@@ -36,13 +36,13 @@ class FakeSandboxRunner:
             status="completed",
             summary=summary,
             next_manifest=SandboxManifest(
-                schema_version=1,
+                schema_version=MANIFEST_SCHEMA_VERSION,
                 manifest_id=f"{invocation.run_id}-{workspace_sha256[:16]}",
                 profile=invocation.profile_name,
                 runtime_fingerprint="fake",
                 workspace=WorkspaceRef(snapshot_asset_id=None, sha256=workspace_sha256),
                 outputs=Outputs(events_asset_id=None, artifacts=()),
-                omp_sessions={},
+                pi_sessions={"main": PiSessionState(session_id="main", state_asset_id=None)},
                 execution=Execution(run_id=invocation.run_id, status="completed", exit_code=0, created_at=""),
             ),
             outputs=(StreamEvent(name="stdout", text=summary),),

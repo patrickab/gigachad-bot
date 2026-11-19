@@ -11,7 +11,7 @@ from fastapi import Depends
 
 from backend.identity import RequestIdentity, get_request_identity
 from config import env_flag
-from lib import document_service
+from lib import document_service, pi_models
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, SandboxRunner
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
@@ -111,7 +111,8 @@ def get_sandbox_service(
         asset_store=assets,
         runner=get_sandbox_runner(),
         runtime_state=_sandbox_runtime,
-        model=defaults["omp_model"],
+        # The sandbox's Pi reaches the gateway directly: a Pi pick is stored as `litellm_proxy/<provider>/<id>`.
+        model=defaults["sandbox_model"].removeprefix(f"{pi_models.LITELLM_ID}/"),
         profile="gigachad",
         slot_prefix=slot_prefix,
     )

@@ -46,7 +46,7 @@ DEFAULTS = {
     "small_model": "gemini/gemini-3.5-flash",
     "vision_model": "openrouter/not-in-the-catalog",
     "memory_model": "gemini/gemini-3.5-flash",
-    "omp_model": "gemini/gemini-3.5-flash",
+    "sandbox_model": "gemini/gemini-3.5-flash",
 }
 BASE_URL = "http://127.0.0.1:30183"
 

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from agent_sandbox import SandboxManifest
-from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, PiSessionState, WorkspaceRef
 
 from config import TEST_MODEL
 from lib import sandbox_plot, tools
@@ -209,15 +209,15 @@ def native_manifest(
     snapshot_asset_id: str | None = None,
     profile: str = "gigachad",
 ) -> SandboxManifest:
-    """A completed native manifest whose workspace has *sha256* and that has no outputs."""
+    """A completed native manifest whose workspace has *sha256*, with one Pi session and no outputs."""
     return SandboxManifest(
-        schema_version=1,
+        schema_version=MANIFEST_SCHEMA_VERSION,
         manifest_id=manifest_id,
         profile=profile,
         runtime_fingerprint="test",
         workspace=WorkspaceRef(snapshot_asset_id=snapshot_asset_id, sha256=sha256),
         outputs=Outputs(events_asset_id=None, artifacts=()),
-        omp_sessions={},
+        pi_sessions={"main": PiSessionState(session_id="main", state_asset_id=None)},
         execution=Execution(run_id=run_id or manifest_id, status="completed", exit_code=0, created_at=""),
     )
 

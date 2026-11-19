@@ -4,7 +4,7 @@ from dataclasses import asdict
 import hashlib
 
 from agent_sandbox import SandboxManifest
-from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef, to_yaml
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, PiSessionState, WorkspaceRef, to_yaml
 import pytest
 
 from config import TEST_MODEL
@@ -99,13 +99,13 @@ async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_serv
     workspace_bytes = b"> legacy workspace\n"
     workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
     manifest = SandboxManifest(
-        schema_version=1,
+        schema_version=MANIFEST_SCHEMA_VERSION,
         manifest_id="legacy-native-manifest",
         profile="gigachad",
         runtime_fingerprint="test",
         workspace=WorkspaceRef(snapshot_asset_id=sandbox_asset(workspace_sha256), sha256=workspace_sha256),
         outputs=Outputs(events_asset_id=None, artifacts=()),
-        omp_sessions={},
+        pi_sessions={"main": PiSessionState(session_id="main", state_asset_id=None)},
         execution=Execution(run_id="legacy-run", status="completed", exit_code=0, created_at=""),
     )
     legacy_manifest_id = "legacy-wrapper-id"
@@ -125,6 +125,36 @@ async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_serv
 
     assert runner.calls[-1].active_manifest == manifest
     assert result.manifest_id is not None
+
+
+async def test_omp_era_manifest_restores_its_workspace_without_resuming(sandbox_service, asset_store, data_store, runner):
+    """A version-1 manifest holds an OMP session Pi cannot continue: the run starts fresh on its workspace."""
+    chat_id = "chat-omp-era"
+    workspace_bytes = b"> omp workspace\n"
+    workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
+    manifest_id = "omp-era-manifest"
+    JsonDocs(data_store).write(
+        sandbox_manifest(chat_id, manifest_id),
+        {
+            "schema_version": 1,
+            "manifest_id": manifest_id,
+            "profile": "gigachad",
+            "runtime_fingerprint": "omp-era",
+            "workspace": {"snapshot_asset_id": sandbox_asset(workspace_sha256), "sha256": workspace_sha256},
+            "outputs": {"events_asset_id": None, "artifacts": []},
+            "omp_sessions": {"main": {"session_id": "main", "state_asset_id": None}},
+            "execution": {"run_id": "omp-run", "status": "completed", "exit_code": 0, "created_at": ""},
+        },
+    )
+    asset_store.write("sandbox", sandbox_asset(workspace_sha256), workspace_bytes, mime="application/x-tar")
+    JsonDocs(data_store).write(sandbox_active(chat_id), asdict(ActivePointer(manifest_id=manifest_id, updated_at=1.0)))
+
+    result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="pi-call", prompt="Continue")
+
+    assert result.status == "completed"
+    assert runner.calls[-1].active_manifest is None
+    assert runner.calls[-1].workspace is not None
+    assert runner.calls[-1].workspace.sha256 == workspace_sha256
 
 
 async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sandbox_service, data_store, runner):

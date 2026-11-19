@@ -22,7 +22,7 @@ vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
 const CATALOG: ModelsResponse = {
   ollama: ["ollama/qwen3", "ollama/gemma4"],
   providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] }],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", omp_model: "" },
+  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
   tab_order: [],
 }
 const SERVED: LearnFrameMessage = {

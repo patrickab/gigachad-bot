@@ -9,7 +9,7 @@ vi.mock("@/lib/backend/api", () => ({ fetchPiCatalog }))
 const models: ModelsResponse = {
   ollama: ["ollama/gemma4:31b-cloud"],
   providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] }],
-  defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud", omp_model: "ollama/gemma4:31b-cloud" },
+  defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud", sandbox_model: "ollama/gemma4:31b-cloud" },
   tab_order: [],
 }
 

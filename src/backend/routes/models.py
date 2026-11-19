@@ -97,7 +97,7 @@ class ModelDefaults(BaseModel):
     small_model: str
     vision_model: str
     memory_model: str
-    omp_model: str
+    sandbox_model: str
 
 
 @router.put("/models/providers")

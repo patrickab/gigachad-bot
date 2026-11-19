@@ -34,7 +34,6 @@ src/frontend/tsconfig.tsbuildinfo
 # Copied from node_modules by next.config.mjs whenever Next starts
 src/frontend/public/pdf.worker.min.mjs
 src/frontend/public/libavoid.wasm
-.omp/*
-!.omp/agents/
+.omp/
 .wayfinder/
 /latex/

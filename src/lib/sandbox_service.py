@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from agent_sandbox import (
     AgentSandboxError,
     ErrorEvent,
-    OmpTask,
     OutputEvent,
+    PiTask,
     PromptImage,
     SandboxInvocation,
     SandboxManifest,
@@ -318,7 +318,7 @@ class SandboxService:
                     slot_key=slot_key,
                     profile_name=self._profile,
                     run_id=tool_call_id,
-                    task=OmpTask(
+                    task=PiTask(
                         prompt,
                         prompt_images=prompt_images,
                         model=self._model,
@@ -326,7 +326,8 @@ class SandboxService:
                         append_system=append_system,
                         lean=lean,
                     ),
-                    active_manifest=prior_manifest,
+                    # A manifest without a Pi session (an OMP-era one) resumes nothing, only its workspace is restored.
+                    active_manifest=prior_manifest if prior_manifest is not None and prior_manifest.pi_sessions else None,
                     workspace=restore,
                 )
                 # Shield so a cancelled caller cannot orphan the native run before it is released.

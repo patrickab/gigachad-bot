@@ -33,6 +33,9 @@ DEFAULT_MODEL_DEFAULTS = dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL)
 # ("OMP · Anthropic"). The store rewrites such rows once into the single Pi row; their selectors stay as stored.
 LEGACY_SOURCE = "omp"
 LEGACY_LABEL = "OMP"
+# Before Pi the sandbox model default was stored as `omp_model`. Loading rewrites it once as `sandbox_model`.
+LEGACY_SANDBOX_MODEL_KEY = "omp_model"
+SANDBOX_MODEL_KEY = "sandbox_model"
 
 
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -77,6 +80,13 @@ def _checked_defaults(defaults: object) -> dict[str, str]:
     if not isinstance(defaults, dict) or set(defaults) != set(DEFAULT_MODEL_DEFAULTS):
         raise ValueError("All default model values are required")
     return {key: _nonempty(value, "Default models must be non-empty strings") for key, value in defaults.items()}
+
+
+def _migrated_defaults(defaults: object) -> dict[str, Any] | None:
+    """*defaults* with the legacy sandbox key renamed in place, None when there is nothing to migrate."""
+    if not isinstance(defaults, dict) or LEGACY_SANDBOX_MODEL_KEY not in defaults or SANDBOX_MODEL_KEY in defaults:
+        return None
+    return {SANDBOX_MODEL_KEY if key == LEGACY_SANDBOX_MODEL_KEY else key: value for key, value in defaults.items()}
 
 
 @dataclass
@@ -156,14 +166,19 @@ class ModelProviderStore:
         return cleaned
 
     def load_defaults(self) -> dict[str, str]:
-        """Return the stored defaults, resetting any file that does not match the current keys."""
+        """Return the stored defaults, migrating a legacy key once and resetting any file that does not match the current keys."""
         defaults = self._load_or_seed(MODEL_DEFAULTS_FILE, {}, dict(DEFAULT_MODEL_DEFAULTS))
+        migrated = _migrated_defaults(defaults)
         try:
-            _checked_defaults(defaults)
+            _checked_defaults(defaults if migrated is None else migrated)
         except ValueError:
             defaults = dict(DEFAULT_MODEL_DEFAULTS)
             self._dump_yaml(MODEL_DEFAULTS_FILE, defaults)
-        return defaults
+            return defaults
+        if migrated is None:
+            return defaults
+        self._dump_yaml(MODEL_DEFAULTS_FILE, migrated)
+        return migrated
 
     def save_defaults(self, defaults: object) -> dict[str, str]:
         cleaned = _checked_defaults(defaults)

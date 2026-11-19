@@ -1,6 +1,7 @@
 from agent_sandbox import SandboxManifest, manifest_from_dict, manifest_to_dict
-from agent_sandbox.manifest import Artifact, Execution, OmpSessionState, Outputs, WorkspaceRef, to_yaml
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Artifact, Execution, Outputs, PiSessionState, WorkspaceRef, to_yaml
 import pytest
+import yaml
 
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.json_docs import JsonDocs
@@ -29,7 +30,7 @@ def _manifest(
     artifacts: tuple[tuple[str, str], ...] = (),
 ) -> SandboxManifest:
     return SandboxManifest(
-        schema_version=1,
+        schema_version=MANIFEST_SCHEMA_VERSION,
         manifest_id=manifest_id,
         profile="gigachad",
         runtime_fingerprint="test",
@@ -38,7 +39,7 @@ def _manifest(
             events_asset_id=sandbox_asset(events_sha256) if events_sha256 else None,
             artifacts=tuple(Artifact(asset_id=sandbox_asset(sha256), mime_type=media_type) for sha256, media_type in artifacts),
         ),
-        omp_sessions={"main": OmpSessionState(session_id="main", state_asset_id=sandbox_asset(session_sha256))}
+        pi_sessions={"main": PiSessionState(session_id="main", state_asset_id=sandbox_asset(session_sha256))}
         if session_sha256
         else {},
         execution=Execution(run_id="run-1", status="completed", exit_code=0, created_at=""),
@@ -113,6 +114,39 @@ def test_invalid_legacy_wrapper_does_not_fabricate_manifest(sandbox_store: Sandb
 
     with pytest.raises(ValueError, match="embedded AIB manifest"):
         sandbox_store.read_manifest(chat_id, manifest_id)
+
+
+def _omp_manifest_mapping(manifest: SandboxManifest, session_sha256: str) -> dict:
+    """*manifest* as a version-1 (OMP) record holding one OMP session."""
+    mapping = {key: value for key, value in manifest_to_dict(manifest).items() if key != "pi_sessions"}
+    omp_sessions = {"main": {"session_id": "main", "state_asset_id": sandbox_asset(session_sha256)}}
+    return {**mapping, "schema_version": 1, "omp_sessions": omp_sessions}
+
+
+def test_version_one_manifest_reads_without_a_session(sandbox_store: SandboxStore, data_store: DataStore) -> None:
+    """An OMP-era manifest keeps its workspace and outputs, its OMP session is dropped."""
+    chat_id = "chat-omp-manifest"
+    manifest = _manifest("omp-native", "a" * 64, events_sha256="c" * 64)
+    JsonDocs(data_store).write(sandbox_manifest(chat_id, manifest.manifest_id), _omp_manifest_mapping(manifest, "b" * 64))
+
+    assert sandbox_store.read_manifest(chat_id, manifest.manifest_id) == manifest
+    assert sandbox_store.referenced_chat_shas(chat_id) == {"a" * 64, "c" * 64}
+
+
+def test_legacy_wrapper_with_a_version_one_manifest_reads_without_a_session(
+    sandbox_store: SandboxStore, data_store: DataStore
+) -> None:
+    chat_id = "chat-omp-wrapper"
+    manifest = _manifest("omp-wrapped", "a" * 64)
+    legacy = {
+        "version": 1,
+        "workspace": AssetRef("a" * 64, "application/x-tar", 100).to_json(),
+        "omp_session": None,
+        "extra": {"agent_sandbox_manifest": yaml.safe_dump(_omp_manifest_mapping(manifest, "b" * 64), sort_keys=False)},
+    }
+    JsonDocs(data_store).write(sandbox_manifest(chat_id, "omp-wrapper"), legacy)
+
+    assert sandbox_store.read_manifest(chat_id, "omp-wrapper") == manifest
 
 
 def test_recover_completed_run_rebuilds_missing_run_history(sandbox_store: SandboxStore, data_store: DataStore):

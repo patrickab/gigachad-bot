@@ -12,7 +12,8 @@ import time
 from typing import Any
 
 from agent_sandbox import SandboxManifest, manifest_from_dict, manifest_to_dict
-from agent_sandbox.manifest import from_yaml
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION
+import yaml
 
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.json_docs import JsonDocs
@@ -100,11 +101,24 @@ def manifest_asset_shas(manifest: SandboxManifest) -> set[str]:
     _validate_workspace_binding(manifest)
     asset_ids = (
         manifest.workspace.snapshot_asset_id,
-        *(session.state_asset_id for session in manifest.omp_sessions.values()),
+        *(session.state_asset_id for session in manifest.pi_sessions.values()),
         manifest.outputs.events_asset_id,
         *(artifact.asset_id for artifact in manifest.outputs.artifacts),
     )
     return {sha256 for asset_id in asset_ids if (sha256 := _asset_sha(asset_id)) is not None}
+
+
+# Version-1 manifests held OMP sessions, which Pi cannot resume. They decode without a session, so a run
+# restores only their workspace.
+OMP_MANIFEST_SCHEMA_VERSION = 1
+
+
+def _native_manifest(data: object) -> SandboxManifest:
+    """Decode a native manifest mapping, dropping the OMP sessions of a version-1 one."""
+    if isinstance(data, dict) and data.get("schema_version") == OMP_MANIFEST_SCHEMA_VERSION and "omp_sessions" in data:
+        sessionless = {key: value for key, value in data.items() if key != "omp_sessions"}
+        data = {**sessionless, "schema_version": MANIFEST_SCHEMA_VERSION, "pi_sessions": {}}
+    return manifest_from_dict(data)
 
 
 # Older records embedded the native manifest as YAML under `extra`.
@@ -116,7 +130,11 @@ def _legacy_manifest(data: dict[str, Any]) -> SandboxManifest:
         raise ValueError("legacy sandbox record lacks an embedded AIB manifest") from exc
     if not isinstance(serialized, str):
         raise ValueError("legacy sandbox record lacks an embedded AIB manifest")
-    manifest = from_yaml(serialized)
+    try:
+        embedded = yaml.safe_load(serialized)
+    except yaml.YAMLError as exc:
+        raise ValueError("legacy sandbox record embeds invalid AIB manifest YAML") from exc
+    manifest = _native_manifest(embedded)
     expected_asset_id = sandbox_asset(legacy_workspace.sha256)
     if manifest.workspace.snapshot_asset_id != expected_asset_id or manifest.workspace.sha256 != legacy_workspace.sha256:
         raise ValueError("legacy sandbox record disagrees with its embedded AIB workspace manifest")
@@ -125,7 +143,7 @@ def _legacy_manifest(data: dict[str, Any]) -> SandboxManifest:
 
 def _decode_manifest(data: dict[str, Any]) -> tuple[SandboxManifest, bool]:
     try:
-        manifest = manifest_from_dict(data)
+        manifest = _native_manifest(data)
     except ValueError:
         manifest = _legacy_manifest(data)
         legacy = True

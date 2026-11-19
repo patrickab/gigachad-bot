@@ -1,4 +1,5 @@
 import pytest
+import yaml
 
 from lib.data_store import StorageError
 from lib.model_provider_store import (
@@ -59,6 +60,27 @@ def test_model_defaults_file_with_unknown_keys_is_reset(data_store):
     defaults = ModelProviderStore(data_store).load_defaults()
 
     assert defaults == DEFAULT_MODEL_DEFAULTS
+
+
+def test_legacy_sandbox_model_key_migrates_once_and_keeps_its_value(data_store):
+    """A pre-Pi `omp_model` default is stored as `sandbox_model`, its value and position unchanged."""
+    legacy = {
+        "default_model": "a/chat",
+        "small_model": "a/small",
+        "vision_model": "a/vision",
+        "memory_model": "a/memory",
+        "omp_model": "gemini/gemini-3.5-flash",
+    }
+    data_store.write_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}", yaml.safe_dump(legacy, sort_keys=False).encode())
+    catalog = ModelProviderStore(data_store)
+
+    defaults = catalog.load_defaults()
+
+    assert list(defaults) == ["default_model", "small_model", "vision_model", "memory_model", "sandbox_model"]
+    assert defaults["sandbox_model"] == "gemini/gemini-3.5-flash"
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}")
+    assert yaml.safe_load(content) == defaults
+    assert catalog.load_defaults() == defaults
 
 
 def test_legacy_gateway_rows_migrate_once_into_the_pi_row(data_store):

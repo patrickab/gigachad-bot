@@ -179,7 +179,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | Providers | LiteLLM routes cloud/local calls, including the configured OMP model source. Use stored model defaults, not hard-coded production models. `lib/llm_resilience.py` retries a call once with `allowed_openai_params` when stale LiteLLM metadata rejects parameters. |
 | Search | Brave LLM Context retrieves passages with backend-only `BRAVE_API_KEY`, then the selected model generates cited answers. |
 | Research | GPT-Researcher uses its DuckDuckGo retriever for multi-step research. Serialize runs with `RESEARCH_ENV_LOCK` because model/reasoning configuration temporarily changes process-wide environment, restoring it and deleting temporary config afterward. |
-| Sandboxed tools | Agents-in-a-box executes workspace code and image-based plot tasks. Distinguish this execution service from the external task factory. |
+| Sandboxed tools | Agents-in-a-box executes workspace code and image-based plot tasks. Distinguish this execution service from the external task factory. A workspace-agent run is a `PiTask` with the stored `sandbox_model` default (a Pi gateway id `<provider>/<id>`, run as `--provider gateway`). The container reaches pi-host's completion gateway with the gateway-only token, port `PI_GATEWAY_PORT` (development 8300, the production backend and factory units set 8301). |
 | Optional service failure | Report dependency unavailability for affected capabilities, do not silently substitute a local service. |
 
 ### Collapsed chat rendering
@@ -193,6 +193,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 - Keep workspace-agent and plot slots scoped by user, chat, and sandbox scope. `SandboxRuntimeState` survives request-scoped service facades within one backend process and serializes each slot, not all chats. Uncheckpointed state is not shared across worker processes or recovered after process loss. Checkpoints and `delete_chat_state` run their store IO in a worker thread while holding the slot lock and `SandboxRuntimeState.assets_lock`, so asset garbage collection never sees a half-written checkpoint. Its asset deletes stay on the event loop, atomic with runs staging outputs there.
 - Persist rich output assets immediately, but stage the latest workspace archive/manifest in memory. `routes/histories.py` checkpoints that workspace only after saving the corresponding chat successfully. Do not treat a finished tool call as a durable workspace checkpoint. `SandboxStore.checkpoint` writes the slot, manifest, active pointer and every run record in one `DataStore.apply` transaction; `recover_completed_run` only heals records written before that.
 - Reuse completed `tool_call_id` results. Refuse a still-running record as busy, allow abandoned records older than five minutes to run again, and release native run/restore resources even on cancellation.
+- Resume only a manifest with a Pi session (`pi_sessions`). A stored schema-1 manifest (`omp_sessions`, before Pi) decodes in `SandboxStore` without its session: the next run restores its workspace and starts a fresh Pi session, and its OMP session asset is no longer referenced.
 
 ### Live attachments and extraction
 
@@ -296,15 +297,15 @@ Coding tabs, the session picker and the workbench file chats (Markdown, LaTeX, n
 
 ```text
 configuration: built-ins -> user defaults -> repo factory.yaml -> workflow -> request
-agents:        built-ins / user defaults / .omp/agents/<name>.md
+agents:        built-ins / user defaults / .factory/agents/<name>.md
 ```
 
 | Concern | Contract |
 | --- | --- |
-| Defaults | Affect future tasks only. Model overrides use native OMP `provider/model`, not `litellm_proxy/` names. |
+| Defaults | Affect future tasks only. Model overrides use Pi gateway ids `provider/model`, not `litellm_proxy/` names. |
 | Repository config | `factory.yaml` defines sandbox profile, hooks, gates, preview processes. `{repo_path}` resolves registered main checkout. Reuse its `.venv` for gates/backend, install frontend packages in worktrees. |
-| Agent instructions | `.omp/agents/coder.md` supplies conventions and scenarios |
-| Protected paths | Engine reverts task-agent changes to `factory.yaml`, `.factory/**`, `.omp/agents/**`. Put phase JSON/scenarios in ignored `.factory/out/`, never commits. |
+| Agent instructions | `.factory/agents/coder.md` supplies conventions and scenarios |
+| Protected paths | Engine reverts task-agent changes to `factory.yaml` and `.factory/**` (agent definitions included). Put phase JSON/scenarios in ignored `.factory/out/`, never commits. |
 | Startup | `run-factory.sh` provisions missing checkout/dependencies/config and `factory` database in selected dev/prod PostgreSQL, preserving state. `GIGACHAD_FACTORY=0` skips development startup. |
 | Previews | Engine alone starts loopback ports 8100–8199, with an empty database and a development identity. It starts the previews of tasks in review again when it starts, and stops them on SIGTERM/SIGINT. |
 | Preview gate | `src/backend/preview_gate.py` (`run-preview-gate.sh`, `127.0.0.1:30185`) is the only way a browser reaches a preview. `/preview/<port>/…` goes to the frontend with the path kept (`NEXT_PUBLIC_BASE_PATH`, Next `basePath`), `/preview-api/<port>/…` to the backend with the prefix stripped, HTTP and WebSocket. Only the dev login or a Tailnet login with the host capability passes: a preview runs agent-written code as the host user. Its own origin keeps that code off the real API's origin. |

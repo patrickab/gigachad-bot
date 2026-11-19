@@ -12,6 +12,8 @@ source "$root_dir/deploy/lib.sh"
 
 bind="${PI_HOST_BIND_HOST:-127.0.0.1}:${PI_HOST_PORT:-8300}"
 pi_host_dir="$root_dir/pi-host"
+# Sandboxed sessions run through the agent-sandbox CLI of this checkout's venv (the pinned Agents-in-a-box)
+export PI_HOST_AGENT_SANDBOX_BIN="${PI_HOST_AGENT_SANDBOX_BIN:-$root_dir/.venv/bin/agent-sandbox}"
 owned_pid=''
 
 if ! command -v bun >/dev/null 2>&1; then

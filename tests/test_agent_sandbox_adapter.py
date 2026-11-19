@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent_sandbox import (
     ContainerRuntimeError,
-    OmpTask,
+    PiTask,
     ProfileError,
     PythonScriptError,
     SandboxInvocation,
@@ -11,7 +11,7 @@ from agent_sandbox import (
     SandboxRun,
     WorkspaceArchive,
 )
-from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, WorkspaceRef
 import pytest
 
 from config import TEST_MODEL
@@ -23,13 +23,13 @@ SANDBOX_MODEL = TEST_MODEL
 
 def _manifest(workspace_sha256: str, *, manifest_id: str = "next-manifest") -> SandboxManifest:
     return SandboxManifest(
-        schema_version=1,
+        schema_version=MANIFEST_SCHEMA_VERSION,
         manifest_id=manifest_id,
         profile="test",
         runtime_fingerprint="test",
         workspace=WorkspaceRef(snapshot_asset_id=None, sha256=workspace_sha256),
         outputs=Outputs(events_asset_id=None, artifacts=()),
-        omp_sessions={},
+        pi_sessions={},
         execution=Execution(run_id="call-2", status="completed", exit_code=0, created_at=""),
     )
 
@@ -68,7 +68,7 @@ async def test_adapter_bridges_native_invocations_through_one_injected_sandbox(t
         slot_key="isolated-chat",
         profile_name="test",
         run_id="call-2",
-        task=OmpTask("trivial OMP command", model=SANDBOX_MODEL, thinking="medium"),
+        task=PiTask("trivial Pi command", model=SANDBOX_MODEL, thinking="medium"),
     )
 
     assert await adapter.run(invocation) is native_run
