@@ -1,13 +1,14 @@
 /**
- * One live Pi session: a `pi --mode rpc` child, its attached clients and the state replayed on attach.
+ * One live Pi session: a `pi --mode rpc` child, its attached clients and the state replayed on attach and resync.
  *
  * - Consumes: the child's JSONL stdout and stderr (Pi `rpc.md`), commands from attached clients, the session lock
- * - Provides: `LiveSession` with attach (snapshot + replay, M2), client commands (M21), extension UI state (M3),
- *   liveness (M17), live status and orderly close
+ * - Provides: `LiveSession` with attach and resync (snapshot + replay, M2), client commands (M21), extension UI state
+ *   (M3), liveness (M17), live status and orderly close
  *
  * Snapshot consistency: the replay buffer is copied in the same synchronous step that handles the `get_entries`
  * response, so the entries plus the replayed records are exactly what Pi had emitted up to that point. Records after
- * it are queued for the attaching client until its `attached` frame is out.
+ * it are queued for the client until its `attached` or `resync` frame is out. `get_state` is sent after that point,
+ * so the state is never older than the entries; the queued records bring it forward.
  */
 import { existsSync } from "node:fs";
 import { tryLockFile, type FileLock } from "./lock.ts";
@@ -15,11 +16,15 @@ import type { PiChild, Profile } from "./spawn.ts";
 
 /** Anything a frame can be sent to, a `ServerWebSocket` in production. */
 export interface FrameSink {
+  /** Bun semantics: 0 means the frame was dropped (socket closed or over its backpressure limit). */
   send(data: string): unknown;
+  close?(code?: number, reason?: string): void;
 }
 
 export type PiRecord = { type?: unknown; id?: unknown; [field: string]: unknown };
 export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
+export type SessionEntry = { id: string; parentId: string | null; type: string; [field: string]: unknown };
+export type Resync = { mode: "append" | "replace"; entries: SessionEntry[]; leafId: string | null };
 
 /** Ids of commands pi-host sends itself; their responses never reach clients. */
 const INTERNAL_ID_PREFIX = "pi-host:";
@@ -32,20 +37,58 @@ const SESSION_SWITCHING_COMMANDS = new Set(["new_session", "switch_session", "fo
 const STREAMING_RECORDS = new Set(["message_update", "tool_execution_update", "bash_execution_update"]);
 const REQUEST_TIMEOUT_MS = 30_000;
 const CLOSE_GRACE_MS = 10_000;
+/** After the child exits, how long its stdout and stderr may still drain (a descendant can hold them open). */
+const READER_DRAIN_MS = 1_000;
+/** Replay buffer bound; the oldest records go first once it is exceeded. */
+const REPLAY_MAX_BYTES = 16 * 1024 * 1024;
 const STDERR_TAIL_LINES = 20;
+/** Close code for a client that dropped a frame: it reconnects and resyncs. */
+const CLOSE_TRY_AGAIN_LATER = 1013;
 
-type BufferedRecord = { line: string; toolCallId?: string };
+type BufferedRecord = { line: string; type: string; toolCallId?: string };
 type Dialog = { record: PiRecord; timer?: Timer };
 type UiState = { dialogs: PiRecord[]; statuses: Record<string, string>; queue: Queue };
 type Queue = { steering: unknown[]; followUp: unknown[] };
-type PendingAttach = {
-  state?: unknown;
-  entries?: unknown;
-  ui?: UiState;
+type EntriesData = { entries: SessionEntry[]; leafId: string | null };
+type PendingSnapshot = {
+  /** The snapshot frame without `state`, set at the snapshot point. */
+  frame?: Record<string, unknown>;
   replay?: string[];
-  /** Frames emitted after the snapshot, sent once `attached` and the replay are out. */
+  /** Frames emitted after the snapshot, sent once the snapshot frame and the replay are out. */
   queued: string[];
 };
+
+/** Root-to-leaf path through `entries` by `parentId`. */
+export function branchOf(entries: SessionEntry[], leafId: string | null): SessionEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const path: SessionEntry[] = [];
+  for (let id = leafId; id !== null; ) {
+    const entry = byId.get(id);
+    if (!entry) break;
+    byId.delete(id);
+    path.push(entry);
+    id = entry.parentId;
+  }
+  return path.reverse();
+}
+
+/**
+ * Entries to append after `cursor`, given the `get_entries` tail after it: the leaf's ancestors back to the cursor.
+ * Undefined when the cursor is not an ancestor of the leaf or a compaction follows it (M2 replace rule).
+ */
+export function appendAfter(cursor: string, tail: SessionEntry[], leafId: string | null): SessionEntry[] | undefined {
+  const byId = new Map(tail.map((entry) => [entry.id, entry]));
+  const path: SessionEntry[] = [];
+  let id = leafId;
+  while (id !== null && id !== cursor) {
+    const entry = byId.get(id);
+    if (!entry || entry.type === "compaction") return undefined;
+    byId.delete(id);
+    path.push(entry);
+    id = entry.parentId;
+  }
+  return id === cursor ? path.reverse() : undefined;
+}
 
 /** `{type:"pi"}` frame around a raw stdout record, spliced so the record stays byte-identical (M16). */
 function piFrame(sessionId: string, line: string): string {
@@ -70,6 +113,14 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function entriesData(data: unknown): EntriesData {
+  const record = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  return {
+    entries: asArray(record.entries) as SessionEntry[],
+    leafId: typeof record.leafId === "string" ? record.leafId : null,
+  };
+}
+
 export class LiveSession {
   sessionId = "";
   sessionPath = "";
@@ -81,11 +132,12 @@ export class LiveSession {
   exitCode: number | undefined;
   closing = false;
   lastActivity = Date.now();
-  private readonly pending = new Map<FrameSink, PendingAttach>();
+  private readonly pending = new Map<FrameSink, PendingSnapshot>();
   private readonly dialogs = new Map<string, Dialog>();
   private readonly statuses = new Map<string, string>();
   private queue: Queue = { steering: [], followUp: [] };
   private replay: BufferedRecord[] = [];
+  private replayBytes = 0;
   private running = false;
   private compacting = false;
   private readonly requests = new Map<string, (record: PiRecord) => void>();
@@ -100,7 +152,13 @@ export class LiveSession {
     private lock: FileLock | undefined,
     private readonly onExit: (session: LiveSession) => void,
   ) {
-    this.exited = Promise.all([child.exited, this.readStdout(), this.readStderr()]).then(([code]) => {
+    const readers = Promise.all([
+      this.readStdout().catch((error) => this.noteStderr(`stdout reader failed: ${String(error)}`)),
+      this.readStderr().catch((error) => this.noteStderr(`stderr reader failed: ${String(error)}`)),
+    ]);
+    // Exit follows the child alone: a descendant holding the pipes must not keep the session and its lock.
+    this.exited = child.exited.then(async (code) => {
+      await Promise.race([readers, Bun.sleep(READER_DRAIN_MS)]);
       this.handleExit(code);
       return code;
     });
@@ -156,37 +214,40 @@ export class LiveSession {
     return promise;
   }
 
-  /** Start attaching a client: snapshot (`get_state`, `get_entries`, UI state), replay, then live records. */
+  /** Attach a client: `attached` (state, all entries, UI state), replay, then live records. */
   attach(client: FrameSink): void {
-    this.clients.delete(client);
-    const pending: PendingAttach = { queued: [] };
-    this.pending.set(client, pending);
-    const fail = (record: PiRecord) => {
-      if (this.pending.get(client) !== pending) return;
-      this.pending.delete(client);
-      this.deliver(client, envelope("error", this.sessionId, { message: `attach failed: ${String(record.error ?? "unknown")}` }));
-    };
-    const finish = () => {
-      if (this.pending.get(client) !== pending || pending.state === undefined || pending.replay === undefined) return;
-      this.pending.delete(client);
-      this.deliver(client, envelope("attached", this.sessionId, { state: pending.state, entries: pending.entries, ui: pending.ui }));
-      this.deliver(client, envelope("replay_start", this.sessionId));
-      for (const line of pending.replay) this.deliver(client, piFrame(this.sessionId, line));
-      this.deliver(client, envelope("replay_end", this.sessionId));
-      for (const frame of pending.queued) this.deliver(client, frame);
-      this.clients.add(client);
-    };
-    this.request({ type: "get_state" }, (record) => {
-      if (record.success !== true) return fail(record);
-      pending.state = record.data ?? {};
-      finish();
+    this.snapshot(client, "attached", (pending, done) => {
+      this.request({ type: "get_entries" }, (record) => {
+        if (record.success !== true) return done(record);
+        this.markSnapshot(client, pending, { entries: record.data });
+        done();
+      });
     });
-    this.request({ type: "get_entries" }, (record) => {
-      if (record.success !== true) return fail(record);
-      pending.entries = record.data;
-      pending.ui = this.uiState();
-      pending.replay = this.replay.map((buffered) => buffered.line);
-      finish();
+  }
+
+  /**
+   * Bring a client up to date from `cursor` (M2), attaching it when it was not: `resync` with `append` (the branch
+   * entries after the cursor) or `replace` (the whole branch), then replay and live records like `attach`.
+   */
+  resync(client: FrameSink, cursor: string | null): void {
+    this.snapshot(client, "resync", (pending, done) => {
+      const replaceAll = () =>
+        this.request({ type: "get_entries" }, (record) => {
+          if (record.success !== true) return done(record);
+          const { entries, leafId } = entriesData(record.data);
+          this.markSnapshot(client, pending, { mode: "replace", entries: branchOf(entries, leafId), leafId });
+          done();
+        });
+      if (cursor === null) return replaceAll();
+      // Pi answers an unknown `since` with a failure: the full branch replaces then.
+      this.request({ type: "get_entries", since: cursor }, (record) => {
+        if (record.success !== true) return replaceAll();
+        const { entries, leafId } = entriesData(record.data);
+        const appended = appendAfter(cursor, entries, leafId);
+        if (!appended) return replaceAll();
+        this.markSnapshot(client, pending, { mode: "append", entries: appended, leafId });
+        done();
+      });
     });
   }
 
@@ -202,11 +263,16 @@ export class LiveSession {
     this.sequences.delete(client);
   }
 
-  /** Send one frame to a client, stamped with this child's `streamId` and the client's next `sequence`. */
+  /**
+   * Send one frame to a client, stamped with this child's `streamId` and the client's next `sequence`. A dropped
+   * frame closes the client's socket: a gap would go unnoticed, a reconnect resyncs.
+   */
   deliver(client: FrameSink, frame: string): void {
     const sequence = (this.sequences.get(client) ?? -1) + 1;
     this.sequences.set(client, sequence);
-    client.send(stamp(frame, this.streamId, sequence));
+    if (client.send(stamp(frame, this.streamId, sequence)) !== 0) return;
+    this.disconnect(client);
+    client.close?.(CLOSE_TRY_AGAIN_LATER, "frame dropped");
   }
 
   /** Forward a client's raw Pi command (M21: any attached client), an error message when it is refused. */
@@ -233,8 +299,12 @@ export class LiveSession {
     clearTimeout(killer);
   }
 
-  /** Start an orderly stop without waiting (pi-host shutdown: children persist and exit on their own). */
+  /**
+   * Start an orderly stop without waiting (pi-host shutdown: children persist and exit on their own). Only the first
+   * call signals: Pi treats a second SIGTERM during shutdown as "skip cleanup".
+   */
   terminate(): void {
+    if (this.closing) return;
     this.closing = true;
     try {
       this.child.stdin.end();
@@ -244,8 +314,50 @@ export class LiveSession {
     this.child.kill("SIGTERM");
   }
 
+  /**
+   * Shared attach/resync flow. `take` requests the snapshot and calls `markSnapshot` at its point, then `done`;
+   * `get_state` follows and the frame goes out with it. An attached client keeps its live frames until the
+   * snapshot point, an unattached one is attached by this.
+   */
+  private snapshot(
+    client: FrameSink,
+    type: "attached" | "resync",
+    take: (pending: PendingSnapshot, done: (failure?: PiRecord) => void) => void,
+  ): void {
+    const pending: PendingSnapshot = { queued: [] };
+    this.pending.set(client, pending);
+    const fail = (record: PiRecord) => {
+      if (this.pending.get(client) !== pending) return;
+      this.pending.delete(client);
+      this.clients.delete(client);
+      this.deliver(client, envelope("error", this.sessionId, { message: `${type === "attached" ? "attach" : "resync"} failed: ${String(record.error ?? "unknown")}` }));
+    };
+    take(pending, (failure) => {
+      if (failure) return fail(failure);
+      this.request({ type: "get_state" }, (record) => {
+        if (this.pending.get(client) !== pending || !pending.frame || !pending.replay) return;
+        if (record.success !== true) return fail(record);
+        this.pending.delete(client);
+        this.deliver(client, envelope(type, this.sessionId, { state: record.data ?? {}, ...pending.frame }));
+        this.deliver(client, envelope("replay_start", this.sessionId));
+        for (const line of pending.replay) this.deliver(client, piFrame(this.sessionId, line));
+        this.deliver(client, envelope("replay_end", this.sessionId));
+        for (const frame of pending.queued) this.deliver(client, frame);
+        if (this.exitCode === undefined && this.sequences.has(client)) this.clients.add(client);
+      });
+    });
+  }
+
+  /** The snapshot point: copy replay and UI state, and queue later frames for this client instead of sending them. */
+  private markSnapshot(client: FrameSink, pending: PendingSnapshot, frame: Record<string, unknown>): void {
+    if (this.pending.get(client) !== pending) return;
+    this.clients.delete(client);
+    pending.frame = { ...frame, ui: this.uiState() };
+    pending.replay = this.replay.map((buffered) => buffered.line);
+  }
+
   private write(record: PiRecord): boolean {
-    if (this.exitCode !== undefined) return false;
+    if (this.exitCode !== undefined || this.closing) return false;
     try {
       this.child.stdin.write(`${JSON.stringify(record)}\n`);
       this.child.stdin.flush();
@@ -273,6 +385,10 @@ export class LiveSession {
   private broadcast(frame: string): void {
     for (const client of this.clients) this.deliver(client, frame);
     for (const pending of this.pending.values()) if (pending.replay) pending.queued.push(frame);
+  }
+
+  private noteStderr(line: string): void {
+    this.stderrLines = [...this.stderrLines, line].slice(-STDERR_TAIL_LINES);
   }
 
   private async readStdout(): Promise<void> {
@@ -304,7 +420,7 @@ export class LiveSession {
     try {
       record = JSON.parse(line);
     } catch {
-      this.stderrLines = [...this.stderrLines, `non-JSON stdout: ${line.slice(0, 200)}`].slice(-STDERR_TAIL_LINES);
+      this.noteStderr(`non-JSON stdout: ${line.slice(0, 200)}`);
       return;
     }
     if (typeof record !== "object" || record === null) return;
@@ -323,6 +439,11 @@ export class LiveSession {
   private track(type: string, record: PiRecord, line: string): void {
     switch (type) {
       case "response":
+        // A bash command's result is an entry now, its streamed output is history.
+        if (record.command === "bash") this.dropReplay((buffered) => buffered.type === "bash_execution_update");
+        return;
+      case "entry_appended":
+        // The entry is persisted, `get_entries` returns it.
         return;
       case "extension_ui_request":
         this.trackUi(record);
@@ -335,7 +456,7 @@ export class LiveSession {
         break;
       case "agent_settled":
         this.running = false;
-        this.replay = [];
+        this.dropReplay(() => true);
         return;
       case "compaction_start":
         this.compacting = true;
@@ -345,17 +466,33 @@ export class LiveSession {
         break;
       case "message_end":
         // The message is persisted now, `get_entries` returns it.
-        this.replay = [];
+        this.dropReplay(() => true);
         return;
       case "tool_execution_update": {
         // `partialResult` is the latest whole partial, older updates of the same call add nothing.
         const toolCallId = String(record.toolCallId);
-        this.replay = this.replay.filter((buffered) => buffered.toolCallId !== toolCallId);
-        this.replay.push({ line, toolCallId });
+        this.dropReplay((buffered) => buffered.toolCallId === toolCallId);
+        this.bufferReplay({ line, type, toolCallId });
         return;
       }
     }
-    this.replay.push({ line });
+    this.bufferReplay({ line, type });
+  }
+
+  private bufferReplay(buffered: BufferedRecord): void {
+    this.replay.push(buffered);
+    this.replayBytes += buffered.line.length;
+    let dropped = 0;
+    while (this.replayBytes > REPLAY_MAX_BYTES && dropped < this.replay.length - 1) {
+      this.replayBytes -= this.replay[dropped]!.line.length;
+      dropped++;
+    }
+    if (dropped) this.replay = this.replay.slice(dropped);
+  }
+
+  private dropReplay(matches: (buffered: BufferedRecord) => boolean): void {
+    this.replay = this.replay.filter((buffered) => !matches(buffered));
+    this.replayBytes = this.replay.reduce((total, buffered) => total + buffered.line.length, 0);
   }
 
   private trackUi(record: PiRecord): void {
@@ -384,7 +521,12 @@ export class LiveSession {
   private lockCreatedFile(): void {
     if (this.lock || this.lockFailed || !this.sessionPath || this.exitCode !== undefined) return;
     if (!existsSync(this.sessionPath)) return;
-    this.lock = tryLockFile(this.sessionPath);
+    try {
+      this.lock = tryLockFile(this.sessionPath);
+    } catch {
+      // Gone between the check and the open: the next record retries.
+      return;
+    }
     if (this.lock) return;
     this.lockFailed = true;
     this.broadcast(envelope("lock_held", this.sessionId));

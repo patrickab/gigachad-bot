@@ -34,13 +34,24 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
   }
 }
 
-/** Read a session's private state, defaults when no valid sidecar exists. */
+/**
+ * Read a session's private state, defaults when no sidecar exists or it is not JSON. Other read errors (EMFILE, EIO,
+ * EACCES) throw: a default would unpin the session for eviction and be written back over the sidecar.
+ */
 export async function readState(sessionPath: string): Promise<PrivateState> {
+  const defaults = { revision: 0, pinned: false, data: {} };
+  let text: string;
+  try {
+    text = await readFile(sidecarPath(sessionPath), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return defaults;
+    throw error;
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(sidecarPath(sessionPath), "utf8"));
+    parsed = JSON.parse(text);
   } catch {
-    return { revision: 0, pinned: false, data: {} };
+    return defaults;
   }
   const record = isPlainObject(parsed) ? parsed : {};
   return {

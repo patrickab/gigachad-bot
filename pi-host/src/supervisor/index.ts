@@ -2,8 +2,9 @@
  * Session supervisor: one `pi --mode rpc` child per live session, attach with replay, many clients, idle eviction.
  *
  * - Consumes: the pinned `pi` binary (checked at start, M13), Pi's session files, Catalog's session helpers
- * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`POST /sessions`, `POST /sessions/:id/close`),
- *   the multiplexed `/ws` handler (M16, M18) and `LiveSessions.liveStatus` for the catalog
+ * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
+ *   `POST /sessions/:id/close`), the multiplexed `/ws` handler (M16, M18, resync M2) and `LiveSessions.liveStatus`
+ *   for the catalog
  *
  * Liveness (M17): Pi exposes no liveness registry over RPC, so an extension with background work keeps its session
  * from idle eviction by setting a non-empty `setStatus` under key `session-liveness` and clearing it when done.
@@ -15,6 +16,10 @@ import { SupervisorHost } from "./host.ts";
 
 export type SocketData = { clientId: string };
 
+/** One live session in `GET /health`. */
+export type LiveSessionHealth = { sessionId: string; sessionPath: string; running: boolean; attached: number; pinned: boolean };
+export type Health = { ok: true; piVersion: string; sessions: LiveSessionHealth[] };
+
 /** What the catalog needs to know about running sessions. */
 export interface LiveSessions {
   /** Live status of a session file, undefined when no child holds it. */
@@ -25,7 +30,7 @@ export interface Supervisor extends LiveSessions {
   socketData(): SocketData;
   websocket: WebSocketHandler<SocketData>;
   handle(request: Request, url: URL): Promise<Response | undefined>;
-  health(): { ok: true; piVersion: string };
+  health(): Promise<Health>;
   shutdown(): Promise<void>;
 }
 

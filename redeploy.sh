@@ -6,7 +6,8 @@
 # Before the backend, pi-host (gigachad-bot-pi-host.service, M14): restarted only when
 # pi-host/ changed (code, the Pi pin in its package.json, the lockfile), the installed pi
 # is another version than the one it runs, or it is down, never while a Pi session is
-# live (M4). A pi whose version differs from the pin stops the redeploy before any restart.
+# running a turn (M4, `running` in pi-host's /health; idle and pinned sessions resume after it).
+# A pi whose version differs from the pin stops the redeploy before any restart.
 #
 # Then omp-web (omp tabs): restarts gigachad-bot-omp-web.service when the upstream ref
 # it serves (GIGACHAD_OMP_WEB_REF, default origin/main, fetched here) moved, origin/main
@@ -117,9 +118,18 @@ pi_host_up() {
     systemctl --user is-active --quiet "$pi_host_unit" && [[ -n $(pi_host_version 2>/dev/null) ]]
 }
 
-# Pi sessions pi-host is running (each is a `pi` child in the unit's cgroup), live ones end with a restart.
-live_pi_sessions() {
-    local cgroup pid count=0
+# Pi sessions running a turn per pi-host's /health; a restart ends them. A pi-host that predates
+# the session list in /health falls back to counting its `pi` children (every live session).
+running_pi_sessions() {
+    local answer running cgroup pid count=0
+    answer="$(curl -sf -H "Authorization: Bearer $(cat "$pi_host_token_file")" "$pi_host_url/health" 2>/dev/null || true)"
+    running="$(printf '%s' "$answer" | python3 -c 'import json, sys
+sessions = json.load(sys.stdin).get("sessions")
+print("" if sessions is None else sum(1 for session in sessions if session.get("running")))' 2>/dev/null || true)"
+    if [[ -n $running ]]; then
+        printf '%s\n' "$running"
+        return
+    fi
     cgroup="$(systemctl --user show -p ControlGroup --value "$pi_host_unit")"
     if [[ -n $cgroup && -r /sys/fs/cgroup$cgroup/cgroup.procs ]]; then
         while read -r pid; do
@@ -171,10 +181,10 @@ if [[ -z $pi_served || $pi_served != "$pi_installed" ]] || ! git diff --quiet "$
             "$pi_pinned" "${pi_installed:-no pi}" "$pi_pinned" "${pi_served:-nothing}" >&2
         exit 1
     fi
-    live="$(live_pi_sessions)"
-    if [[ $live != 0 ]]; then
-        printf "pi-host not restarted: %s Pi session(s) live, run systemctl --user restart %s when they are idle\n" \
-            "$live" "$pi_host_unit" >&2
+    running="$(running_pi_sessions)"
+    if [[ $running != 0 ]]; then
+        printf "pi-host not restarted: %s Pi session(s) running, run systemctl --user restart %s when they are idle\n" \
+            "$running" "$pi_host_unit" >&2
     else
         printf "Restarting %s with Pi %s\n" "$pi_host_unit" "$pi_pinned"
         systemctl --user restart "$pi_host_unit"

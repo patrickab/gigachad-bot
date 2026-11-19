@@ -8,6 +8,7 @@ import { copyPrivateState, handleCatalog, isPinned, type LiveStatus, type Sessio
 import type { RankedFile } from "../src/catalog/files.ts";
 import { cwdDirName } from "../src/catalog/paths.ts";
 import type { LiveSessions } from "../src/supervisor/index.ts";
+import { tryLockFile } from "../src/supervisor/lock.ts";
 
 /** Union of the catalog response bodies; each assertion reads the fields of its route. */
 type Body = {
@@ -213,6 +214,20 @@ describe("archive and pin", () => {
     expect(existsSync(newPath)).toBe(true);
   });
 
+  test("archive is refused while another holder has the session's flock (a spawning child)", async () => {
+    const { newPath } = await writeFixtures();
+    const lock = tryLockFile(newPath)!;
+    try {
+      const { status, json } = await call<{ error: string }>("POST", `/sessions/${NEW_ID}/archive`);
+      expect(status).toBe(409);
+      expect(json).toEqual({ error: "live" });
+      expect(existsSync(newPath)).toBe(true);
+    } finally {
+      lock.release();
+    }
+    expect((await call("POST", `/sessions/${NEW_ID}/archive`)).status).toBe(200);
+  });
+
   test("pin round trip", async () => {
     const { oldPath } = await writeFixtures();
     expect(await isPinned(oldPath)).toBe(false);
@@ -222,6 +237,16 @@ describe("archive and pin", () => {
     expect(await isPinned(oldPath)).toBe(false);
     expect((await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: "yes" })).status).toBe(400);
   });
+});
+
+test("a sidecar read error throws instead of reading as unpinned, missing or invalid JSON is the default", async () => {
+  const { oldPath, newPath } = await writeFixtures();
+  await mkdir(`${oldPath}.gigachad.json`);
+  await expect(isPinned(oldPath)).rejects.toThrow();
+  await writeFile(`${newPath}.gigachad.json`, "not json");
+  expect(await isPinned(newPath)).toBe(false);
+  await rm(`${oldPath}.gigachad.json`, { recursive: true });
+  expect(await isPinned(oldPath)).toBe(false);
 });
 
 describe("private state", () => {

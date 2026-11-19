@@ -145,13 +145,16 @@ async def get_files(repo: str, q: str = "", limit: int = Query(default=50, ge=1,
 
 @router.websocket("/ws")
 async def pi_socket(websocket: WebSocket, identity: Annotated[RequestIdentity, Depends(get_request_identity)]) -> None:
+    # Refusals accept first: a close before the handshake becomes HTTP 403, and the browser sees 1006 for every case.
     if not is_allowed_websocket(websocket, identity):
+        await websocket.accept()
         await websocket.close(code=POLICY_VIOLATION)
         return
     try:
         upstream = await pi_host.open_websocket()
     except pi_host.PiHostUnavailable as exc:
         log.warning("%s", exc)
+        await websocket.accept()
         await websocket.close(code=_TRY_AGAIN_LATER)
         return
     await relay_websocket(websocket, upstream)

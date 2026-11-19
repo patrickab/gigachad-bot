@@ -3,8 +3,10 @@
  *
  * - Consumes: `--session <path>`, `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, JSONL commands on stdin
  * - Provides: Pi-shaped responses and events. Prompt texts script the run: `hold` streams one delta and waits for
- *   `abort`, `dialog` opens a select dialog, `status <key> [text]` sets or clears a status, anything else echoes.
- *   The session file is written lazily at the first assistant `message_end`, like Pi
+ *   `abort`, `dialog` opens a select dialog, `status <key> [text]` sets or clears a status, `compact` appends a
+ *   compaction entry, `goto <entryId>` moves the leaf there (a branch switch), `orphan` starts a `sleep` that
+ *   inherits stdout and stderr and answers its pid, anything else echoes. `bash` streams `bash_execution_update`s.
+ *   `get_entries` honours `since` like Pi. The session file is written lazily at the first assistant `message_end`
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -29,11 +31,13 @@ const sessionDir =
 let sessionId = crypto.randomUUID();
 let sessionFile = join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
 const entries: Entry[] = [];
+let leafId: string | null = null;
 if (sessionArg >= 0) {
   sessionFile = resolve(args[sessionArg + 1]!);
   const [header, ...lines] = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
   sessionId = JSON.parse(header!).id;
   entries.push(...lines.map((line) => JSON.parse(line)));
+  leafId = entries.at(-1)?.id ?? null;
 }
 
 let model = { provider: "faux", id: "faux-1" };
@@ -67,11 +71,16 @@ function message(role: string, text: string, extra: object = {}): object {
   return { role, content: role === "user" ? text : [{ type: "text", text }], timestamp: Date.now(), ...extra };
 }
 
+function appendEntry(fields: { type: string; [field: string]: unknown }, isAssistant: boolean): Entry {
+  const entry = { ...fields, id: crypto.randomUUID().slice(0, 8), parentId: leafId, timestamp: new Date().toISOString() };
+  leafId = entry.id;
+  persist(entry, isAssistant);
+  return entry;
+}
+
 function endMessage(msg: object, isAssistant: boolean): void {
   emit({ type: "message_end", message: msg });
-  const parentId = entries.at(-1)?.id ?? null;
-  const id = crypto.randomUUID().slice(0, 8);
-  persist({ type: "message", id, parentId, timestamp: new Date().toISOString(), message: msg }, isAssistant);
+  appendEntry({ type: "message", message: msg }, isAssistant);
 }
 
 async function run(text: string): Promise<void> {
@@ -105,8 +114,17 @@ function handle(command: Command): void {
         success: true,
         data: { model, thinkingLevel, isStreaming: streaming, isCompacting: false, sessionFile, sessionId, messageCount: entries.length, pendingMessageCount: 0 },
       });
-    case "get_entries":
-      return respond(command, { success: true, data: { entries, leafId: entries.at(-1)?.id ?? null } });
+    case "get_entries": {
+      if (command.since === undefined) return respond(command, { success: true, data: { entries, leafId } });
+      const since = entries.findIndex((entry) => entry.id === command.since);
+      if (since < 0) return respond(command, { success: false, error: `Entry not found: ${command.since}` });
+      return respond(command, { success: true, data: { entries: entries.slice(since + 1), leafId } });
+    }
+    case "bash": {
+      const count = Number(command.updates ?? 3);
+      for (let index = 0; index < count; index++) emit({ type: "bash_execution_update", output: `line ${index}\n` });
+      return respond(command, { success: true, data: { output: "done", exitCode: 0 } });
+    }
     case "set_model":
       if (command.provider === "bad") return respond(command, { success: false, error: "Model not found: bad" });
       model = { provider: String(command.provider), id: String(command.modelId) };
@@ -135,6 +153,21 @@ function handle(command: Command): void {
         const [, statusKey, statusText] = text.split(" ");
         respond(command, { success: true, data: { disposition: "handled" } });
         return emit({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setStatus", statusKey, statusText });
+      }
+      if (text === "compact") {
+        respond(command, { success: true, data: { disposition: "handled" } });
+        emit({ type: "compaction_start", reason: "manual" });
+        const compaction = appendEntry({ type: "compaction", summary: "summary", firstKeptEntryId: leafId, tokensBefore: 10 }, false);
+        return emit({ type: "compaction_end", reason: "manual", result: { summary: "summary" }, entryId: compaction.id });
+      }
+      if (text.startsWith("goto ")) {
+        leafId = text.slice("goto ".length);
+        return respond(command, { success: true, data: { disposition: "handled" } });
+      }
+      if (text === "orphan") {
+        const orphan = Bun.spawn(["sleep", "30"], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+        orphan.unref();
+        return respond(command, { success: true, data: { disposition: "handled", pid: orphan.pid } });
       }
       if (streaming) return respond(command, { success: false, error: "Agent is streaming" });
       respond(command, { success: true, data: { disposition: "started" } });

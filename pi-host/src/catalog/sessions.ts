@@ -7,6 +7,7 @@
 import { mkdir, readdir, rename, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import type { LiveSessions } from "../supervisor/index.ts";
+import { tryLockFile, type FileLock } from "../supervisor/lock.ts";
 import { archiveRoot, cwdSessionDir, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar, readState } from "./state.ts";
 
@@ -185,24 +186,39 @@ export async function findSession(sessionId: string): Promise<string | undefined
   return undefined;
 }
 
-export type MoveResult = { ok: true; path: string } | { ok: false; error: "live" | "exists" | "not_in_root" };
+export type MoveResult = { ok: true; path: string } | { ok: false; error: "live" | "exists" | "not_in_root" | "not_found" };
 
-/** Move a session file and its sidecar between the live and archive roots, refused while live (C7). */
+/**
+ * Move a session file and its sidecar between the live and archive roots, refused while live (C7). The move holds the
+ * session's flock, the one the supervisor takes before it starts a child, so a spawn and an archive exclude each other.
+ */
 export async function moveSession(sessionPath: string, toArchive: boolean, live: LiveSessions): Promise<MoveResult> {
   const fromRoot = toArchive ? sessionsRoot() : archiveRoot();
   const toRoot = toArchive ? archiveRoot() : sessionsRoot();
   if (!isInside(fromRoot, sessionPath)) return { ok: false, error: "not_in_root" };
   if (live.liveStatus(sessionPath)) return { ok: false, error: "live" };
-  const target = join(toRoot, relative(fromRoot, sessionPath));
-  if (await Bun.file(target).exists()) return { ok: false, error: "exists" };
-  await mkdir(dirname(target), { recursive: true });
-  await rename(sessionPath, target);
+  let lock: FileLock | undefined;
   try {
-    await moveSidecar(sessionPath, target);
+    lock = tryLockFile(sessionPath);
   } catch (error) {
-    await rename(target, sessionPath);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: false, error: "not_found" };
     throw error;
   }
-  summaryCache.delete(sessionPath);
-  return { ok: true, path: target };
+  if (!lock) return { ok: false, error: "live" };
+  try {
+    const target = join(toRoot, relative(fromRoot, sessionPath));
+    if (await Bun.file(target).exists()) return { ok: false, error: "exists" };
+    await mkdir(dirname(target), { recursive: true });
+    await rename(sessionPath, target);
+    try {
+      await moveSidecar(sessionPath, target);
+    } catch (error) {
+      await rename(target, sessionPath);
+      throw error;
+    }
+    summaryCache.delete(sessionPath);
+    return { ok: true, path: target };
+  } finally {
+    lock.release();
+  }
 }

@@ -299,10 +299,12 @@ def test_ws_closes_pi_host_when_the_browser_leaves(monkeypatch):
 
 @pytest.mark.usefixtures("trusted_loopback")
 def test_ws_refuses_foreign_origins_and_logins_without_host_access(monkeypatch):
+    # The handshake succeeds and the close carries the code: a close before accept would reach the browser as 1006.
     with fake_socket_host(monkeypatch) as fake:
         for client, origin in ((_client(), "https://evil.example"), (_client(has_host_access=False), ORIGIN)):
-            with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect("/api/pi/ws", headers={"origin": origin}):
-                pass
+            with client.websocket_connect("/api/pi/ws", headers={"origin": origin}) as socket:
+                with pytest.raises(WebSocketDisconnect) as refused:
+                    socket.receive_text()
             assert refused.value.code == websocket_origin.POLICY_VIOLATION
         assert fake.headers == {}
 
@@ -310,6 +312,7 @@ def test_ws_refuses_foreign_origins_and_logins_without_host_access(monkeypatch):
 @pytest.mark.usefixtures("trusted_loopback")
 def test_ws_answers_try_again_later_when_pi_host_is_down(monkeypatch):
     monkeypatch.setenv("GIGACHAD_PI_HOST_URL", "http://127.0.0.1:9")
-    with pytest.raises(WebSocketDisconnect) as refused, _client().websocket_connect("/api/pi/ws", headers={"origin": ORIGIN}):
-        pass
+    with _client().websocket_connect("/api/pi/ws", headers={"origin": ORIGIN}) as socket:
+        with pytest.raises(WebSocketDisconnect) as refused:
+            socket.receive_text()
     assert refused.value.code == 1013

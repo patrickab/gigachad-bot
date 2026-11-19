@@ -67,7 +67,7 @@ async function handleMove(sessionPath: string, toArchive: boolean, live: LiveSes
   const moved = await moveSession(sessionPath, toArchive, live);
   if (!moved.ok) {
     if (moved.error === "not_in_root") return fail(409, toArchive ? "already_archived" : "not_archived");
-    return fail(409, moved.error);
+    return fail(moved.error === "not_found" ? 404 : 409, moved.error);
   }
   const session = await sessionInfo(moved.path, live);
   return session ? Response.json({ session }) : fail(404, "not_found");

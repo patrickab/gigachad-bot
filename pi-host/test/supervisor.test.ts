@@ -1,14 +1,17 @@
 /** Supervisor tests over HTTP and `/ws` against the fake `pi` fixture (no model calls). */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
+import { loadToken } from "../src/auth.ts";
 import { startServer } from "../src/server.ts";
 import { childEnv } from "../src/supervisor/config.ts";
 import { tryLockFile } from "../src/supervisor/lock.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 import type { SupervisorHost } from "../src/supervisor/host.ts";
+import { LiveSession } from "../src/supervisor/session.ts";
+import type { PiChild } from "../src/supervisor/spawn.ts";
 
 type Frame = { type: string; sessionId: string; [field: string]: any };
 
@@ -95,6 +98,17 @@ class Client {
     return { attached, replay: frames.slice(1) };
   }
 
+  /** Frames from `resync` through `replay_end` of a resync. */
+  async resync(sessionId: string, cursor: string | null): Promise<{ resync: Frame; replay: Frame[] }> {
+    this.send({ type: "resync", sessionId, cursor });
+    const resync = await this.next((frame) => frame.type === "resync" && frame.sessionId === sessionId);
+    const start = this.cursor;
+    await this.next((frame) => frame.type === "replay_end");
+    const frames = this.frames.slice(start, this.cursor - 1);
+    expect(frames[0]?.type).toBe("replay_start");
+    return { resync, replay: frames.slice(1) };
+  }
+
   pi(match: (record: any) => boolean): Promise<Frame> {
     return this.next((frame) => frame.type === "pi" && match(frame.record));
   }
@@ -151,7 +165,7 @@ describe("auth", () => {
     expect((await fetch(`${base}/health`, { headers: withOrigin })).status).toBe(403);
     expect((await fetch(`${base}/ws`, { headers: { ...withOrigin, upgrade: "websocket" } })).status).toBe(403);
     expect((await fetch(`${base}/ws`, { headers: { upgrade: "websocket" } })).status).toBe(401);
-    expect(await (await api("/health")).json()).toEqual({ ok: true, piVersion: "1.5.2" });
+    expect(await (await api("/health")).json()).toEqual({ ok: true, piVersion: "1.5.2", sessions: [] });
   });
 });
 
@@ -348,4 +362,271 @@ test("children get an allowlisted environment without backend secrets", () => {
     EXTRA_ALLOWED: "yes",
     PI_SKIP_VERSION_CHECK: "1",
   });
+});
+
+/** A session file with a header and `entries`, under the scratch agent dir's sessions root. */
+function writeSessionFile(cwd: string, entries: object[]): { sessionId: string; sessionPath: string } {
+  const sessionId = crypto.randomUUID();
+  const dir = join(agentDir, "sessions", `--${cwd.replace(/^\//, "").replace(/[/\\:]/g, "-")}--`);
+  mkdirSync(dir, { recursive: true });
+  const sessionPath = join(dir, `2026-11-19T10-00-00-000Z_${sessionId}.jsonl`);
+  const header = { type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd };
+  writeFileSync(sessionPath, [header, ...entries].map((line) => `${JSON.stringify(line)}\n`).join(""));
+  return { sessionId, sessionPath };
+}
+
+function messageEntry(id: string, parentId: string | null, role: "user" | "assistant", text: string): object {
+  const content = role === "user" ? text : [{ type: "text", text }];
+  return { type: "message", id, parentId, timestamp: new Date().toISOString(), message: { role, content, timestamp: 0 } };
+}
+
+function entryIds(entries: { id: string }[]): string[] {
+  return entries.map((entry) => entry.id);
+}
+
+test("an attached frame above Bun's default 16 MB backpressure limit keeps its replay markers", async () => {
+  const cwd = workdir("large");
+  const { sessionPath } = writeSessionFile(cwd, [
+    messageEntry("u1", null, "user", "x".repeat(24 * 1024 * 1024)),
+    messageEntry("a1", "u1", "assistant", "ok"),
+  ]);
+  const { session } = await (await startSession({ cwd, resume: { sessionPath } })).json();
+  const reader = await client();
+  const { attached, replay } = await reader.attach(session.sessionId);
+  expect(entryIds(attached.entries.entries)).toEqual(["u1", "a1"]);
+  expect(replay).toEqual([]);
+  expect(reader.sequenceGaps).toEqual([]);
+  await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
+}, 30_000);
+
+test("archive during a spawn is refused and the resumed child keeps its file", async () => {
+  const slowPi = wrapper("pi-slow", `[ "$1" = --version ] || sleep 1.5\nexec "${fakePi}" "$@"`);
+  const slow = await createSupervisor({ piBin: slowPi, idleMs: 3_600_000, isPinned: async () => false });
+  const slowServer = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor: slow });
+  try {
+    const cwd = workdir("archive-race");
+    const { sessionId, sessionPath } = writeSessionFile(cwd, [
+      messageEntry("u1", null, "user", "hi"),
+      messageEntry("a1", "u1", "assistant", "hello"),
+    ]);
+    const spawning = startSession({ cwd, resume: { sessionPath } }, slowServer.port);
+    await Bun.sleep(400);
+    const archive = await api(`/sessions/${sessionId}/archive`, { method: "POST" }, slowServer.port);
+    expect(archive.status).toBe(409);
+    expect(await archive.json()).toEqual({ error: "live" });
+    const spawned = await spawning;
+    expect(spawned.status).toBe(200);
+    expect((await spawned.json()).session).toMatchObject({ sessionId, archived: false });
+    expect(existsSync(sessionPath)).toBe(true);
+  } finally {
+    await slow.shutdown();
+    slowServer.stop(true);
+  }
+});
+
+test("a child's exit is handled while a descendant still holds its stdout and stderr", async () => {
+  const { session } = await (await startSession({ cwd: workdir("orphan") })).json();
+  const driver = await client();
+  await driver.attach(session.sessionId);
+  driver.command(session.sessionId, { id: "orphan", type: "prompt", message: "orphan" });
+  const orphanPid: number = (await driver.pi((record) => record.id === "orphan")).record.data.pid;
+  try {
+    const started = Date.now();
+    expect((await api(`/sessions/${session.sessionId}/close`, { method: "POST" })).status).toBe(204);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(supervisor.liveStatus(session.sessionPath)).toBeUndefined();
+    expect((await driver.next((frame) => frame.type === "exit")).sessionId).toBe(session.sessionId);
+  } finally {
+    process.kill(orphanPid);
+  }
+}, 15_000);
+
+test("a session started under a symlinked agent dir resumes as the same live child", async () => {
+  const link = join(root, "agent-link");
+  mkdirSync(agentDir, { recursive: true });
+  symlinkSync(agentDir, link);
+  process.env.PI_CODING_AGENT_DIR = link;
+  try {
+    const cwd = workdir("symlinked");
+    const { session } = await (await startSession({ cwd })).json();
+    const driver = await client();
+    await driver.attach(session.sessionId);
+    driver.command(session.sessionId, { type: "prompt", message: "hello" });
+    await driver.pi((record) => record.type === "agent_settled");
+    for (const resume of ["continue", { sessionPath: session.sessionPath }]) {
+      const answer = await startSession({ cwd, resume });
+      expect(answer.status).toBe(200);
+      expect((await answer.json()).session.sessionId).toBe(session.sessionId);
+    }
+  } finally {
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+  }
+});
+
+describe("resync", () => {
+  const cwd = workdir("resync");
+  let sessionId = "";
+  let sessionPath = "";
+  let driver: Client;
+
+  async function prompt(message: string): Promise<void> {
+    driver.command(sessionId, { type: "prompt", message });
+    await driver.pi((record) => record.type === "agent_settled");
+  }
+
+  test("cursor null or unknown replaces with the branch, a known cursor appends what follows it", async () => {
+    ({ sessionId, sessionPath } = (await (await startSession({ cwd })).json()).session);
+    driver = await client();
+    await driver.attach(sessionId);
+    await prompt("one");
+
+    const full = await driver.resync(sessionId, null);
+    expect(full.resync.mode).toBe("replace");
+    expect(full.resync.entries.map((entry: any) => entry.message.role)).toEqual(["user", "assistant"]);
+    expect(full.resync.leafId).toBe(full.resync.entries[1].id);
+    expect(full.resync.state).toMatchObject({ sessionId, isStreaming: false });
+    expect(full.resync.ui).toEqual({ dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } });
+    expect(full.replay).toEqual([]);
+
+    const cursor = full.resync.leafId;
+    await prompt("two");
+    const { resync } = await driver.resync(sessionId, cursor);
+    expect(resync.mode).toBe("append");
+    expect(resync.entries.map((entry: any) => entry.parentId)).toEqual([cursor, resync.entries[0].id]);
+    expect(resync.entries[1].id).toBe(resync.leafId);
+    expect((await driver.resync(sessionId, resync.leafId)).resync).toMatchObject({ mode: "append", entries: [] });
+
+    const unknown = (await driver.resync(sessionId, "no-such-entry")).resync;
+    expect(unknown.mode).toBe("replace");
+    expect(entryIds(unknown.entries)).toEqual([...entryIds(full.resync.entries), ...entryIds(resync.entries)]);
+  });
+
+  test("a resync mid-turn appends the user entry and replays the streaming records", async () => {
+    const cursor = (await driver.resync(sessionId, null)).resync.leafId;
+    driver.command(sessionId, { type: "prompt", message: "hold" });
+    await driver.pi((record) => record.type === "message_update");
+    const { resync, replay } = await driver.resync(sessionId, cursor);
+    expect(resync.mode).toBe("append");
+    expect(resync.entries.map((entry: any) => entry.message.content)).toEqual(["hold"]);
+    expect(resync.state.isStreaming).toBe(true);
+    expect(replay.map((frame) => frame.record.type)).toEqual(["message_start", "message_update"]);
+    driver.command(sessionId, { type: "abort" });
+    await driver.pi((record) => record.type === "agent_settled");
+  });
+
+  test("a compaction after the cursor replaces", async () => {
+    const before = (await driver.resync(sessionId, null)).resync;
+    driver.command(sessionId, { type: "prompt", message: "compact" });
+    await driver.pi((record) => record.type === "compaction_end");
+    const { resync } = await driver.resync(sessionId, before.leafId);
+    expect(resync.mode).toBe("replace");
+    expect(entryIds(resync.entries.slice(0, -1))).toEqual(entryIds(before.entries));
+    expect(resync.entries.at(-1).type).toBe("compaction");
+  });
+
+  test("a leaf moved off the cursor's branch replaces with the new branch", async () => {
+    const before = (await driver.resync(sessionId, null)).resync;
+    const forkPoint = before.entries[1].id;
+    driver.command(sessionId, { id: "goto", type: "prompt", message: `goto ${forkPoint}` });
+    await driver.pi((record) => record.id === "goto");
+    await prompt("branch");
+    const { resync } = await driver.resync(sessionId, before.leafId);
+    expect(resync.mode).toBe("replace");
+    expect(resync.entries).toHaveLength(4);
+    expect(entryIds(resync.entries.slice(0, 2))).toEqual(entryIds(before.entries.slice(0, 2)));
+    expect(entryIds(resync.entries)).not.toContain(before.leafId);
+    expect(resync.entries[2].parentId).toBe(forkPoint);
+  });
+
+  test("a resync on a connection that never attached subscribes it", async () => {
+    const fresh = await client();
+    expect((await fresh.resync(sessionId, null)).resync.mode).toBe("replace");
+    await prompt("three");
+    await fresh.pi((record) => record.type === "agent_settled");
+    expect(supervisor.liveStatus(sessionPath)?.attached).toBe(2);
+    expect(fresh.sequenceGaps).toEqual([]);
+  });
+
+  test("a bash command's streamed output leaves the replay buffer with its response", async () => {
+    driver.command(sessionId, { id: "bash", type: "bash", command: "ls", updates: 5 });
+    await driver.pi((record) => record.id === "bash");
+    const late = await client();
+    expect((await late.attach(sessionId)).replay).toEqual([]);
+  });
+
+  test("GET /health lists live sessions with running, attached and pinned", async () => {
+    const health = await (await api("/health")).json();
+    expect(health).toMatchObject({ ok: true, piVersion: "1.5.2" });
+    expect(health.sessions).toContainEqual({ sessionId, sessionPath, running: false, attached: 3, pinned: false });
+  });
+});
+
+describe("LiveSession against a scripted child", () => {
+  /** A child whose stdout the test writes and whose stderr never closes (a descendant holding it). */
+  function scriptedChild() {
+    const encoder = new TextEncoder();
+    let stdout!: ReadableStreamDefaultController<Uint8Array>;
+    const commands: Record<string, any>[] = [];
+    const kills: string[] = [];
+    const exit = Promise.withResolvers<number>();
+    const child = {
+      stdin: {
+        write: (text: string) => {
+          for (const line of text.split("\n")) if (line) commands.push(JSON.parse(line));
+          return text.length;
+        },
+        flush: () => 0,
+        end: () => undefined,
+      },
+      stdout: new ReadableStream<Uint8Array>({ start: (controller) => void (stdout = controller) }),
+      stderr: new ReadableStream<Uint8Array>(),
+      exited: exit.promise,
+      kill: (signal: string) => void kills.push(signal),
+    };
+    const emit = (record: object) => stdout.enqueue(encoder.encode(`${JSON.stringify(record)}\n`));
+    return { child: child as unknown as PiChild, commands, kills, exit: exit.resolve, emit };
+  }
+
+  test("attach asks for the state only after the entries snapshot", async () => {
+    const scripted = scriptedChild();
+    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    session.identify("scripted", join(root, "missing.jsonl"));
+    const frames: Frame[] = [];
+    session.attach({ send: (data) => frames.push(JSON.parse(data)) });
+    expect(scripted.commands.map((command) => command.type)).toEqual(["get_entries"]);
+    scripted.emit({ type: "response", id: scripted.commands[0]!.id, command: "get_entries", success: true, data: { entries: [], leafId: null } });
+    const stateRequest = await until(() => scripted.commands[1]);
+    expect(stateRequest.type).toBe("get_state");
+    scripted.emit({ type: "agent_settled" });
+    scripted.emit({ type: "response", id: stateRequest.id, command: "get_state", success: true, data: { isStreaming: false } });
+    await until(() => (frames.length === 4 ? true : undefined));
+    expect(frames.map((frame) => (frame.type === "pi" ? frame.record.type : frame.type))).toEqual([
+      "attached",
+      "replay_start",
+      "replay_end",
+      "agent_settled",
+    ]);
+    scripted.exit(0);
+    await session.exited;
+  });
+
+  test("a closing child refuses commands, is signalled once and exits although stderr stays open", async () => {
+    const scripted = scriptedChild();
+    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    session.terminate();
+    session.terminate();
+    expect(scripted.kills).toEqual(["SIGTERM"]);
+    expect(await session.requestAsync({ type: "get_state" })).toMatchObject({ success: false, error: "pi is not running" });
+    expect(scripted.commands).toEqual([]);
+    scripted.exit(143);
+    expect(await session.exited).toBe(143);
+  });
+});
+
+test("first starts create one 0600 token exclusively and all agree on it", async () => {
+  const path = join(root, "state", "pi-host.token");
+  const tokens = await Promise.all([loadToken(path), loadToken(path), loadToken(path)]);
+  expect(new Set(tokens).size).toBe(1);
+  expect(readFileSync(path, "utf8").trim()).toBe(tokens[0]!);
+  expect(statSync(path).mode & 0o777).toBe(0o600);
 });

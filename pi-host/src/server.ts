@@ -27,7 +27,7 @@ export function startServer({ hostname, port, token, supervisor }: ServerOptions
           ? undefined
           : new Response("upgrade failed", { status: 400 });
       }
-      if (url.pathname === "/health") return Response.json(supervisor.health());
+      if (url.pathname === "/health") return Response.json(await supervisor.health());
       return (
         (await handleGateway(request, url)) ??
         (await supervisor.handle(request, url)) ??

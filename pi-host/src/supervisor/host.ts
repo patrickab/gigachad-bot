@@ -12,8 +12,8 @@ import { sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { listSessions } from "../catalog/sessions.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
 import { childEnv, type SupervisorConfig } from "./config.ts";
-import type { LiveSessions, SocketData, Supervisor } from "./index.ts";
-import { tryLockFile } from "./lock.ts";
+import type { Health, LiveSessions, SocketData, Supervisor } from "./index.ts";
+import { tryLockFile, type FileLock } from "./lock.ts";
 import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
 import { PROFILES, spawnStrategyFor, type Profile } from "./spawn.ts";
 
@@ -31,6 +31,8 @@ type StartOutcome = { session: LiveSession } | Failure;
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
 const MAX_EVICTION_INTERVAL_MS = 60_000;
 const MIN_EVICTION_INTERVAL_MS = 50;
+/** Far above any snapshot (omp sessions reach 27 MB): a healthy client never hits it, a stalled one is closed. */
+const BACKPRESSURE_LIMIT_BYTES = 512 * 1024 * 1024;
 
 /** Absolute path with symlinks resolved when the file exists, the key the catalog looks sessions up by. */
 function canonicalPath(path: string): string {
@@ -84,6 +86,9 @@ export class SupervisorHost implements Supervisor {
     close: (ws) => {
       for (const session of this.byId.values()) session.disconnect(ws);
     },
+    backpressureLimit: BACKPRESSURE_LIMIT_BYTES,
+    // An overrun closes the socket instead of dropping frames silently; the client reconnects and resyncs.
+    closeOnBackpressureLimit: true,
   };
 
   constructor(
@@ -100,13 +105,25 @@ export class SupervisorHost implements Supervisor {
     return { clientId: crypto.randomUUID() };
   }
 
-  health(): { ok: true; piVersion: string } {
-    return { ok: true, piVersion: this.piVersion };
+  /** `GET /health` (redeploy guard, M4): every live session; a pin that cannot be read counts as pinned. */
+  async health(): Promise<Health> {
+    const sessions = await Promise.all(
+      [...this.byId.values()].map(async (session) => {
+        const { running, attached } = session.liveStatus();
+        const pinned = await this.isPinned(session.sessionPath).catch(() => true);
+        return { sessionId: session.sessionId, sessionPath: session.sessionPath, running, attached, pinned };
+      }),
+    );
+    return { ok: true, piVersion: this.piVersion, sessions };
   }
 
   liveStatus(sessionPath: string): LiveStatus | undefined {
-    const session = this.byPath.get(resolve(sessionPath)) ?? this.byPath.get(canonicalPath(sessionPath));
-    return session?.liveStatus();
+    return this.livePath(sessionPath)?.liveStatus();
+  }
+
+  /** The live session of a file under either key form: a new session is keyed before its file exists (no realpath). */
+  private livePath(sessionPath: string): LiveSession | undefined {
+    return this.byPath.get(resolve(sessionPath)) ?? this.byPath.get(canonicalPath(sessionPath));
   }
 
   async handle(request: Request, url: URL): Promise<Response | undefined> {
@@ -168,22 +185,26 @@ export class SupervisorHost implements Supervisor {
 
   /** Resolve the session file to resume, then return its live child or spawn one. */
   private async start(request: StartRequest): Promise<StartOutcome> {
-    let sessionPath: string | undefined;
+    let requestedPath: string | undefined;
     let cwd = request.cwd;
     if (request.resume === "continue") {
-      const newest = (await listSessions(cwd, false, this))[0];
-      sessionPath = newest && canonicalPath(newest.sessionPath);
+      requestedPath = (await listSessions(cwd, false, this))[0]?.sessionPath;
     } else if (request.resume) {
       const info = await sessionInfo(request.resume.sessionPath, this);
       if (!info) return fail(404, "not_found");
       if (info.archived) return fail(409, "archived");
-      sessionPath = canonicalPath(info.sessionPath);
+      requestedPath = info.sessionPath;
       cwd = info.cwd;
     }
-    if (!sessionPath) return this.spawn(request, cwd, undefined);
+    if (!requestedPath) return this.spawn(request, cwd, undefined);
+    const sessionPath = canonicalPath(requestedPath);
 
-    const live = this.byPath.get(sessionPath);
-    if (live && !live.closing) return { session: live };
+    const live = this.byPath.get(sessionPath) ?? this.livePath(requestedPath);
+    if (live && !live.closing) {
+      // The client's attach follows; an eviction tick in between must not take the child.
+      live.lastActivity = Date.now();
+      return { session: live };
+    }
     if (live) await live.exited;
     const inFlight = this.starting.get(sessionPath);
     if (inFlight) return inFlight;
@@ -196,10 +217,19 @@ export class SupervisorHost implements Supervisor {
     }
   }
 
-  /** Lock (M1), spawn, identify via `get_state`, apply model and thinking, register. */
+  /** Lock (M1, synchronously before the child starts, which excludes a concurrent archive), spawn, identify, register. */
   private async spawn(request: StartRequest, cwd: string, sessionPath: string | undefined): Promise<StartOutcome> {
-    const lock = sessionPath ? tryLockFile(sessionPath) : undefined;
-    if (sessionPath && !lock) return fail(409, "locked");
+    let lock: FileLock | undefined;
+    if (sessionPath) {
+      try {
+        lock = tryLockFile(sessionPath);
+      } catch (error) {
+        // Archived or deleted since it was looked up.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return fail(404, "not_found");
+        throw error;
+      }
+      if (!lock) return fail(409, "locked");
+    }
     const piArgs = ["--mode", "rpc", ...(sessionPath ? ["--session", sessionPath] : [])];
     let session: LiveSession;
     try {
@@ -262,7 +292,7 @@ export class SupervisorHost implements Supervisor {
       session?.detach(ws);
       return;
     }
-    if (type !== "attach" && type !== "command") {
+    if (type !== "attach" && type !== "resync" && type !== "command") {
       const error = envelope("error", sessionId, { message: `unknown frame type ${JSON.stringify(type)}` });
       if (session) session.deliver(ws, error);
       else ws.send(stamp(error, null, 0));
@@ -276,7 +306,14 @@ export class SupervisorHost implements Supervisor {
       session.attach(ws);
       return;
     }
-    const refused = session.command(ws, (frame as Record<string, unknown>).command);
+    const fields = frame as Record<string, unknown>;
+    if (type === "resync") {
+      const cursor = fields.cursor;
+      if (cursor === null || typeof cursor === "string") session.resync(ws, cursor);
+      else session.deliver(ws, envelope("error", sessionId, { message: "resync needs a cursor (entry id or null)" }));
+      return;
+    }
+    const refused = session.command(ws, fields.command);
     if (refused) session.deliver(ws, envelope("error", sessionId, { message: refused }));
   }
 }
