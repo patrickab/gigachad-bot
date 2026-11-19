@@ -73,15 +73,9 @@ function pathScore(query: string, path: string): number {
   return Math.max(fuzzyScore(query, clipped), basenameScore);
 }
 
-/** Paths ranked against `query` (subsequence, basename and contiguous hits first), at most `limit`. */
+/** Paths ranked against a non-blank `query` (subsequence, basename and contiguous hits first), at most `limit`. */
 export function rankFiles(files: string[], query: string, limit: number): RankedFile[] {
   const needle = query.replace(/\s+/g, "").toLowerCase().slice(0, MAX_QUERY_CHARS);
-  if (!needle) {
-    return [...files]
-      .sort((a, b) => a.length - b.length || a.localeCompare(b))
-      .slice(0, limit)
-      .map((path) => ({ path, score: 0 }));
-  }
   const ranked: RankedFile[] = [];
   for (const path of files) {
     const score = pathScore(needle, path);

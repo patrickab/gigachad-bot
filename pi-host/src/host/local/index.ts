@@ -2,19 +2,21 @@
  * `LocalHost`: the `Host` of the machine pi-host runs on (machine id `local`).
  *
  * - Consumes: the Pi binary, pi-host's environment, Pi's session files and sidecars, git in a requested cwd
- * - Provides: `LocalHost`, the only place that spawns processes, touches files or takes `flock`s
+ * - Provides: `LocalHost`, the only place that spawns processes, touches or watches files or takes `flock`s
  *
  * Spawn strategies (plan D5): `coding` runs the Pi binary directly. A sandboxed profile later maps to a strategy
  * that runs `agent-sandbox pi-rpc --profile ... -- <pi args>`, which keeps the same stdio, stdin-EOF and SIGTERM
  * contract.
  */
 import { stat } from "node:fs/promises";
-import type { Host, LockResult, MoveResult, PiChild, PrivateState, SessionMeta, SpawnRequest } from "../index.ts";
+import type { Host, LockResult, MoveResult, PiChild, PrivateState, SearchMatch, SessionMeta, SpawnRequest } from "../index.ts";
 import { childEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
+import { searchSessions } from "./search.ts";
 import { findSession, listSessions, moveSession, sessionMeta } from "./sessions.ts";
 import { readState, writeState } from "./state.ts";
+import { watchSessions } from "./watch.ts";
 
 export type LocalHostOptions = {
   /** Pi executable (C4). */
@@ -74,7 +76,7 @@ export class LocalHost implements Host {
     return (await stat(path).catch(() => undefined))?.isDirectory() ?? false;
   }
 
-  listSessions(cwd: string, archived: boolean): Promise<SessionMeta[]> {
+  listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
     return listSessions(cwd, archived);
   }
 
@@ -100,5 +102,13 @@ export class LocalHost implements Host {
 
   listFiles(cwd: string): Promise<string[]> {
     return listFiles(cwd);
+  }
+
+  async searchSessions(query: string, limit: number): Promise<SearchMatch[]> {
+    return searchSessions(query, limit, await listSessions(null, false));
+  }
+
+  watchSessions(onChange: (sessionPaths: string[]) => void): () => void {
+    return watchSessions(onChange);
   }
 }

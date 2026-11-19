@@ -9,13 +9,17 @@
  * - `spawn`: start a `pi --mode rpc` child for a profile through its spawn strategy (local now, AiB later, D5)
  * - `lockSession` / `unlockSession`: the M1 lock on a session file
  * - `isDirectory`: check a working directory before the per-cwd operations
- * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd, header and entry metadata, lookup by id
+ * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd or across all cwds, header and entry
+ *   metadata, lookup by id
  * - `moveSession`: archive or restore a session file and its sidecar
  * - `readState` / `writeState`: the private state sidecar (M19, M20)
  * - `listFiles`: `@` completion candidates of a cwd (M7)
+ * - `searchSessions`: full-text search over live session transcripts (M24)
+ * - `watchSessions`: changed session files of the live root, debounced (M25)
  *
  * Inputs and outputs are plain serializable data, so a future `RemoteHost` proxies each operation over a link.
- * The one exception is `PiChild`, a narrow stdio stream type a transport can carry as a byte pipe.
+ * Two exceptions: `PiChild`, a narrow stdio stream type a transport can carry as a byte pipe, and the
+ * `watchSessions` listener, a stream of plain `string[]` messages a transport carries as frames.
  */
 
 export type Profile = "coding";
@@ -60,6 +64,15 @@ export type PrivateState = { revision: number; pinned: boolean; data: Record<str
 
 export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
 
+/** One session matching a search: where the best hit sits and the text around it. */
+export type SearchMatch = {
+  sessionPath: string;
+  /** Id of the entry holding the hit, empty when the file has no entry ids. */
+  entryId: string;
+  snippet: string;
+  score: number;
+};
+
 export interface Host {
   /** Machine id in every `SessionInfo`, `local` for this machine. */
   readonly machine: string;
@@ -68,8 +81,8 @@ export interface Host {
   lockSession(sessionPath: string): Promise<LockResult>;
   unlockSession(lockId: string): Promise<void>;
   isDirectory(path: string): Promise<boolean>;
-  /** Sessions whose header cwd is `cwd`, newest first. */
-  listSessions(cwd: string, archived: boolean): Promise<SessionMeta[]>;
+  /** Sessions whose header cwd is `cwd` (every cwd when null), newest first. */
+  listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]>;
   /** Undefined when the file is missing or not a Pi session. */
   sessionMeta(sessionPath: string): Promise<SessionMeta | undefined>;
   /** Path of the session with Pi id `sessionId`, live root first. */
@@ -81,4 +94,11 @@ export interface Host {
   writeState(sessionPath: string, state: PrivateState): Promise<void>;
   /** Relative paths of the cwd's candidate files. */
   listFiles(cwd: string): Promise<string[]>;
+  /** Live sessions whose transcript (user and assistant text) matches `query`, best first, newest first on ties. */
+  searchSessions(query: string, limit: number): Promise<SearchMatch[]>;
+  /**
+   * Call `onChange` with the session files changed in the live root, at most once per debounce window; an empty
+   * list means the changed files are unknown (the watch overflowed). Returns the function that stops watching.
+   */
+  watchSessions(onChange: (sessionPaths: string[]) => void): () => void;
 }

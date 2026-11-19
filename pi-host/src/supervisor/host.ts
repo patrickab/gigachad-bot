@@ -1,7 +1,9 @@
 /**
- * The supervisor behind `createSupervisor()`: live session registry, `POST /sessions`, `/ws` multiplexing, eviction.
+ * The supervisor behind `createSupervisor()`: live session registry, `POST /sessions`, `/ws` multiplexing, eviction,
+ * and the `sessions_changed` broadcast (M25).
  *
- * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata), Catalog's `sessionInfo`
+ * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, session watcher), Catalog's
+ *   `sessionInfo`
  * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18)
  */
 import { isAbsolute, resolve } from "node:path";
@@ -67,11 +69,15 @@ export class SupervisorHost implements Supervisor {
   private readonly byPath = new Map<string, LiveSession>();
   private readonly starting = new Map<string, Promise<StartOutcome>>();
   private readonly evictionTimer: Timer;
+  private readonly sockets = new Set<ServerWebSocket<SocketData>>();
+  private readonly stopWatching: () => void;
   private evicting = false;
 
   readonly websocket: WebSocketHandler<SocketData> = {
+    open: (ws) => void this.sockets.add(ws),
     message: (ws, message) => this.onSocketMessage(ws, message),
     close: (ws) => {
+      this.sockets.delete(ws);
       for (const session of this.byId.values()) session.disconnect(ws);
     },
     backpressureLimit: BACKPRESSURE_LIMIT_BYTES,
@@ -88,6 +94,11 @@ export class SupervisorHost implements Supervisor {
     const interval = Math.min(MAX_EVICTION_INTERVAL_MS, Math.max(MIN_EVICTION_INTERVAL_MS, config.idleMs / 4));
     this.evictionTimer = setInterval(() => void this.evictIdle(), interval);
     this.evictionTimer.unref();
+    // A host frame for every connected client, attached or not: session lists change outside any session.
+    this.stopWatching = host.watchSessions((sessionPaths) => {
+      const frame = JSON.stringify({ type: "sessions_changed", sessionPaths });
+      for (const ws of this.sockets) ws.send(frame);
+    });
   }
 
   socketData(): SocketData {
@@ -129,6 +140,7 @@ export class SupervisorHost implements Supervisor {
 
   async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
+    this.stopWatching();
     for (const session of this.byId.values()) session.terminate();
   }
 

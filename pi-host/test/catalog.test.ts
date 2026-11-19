@@ -170,6 +170,28 @@ describe("session listing", () => {
     }
   });
 
+  test("lists every cwd's sessions without a cwd, newest first", async () => {
+    const { oldPath, newPath } = await writeFixtures();
+    const elsewhereDir = join(scratch, "agent", "sessions", cwdDirName("/elsewhere"));
+    await mkdir(elsewhereDir, { recursive: true });
+    const elsewhereId = "01a1f3fe-0000-7000-8000-000000000004";
+    const elsewherePath = join(elsewhereDir, `2026-11-19T10-00-00-000Z_${elsewhereId}.jsonl`);
+    await writeFile(elsewherePath, sessionLines(elsewhereId, "/elsewhere", "2026-11-17T09:00:00.000Z", []));
+    await utimes(elsewherePath, new Date("2026-11-17T09:00:00.000Z"), new Date("2026-11-17T09:00:00.000Z"));
+
+    const { status, json } = await call("GET", "/sessions");
+    expect(status).toBe(200);
+    expect(json.sessions.map((session) => [session.sessionId, session.cwd])).toEqual([
+      [OTHER_CWD_ID, "/somewhere/else"],
+      [NEW_ID, projectDir],
+      [OLD_ID, projectDir],
+      [elsewhereId, "/elsewhere"],
+    ]);
+    expect(json.sessions.map((session) => session.sessionPath)).toContain(newPath);
+    expect(json.sessions.map((session) => session.sessionPath)).toContain(oldPath);
+    expect((await call("GET", "/sessions?archived=1")).json.sessions).toEqual([]);
+  });
+
   test("rejects a relative or missing cwd", async () => {
     expect((await call("GET", "/sessions?cwd=relative/dir")).status).toBe(400);
     expect((await call("GET", `/sessions?cwd=${encodeURIComponent(join(scratch, "missing"))}`)).status).toBe(400);
@@ -334,5 +356,96 @@ describe("file completion", () => {
 
   test("rejects an invalid cwd", async () => {
     expect((await call("GET", "/files?cwd=relative&q=x")).status).toBe(400);
+  });
+
+  test("without a query answers the cached list unranked, whole unless a limit is given (K6)", async () => {
+    const many = join(scratch, "many");
+    await mkdir(many, { recursive: true });
+    for (let index = 0; index < 60; index++) await writeFile(join(many, `file-${index}.txt`), "");
+    const { json } = await call("GET", `/files?cwd=${encodeURIComponent(many)}&q=`);
+    expect(json.files).toHaveLength(60);
+    expect(json.files.every((file) => file.score === 0)).toBe(true);
+    expect((await call("GET", `/files?cwd=${encodeURIComponent(many)}&limit=5`)).json.files).toHaveLength(5);
+  });
+});
+
+describe("transcript search (M24)", () => {
+  type SearchBody = { hits: { session: SessionInfo; snippet: string; entryId: string }[] };
+
+  /** Entries chained by `parentId` in order, the last one the leaf. */
+  function chained(...entries: [id: string, role: string, text: string][]): object[] {
+    return entries.map(([id, role, text], index) => ({
+      ...message(id, role, role === "user" ? text : [{ type: "text", text }]),
+      parentId: index === 0 ? null : entries[index - 1]![0],
+    }));
+  }
+
+  async function search(query: string): Promise<SearchBody> {
+    return (await call<SearchBody>("GET", `/search?q=${encodeURIComponent(query)}`)).json;
+  }
+
+  test("finds user and assistant text with a snippet around the hit, newest first on equal scores", async () => {
+    const filler = "lorem ipsum ".repeat(20);
+    const older = await writeSession(
+      OLD_ID,
+      sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", chained(["o1", "user", "where is the frobnicator"])),
+      new Date("2026-11-18T09:05:00.000Z"),
+    );
+    const newer = await writeSession(
+      NEW_ID,
+      sessionLines(
+        NEW_ID,
+        projectDir,
+        "2026-11-19T08:00:00.000Z",
+        chained(["n1", "user", "hello"], ["n2", "assistant", `${filler}the frobnicator lives in settings ${filler}`]),
+      ),
+      new Date("2026-11-19T08:30:00.000Z"),
+    );
+
+    const { hits } = await search("frobnicator");
+    expect(hits.map((hit) => [hit.session.sessionPath, hit.entryId])).toEqual([
+      [newer, "n2"],
+      [older, "o1"],
+    ]);
+    expect(hits[0]!.snippet).toMatch(/^….*the frobnicator lives in settings.*…$/);
+    expect(hits[0]!.snippet.length).toBeLessThan(220);
+    expect(hits[1]!.snippet).toBe("where is the frobnicator");
+    expect(hits[0]!.session).toMatchObject({ sessionId: NEW_ID, machine: "local", live: null });
+    expect((await search("")).hits).toEqual([]);
+  });
+
+  test("skips tool output, thinking and abandoned branches; a large tool result is not parsed for text", async () => {
+    const toolResult = { ...message("t2", "toolResult", [{ type: "text", text: `zanzibar ${"x".repeat(70_000)}` }]), parentId: "t1" };
+    const abandoned = { ...message("t3", "user", "zanzibar on a dead branch"), parentId: "t1" };
+    const leaf = {
+      ...message("t4", "assistant", [
+        { type: "thinking", thinking: "zanzibar" },
+        { type: "text", text: "done" },
+      ]),
+      parentId: "t2",
+    };
+    await writeSession(
+      NEW_ID,
+      sessionLines(NEW_ID, projectDir, "2026-11-19T08:00:00.000Z", [...chained(["t1", "user", "run it"]), toolResult, abandoned, leaf]),
+      new Date("2026-11-19T08:30:00.000Z"),
+    );
+    expect((await search("zanzibar")).hits).toEqual([]);
+    expect((await search("done")).hits.map((hit) => hit.entryId)).toEqual(["t4"]);
+  });
+
+  test("an unchanged file (same size and mtime) is not parsed again", async () => {
+    const mtime = new Date("2026-11-19T08:30:00.000Z");
+    const content = (word: string) => sessionLines(NEW_ID, projectDir, "2026-11-19T08:00:00.000Z", chained(["c1", "user", word]));
+    await writeSession(NEW_ID, content("aardvark"), mtime);
+    expect((await search("aardvark")).hits).toHaveLength(1);
+
+    // Same length, same mtime: the cached transcript answers.
+    await writeSession(NEW_ID, content("pangolin"), mtime);
+    expect((await search("aardvark")).hits).toHaveLength(1);
+    expect((await search("pangolin")).hits).toEqual([]);
+
+    await writeSession(NEW_ID, content("pangolin"), new Date("2026-11-19T08:31:00.000Z"));
+    expect((await search("pangolin")).hits).toHaveLength(1);
+    expect((await search("aardvark")).hits).toEqual([]);
   });
 });

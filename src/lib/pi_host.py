@@ -120,6 +120,18 @@ class FileList(ContractModel):
     files: list[FileMatch]
 
 
+class SearchHit(ContractModel):
+    """A session matching a transcript search (M24): the text around the hit and the entry holding it."""
+
+    session: SessionInfo
+    snippet: str
+    entry_id: str
+
+
+class SearchResult(ContractModel):
+    hits: list[SearchHit]
+
+
 class Health(ContractModel):
     ok: bool
     pi_version: str
@@ -251,10 +263,19 @@ async def write_session_state(session_id: str, state: SessionState) -> int:
     return (await _request("PUT", f"/sessions/{session_id}/state", StateRevision, json=body)).revision
 
 
-async def find_files(cwd: str, query: str, limit: int = 50) -> list[FileMatch]:
-    """Files of *cwd* fuzzy-ranked against *query*, relative paths (M7)."""
-    params: dict[str, str | int] = {"cwd": cwd, "q": query, "limit": limit}
+async def find_files(cwd: str, query: str, limit: int | None = None) -> list[FileMatch]:
+    """Files of *cwd* fuzzy-ranked against *query*, relative paths (M7). A blank *query* answers the cached list
+    unranked, whole unless *limit* is given (K6: the UI ranks it)."""
+    params: dict[str, str | int] = {"cwd": cwd, "q": query}
+    if limit is not None:
+        params["limit"] = limit
     return (await _request("GET", "/files", FileList, params=params)).files
+
+
+async def search_sessions(query: str, limit: int = 20) -> list[SearchHit]:
+    """Live sessions whose user and assistant text matches *query*, best first, newest first on ties (M24)."""
+    params: dict[str, str | int] = {"q": query, "limit": limit}
+    return (await _request("GET", "/search", SearchResult, params=params)).hits
 
 
 async def open_websocket() -> ClientConnection:

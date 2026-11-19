@@ -116,6 +116,28 @@ def test_sessions_pass_through_camel_case_with_the_repo_resolved(monkeypatch, re
     assert dict(host.requests[0].url.params) == {"cwd": str(repositories / "app"), "archived": "1"}
 
 
+def test_sessions_without_a_repo_list_every_cwd(monkeypatch):
+    host = _serve(monkeypatch, {"GET /sessions": (200, {"sessions": [SESSION, {**SESSION, "cwd": "/home/me/git/other"}]})})
+
+    response = _client().get("/api/pi/sessions")
+
+    assert response.status_code == 200, response.text
+    assert [session["cwd"] for session in response.json()["sessions"]] == ["/home/me/git/app", "/home/me/git/other"]
+    assert dict(host.requests[0].url.params) == {"archived": "0"}
+
+
+def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
+    hit = {"session": SESSION, "snippet": "…fix the tests…", "entryId": "a1b2c3d4"}
+    host = _serve(monkeypatch, {"GET /search": (200, {"hits": [hit]})})
+
+    response = _client().get("/api/pi/search", params={"q": "fix tests"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None}}]}
+    assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
+    assert _client().get("/api/pi/search").status_code == 422
+
+
 def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositories):
     host = _serve(monkeypatch, {"POST /sessions": (200, {"session": SESSION})})
     model = {"provider": "anthropic", "id": "claude-haiku-4-5"}
@@ -199,9 +221,12 @@ def test_session_actions_reach_their_pi_host_routes(monkeypatch, repositories):
     assert client.get(f"/api/pi/sessions/{SESSION_ID}/state").json() == {"revision": 1, "data": {}}
     assert client.put(f"/api/pi/sessions/{SESSION_ID}/state", json={"revision": 1, "data": {"a": 1}}).json() == {"revision": 2}
     assert client.get("/api/pi/files", params={"repo": "app", "q": "app"}).json() == {"files": [{"path": "src/app.py", "score": 0.9}]}
+    assert client.get("/api/pi/files", params={"repo": "app"}).status_code == 200
     assert json.loads(host.requests[3].content) == {"pinned": True}
     assert json.loads(host.requests[5].content) == {"revision": 1, "data": {"a": 1}}
-    assert dict(host.requests[6].url.params) == {"cwd": str(repositories / "app"), "q": "app", "limit": "50"}
+    assert dict(host.requests[6].url.params) == {"cwd": str(repositories / "app"), "q": "app"}
+    # K6: without a query pi-host answers the whole cached list, the UI ranks it.
+    assert dict(host.requests[7].url.params) == {"cwd": str(repositories / "app"), "q": ""}
 
 
 def test_session_ids_outside_the_uuid_alphabet_are_refused(monkeypatch):

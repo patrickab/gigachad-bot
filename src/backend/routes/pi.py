@@ -136,9 +136,16 @@ async def put_state(session_id: SessionId, body: pi_host.SessionState) -> pi_hos
     return pi_host.StateRevision(revision=await _call(pi_host.write_session_state(session_id, body)))
 
 
+@http_router.get("/search")
+async def get_search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> pi_host.SearchResult:
+    """Live sessions of every repo whose transcript matches *q*, best first (M24)."""
+    return pi_host.SearchResult(hits=await _call(pi_host.search_sessions(q, limit)))
+
+
 @http_router.get("/files")
-async def get_files(repo: str, q: str = "", limit: int = Query(default=50, ge=1, le=500)) -> pi_host.FileList:
-    """Files of *repo* fuzzy-ranked against *q*, for `@` completion."""
+async def get_files(repo: str, q: str = "", limit: int | None = Query(default=None, ge=1, le=500)) -> pi_host.FileList:
+    """Files of *repo* fuzzy-ranked against *q* (50 unless *limit*), for `@` completion. Without *q* the whole
+    list unranked unless *limit* is given (K6: the UI ranks it)."""
     cwd = await asyncio.to_thread(_cwd, repo)
     return pi_host.FileList(files=await _call(pi_host.find_files(cwd, q, limit)))
 

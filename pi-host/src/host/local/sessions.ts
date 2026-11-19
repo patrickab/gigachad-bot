@@ -1,5 +1,6 @@
 /**
- * Pi's JSONL session files on this machine: metadata scan, listing per cwd, lookup by id, archive and restore (C7).
+ * Pi's JSONL session files on this machine: metadata scan, listing per cwd or across cwds, lookup by id, archive and
+ * restore (C7).
  *
  * - Consumes: session files under the roots from `paths.ts`, the M1 lock, sidecars from `state.ts`
  * - Provides: `sessionMeta`, `listSessions`, `findSession`, `moveSession` behind `LocalHost`
@@ -120,9 +121,19 @@ export async function sessionMeta(sessionPath: string): Promise<SessionMeta | un
   };
 }
 
-/** Sessions of `cwd`, newest first. */
-export async function listSessions(cwd: string, archived: boolean): Promise<SessionMeta[]> {
-  const dir = cwdSessionDir(archived ? archiveRoot() : sessionsRoot(), cwd);
+/** Newest first by modification, then creation. */
+function newestFirst(a: SessionMeta, b: SessionMeta): number {
+  return b.modifiedAt.localeCompare(a.modifiedAt) || b.createdAt.localeCompare(a.createdAt);
+}
+
+/** Sessions of `cwd` (every cwd when null), newest first. */
+export async function listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
+  const root = archived ? archiveRoot() : sessionsRoot();
+  if (cwd === null) {
+    const metas = await Promise.all((await sessionFiles(root, ".jsonl")).map((path) => sessionMeta(path)));
+    return metas.filter((meta): meta is SessionMeta => meta !== undefined).sort(newestFirst);
+  }
+  const dir = cwdSessionDir(root, cwd);
   let names: string[];
   try {
     names = await readdir(dir);
@@ -133,10 +144,10 @@ export async function listSessions(cwd: string, archived: boolean): Promise<Sess
   const wantedCwd = resolve(cwd);
   return metas
     .filter((meta): meta is SessionMeta => meta !== undefined && resolve(meta.cwd || "/") === wantedCwd)
-    .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || b.createdAt.localeCompare(a.createdAt));
+    .sort(newestFirst);
 }
 
-/** Session files named for `sessionId` directly under `dir`. */
+/** Files ending in `suffix` directly under `dir`, and its subdirectories. */
 async function matchingFiles(dir: string, suffix: string): Promise<{ files: string[]; subdirs: string[] }> {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -149,14 +160,18 @@ async function matchingFiles(dir: string, suffix: string): Promise<{ files: stri
   }
 }
 
+/** Files ending in `suffix` under `root`: directly in it (flat session dir) and one level down (per-cwd dirs). */
+async function sessionFiles(root: string, suffix: string): Promise<string[]> {
+  const top = await matchingFiles(root, suffix);
+  const nested = await Promise.all(top.subdirs.map((dir) => matchingFiles(dir, suffix)));
+  return [...top.files, ...nested.flatMap((level) => level.files)];
+}
+
 /** Path of the session file with Pi session id `sessionId` (`<timestamp>_<id>.jsonl`), live root first. */
 export async function findSession(sessionId: string): Promise<string | undefined> {
   if (!sessionId || /[/\\]/.test(sessionId) || sessionId.includes("..")) return undefined;
-  const suffix = `_${sessionId}.jsonl`;
   for (const root of [sessionsRoot(), archiveRoot()]) {
-    const top = await matchingFiles(root, suffix);
-    const nested = await Promise.all(top.subdirs.map((dir) => matchingFiles(dir, suffix)));
-    for (const candidate of [...top.files, ...nested.flatMap((level) => level.files)]) {
+    for (const candidate of await sessionFiles(root, `_${sessionId}.jsonl`)) {
       const scanned = await summarize(candidate);
       if (scanned?.summary.sessionId === sessionId) return candidate;
     }

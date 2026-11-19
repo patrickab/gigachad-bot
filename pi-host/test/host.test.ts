@@ -1,7 +1,16 @@
 /** Supervisor and catalog against an in-memory fake `Host` (M23): no process, file or lock outside the seam. */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "bun";
-import type { Host, LockResult, MoveResult, PiChild, PrivateState, SessionMeta, SpawnRequest } from "../src/host/index.ts";
+import type {
+  Host,
+  LockResult,
+  MoveResult,
+  PiChild,
+  PrivateState,
+  SearchMatch,
+  SessionMeta,
+  SpawnRequest,
+} from "../src/host/index.ts";
 import { startServer } from "../src/server.ts";
 import { PINNED_PI_VERSION } from "../src/supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
@@ -81,8 +90,8 @@ class FakeHost implements Host {
     return path === CWD;
   }
 
-  async listSessions(cwd: string, archived: boolean): Promise<SessionMeta[]> {
-    return [...this.sessions.values()].filter((meta) => meta.cwd === cwd && meta.archived === archived);
+  async listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
+    return [...this.sessions.values()].filter((meta) => (cwd === null || meta.cwd === cwd) && meta.archived === archived);
   }
 
   async sessionMeta(sessionPath: string): Promise<SessionMeta | undefined> {
@@ -114,6 +123,20 @@ class FakeHost implements Host {
 
   async listFiles(_cwd: string): Promise<string[]> {
     return ["README.md", "src/main.ts"];
+  }
+
+  async searchSessions(query: string, limit: number): Promise<SearchMatch[]> {
+    return [...this.sessions.values()]
+      .filter((meta) => !meta.archived && meta.firstMessage.includes(query))
+      .slice(0, limit)
+      .map((meta) => ({ sessionPath: meta.sessionPath, entryId: "e1", snippet: meta.firstMessage, score: 1 }));
+  }
+
+  readonly watchers = new Set<(sessionPaths: string[]) => void>();
+
+  watchSessions(onChange: (sessionPaths: string[]) => void): () => void {
+    this.watchers.add(onChange);
+    return () => this.watchers.delete(onChange);
   }
 }
 
@@ -195,4 +218,44 @@ test("a new session is identified from the child and carries the host's machine 
   expect(started.status).toBe(200);
   expect(started.body.session).toMatchObject({ sessionPath: `${LIVE_ROOT}/new.jsonl`, machine: "box-1", cwd: CWD });
   expect(host.spawned.at(-1)).toEqual({ profile: "coding", cwd: CWD, piArgs: ["--mode", "rpc"] });
+});
+
+/** The socket's next `type` event. */
+function nextEvent(socket: WebSocket, type: "open" | "message"): Promise<Event> {
+  const { promise, resolve } = Promise.withResolvers<Event>();
+  socket.addEventListener(type, resolve, { once: true });
+  return promise;
+}
+
+test("listing without a cwd, search and the sessions_changed broadcast go through the Host", async () => {
+  const otherPath = `${LIVE_ROOT}/other/2026-11-19_other.jsonl`;
+  host.sessions.set(otherPath, {
+    sessionId: "01a1f3fe-0000-7000-8000-00000000000b",
+    sessionPath: otherPath,
+    realPath: otherPath,
+    cwd: "/remote/other",
+    createdAt: "2026-11-19T11:00:00.000Z",
+    modifiedAt: "2026-11-19T11:05:00.000Z",
+    firstMessage: "hello other",
+    messageCount: 1,
+    archived: false,
+  });
+  const listed = await api("/sessions");
+  expect(listed.body.sessions.map((session: { cwd: string }) => session.cwd)).toContain("/remote/other");
+  expect((await api("/sessions?cwd=relative")).status).toBe(400);
+
+  const searched = await api("/search?q=other");
+  expect(searched.body).toEqual({
+    hits: [{ session: expect.objectContaining({ sessionPath: otherPath, machine: "box-1" }), snippet: "hello other", entryId: "e1" }],
+  });
+  expect((await api("/search?q=")).body).toEqual({ hits: [] });
+
+  const options = { headers: { authorization: `Bearer ${TOKEN}` } } as unknown as string[];
+  const sockets = [0, 1].map(() => new WebSocket(`ws://127.0.0.1:${server.port}/ws`, options));
+  const received = sockets.map((socket) => nextEvent(socket, "message"));
+  await Promise.all(sockets.map((socket) => nextEvent(socket, "open")));
+  for (const notify of host.watchers) notify([otherPath]);
+  const frames = (await Promise.all(received)).map((event) => JSON.parse(String((event as MessageEvent).data)));
+  expect(frames).toEqual([0, 1].map(() => ({ type: "sessions_changed", sessionPaths: [otherPath] })));
+  for (const socket of sockets) socket.close();
 });

@@ -48,6 +48,8 @@ async function until<T>(probe: () => T | undefined, timeoutMs = 5000): Promise<T
 
 class Client {
   readonly frames: Frame[] = [];
+  /** Host frames (`sessions_changed`, M25): no session, no stream, kept apart from the session frames. */
+  readonly hostFrames: { type: string; sessionPaths: string[] }[] = [];
   /** Frames whose `sequence` is not the previous one of their `streamId` plus 1 (M16). */
   readonly sequenceGaps: Frame[] = [];
   private readonly lastSequence = new Map<string, number>();
@@ -56,6 +58,10 @@ class Client {
   private constructor(readonly socket: WebSocket) {
     socket.addEventListener("message", (event) => {
       const frame: Frame = JSON.parse(String(event.data));
+      if (frame.type === "sessions_changed") {
+        this.hostFrames.push(frame as unknown as Client["hostFrames"][number]);
+        return;
+      }
       if (frame.streamId !== null) {
         if (frame.sequence !== (this.lastSequence.get(frame.streamId) ?? -1) + 1) this.sequenceGaps.push(frame);
         this.lastSequence.set(frame.streamId, frame.sequence);
@@ -142,6 +148,8 @@ async function client(target = server): Promise<Client> {
 beforeAll(async () => {
   process.env.PI_CODING_AGENT_DIR = agentDir;
   delete process.env.PI_CODING_AGENT_SESSION_DIR;
+  // The watcher (M25) starts with the supervisor; without a root it would only retry after 5 s.
+  mkdirSync(join(agentDir, "sessions"), { recursive: true });
   supervisor = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, isPinned: async () => false });
   server = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor });
 });
@@ -303,6 +311,27 @@ describe("live sessions", () => {
       expect(opened.sequenceGaps).toEqual([]);
     }
   });
+});
+
+test("a burst of session writes outside any child reaches every client as one sessions_changed frame", async () => {
+  const first = await client();
+  const second = await client();
+  const dir = join(agentDir, "sessions", "--tui-cwd--");
+  mkdirSync(dir, { recursive: true });
+  const paths = ["a", "b"].map((name) => join(dir, `2026-11-19T10-00-00-000Z_${name}.jsonl`));
+  for (const path of paths) writeFileSync(path, `${JSON.stringify({ type: "session", version: 3, id: path, cwd: "/tmp" })}\n`);
+  for (const path of paths) writeFileSync(path, "{}\n", { flag: "a" });
+  writeFileSync(join(dir, "notes.txt"), "not a session");
+
+  const ours = (target: Client) => target.hostFrames.filter((frame) => frame.sessionPaths.some((path) => paths.includes(path)));
+  await until(() => (ours(first).length > 0 && ours(second).length > 0 ? true : undefined));
+  // Real fs.watch events against the real clock: wait past a further 500 ms window to prove no second frame came.
+  await Bun.sleep(800);
+  for (const target of [first, second]) {
+    expect(ours(target)).toEqual([{ type: "sessions_changed", sessionPaths: expect.arrayContaining(paths) }]);
+    expect(ours(target)[0]!.sessionPaths.every((path) => path.endsWith(".jsonl"))).toBe(true);
+    expect(target.frames).toEqual([]);
+  }
 });
 
 test("idle eviction skips pinned, streaming and liveness-reporting sessions", async () => {

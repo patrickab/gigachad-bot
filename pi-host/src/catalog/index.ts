@@ -1,5 +1,5 @@
 /**
- * Catalog HTTP routes: session listing, archive/restore, pin, private state and `@` file completion.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, private state and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned` and
@@ -9,7 +9,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { Host } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { rankFiles } from "./files.ts";
-import { listSessions, liveStatusOf, sessionInfo } from "./sessions.ts";
+import { listSessions, liveStatusOf, sessionInfo, type SessionInfo } from "./sessions.ts";
 import { isPlainObject, updateState } from "./state.ts";
 
 export { listSessions, sessionInfo, type LiveStatus, type SessionInfo } from "./sessions.ts";
@@ -17,7 +17,12 @@ export { copyPrivateState, isPinned } from "./state.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
+const DEFAULT_SEARCH_LIMIT = 20;
+const MAX_SEARCH_LIMIT = 100;
 const SESSION_ACTION = /^\/sessions\/([^/]+)\/(archive|restore|pin|state)$/;
+
+/** One `GET /search` hit (M24). */
+export type SearchHit = { session: SessionInfo; snippet: string; entryId: string };
 
 /** JSON error response `{error}`. */
 function fail(status: number, error: string): Response {
@@ -40,22 +45,49 @@ async function jsonBody(request: Request): Promise<unknown> {
   }
 }
 
-/** `GET /sessions?cwd=&archived=0|1`. */
+/** Integer `limit` query parameter clamped to `1..max`, `fallback` when absent or not an integer. */
+function limitParam(url: URL, fallback: number, max: number): number {
+  const requested = Number(url.searchParams.get("limit") ?? fallback);
+  return Number.isInteger(requested) ? Math.min(Math.max(requested, 1), max) : fallback;
+}
+
+/** `GET /sessions?cwd=&archived=0|1`, every cwd's sessions without `cwd`. */
 async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Response> {
-  const cwd = await validCwd(host, url.searchParams.get("cwd"));
-  if (!cwd) return fail(400, "invalid_cwd");
+  const rawCwd = url.searchParams.get("cwd");
+  const cwd = rawCwd === null ? null : await validCwd(host, rawCwd);
+  if (cwd === undefined) return fail(400, "invalid_cwd");
   const archived = url.searchParams.get("archived") === "1";
   return Response.json({ sessions: await listSessions(host, cwd, archived, live) });
 }
 
-/** `GET /files?cwd=&q=&limit=`. */
+/**
+ * `GET /files?cwd=&q=&limit=`: ranked against `q`, or without `q` the cached list unranked (K6: the UI ranks it),
+ * cut to `limit` only when one is given.
+ */
 async function handleFiles(url: URL, host: Host): Promise<Response> {
   const cwd = await validCwd(host, url.searchParams.get("cwd"));
   if (!cwd) return fail(400, "invalid_cwd");
-  const requested = Number(url.searchParams.get("limit") ?? DEFAULT_FILE_LIMIT);
-  const limit = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), MAX_FILE_LIMIT) : DEFAULT_FILE_LIMIT;
-  const files = rankFiles(await host.listFiles(cwd), url.searchParams.get("q") ?? "", limit);
-  return Response.json({ files });
+  const query = url.searchParams.get("q") ?? "";
+  const candidates = await host.listFiles(cwd);
+  if (!query.trim()) {
+    const listed = url.searchParams.has("limit") ? candidates.slice(0, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) : candidates;
+    return Response.json({ files: listed.map((path) => ({ path, score: 0 })) });
+  }
+  return Response.json({ files: rankFiles(candidates, query, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) });
+}
+
+/** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first. */
+async function handleSearch(url: URL, live: LiveSessions, host: Host): Promise<Response> {
+  const query = url.searchParams.get("q") ?? "";
+  if (!query.trim()) return Response.json({ hits: [] });
+  const matches = await host.searchSessions(query, limitParam(url, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
+  const hits = await Promise.all(
+    matches.map(async ({ sessionPath, snippet, entryId }): Promise<SearchHit | undefined> => {
+      const session = await sessionInfo(host, sessionPath, live);
+      return session && { session, snippet, entryId };
+    }),
+  );
+  return Response.json({ hits: hits.filter((hit) => hit !== undefined) });
 }
 
 /** `POST /sessions/:id/archive` and `/restore`: 409 while live (C7), when held by a spawning child or the target exists. */
@@ -105,6 +137,7 @@ async function handlePutState(request: Request, sessionPath: string, host: Host)
 export async function handleCatalog(request: Request, url: URL, live: LiveSessions, host: Host): Promise<Response | undefined> {
   if (url.pathname === "/sessions" && request.method === "GET") return handleList(url, live, host);
   if (url.pathname === "/files" && request.method === "GET") return handleFiles(url, host);
+  if (url.pathname === "/search" && request.method === "GET") return handleSearch(url, live, host);
   const match = SESSION_ACTION.exec(url.pathname);
   if (!match) return undefined;
   const [, rawId, action] = match;
