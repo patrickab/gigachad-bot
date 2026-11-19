@@ -3,7 +3,8 @@
 /**
  * The app's Pi session store, mounted once in `AppShell` as `<PiSessionsProvider>`.
  *
- * - Lists every repo's sessions from `GET /api/pi/sessions` and filters by repo in the browser. Lists refresh on the host
+ * - Lists every repo's sessions from `GET /api/pi/sessions` and filters by repo and profile in the browser (the coding sidebar and
+ *   picker ask for `coding`, G5). Lists refresh on the host
  *   frame `sessions_changed` (M25), on window focus, on socket reopen and every 30 s, while any `usePiSessions` is mounted
  * - Status per session: `running`/`waiting` from the listed `live`, or from the frames of sessions this page attached
  *   (`agent_start`/`agent_settled`, dialog requests/`ui_closed`), which win. `contextPercent`/`cost` from Pi's
@@ -12,7 +13,7 @@
  * - `piSessionEvents`: `settled` on `agent_settled` (never `agent_end`) once per run, `waiting` per dialog, `failed` once per run
  */
 import { createElement, Fragment, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react"
-import { fetchPiRepositories, fetchPiSessions, searchPiSessions as fetchSearchHits, type PiLiveStatus, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
+import { fetchPiRepositories, fetchPiSessions, searchPiSessions as fetchSearchHits, type PiLiveStatus, type PiProfile, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
 import { readStorage, writeStorage } from "@/lib/storage"
 import { observePiSocket, sendPiCommand, type HostEvent, type HostFrame } from "./piSocket"
 
@@ -169,18 +170,24 @@ function subscribeLists(listener: () => void): () => void {
   return () => listListeners.delete(listener)
 }
 
-/** Sessions of `repo` (all repos when omitted), the archived ones with `archived`, kept live. */
-export function usePiSessions(filter: { repo?: string; archived?: boolean } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
-  const { repo, archived = false } = filter
+/** The profile of `session`: one written before profiles existed is a coding session (G5). */
+export function piSessionProfile(session: Pick<PiSessionInfo, "profile">): PiProfile {
+  return session.profile ?? "coding"
+}
+
+/** Sessions of `repo` (all repos when omitted) and of `profile` (any when omitted), the archived ones with `archived`, kept live. */
+export function usePiSessions(filter: { repo?: string; archived?: boolean; profile?: PiProfile } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
+  const { repo, archived = false, profile } = filter
   const list = archived ? lists.archived : lists.active
   const state = useSyncExternalStore(subscribeLists, () => list.state, () => list.state)
   const known = useSyncExternalStore(subscribeLists, () => repositories, () => NO_REPOSITORIES)
   useEffect(() => watchList(list), [list])
   const sessions = useMemo(() => {
-    if (repo === undefined) return state.sessions
+    const profiled = profile === undefined ? state.sessions : state.sessions.filter((session) => piSessionProfile(session) === profile)
+    if (repo === undefined) return profiled
     const path = known.find((repository) => repository.name === repo)?.path
-    return path === undefined ? [] : state.sessions.filter((session) => session.cwd === path || session.cwd.startsWith(`${path}/`))
-  }, [state.sessions, known, repo])
+    return path === undefined ? [] : profiled.filter((session) => session.cwd === path || session.cwd.startsWith(`${path}/`))
+  }, [state.sessions, known, repo, profile])
   return { sessions, loading: state.loading, error: state.error }
 }
 
@@ -408,10 +415,12 @@ export function PiSessionsProvider({ children }: { children: ReactNode }) {
   return createElement(Fragment, null, children)
 }
 
-/** Sessions of every repo whose entries match `query`, none for a blank query. */
-export async function searchPiSessions(query: string): Promise<PiSearchHit[]> {
+/** Sessions of every repo (of `profile` when given) whose entries match `query`, none for a blank query. */
+export async function searchPiSessions(query: string, filter: { profile?: PiProfile } = {}): Promise<PiSearchHit[]> {
   const trimmed = query.trim()
-  return trimmed ? fetchSearchHits(trimmed) : []
+  if (!trimmed) return []
+  const hits = await fetchSearchHits(trimmed)
+  return filter.profile === undefined ? hits : hits.filter((hit) => piSessionProfile(hit.session) === filter.profile)
 }
 
 /** Run events of every session this page attached, for notifications. */

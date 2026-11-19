@@ -61,7 +61,7 @@ function useSearchHits(query: string): { hits: PiSearchHit[] | null; error: stri
     if (!trimmed) return
     let cancelled = false
     const timer = setTimeout(() => {
-      searchPiSessions(trimmed).then(
+      searchPiSessions(trimmed, { profile: "coding" }).then(
         (hits) => { if (!cancelled) setFound({ query: trimmed, hits, error: "" }) },
         (cause: unknown) => { if (!cancelled) setFound({ query: trimmed, hits: [], error: errorMessage(cause, "Search failed") }) },
       )
@@ -86,14 +86,14 @@ function SessionRow({ session, snippet, repositories, now }: { session: PiSessio
 }
 
 /**
- * Top bar panel over every Pi session (Alt+A): running ones first, then recent, older ones behind "Show N older".
+ * Top bar panel over every Pi coding session (Alt+A, G5): running ones first, then recent, older ones behind "Show N older".
  *
  * - Typing filters by title and directory and searches the transcripts, matches show the text they matched
  * - Picking a session opens it, or switches to the tab already showing it; Delete at the search's end archives the highlighted one
  */
 export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void }) {
   const hostAccess = useHostAccess()
-  const { sessions: listed, error: listError } = usePiSessions()
+  const { sessions: listed, error: listError } = usePiSessions({ profile: "coding" })
   const repositories = usePiRepositories()
   const now = useNowMs()
   const [query, setQuery] = useState("")

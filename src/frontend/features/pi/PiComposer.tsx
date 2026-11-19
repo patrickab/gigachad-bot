@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { X } from "lucide-react"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import type { DraftPicker } from "@/features/chat/composer/CompletionMenu"
 import { stageChip, useComposerChips } from "@/features/chat/composer/composerChips"
-import { fetchPiFiles } from "@/lib/backend/api"
+import { fetchPiFiles, type PiFileScope } from "@/lib/backend/api"
 import type { Attachment } from "@/lib/domain/types"
 import { composerAction, piCompletions, type ComposerAction } from "./composerInput"
 import type { ExtensionDialog, ImageContent, PiCommand } from "./types"
@@ -46,23 +46,53 @@ export async function imageOf(attachment: Attachment): Promise<ImageContent> {
   return { type: "image", data: dataUrl.slice(dataUrl.indexOf(",") + 1), mimeType: attachment.mime }
 }
 
-/** The repo's files for `@` completion, unranked (the composer ranks them), empty until loaded or when the list fails. */
-function useRepoFiles(repo: string): string[] {
-  const [files, setFiles] = useState<{ repo: string; paths: string[] } | null>(null)
+/** The files of `scope` for `@` completion, unranked (the composer ranks them), empty until loaded or when the list fails. */
+function useScopeFiles(scope: PiFileScope): string[] {
+  const key = JSON.stringify(scope)
+  const [files, setFiles] = useState<{ key: string; paths: string[] } | null>(null)
   useEffect(() => {
     let cancelled = false
-    fetchPiFiles(repo).then((paths) => cancelled || setFiles({ repo, paths }), () => cancelled || setFiles({ repo, paths: [] }))
+    fetchPiFiles(JSON.parse(key) as PiFileScope).then((paths) => cancelled || setFiles({ key, paths }), () => cancelled || setFiles({ key, paths: [] }))
     return () => {
       cancelled = true
     }
-  }, [repo])
-  return files?.repo === repo ? files.paths : []
+  }, [key])
+  return files?.key === key ? files.paths : []
+}
+
+/**
+ * Text or files put into the composer from outside (a quoted selection, a canvas screenshot), `id` tells one request from the next.
+ *
+ * - `text` with a `label` is staged as a composer chip, without one it is appended to the draft
+ * - `files` are attached like pasted files, images go to Pi as image blocks
+ */
+export interface PiInsertion {
+  id: number
+  text: string
+  label?: string
+  files?: File[]
+}
+
+/** Put `insertion` into the composer of `draftKey` once `enabled`, focus it, then report it through `onInserted`. */
+function useInsertion(insertion: PiInsertion | null, enabled: boolean, draftKey: string, onInserted: (() => void) | undefined, inputRef: RefObject<ChatInputHandle | null>) {
+  const insertedIdRef = useRef<number | null>(null)
+  const reportInserted = useEffectEvent(() => onInserted?.())
+  useEffect(() => {
+    if (!insertion || !enabled || insertedIdRef.current === insertion.id) return
+    insertedIdRef.current = insertion.id
+    const input = inputRef.current
+    if (insertion.text && insertion.label) stageChip(draftKey, { label: insertion.label, text: insertion.text })
+    else if (insertion.text) input?.updateText((draft) => (draft ? `${draft}\n\n${insertion.text}` : insertion.text))
+    if (insertion.files?.length) input?.addFiles(insertion.files)
+    input?.focus()
+    reportInserted()
+  }, [insertion, enabled, draftKey, inputRef])
 }
 
 interface PiComposerProps {
   sessionKey: string
-  /** Repo under `~/git` whose files `@` completes. */
-  repo: string
+  /** Whose files `@` completes: a repo under `~/git`, or the session's folder. */
+  files: PiFileScope
   running: boolean
   disabled: boolean
   commands: PiCommand[]
@@ -71,29 +101,33 @@ interface PiComposerProps {
   notices: Notice[]
   statusLines: Record<string, string>
   editorText: { text: string } | null
+  insertion?: PiInsertion | null
+  onInserted?: () => void
   onSubmit: (submit: PiSubmit) => void
   onAbort: () => Promise<string[]>
   onAnswerDialog: (id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => void
 }
 
 /**
- * gigachad's composer driving Pi: `/` lists Pi's commands, `@` the repo's files, `!cmd`/`!!cmd` run in the shell, `/compact` compacts.
+ * gigachad's composer driving Pi: `/` lists Pi's commands, `@` the files of `files`, `!cmd`/`!!cmd` run in the shell, `/compact` compacts.
  *
  * - While a run streams Enter steers, Alt+Enter queues a follow-up, Esc (or Stop) aborts and takes queued messages back into the draft
  * - Composer chips join prompts, a `!` command leaves them staged for the next message
+ * - `insertion` goes into the composer once, as soon as it is enabled (`PiInsertion`), `onInserted` follows
  * - `select`/`confirm` dialogs pick in the composer's menu, `input`/`editor` dialogs take the next send as their answer
  * - Queued steering and follow-ups, extension status lines and notices sit above it
  */
-export function PiComposer({ sessionKey, repo, running, disabled, commands, dialog, queue, notices, statusLines, editorText, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
+export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
   const inputRef = useRef<ChatInputHandle>(null)
   const draftKey = `pi:${sessionKey}`
   const chips = useComposerChips(draftKey)
-  const files = useRepoFiles(repo)
+  const files = useScopeFiles(fileScope)
   const complete = useMemo(() => piCompletions(commands, files), [commands, files])
   const picker = useMemo(() => dialogPicker(dialog, onAnswerDialog), [dialog, onAnswerDialog])
   const textDialog = dialog && (dialog.method === "input" || dialog.method === "editor") ? dialog : undefined
   /** Set while an Alt+Enter keydown passes through `ChatInput`, so its send queues a follow-up. */
   const followUpRef = useRef(false)
+  useInsertion(insertion, !disabled, draftKey, onInserted, inputRef)
 
   useEffect(() => {
     if (editorText) inputRef.current?.updateText(() => editorText.text)

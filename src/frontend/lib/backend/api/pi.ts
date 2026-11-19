@@ -27,7 +27,15 @@ export interface PiSessionInfo {
   live: PiLiveStatus | null
   pinned: boolean
   archived: boolean
+  /** Session profile (G5): coding tabs, or a workbench `document` chat. Sessions written before profiles are `coding`. */
+  profile?: PiProfile
 }
+
+/** What a session runs as: a coding agent in a repo, or a workbench chat about one document. */
+export type PiProfile = "coding" | "document"
+
+/** Where `@` completion finds files: a checkout under `~/git` by name, or an absolute folder (a workbench chat's cwd). */
+export type PiFileScope = { repo: string } | { cwd: string }
 
 /** How a session opens: a fresh one, the repo's newest, a given session file, or a fork of a file at an entry (D11). */
 export type PiResume = null | "continue" | { sessionPath: string } | { forkOf: { sessionPath: string; entryId: string } }
@@ -66,9 +74,10 @@ export async function searchPiSessions(query: string, signal?: AbortSignal): Pro
   return hits
 }
 
-/** Up to 500 files of `repo`, unranked (the UI ranks them, K6), for `@` completion. */
-export async function fetchPiFiles(repo: string): Promise<string[]> {
-  const { files } = await request<{ files: { path: string }[] }>(`/pi/files?repo=${encodeURIComponent(repo)}&limit=500`)
+/** Up to 500 files of `scope`, unranked (the UI ranks them, K6), for `@` completion. */
+export async function fetchPiFiles(scope: PiFileScope): Promise<string[]> {
+  const where = "repo" in scope ? `repo=${encodeURIComponent(scope.repo)}` : `cwd=${encodeURIComponent(scope.cwd)}`
+  const { files } = await request<{ files: { path: string }[] }>(`/pi/files?${where}&limit=500`)
   return files.map((file) => file.path)
 }
 

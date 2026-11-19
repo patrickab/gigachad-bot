@@ -1,6 +1,22 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { renderHook } from "@testing-library/react"
 import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
-import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piUsageText, unmountedPiWorkspaces } from "../usePiSidebar"
+import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
+
+const store = vi.hoisted(() => ({ listFilters: [] as unknown[] }))
+vi.mock("@/contexts/TabContext", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/contexts/TabContext")>(),
+  useTab: () => ({ tab: { workspaceItem: null } }),
+}))
+vi.mock("../sessionStore", () => ({
+  usePiSessions: (filter: unknown) => {
+    store.listFilters.push(filter)
+    return { sessions: [], loading: false, error: null }
+  },
+  usePiRepositories: () => [],
+  usePiSessionStatus: () => ({ running: false, waiting: false, unread: false }),
+  refreshPiSessions: () => {},
+}))
 
 const repositories = [{ name: "proj", path: "/git/proj" }, { name: "proj-two", path: "/git/proj-two" }, { name: "tool", path: "/git/tool" }]
 
@@ -57,5 +73,14 @@ describe("Pi sidebar grouping", () => {
     expect(piSessionError(new ApiError("not_found", 404), "Could not archive this session")).toBe("Session no longer exists")
     expect(piSessionError(new ApiError("toString", 409), "Could not archive this session")).toBe("Could not archive this session")
     expect(piSessionError(new Error("live"), "Could not pin this session")).toBe("Could not pin this session")
+  })
+})
+
+describe("usePiSidebar", () => {
+  it("lists only coding sessions, active and archived (G5)", () => {
+    renderHook(() => usePiSidebar({}))
+    expect(store.listFilters).toContainEqual({ profile: "coding" })
+    expect(store.listFilters).toContainEqual({ archived: true, profile: "coding" })
+    for (const filter of store.listFilters) expect(filter).toMatchObject({ profile: "coding" })
   })
 })

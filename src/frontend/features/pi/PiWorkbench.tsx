@@ -187,7 +187,7 @@ export function PiWorkbench() {
               key={`${active.sessionId}:${active.opening}`}
               sessionId={active.sessionId}
               cwd={repository.path}
-              repo={repository.name}
+              files={{ repo: repository.name }}
               onBranch={(forkOf) => open(repository.name, { forkOf })}
               renderHeader={({ tone, sessionName, controls }) => (
                 <header className="flex h-11 shrink-0 items-center gap-2 border-b border-divider/50 px-4 text-sm">

@@ -9,7 +9,8 @@ const pi = vi.hoisted(() => ({
   sessions: [] as PiSessionInfo[],
   repositories: [] as PiRepository[],
   statuses: {} as Record<string, PiSessionStatus>,
-  search: vi.fn<(query: string) => Promise<PiSearchHit[]>>(),
+  search: vi.fn<(query: string, filter?: { profile?: string }) => Promise<PiSearchHit[]>>(),
+  listFilters: [] as unknown[],
   archive: vi.fn<(sessionId: string) => Promise<PiSessionInfo>>(),
 }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -17,11 +18,14 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useHostAccess: () => true,
 }))
 vi.mock("../sessionStore", () => ({
-  usePiSessions: () => ({ sessions: pi.sessions, loading: false, error: null }),
+  usePiSessions: (filter: unknown) => {
+    pi.listFilters.push(filter)
+    return { sessions: pi.sessions, loading: false, error: null }
+  },
   usePiRepositories: () => pi.repositories,
   usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false },
   refreshPiSessions: vi.fn(),
-  searchPiSessions: (query: string) => pi.search(query),
+  searchPiSessions: (query: string, filter?: { profile?: string }) => pi.search(query, filter),
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
@@ -55,6 +59,7 @@ afterEach(() => {
   pi.sessions = []
   pi.repositories = []
   pi.statuses = {}
+  pi.listFilters = []
   pi.search.mockReset()
   pi.archive.mockReset()
 })
@@ -111,7 +116,7 @@ describe("PiSessionPicker", () => {
     const onOpenItem = renderPicker()
 
     fireEvent.change(screen.getByRole("combobox", { name: "Search sessions…" }), { target: { value: "refactor" } })
-    await waitFor(() => expect(pi.search).toHaveBeenCalledWith("refactor"))
+    await waitFor(() => expect(pi.search).toHaveBeenCalledWith("refactor", { profile: "coding" }))
     const content = await screen.findByRole("group", { name: "Content" })
     expect(within(screen.getByRole("group", { name: "Sessions" })).getByRole("option", { name: /refactor tabs/ })).toBeInTheDocument()
     const hit = within(content).getByRole("option")
@@ -142,5 +147,15 @@ describe("PiSessionPicker", () => {
     expect(screen.getByText("Session is running")).toBeInTheDocument()
     expect(screen.queryByText("live")).not.toBeInTheDocument()
     expect(screen.getByRole("option", { name: /first/ })).toBeInTheDocument()
+  })
+
+  it("lists and searches only coding sessions (G5)", async () => {
+    pi.search.mockResolvedValue([])
+    renderPicker()
+    expect(pi.listFilters.length).toBeGreaterThan(0)
+    for (const filter of pi.listFilters) expect(filter).toEqual({ profile: "coding" })
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Search sessions…" }), { target: { value: "notes" } })
+    await waitFor(() => expect(pi.search).toHaveBeenCalledWith("notes", { profile: "coding" }))
   })
 })

@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { PiModelSelector, PiThinkingSelector } from "./PiModelSelector"
 import type { PiModel } from "./types"
@@ -39,12 +40,12 @@ export function statsText(stats: PiSessionStats | null): { text: string; label: 
   return { text: `${percent} · ${cost}`, label: `Context ${tokens} of ${compactTokens(usage.contextWindow)} tokens, cost ${cost}` }
 }
 
-/** Model and thinking selectors and the usage line, for a session header. */
-export function PiSessionControlsBar({ controls }: { controls: PiSessionControls }) {
+/** Model and thinking selectors and the usage line, for a session header. `compact` shortens the model name for a side panel. */
+export function PiSessionControlsBar({ controls, compact = false }: { controls: PiSessionControls; compact?: boolean }) {
   const stats = statsText(controls.stats)
   return (
     <div className="flex shrink-0 items-center gap-1">
-      {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} />}
+      {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
       {controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
         <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
       )}
@@ -62,6 +63,25 @@ export function PiTopBar({ repo, header, controls }: { repo: string; header: PiS
       <span className="font-medium text-ink">{repo}</span>
       {header?.sessionName && <span className="truncate text-ink-muted">{header.sessionName}</span>}
       {shown && <div className="ml-auto"><PiSessionControlsBar controls={shown} /></div>}
+    </div>
+  )
+}
+
+/**
+ * The compact header of a session in a side panel (a workbench chat): live dot and session name, then model, thinking, context and cost, then `actions`.
+ *
+ * Before the session runs it shows `controls` (what a new session starts on) instead.
+ */
+export function PiPanelBar({ header, controls, actions }: { header: PiSessionHeader | null; controls?: PiSessionControls; actions?: ReactNode }) {
+  const shown = header?.controls ?? controls
+  return (
+    <div className="flex h-8 min-w-0 shrink-0 items-center gap-1.5 px-2 text-xs">
+      {header && <StatusDot tone={header.tone} />}
+      {header?.sessionName && <span className="min-w-0 truncate text-ink-muted">{header.sessionName}</span>}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {shown && <PiSessionControlsBar controls={shown} compact />}
+        {actions}
+      </div>
     </div>
   )
 }

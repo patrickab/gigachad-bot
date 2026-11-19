@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { clearChips, stageChip } from "@/features/chat/composer/composerChips"
-import { PiComposer, type PiSubmit } from "../PiComposer"
+import { fetchPiFiles, type PiFileScope } from "@/lib/backend/api"
+import { PiComposer, type PiInsertion, type PiSubmit } from "../PiComposer"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -16,31 +17,35 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
 
 const SESSION = "s1"
 
-function renderComposer({ running = false, onAbort = vi.fn(async () => [] as string[]) } = {}) {
+function renderComposer({ running = false, disabled = false, onAbort = vi.fn(async () => [] as string[]), files = { repo: "repo" } as PiFileScope, insertion = null as PiInsertion | null, onInserted = vi.fn() } = {}) {
   const onSubmit = vi.fn<(submit: PiSubmit) => void>()
-  render(
+  const element = (props: { disabled: boolean; insertion: PiInsertion | null }) => (
     <PiComposer
       sessionKey={SESSION}
-      repo="repo"
+      files={files}
       running={running}
-      disabled={false}
+      disabled={props.disabled}
       commands={[]}
       dialog={undefined}
       queue={{ steering: [], followUp: [] }}
       notices={[]}
       statusLines={{}}
       editorText={null}
+      insertion={props.insertion}
+      onInserted={onInserted}
       onSubmit={onSubmit}
       onAbort={onAbort}
       onAnswerDialog={() => {}}
-    />,
+    />
   )
+  const { rerender } = render(element({ disabled, insertion }))
   const textbox = screen.getByRole("textbox")
   const send = (text: string, keys: { altKey?: boolean } = {}) => {
     fireEvent.change(textbox, { target: { value: text } })
     fireEvent.keyDown(textbox, { key: "Enter", ...keys })
   }
-  return { onSubmit, onAbort, textbox, send }
+  const update = (props: { disabled: boolean; insertion: PiInsertion | null }) => rerender(element(props))
+  return { onSubmit, onAbort, onInserted, textbox, send, update }
 }
 
 describe("PiComposer", () => {
@@ -112,5 +117,40 @@ describe("PiComposer", () => {
     const { onSubmit, send } = renderComposer()
     send("/compact keep the API notes")
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "compact", instructions: "keep the API notes" } })))
+  })
+
+  it("completes @ with the files of a chat's folder", async () => {
+    vi.useFakeTimers()
+    try {
+      const { textbox } = renderComposer({ files: { cwd: "/work/markdown" } })
+      expect(fetchPiFiles).toHaveBeenLastCalledWith({ cwd: "/work/markdown" })
+      await act(() => vi.advanceTimersByTimeAsync(0))
+      ;(textbox as HTMLTextAreaElement).focus()
+      fireEvent.change(textbox, { target: { value: "@app", selectionStart: 4 } })
+      await act(() => vi.advanceTimersByTimeAsync(100))
+      expect(screen.getByRole("option", { name: /src\/app\.ts/ })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("appends an insertion to the draft once the composer is enabled, once per id", async () => {
+    const insertion: PiInsertion = { id: 1, text: "notes.md:3-4\n> quoted" }
+    const { textbox, onInserted, update } = renderComposer({ disabled: true, insertion })
+    expect(textbox).toHaveValue("")
+    expect(onInserted).not.toHaveBeenCalled()
+
+    update({ disabled: false, insertion })
+    await waitFor(() => expect(textbox).toHaveValue("notes.md:3-4\n> quoted"))
+    expect(onInserted).toHaveBeenCalledOnce()
+    update({ disabled: false, insertion: { ...insertion } })
+    expect(textbox).toHaveValue("notes.md:3-4\n> quoted")
+  })
+
+  it("stages a labelled insertion as a chip that joins the next prompt", async () => {
+    const { onSubmit, send, onInserted } = renderComposer({ insertion: { id: 2, label: "slide 3", text: "\\begin{frame}" } })
+    await waitFor(() => expect(onInserted).toHaveBeenCalledOnce())
+    send("tighten this")
+    await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "prompt", text: "tighten this\n\n\\begin{frame}" } })))
   })
 })

@@ -5,9 +5,9 @@ import { createPortal } from "react-dom"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
-import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
+import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
-import { imageOf, PiComposer, type PiSubmit } from "./PiComposer"
+import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
 import { PiTopBar, type PiSessionControls, type PiSessionHeader } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { refreshPiSessions } from "./sessionStore"
@@ -123,22 +123,35 @@ function clampThinking(level: string, levels: string[]): string {
   return levels.includes("medium") ? "medium" : levels[levels.length - 1]
 }
 
+/** `text` led by `lead` and a blank line, unless there is no lead or `text` is a Pi command (`/name`), which must stay first. */
+export function withLead(text: string, lead: string | undefined): string {
+  if (!lead || text.trimStart().startsWith("/")) return text
+  return `${lead}\n\n${text}`
+}
+
 /**
- * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs and the `/pi` page.
+ * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs, the `/pi` page and workbench chats.
  *
- * - File links resolve against `cwd` and open in the file panel, `@` completes files of `repo`
+ * - The owner opens the session: a coding tab through `/api/pi/sessions`, a workbench chat through `/api/workbench/chat`
+ * - File links resolve against `cwd` and open in the file panel, `@` completes the files of `files` (a repo, or a chat's folder)
  * - `firstSubmit` runs once the session attaches, then reported through `onFirstSubmitted`
+ * - `insertion` goes into the composer once it is enabled (a quote, a canvas screenshot), `onInserted` follows
+ * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
  * - Each settled turn branches through `onBranch` (D11); a failed branch shows as a notice
  */
-export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit, onFirstSubmitted, onBranch, shellCommands }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent }: {
   sessionId: string
   cwd: string
-  repo: string
+  files: PiFileScope
   renderHeader: (header: PiSessionHeader) => ReactNode
   firstSubmit?: PiSubmit | null
   onFirstSubmitted?: () => void
   onBranch?: (fork: PiFork) => Promise<void>
   shellCommands?: PiShellCommands
+  insertion?: PiInsertion | null
+  onInserted?: () => void
+  lead?: string
+  onLeadSent?: () => void
 }) {
   const session = usePiSession(sessionId)
   const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
@@ -154,14 +167,27 @@ export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit,
     }
   }, [sessionId, messages])
 
+  // The lead already sent: one the owner has not cleared yet never leads a second prompt
+  const sentLead = useRef<string | null>(null)
+  useEffect(() => {
+    if (!lead) sentLead.current = null
+  }, [lead])
+
   const commands = useComposerCommands(session.commands, shellCommands)
   const submit = useCallback(async (request: PiSubmit) => {
     if (await runShellCommand(request, shellCommands)) return
     const { action } = request
     if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
     else if (action.kind === "compact") void compact(action.instructions)
-    else void send(action.text, request.images, request.mode)
-  }, [runBash, compact, send, shellCommands])
+    else {
+      const text = withLead(action.text, lead !== sentLead.current ? lead : undefined)
+      void send(text, request.images, request.mode)
+      if (text !== action.text) {
+        sentLead.current = lead ?? null
+        onLeadSent?.()
+      }
+    }
+  }, [runBash, compact, send, shellCommands, lead, onLeadSent])
 
   const firstSent = useRef(false)
   useEffect(() => {
@@ -200,7 +226,7 @@ export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit,
       <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} />
       <PiComposer
         sessionKey={sessionId}
-        repo={repo}
+        files={files}
         running={transcript.running}
         disabled={status.kind !== "ready"}
         commands={commands}
@@ -209,6 +235,8 @@ export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit,
         notices={session.notices}
         statusLines={session.statusLines}
         editorText={session.editorText}
+        insertion={insertion}
+        onInserted={onInserted}
         onSubmit={(request) => void submit(request)}
         onAbort={session.abort}
         onAnswerDialog={session.answerDialog}
@@ -303,7 +331,7 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
         key={shown.sessionId}
         sessionId={shown.sessionId}
         cwd={shown.cwd}
-        repo={repo}
+        files={{ repo }}
         renderHeader={(header) => inTopBar(<PiTopBar repo={repo} header={header} />)}
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
@@ -332,7 +360,7 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
       {!sessionId && (
         <PiComposer
           sessionKey={`new:${repo}`}
-          repo={repo}
+          files={{ repo }}
           running={false}
           disabled={starting}
           commands={newCommands}

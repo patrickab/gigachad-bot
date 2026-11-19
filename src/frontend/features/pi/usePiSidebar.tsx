@@ -130,7 +130,7 @@ function SessionMeta({ session, worktree, pinned }: { session: PiSessionInfo; wo
 }
 
 /**
- * Sidebar rows for Pi sessions, from the app's session store.
+ * Sidebar rows for Pi coding sessions, from the app's session store. Workbench `document` chats stay with their file (G5).
  *
  * - Each mount and each checkout outside the mounts gets a Sessions folder, worktree sessions sit under their main checkout
  * - Forks nest under their parent, a row shows its worktree, pin, context use, cost and running/waiting/unread dot
@@ -143,8 +143,8 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
   workspaceActions?: (directory: string, label: string, reportError: (message: string) => void) => NonNullable<FileTreeItem["actions"]>
 }) {
   const { tab } = useTab()
-  const listed = usePiSessions().sessions
-  const archived = usePiSessions({ archived: true }).sessions
+  const listed = usePiSessions({ profile: "coding" }).sessions
+  const archived = usePiSessions({ archived: true, profile: "coding" }).sessions
   const repositories = usePiRepositories()
   /** Rows moved by archive or restore before the lists read them again: session id to whether it is archived. */
   const [moved, setMoved] = useState<ReadonlyMap<string, boolean>>(() => new Map())

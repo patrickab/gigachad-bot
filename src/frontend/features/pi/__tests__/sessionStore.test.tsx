@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { PiSessionInfo } from "@/lib/backend/api"
 import { subscribePiSession } from "../piSocket"
-import { markPiSessionRead, piSessionEvents, PiSessionsProvider, usePiSessions, usePiSessionStatus, type PiSessionEvent } from "../sessionStore"
+import { markPiSessionRead, piSessionEvents, PiSessionsProvider, searchPiSessions, usePiSessions, usePiSessionStatus, type PiSessionEvent } from "../sessionStore"
 
 const api = vi.hoisted(() => ({
   sessions: [] as unknown[],
@@ -108,6 +108,27 @@ describe("usePiSessions", () => {
     api.sessions = [session("a3", "/home/u/git/alpha"), ...api.sessions]
     socket().emit({ type: "sessions_changed", sessionPaths: ["/sessions/a3.jsonl"] })
     await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a3", "a1", "a2"]))
+  })
+
+  it("lists only coding sessions for profile coding, counting a session without a profile as coding (G5)", async () => {
+    api.sessions = [
+      session("c1", "/home/u/git/alpha"),
+      { ...session("d1", "/home/u/workbench/markdown"), profile: "document" },
+      { ...session("c2", "/home/u/git/alpha"), profile: "coding" },
+    ]
+    const { result, unmount } = renderHook(() => ({ coding: usePiSessions({ profile: "coding" }), all: usePiSessions() }), { wrapper })
+    cleanups.push(unmount)
+    await waitFor(() => expect(result.current.coding.sessions.map((listed) => listed.sessionId)).toEqual(["c1", "c2"]))
+    expect(result.current.all.sessions).toHaveLength(3)
+  })
+
+  it("drops search hits of other profiles", async () => {
+    api.searchPiSessions.mockResolvedValue([
+      { session: session("c1", "/home/u/git/alpha"), snippet: "a", entryId: "e1" },
+      { session: { ...session("d1", "/home/u/workbench/pdf"), profile: "document" }, snippet: "b", entryId: "e2" },
+    ])
+    expect((await searchPiSessions("x", { profile: "coding" })).map((hit) => hit.session.sessionId)).toEqual(["c1"])
+    expect(await searchPiSessions("x")).toHaveLength(2)
   })
 
   it("marks a listed run that stopped unseen as unread", async () => {
