@@ -40,8 +40,9 @@ export interface DocumentChat {
  * - `lead(cwd)` names the file to a new session (`File:`, `Project:`, `Canvas:`), and once more to a session `path` moved to (a renamed file, `markWorkbenchChatInformed`).
  *   A PDF's lead also names its extracted text (`Text: <path>`, G3); while that is extracted the chat is `pending` and polls until it is ready
  * - A session the item names that pi-host no longer has (404) falls back to the file's active one
+ * - Nothing opens (no Pi child starts) while `enabled` is false, e.g. while a workbench's chat drawer is closed. A session already open stays
  */
-export function useDocumentChat(path: string, lead: (cwd: string) => string, binding?: DocumentChatBinding): DocumentChat {
+export function useDocumentChat(path: string, lead: (cwd: string) => string, binding?: DocumentChatBinding, enabled = true): DocumentChat {
   const [opened, setOpened] = useState<{ path: string; chat: OpenedWorkbenchChat } | null>(null)
   const [failure, setFailure] = useState<{ path: string; message: string } | null>(null)
   const [localId, setLocalId] = useState<string | undefined>(undefined)
@@ -63,14 +64,14 @@ export function useDocumentChat(path: string, lead: (cwd: string) => string, bin
   const onFailed = useEffectEvent(fail)
 
   useEffect(() => {
-    if (shownId && (requested === undefined || requested === shownId)) return
+    if (!enabled || (shownId && (requested === undefined || requested === shownId))) return
     let cancelled = false
     openWorkbenchChat({ path, sessionId: requested })
       // A session the item names that pi-host lost falls back to the file's active one
       .catch((cause: unknown) => (requested !== undefined && cause instanceof ApiError && cause.status === 404 ? openWorkbenchChat({ path }) : Promise.reject(cause)))
       .then((chat) => { if (!cancelled) onOpened(chat) }, (cause: unknown) => { if (!cancelled) onFailed(cause) })
     return () => { cancelled = true }
-  }, [path, requested, shownId])
+  }, [enabled, path, requested, shownId])
 
   const owed = !!current && !!shownId && !leadSent.has(shownId) && (current.session.messageCount === 0 || current.link.moved.includes(shownId))
   const pdfText = current?.pdfText ?? null
@@ -83,7 +84,7 @@ export function useDocumentChat(path: string, lead: (cwd: string) => string, bin
     } catch (cause) {
       if (!signal.aborted) fail(cause)
     }
-  }, { intervalMs: PDF_TEXT_POLL_MS, active: pending, runWhileHidden: true })
+  }, { intervalMs: PDF_TEXT_POLL_MS, active: enabled && pending, runWhileHidden: true })
 
   let shownLead: string | undefined
   if (owed && current && !pending) {

@@ -28,9 +28,9 @@ export interface WorkbenchChatState {
 /** Width of the chat panel (the tab's file panel card, like the PDF chat), the workbench's content shares what is left. */
 const DRAWER_WIDTH_PX = 360
 
-/** The Pi chat linked to `key` (`useDocumentChat`), naming the file to a new session with `lead(cwd)`, with quotes into its draft. */
-export function useWorkbenchChat(key: string, lead: (cwd: string) => string, { chatSessionId, onChatSessionChange, onDrawerOpenChange }: WorkbenchChatProps): WorkbenchChatState {
-  const chat = useDocumentChat(key, lead, { sessionId: chatSessionId, onSessionChange: onChatSessionChange })
+/** The Pi chat linked to `key` (`useDocumentChat`), naming the file to a new session with `lead(cwd)`, with quotes into its draft. It opens only once the drawer is open, so browsing files starts no Pi child. */
+export function useWorkbenchChat(key: string, lead: (cwd: string) => string, { chatSessionId, onChatSessionChange, drawerOpen, onDrawerOpenChange }: WorkbenchChatProps): WorkbenchChatState {
+  const chat = useDocumentChat(key, lead, { sessionId: chatSessionId, onSessionChange: onChatSessionChange }, drawerOpen)
   const [insertion, setInsertion] = useState<PiInsertion | null>(null)
   const insertionCount = useRef(0)
   const quote = (text: string) => {

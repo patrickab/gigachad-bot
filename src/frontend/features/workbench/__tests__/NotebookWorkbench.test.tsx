@@ -105,10 +105,11 @@ describe("NotebookWorkbench chat", () => {
     expect(await screen.findByText(`chat ${PATH} s1 File: analysis.ipynb`)).toBeTruthy()
   })
 
-  it("shows no chat while the drawer is closed", async () => {
+  it("shows no chat and starts no Pi session while the drawer is closed", async () => {
     render(workbenchOf(false))
     expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
-    await vi.waitFor(() => expect(api.openWorkbenchChat).toHaveBeenCalled())
+    await act(async () => {})
+    expect(api.openWorkbenchChat).not.toHaveBeenCalled()
     expect(screen.queryByText(/^chat /)).toBeNull()
   })
 

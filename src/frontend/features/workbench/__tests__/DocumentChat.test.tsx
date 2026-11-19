@@ -61,20 +61,22 @@ import { canvasLead, fileLead, projectLead } from "../fileLead"
 const MARKDOWN = "/work/markdown/notes.md"
 const MARKDOWN_CWD = "/work/markdown"
 
-/** A workbench's chat as its owner wires it: the item holds the shown session (starting at `sessionId`), a button quotes `quoted` into the draft. */
-function Harness({ chatKey, lead, sessionId, onSessionChange = () => {}, quoted = "" }: {
+/** A workbench's chat as its owner wires it: the item holds the shown session (starting at `sessionId`), the drawer starts `open`, a button quotes `quoted` into the draft. */
+function Harness({ chatKey, lead, sessionId, onSessionChange = () => {}, quoted = "", open = true }: {
   chatKey: string
   lead: (cwd: string) => string
   sessionId?: string
   onSessionChange?: (sessionId: string) => void
   quoted?: string
+  open?: boolean
 }) {
   const [itemSession, setItemSession] = useState(sessionId)
+  const [drawerOpen, setDrawerOpen] = useState(open)
   const onChatSessionChange = (next: string) => {
     setItemSession(next)
     onSessionChange(next)
   }
-  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen: true, onDrawerOpenChange: () => {}, shellCommands: { names: [], run: async () => false } }
+  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen, onDrawerOpenChange: setDrawerOpen, shellCommands: { names: [], run: async () => false } }
   const state = useWorkbenchChat(chatKey, lead, props)
   return <>
     <button type="button" onClick={() => state.quote(quoted)}>quote</button>
@@ -87,6 +89,19 @@ const leadShown = () => screen.getByTestId("lead").textContent
 beforeEach(() => {
   api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s1", cwd: MARKDOWN_CWD }))
   api.prepareWorkbench.mockImplementation(async (path) => ({ path, cwd: "/unused" }))
+})
+
+describe("Workbench chat drawer", () => {
+  it("starts no Pi session while the drawer is closed, a quote opens the drawer and then the chat", async () => {
+    render(<Harness chatKey={MARKDOWN} lead={(cwd) => fileLead(MARKDOWN, cwd)} quoted="picked" open={false} />)
+    await act(async () => {})
+    expect(api.openWorkbenchChat).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "quote" }))
+    expect(await screen.findByText(/session s1/)).toBeTruthy()
+    expect(api.openWorkbenchChat).toHaveBeenCalledExactlyOnceWith({ path: MARKDOWN, sessionId: undefined })
+    expect(screen.getByText("insert picked files 0")).toBeTruthy()
+  })
 })
 
 afterEach(() => {
