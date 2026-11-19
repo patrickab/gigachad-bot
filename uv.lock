@@ -44,7 +44,7 @@ wheels = [
 [[package]]
 name = "agent-sandbox"
 version = "0.1.0"
-source = { git = "https://github.com/patrickab/Agents-in-a-box?branch=main#c719df076e7d4dcf11bf5ea9a288a60c61257e08" }
+source = { git = "https://github.com/patrickab/Agents-in-a-box?branch=main#5e5790928631f27fb9b5513b67252c329588f0d0" }
 dependencies = [
     { name = "docker" },
     { name = "pyyaml" },
