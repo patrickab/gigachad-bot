@@ -1,14 +1,22 @@
 "use client"
 
-import { createElement, Fragment, type ReactNode } from "react"
-import type { PiSessionInfo } from "@/lib/backend/api"
+/**
+ * The app's Pi session store, mounted once in `AppShell` as `<PiSessionsProvider>`.
+ *
+ * - Lists every repo's sessions from `GET /api/pi/sessions` and filters by repo in the browser. Lists refresh on the host
+ *   frame `sessions_changed` (M25), on window focus, on socket reopen and every 30 s, while any `usePiSessions` is mounted
+ * - Status per session: `running`/`waiting` from the listed `live`, or from the frames of sessions this page attached
+ *   (`agent_start`/`agent_settled`, dialog requests/`ui_closed`), which win. `contextPercent`/`cost` from Pi's
+ *   `get_session_stats` (F3) while attached
+ * - `unread`: a run settled since the user last viewed the session (`markPiSessionRead`), persisted in localStorage
+ * - `piSessionEvents`: `settled` on `agent_settled` (never `agent_end`) once per run, `waiting` per dialog, `failed` once per run
+ */
+import { createElement, Fragment, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react"
+import { fetchPiRepositories, fetchPiSessions, searchPiSessions as fetchSearchHits, type PiLiveStatus, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
+import { readStorage, writeStorage } from "@/lib/storage"
+import { observePiSocket, sendPiCommand, type HostEvent, type HostFrame } from "./piSocket"
 
-/** A session matching a search, with the matched text and the entry it sits in (pi-host `GET /search`). */
-export interface PiSearchHit {
-  session: PiSessionInfo
-  snippet: string
-  entryId: string
-}
+export type { PiSearchHit }
 
 /** Live status of one session for sidebar rows, the picker and tab titles. */
 export interface PiSessionStatus {
@@ -27,42 +35,379 @@ export interface PiSessionEvent {
 }
 
 type PiSessionListener = (event: PiSessionEvent) => void
+type PiRecord = { type: string; [field: string]: unknown }
 
+interface ListState {
+  sessions: PiSessionInfo[]
+  loading: boolean
+  error: string | null
+}
+
+interface SessionList {
+  archived: boolean
+  state: ListState
+  /** Mounted `usePiSessions` hooks reading this list. */
+  watchers: number
+  reading: boolean
+  /** A refresh was asked for while reading: read again once done. */
+  again: boolean
+}
+
+/** What the frames of a session this page attached say. */
+interface AttachedSession {
+  running: boolean
+  /** Ids of open extension dialogs. */
+  dialogs: Set<string>
+  replaying: boolean
+  /** The current run's `agent_end` reported an abort. */
+  aborted: boolean
+  /** `failed` was emitted for the current run. */
+  failed: boolean
+  /** `settled` was emitted for the current run. */
+  settled: boolean
+  contextPercent?: number
+  cost?: number
+}
+
+const POLL_MS = 30_000
+const UNREAD_KEY = "pi-unread-sessions"
+const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
+/** Id prefix of this page's `get_session_stats` commands: responses reach every client attached to the session. */
+const STATS_PREFIX = `stats-${crypto.randomUUID().slice(0, 8)}-`
 const IDLE_STATUS: PiSessionStatus = { running: false, waiting: false, unread: false }
-const listeners = new Set<PiSessionListener>()
+const NO_REPOSITORIES: PiRepository[] = []
 
-/** The app's Pi session store, mounted once in `AppShell`. Stub: holds no state yet. */
+const eventListeners = new Set<PiSessionListener>()
+const listListeners = new Set<() => void>()
+const statusListeners = new Set<() => void>()
+const lists = { active: listOf(false), archived: listOf(true) }
+let repositories: PiRepository[] = NO_REPOSITORIES
+let repositoriesRead: Promise<void> | null = null
+let stopLive: (() => void) | null = null
+const attached = new Map<string, AttachedSession>()
+let listedLive = new Map<string, PiLiveStatus | null>()
+let unread = readUnread()
+const statuses = new Map<string, PiSessionStatus>()
+let nextStatsId = 0
+
+function listOf(archived: boolean): SessionList {
+  return { archived, state: { sessions: [], loading: true, error: null }, watchers: 0, reading: false, again: false }
+}
+
+function readRepositories(): Promise<void> {
+  repositoriesRead ??= fetchPiRepositories().then(
+    (read) => { repositories = read },
+    (error: unknown) => {
+      repositoriesRead = null
+      throw error
+    },
+  )
+  return repositoriesRead
+}
+
+/** Read `list` again. Asks during a read coalesce into one more read after it. */
+async function readList(list: SessionList): Promise<void> {
+  if (list.reading) {
+    list.again = true
+    return
+  }
+  list.reading = true
+  do {
+    list.again = false
+    try {
+      const [sessions] = await Promise.all([fetchPiSessions(undefined, { archived: list.archived }), readRepositories()])
+      if (!list.archived) noteListed(sessions)
+      list.state = { sessions, loading: false, error: null }
+    } catch (error) {
+      list.state = { ...list.state, loading: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    for (const listener of listListeners) listener()
+  } while (list.again)
+  list.reading = false
+}
+
+function refreshWatched() {
+  for (const list of Object.values(lists)) if (list.watchers > 0) void readList(list)
+}
+
+/** Keep the watched lists fresh: host `sessions_changed`, socket reopen, focus, visibility and a poll. */
+function startLive(): () => void {
+  const stopObserving = observePiSocket({
+    onHostEvent: (event: HostEvent) => {
+      if (event.type === "sessions_changed") refreshWatched()
+    },
+    onOpen: refreshWatched,
+  }, { hold: true })
+  const refreshWhenVisible = () => {
+    if (document.visibilityState === "visible") refreshWatched()
+  }
+  const poll = setInterval(refreshWatched, POLL_MS)
+  window.addEventListener("focus", refreshWatched)
+  document.addEventListener("visibilitychange", refreshWhenVisible)
+  return () => {
+    stopObserving()
+    clearInterval(poll)
+    window.removeEventListener("focus", refreshWatched)
+    document.removeEventListener("visibilitychange", refreshWhenVisible)
+  }
+}
+
+function watchList(list: SessionList): () => void {
+  list.watchers += 1
+  stopLive ??= startLive()
+  void readList(list)
+  return () => {
+    list.watchers -= 1
+    if (lists.active.watchers + lists.archived.watchers > 0) return
+    stopLive?.()
+    stopLive = null
+  }
+}
+
+function subscribeLists(listener: () => void): () => void {
+  listListeners.add(listener)
+  return () => listListeners.delete(listener)
+}
+
+/** Sessions of `repo` (all repos when omitted), the archived ones with `archived`, kept live. */
+export function usePiSessions(filter: { repo?: string; archived?: boolean } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
+  const { repo, archived = false } = filter
+  const list = archived ? lists.archived : lists.active
+  const state = useSyncExternalStore(subscribeLists, () => list.state, () => list.state)
+  const known = useSyncExternalStore(subscribeLists, () => repositories, () => NO_REPOSITORIES)
+  useEffect(() => watchList(list), [list])
+  const sessions = useMemo(() => {
+    if (repo === undefined) return state.sessions
+    const path = known.find((repository) => repository.name === repo)?.path
+    return path === undefined ? [] : state.sessions.filter((session) => session.cwd === path || session.cwd.startsWith(`${path}/`))
+  }, [state.sessions, known, repo])
+  return { sessions, loading: state.loading, error: state.error }
+}
+
+function readUnread(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(readStorage(UNREAD_KEY) ?? "[]")
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function markUnread(sessionId: string) {
+  if (unread.has(sessionId)) return
+  unread.add(sessionId)
+  writeStorage(UNREAD_KEY, JSON.stringify([...unread]))
+}
+
+/** Clear the unread mark of `sessionId`, e.g. while it is in view. */
+export function markPiSessionRead(sessionId: string): void {
+  if (!unread.delete(sessionId)) return
+  writeStorage(UNREAD_KEY, JSON.stringify([...unread]))
+  statusChanged()
+}
+
+function computeStatus(sessionId: string): PiSessionStatus {
+  const session = attached.get(sessionId)
+  const live = listedLive.get(sessionId)
+  const running = session ? session.running : live?.running ?? false
+  const waiting = session ? session.dialogs.size > 0 : live?.waiting ?? false
+  const status: PiSessionStatus = { running, waiting, unread: !running && unread.has(sessionId) }
+  if (session?.contextPercent !== undefined) status.contextPercent = session.contextPercent
+  if (session?.cost !== undefined) status.cost = session.cost
+  return status
+}
+
+function sameStatus(a: PiSessionStatus, b: PiSessionStatus): boolean {
+  return a.running === b.running && a.waiting === b.waiting && a.unread === b.unread && a.contextPercent === b.contextPercent && a.cost === b.cost
+}
+
+function statusOf(sessionId: string): PiSessionStatus {
+  let status = statuses.get(sessionId)
+  if (!status) {
+    status = computeStatus(sessionId)
+    statuses.set(sessionId, status)
+  }
+  return status
+}
+
+/** Recompute every status read so far, keeping unchanged ones identical for `useSyncExternalStore`. */
+function statusChanged() {
+  for (const [sessionId, previous] of statuses) {
+    const next = computeStatus(sessionId)
+    if (!sameStatus(previous, next)) statuses.set(sessionId, next)
+  }
+  for (const listener of statusListeners) listener()
+}
+
+function subscribeStatus(listener: () => void): () => void {
+  statusListeners.add(listener)
+  return () => statusListeners.delete(listener)
+}
+
+/** Live status of `sessionId`, idle and read for null. */
+export function usePiSessionStatus(sessionId: string | null): PiSessionStatus {
+  const snapshot = () => sessionId === null ? IDLE_STATUS : statusOf(sessionId)
+  return useSyncExternalStore(subscribeStatus, snapshot, snapshot)
+}
+
+/** A listed session that stopped running while this page did not watch its frames settled unseen. */
+function noteListed(sessions: PiSessionInfo[]) {
+  const previous = listedLive
+  listedLive = new Map(sessions.map((session) => [session.sessionId, session.live]))
+  for (const [sessionId, live] of listedLive) {
+    if (previous.get(sessionId)?.running && !live?.running && !attached.has(sessionId)) markUnread(sessionId)
+  }
+  statusChanged()
+}
+
+function emit(event: PiSessionEvent) {
+  for (const listener of eventListeners) listener(event)
+}
+
+function requestStats(sessionId: string) {
+  sendPiCommand(sessionId, { id: `${STATS_PREFIX}${++nextStatsId}`, type: "get_session_stats" })
+}
+
+function attachedSession(sessionId: string): AttachedSession {
+  let session = attached.get(sessionId)
+  if (!session) {
+    session = { running: false, dialogs: new Set(), replaying: false, aborted: false, failed: false, settled: false }
+    attached.set(sessionId, session)
+  }
+  return session
+}
+
+function isDialogRequest(record: PiRecord): boolean {
+  return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method as string)
+}
+
+/** The last assistant message's stop reason of an `agent_end`. */
+function stopReasonOf(record: PiRecord): unknown {
+  const messages = Array.isArray(record.messages) ? record.messages as { role?: string; stopReason?: unknown }[] : []
+  return messages.findLast((message) => message.role === "assistant")?.stopReason
+}
+
+/** Pi's state and open dialogs as `attached` (and `resync`, when it carries them) report them. */
+function applySnapshot(sessionId: string, frame: HostFrame) {
+  const session = attachedSession(sessionId)
+  const state = frame.state as { isStreaming?: boolean } | undefined
+  const ui = frame.ui as { dialogs?: PiRecord[] } | undefined
+  if (state) session.running = Boolean(state.isStreaming)
+  if (ui?.dialogs) session.dialogs = new Set(ui.dialogs.filter(isDialogRequest).map((dialog) => String(dialog.id)))
+}
+
+function handleRecord(sessionId: string, session: AttachedSession, record: PiRecord) {
+  if (record.type === "response") {
+    if (typeof record.id !== "string" || !record.id.startsWith(STATS_PREFIX) || !record.success) return
+    const stats = record.data as { cost?: number; contextUsage?: { percent?: number | null } }
+    session.contextPercent = stats.contextUsage?.percent ?? undefined
+    session.cost = stats.cost
+    return statusChanged()
+  }
+  // Replay rebuilds a transcript: the `attached` snapshot already holds the run state and dialogs
+  if (session.replaying) return
+  switch (record.type) {
+    case "agent_start":
+      Object.assign(session, { running: true, aborted: false, failed: false, settled: false })
+      return statusChanged()
+    case "agent_end": {
+      const stopReason = stopReasonOf(record)
+      if (stopReason === "aborted") session.aborted = true
+      if (stopReason === "error" && !record.willRetry && !session.failed) {
+        session.failed = true
+        emit({ type: "failed", sessionId })
+      }
+      return
+    }
+    case "agent_settled": {
+      session.running = false
+      requestStats(sessionId)
+      if (!session.settled) {
+        session.settled = true
+        markUnread(sessionId)
+        statusChanged()
+        emit({ type: "settled", sessionId, aborted: session.aborted })
+        return
+      }
+      return statusChanged()
+    }
+    case "message_end":
+      if ((record.message as { role?: string } | undefined)?.role === "assistant") requestStats(sessionId)
+      return
+    case "compaction_end":
+      return requestStats(sessionId)
+    case "extension_ui_request": {
+      if (!isDialogRequest(record) || session.dialogs.has(String(record.id))) return
+      session.dialogs.add(String(record.id))
+      statusChanged()
+      return emit({ type: "waiting", sessionId })
+    }
+  }
+}
+
+function handleFrame(frame: HostFrame) {
+  const { sessionId } = frame
+  switch (frame.type) {
+    case "attached":
+      applySnapshot(sessionId, frame)
+      requestStats(sessionId)
+      return statusChanged()
+    case "resync":
+      applySnapshot(sessionId, frame)
+      return statusChanged()
+    case "replay_start":
+      attachedSession(sessionId).replaying = true
+      return
+    case "replay_end":
+      attachedSession(sessionId).replaying = false
+      return
+    case "ui_closed":
+      attachedSession(sessionId).dialogs.delete(String(frame.id))
+      return statusChanged()
+    case "exit": {
+      const session = attachedSession(sessionId)
+      session.running = false
+      session.dialogs.clear()
+      return statusChanged()
+    }
+    case "pi":
+      return handleRecord(sessionId, attachedSession(sessionId), frame.record as PiRecord)
+  }
+}
+
+/** The page detached `sessionId`: its status falls back to the listed `live`. */
+function forget(sessionId: string) {
+  if (attached.delete(sessionId)) statusChanged()
+}
+
+/** Mounted once in `AppShell`: watches the frames of every session the page attaches, and unread marks other tabs set. */
 export function PiSessionsProvider({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    const stopObserving = observePiSocket({ onFrame: handleFrame, onDetach: forget })
+    const syncUnread = (event: StorageEvent) => {
+      if (event.key !== UNREAD_KEY) return
+      unread = readUnread()
+      statusChanged()
+    }
+    window.addEventListener("storage", syncUnread)
+    return () => {
+      stopObserving()
+      window.removeEventListener("storage", syncUnread)
+    }
+  }, [])
   return createElement(Fragment, null, children)
 }
 
-/** Sessions of `repo` (all repos when omitted), the archived ones with `archived`, kept live. Stub: always empty. */
-export function usePiSessions(filter: { repo?: string; archived?: boolean } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
-  void filter
-  return { sessions: [], loading: false, error: null }
-}
-
-/** Live status of `sessionId`. Stub: always idle and read. */
-export function usePiSessionStatus(sessionId: string | null): PiSessionStatus {
-  void sessionId
-  return IDLE_STATUS
-}
-
-/** Clear the unread mark of `sessionId`. Stub: no-op until the store tracks unread sessions. */
-export function markPiSessionRead(sessionId: string): void {
-  void sessionId
-}
-
-/** Sessions whose entries match `query`. Stub: no hits. */
+/** Sessions of every repo whose entries match `query`, none for a blank query. */
 export async function searchPiSessions(query: string): Promise<PiSearchHit[]> {
-  void query
-  return []
+  const trimmed = query.trim()
+  return trimmed ? fetchSearchHits(trimmed) : []
 }
 
-/** Run events of every session, for notifications. */
+/** Run events of every session this page attached, for notifications. */
 export const piSessionEvents = {
   subscribe(listener: PiSessionListener): () => void {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
+    eventListeners.add(listener)
+    return () => eventListeners.delete(listener)
   },
 }
