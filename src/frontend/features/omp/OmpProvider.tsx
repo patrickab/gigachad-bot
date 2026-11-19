@@ -14,8 +14,6 @@ import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerCommands, ComposerState } from "./composer"
 import { createFrameHints, isHintMessage } from "./clickHints"
-import { installClickHints } from "@gigachad/chat-ui/hints"
-import "@gigachad/chat-ui/hints.css"
 import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameBackdrop, type FrameMessage, type HintMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
@@ -160,7 +158,6 @@ function FrameModalBackdrop({ onClose }: { onClose: () => void }) {
  * - One `<iframe>` for all omp tabs, mounted on the first attach and laid over the active tab's slot
  * - Tabs switch it by postMessage (`protocol.ts`), never by reload
  * - Polls the overview every 15s and on window focus
- * - Click hints (`f`) for the whole shell, joined by the frame's clickables while it shows (`clickHints.ts`)
  */
 export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl, hostAccess } = useSettings()
@@ -338,8 +335,6 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     // A hidden frame keeps focus, keystrokes would land in it (e.g. after Alt+T from inside it opened a chat tab).
     if (!visible && document.activeElement === frameRef.current) frameRef.current?.blur()
   }, [visible])
-  const framePeer = useEffectEvent(() => (visible ? frameHintsRef.current?.peer ?? null : null))
-  useEffect(() => installClickHints({ peer: framePeer }), [])
   const closeModal = useCallback(() => post({ type: "close-modal" }), [post])
   const showsModal = visible && modalOpen
   return (

@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
+import { installClickHints } from "@gigachad/chat-ui/hints"
+import "@gigachad/chat-ui/hints.css"
 import type { ChatFocus } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
@@ -154,6 +156,9 @@ export function AppShell() {
 
   // Every tab's sidebar shows the same lists, one subscription keeps them current
   useEffect(() => watchDocumentLists(), [])
+
+  // Click hints (`f`) for the whole app, the shell's clickables only
+  useEffect(() => installClickHints(), [])
 
   useEventListener("document", "keydown", (event) => {
     if (!event.altKey || event.key !== "d") return
