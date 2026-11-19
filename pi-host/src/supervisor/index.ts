@@ -3,8 +3,8 @@
  *
  * - Consumes: a `Host` (spawn, session lock, session metadata; Pi version checked at start, M13), Catalog's helpers
  * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
- *   `POST /sessions/:id/close`), the multiplexed `/ws` handler (M16, M18, resync M2) and `LiveSessions.liveStatus`
- *   for the catalog
+ *   `POST /sessions/:id/close`), the multiplexed `/ws` handler (M16, M18, resync M2) and `LiveSessions` (live status,
+ *   closing an idle child before archive) for the catalog
  *
  * Liveness (M17): Pi exposes no liveness registry over RPC, so an extension with background work keeps its session
  * from idle eviction by setting a non-empty `setStatus` under key `session-liveness` and clearing it when done.
@@ -26,6 +26,8 @@ export type Health = { ok: true; piVersion: string; sessions: LiveSessionHealth[
 export interface LiveSessions {
   /** Live status of a session file, undefined when no child holds it. */
   liveStatus(sessionPath: string): { running: boolean; waiting: boolean; attached: number } | undefined;
+  /** Close the child holding a session file when nothing needs it now (no run, client, dialog or liveness status). True once no child holds it. */
+  closeIfIdle(sessionPath: string): Promise<boolean>;
 }
 
 export interface Supervisor extends LiveSessions {

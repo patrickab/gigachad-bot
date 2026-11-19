@@ -143,7 +143,7 @@ From the P0 spike (`pi-ai` 1.5.2, LiteLLM 1.98 through `litellm_proxy/`: text, s
 
 **Smooth streaming**: buffer Pi's deltas and render at most once per animation frame (`~/git/ompweb_original/lib/message-update-coalescer.ts`), group the transcript into rows in one pass and create elements only for the visible window (`~/git/ompweb_original/lib/chat-transcript-plan.ts`). `features/pi/transcript.ts` re-renders on every delta today.
 
-**Entry edits**: `context_edit` (omit or replace an earlier message) and `label` entries arrive after the entry they target, also via resync `append`. The transcript applies them to their target (or marks the edited message) instead of rendering them as rows. `features/pi/transcript.ts` ignores both today.
+**Entry edits**: `context_edit` (omit or replace an earlier message) and `label` entries arrive after the entry they target, also via resync `append`. The transcript applies them to their target (or marks the edited message) instead of rendering them as rows. A failed attempt Pi's auto-retry omitted (assistant, `stopReason:"error"`, `context_edit` `replacement:null`) shows only as a quiet "Retried after: <error>" line, other omitted messages keep "Omitted from context" (`features/pi/PiTranscript.tsx`).
 
 Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/git/ompweb_original` (omp-web, MIT). Port its logic, adapt to Pi's records.
 

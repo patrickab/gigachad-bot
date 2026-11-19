@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript, TURN_PAGE_SIZE } from "../PiTranscript"
-import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
+import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"
 import type { AgentMessage, AssistantMessage } from "../types"
 
 const fileLinks = { base: "/repo", open: () => {} }
@@ -71,5 +71,39 @@ describe("PiTranscript window", () => {
     render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={onBranch} />)
     fireEvent.click(screen.getByRole("button", { name: "Branch session from this point" }))
     expect(onBranch).toHaveBeenCalledWith("e3")
+  })
+})
+
+describe("PiTranscript entry edits", () => {
+  const entry = (id: string, parentId: string | null, fields: Record<string, unknown>): SessionEntry => ({ id, parentId, timestamp: "2026-11-19T19:02:30.251Z", type: "message", ...fields })
+  const assistant = (fields: Partial<AssistantMessage>): AssistantMessage => ({ role: "assistant", content: [], provider: "anthropic", model: "claude-haiku-4-5", stopReason: "stop", timestamp: 2, ...fields })
+  const snapshotOf = (entries: SessionEntry[]): Transcript =>
+    transcriptReducer(EMPTY_TRANSCRIPT, { kind: "snapshot", entries: { entries, leafId: entries.at(-1)!.id }, running: false, queue: { steering: [], followUp: [] } })
+
+  it("shows an attempt Pi's auto-retry omitted as one quiet line before the retry's answer", () => {
+    // Shaped like a real session: the failed attempt, Pi's `context_edit` omitting it, then the retry
+    const transcript = snapshotOf([
+      entry("u1", null, { message: { role: "user", content: "Reply with just: ok", timestamp: 1 } }),
+      entry("9d1d64ed", "u1", { message: assistant({ stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 }) }),
+      entry("edit1", "9d1d64ed", { type: "context_edit", targetId: "9d1d64ed", replacement: null }),
+      entry("a2", "edit1", { message: assistant({ content: [{ type: "text", text: "ok" }], timestamp: 3 }) }),
+    ])
+    render(<PiTranscript transcript={transcript} fileLinks={fileLinks} />)
+    expect(screen.getByText("Retried after: Request timed out")).toBeTruthy()
+    expect(screen.getByText("ok")).toBeTruthy()
+    expect(screen.queryByText("Request timed out.")).toBeNull()
+    expect(screen.queryByText(/Omitted from context/)).toBeNull()
+  })
+
+  it("keeps the omitted marker on an omitted answer that did not fail", () => {
+    const transcript = snapshotOf([
+      entry("u1", null, { message: { role: "user", content: "Hi", timestamp: 1 } }),
+      entry("a1", "u1", { message: assistant({ content: [{ type: "text", text: "Hello" }] }) }),
+      entry("edit1", "a1", { type: "context_edit", targetId: "a1", replacement: null }),
+    ])
+    render(<PiTranscript transcript={transcript} fileLinks={fileLinks} />)
+    expect(screen.getByText("Omitted from context")).toBeTruthy()
+    expect(screen.getByText("Hello")).toBeTruthy()
+    expect(screen.queryByText(/Retried after/)).toBeNull()
   })
 })

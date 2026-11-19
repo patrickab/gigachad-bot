@@ -453,6 +453,29 @@ test("archive during a spawn is refused and the resumed child keeps its file", a
   }
 });
 
+test("archive closes a detached idle child and refuses an attached one", async () => {
+  const cwd = workdir("archive-idle");
+  const { sessionId, sessionPath } = writeSessionFile(cwd, [
+    messageEntry("u1", null, "user", "hi"),
+    messageEntry("a1", "u1", "assistant", "hello"),
+  ]);
+  expect((await startSession({ cwd, resume: { sessionPath } })).status).toBe(200);
+  const viewer = await client();
+  await viewer.attach(sessionId);
+  const refused = await api(`/sessions/${sessionId}/archive`, { method: "POST" });
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ error: "live" });
+  expect(supervisor.liveStatus(sessionPath)).toBeDefined();
+
+  viewer.send({ type: "detach", sessionId });
+  await until(() => (supervisor.liveStatus(sessionPath)?.attached === 0 ? true : undefined));
+  const archived = await api(`/sessions/${sessionId}/archive`, { method: "POST" });
+  expect(archived.status).toBe(200);
+  expect((await archived.json()).session).toMatchObject({ sessionId, archived: true, live: null });
+  expect(supervisor.liveStatus(sessionPath)).toBeUndefined();
+  expect(existsSync(sessionPath)).toBe(false);
+});
+
 describe("fork", () => {
   const cwd = workdir("fork");
   const labelEntry = (id: string, parentId: string, targetId: string, label: string) => ({

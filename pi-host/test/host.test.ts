@@ -165,14 +165,6 @@ async function api(path: string, init: RequestInit = {}): Promise<any> {
   return { status: response.status, body: response.status === 204 ? null : await response.json() };
 }
 
-async function until(probe: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!probe()) {
-    if (Date.now() > deadline) throw new Error("timed out");
-    await Bun.sleep(10);
-  }
-}
-
 beforeAll(async () => {
   host.sessions.set(sessionPath, {
     sessionId: SESSION_ID,
@@ -208,12 +200,10 @@ test("supervisor and catalog run every machine action through the Host", async (
   expect(started.body.session).toMatchObject({ sessionId: SESSION_ID, machine: "box-1", live: { attached: 0 } });
   expect(host.spawned).toEqual([{ profile: "coding", cwd: CWD, piArgs: ["--mode", "rpc", "--session", sessionPath] }]);
   expect([...host.locks.values()]).toEqual([sessionPath]);
-  expect((await api(`/sessions/${SESSION_ID}/archive`, { method: "POST" })).body).toEqual({ error: "live" });
 
-  expect((await api(`/sessions/${SESSION_ID}/close`, { method: "POST" })).status).toBe(204);
-  await until(() => host.locks.size === 0);
-
+  // The child is detached and idle: archive closes it (releasing the Host lock) and moves the file
   const archived = await api(`/sessions/${SESSION_ID}/archive`, { method: "POST" });
+  expect(host.locks.size).toBe(0);
   expect(archived.body.session).toMatchObject({ archived: true, machine: "box-1", sessionPath: sessionPath.replace(LIVE_ROOT, ARCHIVE_ROOT) });
   const pinned = await api(`/sessions/${SESSION_ID}/pin`, { method: "PUT", body: JSON.stringify({ pinned: true }) });
   expect(pinned.body.session.pinned).toBe(true);

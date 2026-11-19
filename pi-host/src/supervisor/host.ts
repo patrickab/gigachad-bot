@@ -129,6 +129,15 @@ export class SupervisorHost implements Supervisor {
     return this.byPath.get(resolve(sessionPath))?.liveStatus();
   }
 
+  /** Archive/restore (C7): close a detached idle child through the orderly close path, never a running, attached or asking one. */
+  async closeIfIdle(sessionPath: string): Promise<boolean> {
+    const session = this.byPath.get(resolve(sessionPath));
+    if (!session) return true;
+    if (!session.closing && !session.isIdle(Date.now(), 0)) return false;
+    await session.close();
+    return true;
+  }
+
   async handle(request: Request, url: URL): Promise<Response | undefined> {
     if (url.pathname === "/sessions" && request.method === "POST") {
       const parsed = await parseStartRequest(await request.json().catch(() => undefined), this.host);

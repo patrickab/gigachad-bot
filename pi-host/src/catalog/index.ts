@@ -9,7 +9,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { Host } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { rankFiles } from "./files.ts";
-import { listSessions, liveStatusOf, sessionInfo, type SessionInfo } from "./sessions.ts";
+import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 import { isPlainObject, updateState } from "./state.ts";
 
 export { listSessions, sessionInfo, type LiveStatus, type SessionInfo } from "./sessions.ts";
@@ -90,12 +90,18 @@ async function handleSearch(url: URL, live: LiveSessions, host: Host): Promise<R
   return Response.json({ hits: hits.filter((hit) => hit !== undefined) });
 }
 
-/** `POST /sessions/:id/archive` and `/restore`: 409 while live (C7), when held by a spawning child or the target exists. */
+/**
+ * `POST /sessions/:id/archive` and `/restore` (C7): a detached idle child is closed first. 409 `live` while a child runs,
+ * has a client or asks a question, or a spawning child holds the file; 409 too when the target exists.
+ */
 async function handleMove(sessionPath: string, toArchive: boolean, live: LiveSessions, host: Host): Promise<Response> {
   const meta = await host.sessionMeta(sessionPath);
   if (!meta) return fail(404, "not_found");
   if (meta.archived === toArchive) return fail(409, toArchive ? "already_archived" : "not_archived");
-  if (liveStatusOf(meta, live)) return fail(409, "live");
+  // Either path form may key the child: a new session's as Pi named it, a resumed one's real path
+  for (const path of new Set([meta.sessionPath, meta.realPath])) {
+    if (!(await live.closeIfIdle(path))) return fail(409, "live");
+  }
   const moved = await host.moveSession(sessionPath, toArchive);
   if (!moved.ok) {
     if (moved.error === "not_in_root") return fail(409, toArchive ? "already_archived" : "not_archived");

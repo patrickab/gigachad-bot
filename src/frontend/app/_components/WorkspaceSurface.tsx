@@ -317,8 +317,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     pi: () => {
       const piItem = itemOf(tab, "pi")
       return {
-        // The Pi tab renders its top bar into this slot
-        left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+        // The Pi tab renders its top bar into this slot. The pill takes clicks, the bar around it lets them through
+        left: <TopBarSlot name="workbenchAgent">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
         body: piItem?.pi ? (

@@ -12,7 +12,7 @@ import { archivePiSession, type PiRepository, type PiSessionInfo } from "@/lib/b
 import { baseName, shortPath } from "@/lib/paths"
 import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
 import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, type PiSearchHit } from "./sessionStore"
-import { PiSessionDot, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
+import { PiSessionDot, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
 
 const TICK_MS = 60_000
 /** Typing pauses this long before the transcripts are searched. */
@@ -121,7 +121,7 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
       refreshPiSessions()
     } catch (cause) {
       setArchiving((current) => new Set([...current].filter((id) => id !== session.sessionId)))
-      setArchiveError(errorMessage(cause, "Could not archive this session"))
+      setArchiveError(piSessionError(cause, "Could not archive this session"))
     }
   }
 

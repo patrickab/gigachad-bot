@@ -28,7 +28,19 @@ let scratch: string;
 let projectDir: string;
 let sessionDir: string;
 const liveByPath = new Map<string, LiveStatus>();
-const live: LiveSessions = { liveStatus: (path) => liveByPath.get(path) };
+/** Session paths whose idle child the catalog closed. */
+const closed: string[] = [];
+const live: LiveSessions = {
+  liveStatus: (path) => liveByPath.get(path),
+  closeIfIdle: async (path) => {
+    const status = liveByPath.get(path);
+    if (!status) return true;
+    if (status.running || status.waiting || status.attached > 0) return false;
+    liveByPath.delete(path);
+    closed.push(path);
+    return true;
+  },
+};
 const savedEnv = { agent: process.env.PI_CODING_AGENT_DIR, sessions: process.env.PI_CODING_AGENT_SESSION_DIR };
 
 const OLD_ID = "01a1f3fe-0000-7000-8000-000000000001";
@@ -83,6 +95,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   liveByPath.clear();
+  closed.length = 0;
   await rm(join(scratch, "agent"), { recursive: true, force: true });
   await mkdir(sessionDir, { recursive: true });
 });
@@ -228,12 +241,29 @@ describe("archive and pin", () => {
     expect(await isPinned(oldPath)).toBe(true);
   });
 
-  test("archive is refused while the session is live", async () => {
+  test("archive closes a detached idle child first", async () => {
     const { newPath } = await writeFixtures();
     liveByPath.set(newPath, { running: false, waiting: false, attached: 0 });
-    const { status, json } = await call<{ error: string }>("POST", `/sessions/${NEW_ID}/archive`);
-    expect(status).toBe(409);
-    expect(json).toEqual({ error: "live" });
+    const archived = await call("POST", `/sessions/${NEW_ID}/archive`);
+    expect(archived.status).toBe(200);
+    expect(archived.json.session).toMatchObject({ sessionId: NEW_ID, archived: true, live: null });
+    expect(closed).toEqual([newPath]);
+    expect(existsSync(newPath)).toBe(false);
+  });
+
+  test("archive is refused while the child runs, has a client or asks", async () => {
+    const { newPath } = await writeFixtures();
+    for (const status of [
+      { running: true, waiting: false, attached: 0 },
+      { running: false, waiting: false, attached: 1 },
+      { running: false, waiting: true, attached: 0 },
+    ]) {
+      liveByPath.set(newPath, status);
+      const { status: code, json } = await call<{ error: string }>("POST", `/sessions/${NEW_ID}/archive`);
+      expect(code).toBe(409);
+      expect(json).toEqual({ error: "live" });
+    }
+    expect(closed).toEqual([]);
     expect(existsSync(newPath)).toBe(true);
   });
 

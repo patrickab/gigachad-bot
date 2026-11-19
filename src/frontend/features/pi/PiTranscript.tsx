@@ -27,7 +27,8 @@ type Piece =
   | { kind: "tool"; key: string; call: ToolCall; messageKey: string }
   | { kind: "bash"; key: string; message: BashExecutionMessage }
   | { kind: "custom"; key: string; message: CustomMessage }
-  | { kind: "mark"; key: string; marks: MessageMarks }
+  /** `retried`: the error of a failed attempt Pi's auto-retry omitted from context, shown instead of the attempt. */
+  | { kind: "mark"; key: string; marks: MessageMarks; retried?: string }
   | { kind: "error"; key: string; text: string }
 
 /** Folds into "Process details" when settled; a tool with a `standalone` renderer stays between the texts. */
@@ -60,7 +61,14 @@ function marksAt(confirmed: Confirmed, index: number): MessageMarks | undefined 
   return marks && (marks.context || marks.label) ? marks : undefined
 }
 
-/** The answer's pieces: committed messages after the prompt (each edited one after its marks), then the streaming reply when live. */
+/** The error of a failed attempt Pi's auto-retry left in history and omitted from context, else undefined. */
+function retriedError(message: AgentMessage, marks: MessageMarks | undefined): string | undefined {
+  if (marks?.context !== "omitted" || message.role !== "assistant") return undefined
+  const { stopReason, errorMessage } = message as AssistantMessage
+  return stopReason === "error" ? (errorMessage || "Error").replace(/\.$/, "") : undefined
+}
+
+/** The answer's pieces: committed messages after the prompt (each edited one after its marks), then the streaming reply when live. A retried attempt is only its mark. */
 function answerPieces(messages: AgentMessage[], turn: Turn, streaming: AssistantMessage | null, confirmed: Confirmed): Piece[] {
   const pieces: Piece[] = []
   for (let index = turn.start + 1; index < turn.end; index++) {
@@ -68,7 +76,9 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
     const key = `m${index}`
     const visible = message.role === "assistant" || message.role === "bashExecution" || (message.role === "custom" && (message as CustomMessage).display)
     const marks = visible ? marksAt(confirmed, index) : undefined
-    if (marks) pieces.push({ kind: "mark", key: `${key}-mark`, marks })
+    const retried = retriedError(message, marks)
+    if (marks) pieces.push({ kind: "mark", key: `${key}-mark`, marks, retried })
+    if (retried) continue
     if (message.role === "assistant") pieces.push(...assistantPieces(message as AssistantMessage, key))
     if (message.role === "bashExecution") pieces.push({ kind: "bash", key, message: message as BashExecutionMessage })
     if (message.role === "custom" && (message as CustomMessage).display) pieces.push({ kind: "custom", key, message: message as CustomMessage })
@@ -100,9 +110,10 @@ function BashBlock({ message }: { message: BashExecutionMessage }) {
   )
 }
 
-/** Quiet line naming a message's label and `context_edit`. */
-function MarksLine({ marks }: { marks: MessageMarks }) {
-  const parts = [marks.label, marks.context === "omitted" ? "Omitted from context" : marks.context === "replaced" ? "Replaced in context" : undefined].filter(Boolean)
+/** Quiet line naming a message's label and `context_edit`, or the error a retried attempt failed with. */
+function MarksLine({ marks, retried }: { marks: MessageMarks; retried?: string }) {
+  const context = retried ? `Retried after: ${retried}` : marks.context === "omitted" ? "Omitted from context" : marks.context === "replaced" ? "Replaced in context" : undefined
+  const parts = [marks.label, context].filter(Boolean)
   return <p className="my-1 text-xs text-ink-faint">{parts.join(" · ")}</p>
 }
 
@@ -120,7 +131,7 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
       const text = () => <LaTeXMarkdown content={textOf(piece.message.content)} fileLinks={fileLinks} />
       return <Fragment key={piece.key}>{renderCustomMessage(piece.message, text)}</Fragment>
     }
-    case "mark": return <MarksLine key={piece.key} marks={piece.marks} />
+    case "mark": return <MarksLine key={piece.key} marks={piece.marks} retried={piece.retried} />
     case "error": return <p key={piece.key} className="my-1 text-xs text-danger">{piece.text}</p>
   }
 }

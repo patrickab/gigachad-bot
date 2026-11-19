@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { PiSessionInfo } from "@/lib/backend/api"
-import { piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piUsageText, unmountedPiWorkspaces } from "../usePiSidebar"
+import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
+import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piUsageText, unmountedPiWorkspaces } from "../usePiSidebar"
 
 const repositories = [{ name: "proj", path: "/git/proj" }, { name: "proj-two", path: "/git/proj-two" }, { name: "tool", path: "/git/tool" }]
 
@@ -50,5 +50,12 @@ describe("Pi sidebar grouping", () => {
     expect(piStatusMark({ running: false, waiting: false, unread: false })).toBeNull()
     expect(piUsageText({ contextPercent: 12.4, cost: 1.5 })).toBe("12% · $1.50")
     expect(piUsageText({})).toBe("")
+  })
+
+  it("words pi-host's error codes for session actions and falls back for anything else", () => {
+    expect(piSessionError(new ApiError("live", 409), "Could not archive this session")).toBe("Session is running")
+    expect(piSessionError(new ApiError("not_found", 404), "Could not archive this session")).toBe("Session no longer exists")
+    expect(piSessionError(new ApiError("toString", 409), "Could not archive this session")).toBe("Could not archive this session")
+    expect(piSessionError(new Error("live"), "Could not pin this session")).toBe("Could not pin this session")
   })
 })

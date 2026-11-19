@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { TabContext, type Tab } from "@/contexts/TabContext"
-import type { PiRepository, PiSearchHit, PiSessionInfo } from "@/lib/backend/api"
+import { ApiError, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
 import type { PiSessionStatus } from "../sessionStore"
 import { groupPiSessions, PiSessionPicker, RECENT_SESSION_MS } from "../PiSessionPicker"
 
@@ -131,5 +131,16 @@ describe("PiSessionPicker", () => {
     expect(pi.archive).toHaveBeenCalledWith("first")
     expect(screen.queryByRole("option", { name: /first/ })).not.toBeInTheDocument()
     expect(screen.getByRole("option", { name: /second/ })).toBeInTheDocument()
+  })
+
+  it("says why an archive failed in words, not pi-host's code", async () => {
+    pi.sessions = [piSession("first", HOUR)]
+    pi.archive.mockRejectedValue(new ApiError("live", 409))
+    renderPicker()
+
+    await act(async () => { fireEvent.keyDown(screen.getByRole("combobox", { name: "Search sessions…" }), { key: "Delete" }) })
+    expect(screen.getByText("Session is running")).toBeInTheDocument()
+    expect(screen.queryByText("live")).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /first/ })).toBeInTheDocument()
   })
 })

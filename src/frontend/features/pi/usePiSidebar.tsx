@@ -5,9 +5,8 @@ import { Archive, Bot, Pin, PinOff, RotateCcw } from "lucide-react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { itemOf, newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
-import { archivePiSession, pinPiSession, restorePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
+import { ApiError, archivePiSession, pinPiSession, restorePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
 import { PATH_COLLATOR, baseName, dirName, isInside, relativeIn, trimSlash } from "@/lib/paths"
-import { errorMessage } from "@/lib/utils"
 import { refreshPiSessions, usePiRepositories, usePiSessions, usePiSessionStatus } from "./sessionStore"
 
 /** Session rows a Sessions folder shows before "Show more". */
@@ -16,6 +15,20 @@ const SESSION_LIMIT = 5
 /** Sidebar, picker and tab title of a session: the first line of its first prompt. */
 export function piSessionTitle(session: Pick<PiSessionInfo, "firstMessage">): string {
   return session.firstMessage.trim().split("\n")[0] || "Untitled session"
+}
+
+/** pi-host's error codes for archive, restore and pin, as the error line says them. */
+const SESSION_ERRORS: Record<string, string> = {
+  live: "Session is running",
+  not_found: "Session no longer exists",
+  already_archived: "Session is already archived",
+  not_archived: "Session is not archived",
+  exists: "A session file of that name is already there",
+}
+
+/** Readable text of a failed session action: a known pi-host error code as a short sentence, else `fallback`. */
+export function piSessionError(cause: unknown, fallback: string): string {
+  return cause instanceof ApiError && Object.hasOwn(SESSION_ERRORS, cause.message) ? SESSION_ERRORS[cause.message]! : fallback
 }
 
 /** Where the backend puts the worktrees of the checkout at `repositoryPath`: `<git home>/worktrees/<repo>/<branch>`. */
@@ -150,7 +163,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
       refreshPiSessions()
     } catch (cause) {
       setMoved((current) => new Map([...current].filter(([id]) => id !== session.sessionId)))
-      setError(errorMessage(cause, toArchive ? "Could not archive this session" : "Could not restore this session"))
+      setError(piSessionError(cause, toArchive ? "Could not archive this session" : "Could not restore this session"))
     }
   }
 
@@ -162,7 +175,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
       refreshPiSessions()
     } catch (cause) {
       setPins((current) => new Map([...current].filter(([id]) => id !== session.sessionId)))
-      setError(errorMessage(cause, "Could not pin this session"))
+      setError(piSessionError(cause, "Could not pin this session"))
     }
   }
 

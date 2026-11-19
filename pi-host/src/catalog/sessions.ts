@@ -2,7 +2,7 @@
  * Contract `SessionInfo` (C5): a Host's session metadata plus pin and live status.
  *
  * - Consumes: `Host` session metadata and private state, `LiveSessions` for live status
- * - Provides: `SessionInfo`, `sessionInfo`, `listSessions`, `liveStatusOf`
+ * - Provides: `SessionInfo`, `sessionInfo`, `listSessions`
  */
 import type { Host, SessionMeta } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
@@ -25,7 +25,7 @@ export type SessionInfo = {
 };
 
 /** Live status under either path form: a new session is keyed before its file exists, a resumed one by real path. */
-export function liveStatusOf(meta: SessionMeta, live: LiveSessions): LiveStatus | undefined {
+function liveStatusOf(meta: SessionMeta, live: LiveSessions): LiveStatus | undefined {
   return live.liveStatus(meta.sessionPath) ?? (meta.realPath === meta.sessionPath ? undefined : live.liveStatus(meta.realPath));
 }
 
