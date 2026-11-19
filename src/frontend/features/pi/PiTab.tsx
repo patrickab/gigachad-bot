@@ -153,9 +153,9 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit
   lead?: string
   onLeadSent?: () => void
 }) {
-  const session = usePiSession(sessionId)
-  const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
   const openFile = useOpenFile()
+  const session = usePiSession(sessionId, openFile)
+  const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
 

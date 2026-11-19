@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
 import { useCoalescedDispatch } from "./coalescer"
 import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "./piSocket"
 import { SessionResync } from "./resync"
@@ -37,6 +37,8 @@ const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
 const EMPTY_QUEUE: Queue = { steering: [], followUp: [] }
 /** Distinguishes this tab's command ids from other clients' on the same session, their responses reach every attached client. */
 const CLIENT_ID = crypto.randomUUID().slice(0, 8)
+/** An extension's `notify` asking the GUI to open the path that follows instead of showing a notice (C7, `pi-extensions/files.ts`). */
+export const OPEN_FILE_NOTICE_PREFIX = "Open file: "
 
 function isDialogRequest(record: PiRecord): boolean {
   return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method as string)
@@ -59,8 +61,9 @@ function entriesOf(data: unknown): SessionEntries {
  * - `runBash` runs `!cmd` (F7), `compact` compacts with optional instructions (F8), `setModel`/`setThinking` switch the session's model and thinking (D10, F10)
  * - `stats` (cost, context use) refresh on attach, after each run, compaction and model switch (F3)
  * - Extension dialogs queue until answered, `notify` shows briefly, `setStatus` keeps a line per key
+ * - A `notify` led by `OPEN_FILE_NOTICE_PREFIX` goes to `onOpenFile` instead of showing
  */
-export function usePiSession(sessionId: string) {
+export function usePiSession(sessionId: string, onOpenFile: (path: string) => void) {
   const [transcript, dispatchNow] = useReducer(transcriptReducer, EMPTY_TRANSCRIPT)
   const dispatch = useCoalescedDispatch(dispatchNow)
   const [status, setStatus] = useState<ConnectionStatus>({ kind: "connecting" })
@@ -76,6 +79,7 @@ export function usePiSession(sessionId: string) {
   const pendingRef = useRef(new Map<string, (response: Response) => void>())
   const nextIdRef = useRef(0)
   const syncRef = useRef<SessionResync | null>(null)
+  const openFile = useEffectEvent(onOpenFile)
 
   const notify = useCallback((text: string, tone: Notice["tone"]) => {
     const id = `notice-${++nextIdRef.current}`
@@ -121,7 +125,12 @@ export function usePiSession(sessionId: string) {
         return
       }
       switch (record.method) {
-        case "notify": notify(String(record.message ?? ""), (record.notifyType as Notice["tone"]) ?? "info"); break
+        case "notify": {
+          const message = String(record.message ?? "")
+          if (message.startsWith(OPEN_FILE_NOTICE_PREFIX)) openFile(message.slice(OPEN_FILE_NOTICE_PREFIX.length))
+          else notify(message, (record.notifyType as Notice["tone"]) ?? "info")
+          break
+        }
         case "setStatus": setStatusLines((current) => {
           const key = String(record.statusKey)
           const rest = Object.fromEntries(Object.entries(current).filter(([existing]) => existing !== key))
