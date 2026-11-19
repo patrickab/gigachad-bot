@@ -32,15 +32,23 @@ def paste_mention(filename: str, suffix: str, now: datetime) -> Path:
 
 
 def store_paste(roots: FileRoots, folder: Path, mention: Path, content: bytes) -> Path:
-    """Create `folder / mention` exclusively (FileExistsError when taken), UnknownFolder for an unreachable folder, ValueError
-    when `.pi` or `.pi/pastes` is a symlink."""
+    """Create `folder / mention` exclusively (FileExistsError when taken) next to a `.gitignore` of `*` (created when missing),
+    so pastes are never committed. UnknownFolder for an unreachable folder, ValueError when `.pi`, `.pi/pastes` or that
+    `.gitignore` is a symlink."""
     if not folder.is_absolute():
         raise UnknownFolder(f"Unknown folder {folder}")
     folder = folder.resolve()
     if not (folder.is_dir() and roots.contains(folder)):
         raise UnknownFolder(f"Unknown folder {folder}")
-    for part in (folder / mention.parts[0], folder / mention.parent):
+    pastes = folder / mention.parent
+    ignore = pastes / ".gitignore"
+    for part in (folder / mention.parts[0], pastes, ignore):
         if part.is_symlink():
             raise ValueError(f"{part} is a symlink")
-    (folder / mention.parent).mkdir(parents=True, exist_ok=True)
+    pastes.mkdir(parents=True, exist_ok=True)
+    if not ignore.exists():
+        try:
+            roots.create(str(ignore), "*\n")
+        except FileExistsError:
+            pass
     return roots.create(str(folder / mention), content)

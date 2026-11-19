@@ -1,6 +1,7 @@
 """`POST /api/pi/pastes`: videos pasted into a Pi composer land in the session folder's `.pi/pastes/`."""
 
 import re
+import subprocess
 
 from fastapi.testclient import TestClient
 import pytest
@@ -49,7 +50,22 @@ def test_an_absolute_cwd_inside_the_file_roots_takes_a_named_or_typed_video(tmp_
 
     assert _paste(client, {"cwd": str(vault / "docs")}, name="../../clip.webm", content_type="video/webm").json()["mention"].endswith("-clip.webm")
     assert _paste(client, {"cwd": str(vault / "docs")}, name="blob", content_type="video/quicktime").json()["mention"].endswith("-blob.mov")
-    assert sorted(path.suffix for path in (vault / "docs" / ".pi" / "pastes").iterdir()) == [".mov", ".webm"]
+    assert sorted(path.name.rsplit("-", 1)[-1] for path in (vault / "docs" / ".pi" / "pastes").iterdir()) == [".gitignore", "blob.mov", "clip.webm"]
+
+
+def test_pastes_are_ignored_by_git_and_an_existing_ignore_file_is_kept(tmp_path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    client = _client(repo)
+
+    mention = _paste(client, {"cwd": str(repo)}).json()["mention"]
+    assert (repo / ".pi" / "pastes" / ".gitignore").read_text() == "*\n"
+    assert subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo, capture_output=True, text=True, check=True).stdout == ""
+    assert subprocess.run(["git", "check-ignore", "-q", mention], cwd=repo).returncode == 0
+
+    (repo / ".pi" / "pastes" / ".gitignore").write_text("*.mp4\n")
+    assert _paste(client, {"cwd": str(repo)}, name="other.webm", content_type="video/webm").status_code == 200
+    assert (repo / ".pi" / "pastes" / ".gitignore").read_text() == "*.mp4\n"
 
 
 def test_folders_outside_the_file_roots_or_relative_are_unknown(tmp_path):
@@ -86,6 +102,13 @@ def test_a_symlinked_pastes_folder_is_refused(tmp_path):
     (vault / ".pi").symlink_to(elsewhere)
 
     assert _paste(_client(vault), {"cwd": str(vault)}).status_code == 400
+    assert list(elsewhere.iterdir()) == []
+
+    pastes = vault / "other" / ".pi" / "pastes"
+    pastes.mkdir(parents=True)
+    (pastes / ".gitignore").symlink_to(elsewhere / "ignore")
+    assert _paste(_client(vault), {"cwd": str(vault / "other")}).status_code == 400
+    assert list(pastes.iterdir()) == [pastes / ".gitignore"]
     assert list(elsewhere.iterdir()) == []
 
 
