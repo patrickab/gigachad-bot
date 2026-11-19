@@ -3,11 +3,6 @@ import { toQuery } from "../urls"
 import { post, request, requestVoid } from "./http"
 import type { KernelSpecs, RunningKernel } from "@/lib/domain/jupyter"
 
-/** Where the notebook at absolute `path` works, its kernel and its chat: the mounted root holding it, else its folder. */
-export async function fetchNotebookDirectory(path: string, signal?: AbortSignal): Promise<string> {
-  return (await request<{ path: string }>(`/jupyter/directory${toQuery({ path })}`, { signal })).path
-}
-
 /** The kernel environments for the notebook at absolute `path`, and the one it opens with. */
 export function fetchKernelSpecs(path: string, signal?: AbortSignal): Promise<KernelSpecs> {
   return request<KernelSpecs>(`/jupyter/kernelspecs${toQuery({ path })}`, { signal })

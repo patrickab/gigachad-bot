@@ -18,7 +18,6 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { ProviderUsagePoll } from "@/features/navigation/ProviderUsage"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
-import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
 import { markPiSessionRead, PiSessionsProvider } from "@/features/pi/sessionStore"
 import { startPiNotifications } from "@/features/pi/notifications"
@@ -174,19 +173,17 @@ export function AppShell() {
       <BranchProvider onFileClick={handleOpenChat} onHistoriesMoved={handleHistoriesMoved}>
         <SidebarProvider>
           <MemoryViewerProvider>
-            <OmpProvider>
-              <PiSessionsProvider>
-                <LearnProvider onOpenItem={handleOpenItem}>
-                  <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-                    <EnabledToolsProvider>
-                      <FilePanelProvider>
-                        <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
-                      </FilePanelProvider>
-                    </EnabledToolsProvider>
-                  </TabManager>
-                </LearnProvider>
-              </PiSessionsProvider>
-            </OmpProvider>
+            <PiSessionsProvider>
+              <LearnProvider onOpenItem={handleOpenItem}>
+                <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                  <EnabledToolsProvider>
+                    <FilePanelProvider>
+                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                    </FilePanelProvider>
+                  </EnabledToolsProvider>
+                </TabManager>
+              </LearnProvider>
+            </PiSessionsProvider>
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />
             <ProviderUsagePoll />

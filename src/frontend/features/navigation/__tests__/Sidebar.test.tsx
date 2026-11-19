@@ -765,7 +765,6 @@ describe("Project navigation", () => {
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Sessions" })).not.toBeInTheDocument()
       const section = within(view.getByLabelText("Code"))
-      expect(section.queryByRole("button", { name: "Open omp settings" })).not.toBeInTheDocument()
       fireEvent.click(await section.findByRole("button", { name: "proj" }))
       fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
@@ -1611,7 +1610,7 @@ describe("Tab picker", () => {
       const { attachment, attach } = useFrameAttachment<Attachment>()
       return <AttachContext.Provider value={attach}>{children}<output data-testid="frame-holder">{attachment?.name}</output></AttachContext.Provider>
     }
-    // Tabs named "Frame …" stand in for omp tabs, they lay the shared frame over their slot
+    // Tabs named "Frame …" stand in for learn tabs, they lay the shared frame over their slot
     function FrameSurface() {
       const { tab, isActive } = useTab()
       const peeked = useIsPeeked()

@@ -7,7 +7,7 @@ import { readStorage, removeStorage, writeStorage } from "@/lib/storage"
  * Composer chips: labeled text staged above a composer's draft and appended verbatim to the message on send.
  *
  * Consumes a conversation key, the same `draftKey` `useComposerDraft` keeps the draft under (a chat's history file,
- * a Pi or omp session). Provides a module store any feature calls without a handle on the composer:
+ * a Pi session). Provides a module store any feature calls without a handle on the composer:
  * - `stageChip(conversationKey, {label, text})` stages a chip, e.g. a file selection, a diff hunk or test output
  * - `useComposerChips(conversationKey)` is what `ChatInput` renders, removes and sends
  * Chips of a keyed conversation persist in `localStorage` under `gigachad:chips:<key>` like drafts. A composer

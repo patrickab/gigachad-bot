@@ -9,7 +9,7 @@ const DRAFT_STORAGE_PREFIX = "gigachad:draft:"
 /**
  * The composer's unsent text, kept in `localStorage` under `draftKey` so it survives closing the tab or reloading.
  *
- * - `draftKey` names the conversation (a chat's history file, an omp session), null keeps the text in memory only
+ * - `draftKey` names the conversation (a chat's history file, a Pi session), null keeps the text in memory only
  * - An empty draft removes its key
  */
 export function useComposerDraft(draftKey: string | null): [string, (update: SetStateAction<string>) => void] {

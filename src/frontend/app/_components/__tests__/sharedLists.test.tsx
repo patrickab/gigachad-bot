@@ -22,7 +22,6 @@ const api = vi.hoisted(() => ({
   loadTemplateSets: vi.fn(async () => [{ name: "deck-set", label: "Deck" }]),
   fileRootTree: vi.fn<() => Promise<RootTree>>(),
   fetchWorktrees: vi.fn(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
-  fetchOmpArchive: vi.fn(async () => []),
   fetchFactoryRepos: vi.fn(async () => []),
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), ...api }))
@@ -50,7 +49,6 @@ vi.mock("@/contexts/ProjectContext", async () => {
   }
 })
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
-vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => ({ overview: null, refreshOverview: () => {} }) }))
 vi.mock("@/features/learn/LearnProvider", () => ({
   useLearn: () => ({
     sessions: { sessions: [], error: null, refresh: async () => {}, claim: async () => {}, rename: vi.fn(), remove: vi.fn(), retitle: vi.fn(), missing: new Set<string>() },

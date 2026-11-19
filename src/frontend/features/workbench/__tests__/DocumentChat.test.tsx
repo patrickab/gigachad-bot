@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
   fetchWorkbenchChats: vi.fn<(path: string) => Promise<{ link: WorkbenchChatLink; sessions: PiSessionInfo[] }>>(),
   markWorkbenchChatInformed: vi.fn<(path: string, sessionId: string) => Promise<WorkbenchChatLink>>(),
   archivePiSession: vi.fn(),
-  prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string; cwd: string }>>(),
+  prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string }>>(),
   ApiError: class extends Error { status = 0 },
 }))
 vi.mock("@/lib/backend/api", () => api)
@@ -88,7 +88,7 @@ const leadShown = () => screen.getByTestId("lead").textContent
 
 beforeEach(() => {
   api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s1", cwd: MARKDOWN_CWD }))
-  api.prepareWorkbench.mockImplementation(async (path) => ({ path, cwd: "/unused" }))
+  api.prepareWorkbench.mockImplementation(async (path) => ({ path }))
 })
 
 describe("Workbench chat drawer", () => {

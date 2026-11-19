@@ -152,8 +152,8 @@ describe("tabShowingItem", () => {
 
   it("ignores other files and non-file items that share a path", () => {
     expect(tabShowingItem([first], { ...canvas, path: "project/proj/document/other.canvas" }, "")).toBeUndefined()
-    const omp: WorkspaceItem = { kind: "omp", path: "/repo", projectSlug: null }
-    expect(tabShowingItem([tabWith(omp)], omp, "")).toBeUndefined()
+    const diff: WorkspaceItem = { kind: "diff", path: "/repo", projectSlug: null }
+    expect(tabShowingItem([tabWith(diff)], diff, "")).toBeUndefined()
   })
 
   const piItem = (sessionId: string | null): WorkspaceItem => ({ kind: "pi", path: "repo", projectSlug: null, pi: { sessionId, repo: "repo" } })
@@ -189,10 +189,11 @@ describe("parseSavedTabs", () => {
     for (const raw of [null, "", "{", "{}", JSON.stringify({ tabs: [] })]) expect(parseSavedTabs(raw)).toBeNull()
   })
 
-  it("keeps saved Pi and omp tabs", () => {
+  it("keeps saved Pi tabs and drops the omp tabs old builds saved", () => {
     const pi = { ...nextTab(), ...showingItem({ kind: "pi", path: "app", projectSlug: null, pi: { sessionId: "s1", repo: "app" } }) }
-    const omp = { ...nextTab(), ...showingItem({ kind: "omp", path: "/git/app", projectSlug: null, omp: { kind: "session", sessionId: "o1" } }) }
-    expect(parseSavedTabs(JSON.stringify({ tabs: [pi, omp], activeId: pi.id }))).toEqual({ tabs: [pi, omp], activeId: pi.id })
+    const omp = { ...nextTab(), appMode: "omp", workspaceItem: { kind: "omp", path: "/git/app", projectSlug: null, omp: { kind: "session", sessionId: "o1" } } }
+    expect(parseSavedTabs(JSON.stringify({ tabs: [omp, pi], activeId: omp.id }))).toEqual({ tabs: [pi], activeId: pi.id })
+    expect(parseSavedTabs(JSON.stringify({ tabs: [omp], activeId: omp.id }))).toBeNull()
   })
 
   it("drops the omp chat old builds saved on workbench and notebook items, keeps their Pi chat", () => {

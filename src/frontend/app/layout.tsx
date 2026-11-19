@@ -25,7 +25,7 @@ const architectsDaughter = localFont({
   weight: "400",
 })
 
-// Nerd Font icons (omp session titles start with one). PUA only, fetched when a page shows such a glyph.
+// Nerd Font icons in agent output and session titles. PUA only, fetched when a page shows such a glyph.
 const symbolsNerdFont = localFont({
   src: "./fonts/SymbolsNerdFontMono-Regular.woff2",
   variable: "--font-symbols",

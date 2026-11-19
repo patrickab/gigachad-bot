@@ -18,7 +18,7 @@
    Role tokens (--ink, --paper, --surface, ...) are the only colors components use.
    Derived tokens (--divider, --hover-overlay, ...) are color-mix of role tokens.
    Dark is the default (:root), `.light` overrides the role tokens.
-   Roles shared with the omp frame take their values from `packages/chat-ui/src/palette.css`
+   Roles shared with the LearnHarness frame take their values from `packages/chat-ui/src/palette.css`
    (`--gc-<mode>-*`), change them there. Shell-only roles are OKLCH with the same warm hue.
    Tailwind utilities come from @theme below. */
 

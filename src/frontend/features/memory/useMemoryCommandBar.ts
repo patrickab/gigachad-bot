@@ -21,7 +21,7 @@ export interface MemoryCommandBar {
 
 /** Own the workspace command menu and the memory flow it launches. */
 export function useMemoryCommandBar({ loadSource }: {
-  /** Loads the conversation `/memorize` reads, null when the tab has none to memorize (a branch chat, no omp session). */
+  /** Loads the conversation `/memorize` reads, null when the tab has none to memorize (a branch chat, no Pi session). */
   loadSource: (() => Promise<MemorizeSource>) | null
 }): MemoryCommandBar {
   const { tab, setModeLabel } = useTab()

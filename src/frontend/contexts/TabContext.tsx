@@ -3,14 +3,14 @@
 import { createContext, useContext } from "react"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import type { TabConfig } from "@/contexts/SettingsContext"
-import type { LearnView, OmpView, PiView } from "@/lib/domain/types"
+import type { LearnView, PiView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document" | "omp" | "pi" | "workbench" | "factory" | "learn"
+export type AppSurface = "chat" | "canvas" | "document" | "pi" | "workbench" | "factory" | "learn"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "pi" | "workbench" | "factory" | "learn"
-  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `pi` item its repo name, a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
+  kind: "canvas" | "architecture" | "document" | "diff" | "pi" | "workbench" | "factory" | "learn"
+  /** A `diff` item holds the mounted directory it compares against HEAD, a `pi` item its repo name, a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
   path: string
   projectSlug: string | null
   rootFile?: boolean
@@ -18,8 +18,6 @@ export interface WorkspaceItem {
   sessionKey?: string
   /** The LaTeX project folder a `workbench` item shows: opening another file of it switches this tab's buffer. */
   texFolder?: string
-  /** What an `omp` item shows in omp-web's frame. */
-  omp?: OmpView
   /** The Pi `document` chat session a `workbench` item or a notebook `document` item shows. */
   chat?: { sessionId: string }
   /** What a `pi` item shows: its repo and session. */
@@ -30,7 +28,6 @@ export interface WorkspaceItem {
 
 /** Surface that shows `item`. */
 function surfaceOf(item: WorkspaceItem): AppSurface {
-  if (item.kind === "omp") return "omp"
   if (item.kind === "pi") return "pi"
   if (item.kind === "workbench") return "workbench"
   if (item.kind === "factory") return "factory"

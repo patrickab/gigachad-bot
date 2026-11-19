@@ -23,11 +23,8 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
 import { canvasLead } from "@/features/workbench/fileLead"
 import { FileChat } from "@/features/workbench/FileChat"
-import { OmpSurface } from "@/features/omp/OmpSurface"
-import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { PiTab, type PiLaunch, type PiShellCommands } from "@/features/pi/PiTab"
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import { TokenCounter } from "@/features/chat/TokenCounter"
@@ -41,7 +38,7 @@ import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
 import { isNotebookPath } from "@/lib/paths"
 
-/** Model picker props shared by the chat, document and omp top bars. */
+/** Model picker props shared by the chat, document and learn top bars. */
 export type ModelProps = Omit<ComponentProps<typeof ModelDropdown>, "selectedModel" | "onSelect" | "chatColumn">
 
 /** The parts of the tab's canvas view state that the canvas surface reads. */
@@ -286,30 +283,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               model={config.selectedModel}
             />
           ),
-      }
-    },
-    omp: () => {
-      const ompItem = itemOf(tab, "omp")
-      const ompView = ompItem?.omp ?? null
-      return {
-        left: <>
-          {ompView && <TopBarPill>
-            <OmpReasoningSelector view={ompView} />
-          </TopBarPill>}
-          {ompView && <TopBarTransparent>
-            <OmpModelSelector view={ompView} {...modelProps} />
-          </TopBarTransparent>}
-        </>,
-        right: <>
-          <TopBarPill>
-            {ompView && <OmpSystemPrompt view={ompView} />}
-            {ompView && <OmpTokenCounter view={ompView} />}
-            <ThemeToggle />
-          </TopBarPill>
-          {filePanelToggle}
-        </>,
-        runsUnderTopBar: !!ompView && ompView.kind !== "settings",
-        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={shellCommands} /> : chatBody,
       }
     },
     pi: () => {

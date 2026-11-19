@@ -108,7 +108,7 @@ export interface PickerItem extends MenuItem {
 }
 
 /**
- * A choice the draft filters, shown in the menu instead of suggestions, e.g. an omp extension's `select`.
+ * A choice the draft filters, shown in the menu instead of suggestions, e.g. a Pi extension's `select`.
  *
  * Attributes
  * ----------

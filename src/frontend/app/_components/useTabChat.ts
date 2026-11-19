@@ -15,7 +15,7 @@ import type { MemorizeSource } from "@/features/memory/useMemorizeFlow"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
 import { useSlashCommands } from "@/features/navigation/useSlashCommands"
 import { piSessionHistory, type PiShellCommands } from "@/features/pi/PiTab"
-import { fetchOmpSessionHistory, loadChatHistory } from "@/lib/backend/api"
+import { loadChatHistory } from "@/lib/backend/api"
 import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
@@ -30,17 +30,14 @@ async function piSource(sessionId: string): Promise<MemorizeSource> {
   return { messages, conversationId: sessionId }
 }
 
-/** What `/memorize` reads in `tab`: the Pi or omp session an agent tab shows, else the chat, never a branch chat. Null when there is none. */
+/** What `/memorize` reads in `tab`: the Pi session an agent tab shows, else the chat, never a branch chat. Null when there is none. */
 export function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branchMessageIdx: number | null): (() => Promise<MemorizeSource>) | null {
   const { appMode } = tab
-  const ompView = appMode === "omp" ? itemOf(tab, "omp")?.omp : null
-  const ompSessionId = ompView?.kind === "session" ? ompView.sessionId : null
   const piSessionId = appMode === "pi" ? itemOf(tab, "pi")?.pi?.sessionId ?? null : null
   return useMemo(() => {
     if (appMode === "pi") return piSessionId ? () => piSource(piSessionId) : null
-    if (appMode === "omp") return ompSessionId ? async () => ({ messages: await fetchOmpSessionHistory(ompSessionId), conversationId: ompSessionId }) : null
     return branchMessageIdx == null ? async () => ({ messages, conversationId: chatId }) : null
-  }, [appMode, piSessionId, ompSessionId, branchMessageIdx, messages, chatId])
+  }, [appMode, piSessionId, branchMessageIdx, messages, chatId])
 }
 
 /** Run one tab's chat (history, turns, attachments, memory commands, shortcuts); called in every mode so the chat survives mode switches. */

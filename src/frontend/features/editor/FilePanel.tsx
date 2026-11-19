@@ -45,10 +45,10 @@ export function useOpenFile(): (path: string) => void {
 }
 
 /**
- * Own one tab's right file panel, which shares the width with the chat (ompweb's right panel).
+ * Own one tab's right file panel, which shares the width with the chat.
  *
  * - One `FilePanel` shows at a time, opening another closes the shown one
- * - `openFile` shows a file root path, e.g. a file link from the omp frame
+ * - `openFile` shows a file root path, e.g. a file link in a Pi answer
  * - Collapsing hides the panel and keeps its content (Neovim keeps running), opening something expands it
  */
 export function FilePanelProvider({ children }: { children: ReactNode }) {

@@ -4,7 +4,7 @@ import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-libr
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
-  prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string; cwd: string }>>(),
+  prepareWorkbench: vi.fn<(path: string) => Promise<{ path: string }>>(),
 }))
 vi.mock("@/lib/backend/api", () => api)
 const follow = vi.hoisted(() => ({ paths: [] as readonly string[], changed: null as ((path: string) => void) | null }))
@@ -19,7 +19,6 @@ import { useFollowBuffers } from "../useFollowBuffers"
 import { usePreparedWorkbench } from "../usePreparedWorkbench"
 
 const PATH = "/data/workbench/markdown/proj/plan/plan.md"
-const CWD = "/data/workbench/markdown"
 
 afterEach(() => {
   cleanup()
@@ -38,8 +37,8 @@ function PreparedItem({ initialPath, onMoved }: { initialPath: string; onMoved: 
 
 /** A prepare answer the test hands out when it wants. */
 function deferred() {
-  let resolve: (value: { path: string; cwd: string }) => void = () => {}
-  const promise = new Promise<{ path: string; cwd: string }>((done) => { resolve = done })
+  let resolve: (value: { path: string }) => void = () => {}
+  const promise = new Promise<{ path: string }>((done) => { resolve = done })
   return { promise, resolve }
 }
 
@@ -47,7 +46,7 @@ function deferred() {
 describe("usePreparedWorkbench", () => {
   it("reports a moved document and treats its new path as prepared", async () => {
     const disk = "/data/workbench/markdown/moved/plan/plan.md"
-    api.prepareWorkbench.mockResolvedValueOnce({ path: disk, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path: disk })
     const onMoved = vi.fn()
     const { result, rerender } = renderHook(({ path }) => usePreparedWorkbench(path, onMoved), { initialProps: { path: "project/moved/document/plan.md" } })
     expect(result.current.prepared).toBeNull()
@@ -60,7 +59,7 @@ describe("usePreparedWorkbench", () => {
 
   it("prepares once and mounts under StrictMode's double effects", async () => {
     const disk = "/data/workbench/markdown/strict/plan/plan.md"
-    api.prepareWorkbench.mockResolvedValueOnce({ path: disk, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path: disk })
     const onMoved = vi.fn()
     render(<StrictMode><PreparedItem initialPath="project/strict/document/plan.md" onMoved={onMoved} /></StrictMode>)
 
@@ -75,7 +74,7 @@ describe("usePreparedWorkbench", () => {
     api.prepareWorkbench.mockReturnValueOnce(answer.promise)
     const first = render(<PreparedItem initialPath="project/away/document/plan.md" onMoved={vi.fn()} />)
     first.unmount()
-    await act(async () => answer.resolve({ path: disk, cwd: CWD }))
+    await act(async () => answer.resolve({ path: disk }))
 
     const onMoved = vi.fn()
     render(<PreparedItem initialPath="project/away/document/plan.md" onMoved={onMoved} />)
@@ -90,7 +89,7 @@ describe("usePreparedWorkbench", () => {
     const { result } = renderHook(() => usePreparedWorkbench(path, vi.fn()))
     await waitFor(() => expect(result.current.error).toBe("Name taken"))
 
-    api.prepareWorkbench.mockResolvedValueOnce({ path, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path })
     act(() => result.current.retry())
     expect(result.current.error).toBeNull()
     await waitFor(() => expect(result.current.prepared?.path).toBe(path))
@@ -103,7 +102,7 @@ describe("usePreparedWorkbench", () => {
     const { result, rerender } = renderHook(({ path }) => usePreparedWorkbench(path, vi.fn()), { initialProps: { path: a } })
     await waitFor(() => expect(result.current.error).toBe("Not reachable"))
 
-    api.prepareWorkbench.mockResolvedValueOnce({ path: b, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path: b })
     rerender({ path: b })
     expect(result.current.error).toBeNull()
     await waitFor(() => expect(result.current.prepared?.path).toBe(b))
@@ -112,7 +111,7 @@ describe("usePreparedWorkbench", () => {
     api.prepareWorkbench.mockReturnValueOnce(answer.promise)
     rerender({ path: a })
     expect(result.current.error).toBeNull()
-    await act(async () => answer.resolve({ path: a, cwd: CWD }))
+    await act(async () => answer.resolve({ path: a }))
     expect(result.current.prepared?.path).toBe(a)
     expect(result.current.error).toBeNull()
   })
@@ -120,7 +119,7 @@ describe("usePreparedWorkbench", () => {
   it("stays prepared under the path the item was opened with when the file is renamed", async () => {
     const opened = "/data/workbench/markdown/renamed/plan/plan.md"
     const renamed = "/data/workbench/markdown/renamed/plan/roadmap.md"
-    api.prepareWorkbench.mockResolvedValueOnce({ path: opened, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path: opened })
     const { result, rerender } = renderHook(({ path, sessionKey }) => usePreparedWorkbench(path, vi.fn(), sessionKey), { initialProps: { path: opened, sessionKey: undefined as string | undefined } })
     await waitFor(() => expect(result.current.prepared?.path).toBe(opened))
 
@@ -134,7 +133,7 @@ describe("usePreparedWorkbench", () => {
     const session = "/home/me/thesis/main.tex"
     const restored = "/home/me/thesis/chapters/intro.tex"
     const next = "/home/me/thesis/chapters/outro.tex"
-    api.prepareWorkbench.mockResolvedValueOnce({ path: restored, cwd: CWD })
+    api.prepareWorkbench.mockResolvedValueOnce({ path: restored })
     const { result, rerender } = renderHook(({ path }) => usePreparedWorkbench(path, vi.fn(), session), { initialProps: { path: restored } })
     await waitFor(() => expect(result.current.prepared?.path).toBe(restored))
 

@@ -15,7 +15,7 @@ import { useElementSize } from "@/hooks/useElementSize"
 import { pairMessages } from "@/lib/domain/pairs"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 
-/** Chat column cap, omp-web's (`CHAT_COLUMN_MAX_WIDTH` in its `lib/chat-layout.ts`), so chat and omp tabs read alike. */
+/** Chat column cap. */
 const CHAT_COLUMN_MAX_PX = 960
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16

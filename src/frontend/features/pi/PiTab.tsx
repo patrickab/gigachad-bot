@@ -28,13 +28,13 @@ export interface PiFork {
 }
 
 /** A new session starts on Pi's default model at thinking `medium` (D10). */
-export const NEW_SESSION_OPTIONS: PiSessionOptions = { thinking: "medium" }
+const NEW_SESSION_OPTIONS: PiSessionOptions = { thinking: "medium" }
 
 const EMPTY_QUEUE = { steering: [], followUp: [] }
 const NO_COMMANDS: PiCommand[] = []
 
 /** The message an open in `repo` that failed shows. */
-export function piOpenError(reason: unknown, repo?: string): string {
+function piOpenError(reason: unknown, repo?: string): string {
   if (reason instanceof ApiError && reason.status === 409) return "Another Pi process holds this session"
   if (reason instanceof ApiError && reason.status === 404 && repo !== undefined && reason.message.startsWith("Unknown repository")) return `${repo} is not a Git checkout under ~/git, Pi sessions start only there`
   return reason instanceof Error ? reason.message : String(reason)

@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 
 /**
- * Which tab a shared frame (omp, learn) is laid over: the tab the tab picker previews while it shows one, else the frontmost.
+ * Which tab a shared frame (learn) is laid over: the tab the tab picker previews while it shows one, else the frontmost.
  *
  * - `attach(next)` registers a tab's slot as frontmost or, with `peek`, previewed, and returns the detach
  * - A preview of a tab without a frame leaves the frame with the frontmost tab

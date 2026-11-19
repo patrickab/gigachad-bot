@@ -31,7 +31,7 @@ export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRen
   const { tab, updateConfig } = useTab()
   const { config, appMode } = tab
   const { researchEnabled } = useEnabledTools()
-  // The workbench needs Neovim for the source and host access for omp and the LaTeX build
+  // The workbench needs Neovim for the source and host access for its Pi chats and the LaTeX build
   const neovimEnabled = useNeovimSetting().enabled
   const hostAccess = useHostAccess()
   const opensWorkbench = neovimEnabled && hostAccess

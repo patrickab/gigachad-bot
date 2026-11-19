@@ -228,8 +228,6 @@ export interface BackendConfig {
   neovim_available: boolean
   /** Whether this login may use the host-only factory. */
   host_access: boolean
-  /** omp-web's address, the source of the omp tabs' frame. */
-  omp_web_url: string
   /** LearnHarness's address, the source of the learn frame. Null for logins without host access. */
   learnharness_url: string | null
 }
@@ -290,60 +288,6 @@ export interface WebSearchResult {
   videos: WebSearchVideo[]
   citationMap?: Record<string, WebSearchResultItem>
 }
-
-/** One omp session file (`src/lib/omp_web.py` `OmpSession`). */
-export interface OmpSession {
-  id: string
-  path: string
-  cwd: string
-  name: string | null
-  created: string
-  modified: string
-  message_count: number
-  first_message: string
-  /** Session this one was forked from. */
-  parent_session_id: string | null
-  /** Main repository of a worktree cwd, the cwd itself otherwise. */
-  project_root: string | null
-  worktree_branch: string | null
-}
-
-/** A directory omp-web lists as workspace: registered, or discovered from its sessions. */
-interface OmpWorkspace {
-  path: string
-  alias: string | null
-  added_at: string | null
-}
-
-export interface OmpOverview {
-  sessions: OmpSession[]
-  running_session_ids: string[]
-  workspaces: OmpWorkspace[]
-}
-
-export interface OmpArchivedSession {
-  key: string
-  id: string
-  cwd: string
-  name: string | null
-  created: string
-  archived_at: string
-  message_count: number
-  first_message: string
-  status: "complete" | "interrupted" | "aborted" | "error" | "pending" | "unknown" | null
-}
-
-export interface OmpSystemPrompt {
-  running: boolean
-  system_prompt: string | null
-}
-
-/** What an omp tab shows in omp-web's shared frame. */
-export type OmpView =
-  | { kind: "session"; sessionId: string }
-  /** New-session composer in `cwd`. */
-  | { kind: "new"; cwd: string }
-  | { kind: "settings" }
 
 /** What a Pi tab shows: a session in `repo` (a checkout name under `~/git`, as `/api/pi/repos` lists it), `sessionId` null until its first message creates one. */
 export interface PiView {

@@ -25,7 +25,6 @@ const api = vi.hoisted(() => ({
   removeDocument: vi.fn<(slug: string, path: string) => Promise<string[]>>(),
   fileRootTree: vi.fn(async () => ({ enabled: true, tree: [] })),
   fetchWorktrees: vi.fn(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
-  fetchOmpArchive: vi.fn(async () => []),
   fetchFactoryRepos: vi.fn(async () => []),
   fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
 }))
@@ -53,7 +52,6 @@ vi.mock("@/contexts/ProjectContext", async () => {
   }
 })
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
-vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => ({ overview: null, refreshOverview: () => {} }) }))
 vi.mock("@/features/learn/LearnProvider", () => ({
   useLearn: () => ({
     sessions: { sessions: [], error: null, refresh: async () => {}, claim: async () => {}, rename: vi.fn(), remove: vi.fn(), retitle: vi.fn(), missing: new Set<string>() },

@@ -14,7 +14,7 @@ function clipAround({ left, top, right, bottom }: DOMRect): string {
 }
 
 /**
- * The shell's half of a modal dialog open in the frame (`modal`), like omp's frame backdrop: the shell dims around the
+ * The shell's half of a modal dialog open in the frame (`modal`): the shell dims around the
  * frame, which dims itself under its dialog. A click on the dimmed shell or Escape in it closes the dialog (`onClose`),
  * Escape never reaches the shell's other handlers. The frame's box stays a hole, so the dialog keeps its clicks.
  */

@@ -14,7 +14,7 @@ vi.mock("@gigachad/chat-ui/hints", () => ({
 const { pass } = vi.hoisted(() => ({ pass: ({ children }: { children?: ReactNode }) => children }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
-  useSettings: () => ({ tabDefaults: {}, ompWebUrl: null, hostAccess: false }),
+  useSettings: () => ({ tabDefaults: {}, hostAccess: false }),
 }))
 vi.mock("@/contexts/ProjectContext", () => ({ useProject: () => ({ refreshProjects: async () => {} }) }))
 vi.mock("@/features/navigation/BranchContext", () => ({ BranchProvider: pass, useBranches: () => ({ branchMeta: {} }) }))
@@ -41,7 +41,7 @@ afterEach(() => {
 })
 
 describe("AppShell click hints", () => {
-  it("installs the shell's frameless hints once, the omp provider no longer adds its own", () => {
+  it("installs the shell's frameless hints once", () => {
     const { unmount } = render(<AppShell />)
 
     expect(hints.install).toHaveBeenCalledTimes(1)

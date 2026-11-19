@@ -1,7 +1,7 @@
 /* Ported from kahme247/ompweb app/globals.css (MIT, Copyright (c) 2026 agegr).
 
    Pi tool call rows and the folded "Process details" group, on gigachad tokens (light and dark follow the theme).
-   - Every selector is `pi-` prefixed so nothing collides with the omp-web overlay or app CSS
+   - Every selector is `pi-` prefixed so nothing collides with app CSS
    - Monochrome chrome: only status (done, failed) and diff lines carry hue */
 
 .pi-process-details,

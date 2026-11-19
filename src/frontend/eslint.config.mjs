@@ -8,9 +8,8 @@ import boundaries from "eslint-plugin-boundaries"
 // A feature's public API: files at its root or at a sub-feature root, never inside concept folders.
 const publicEntry = ["*", "*/*"]
 
-// Package files any module may import: all but the embed protocols, which only their feature may (`packages/chat-ui/src/protocol.ts`
-// for `features/omp`, `packages/chat-ui/src/learn-protocol.ts` for `features/learn`).
-const PACKAGE_FILES_BESIDES_PROTOCOLS = "src/!(protocol|learn-protocol).*"
+// Package files any module may import: all but the learn embed protocol, which only `features/learn` may (`packages/chat-ui/src/learn-protocol.ts`).
+const PACKAGE_FILES_BESIDES_PROTOCOL = "src/!(learn-protocol).*"
 
 const crossFeature = (from, to) => ({
   from: { element: { type: "feature", captured: { feature: from } } },
@@ -42,10 +41,9 @@ export default defineConfig([
           { allow: { to: { module: { origin: ["external", "core"] } } } },
           { allow: { dependency: { relationship: { to: "internal" } } } },
           { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "shared" } } } },
-          // The embed protocols are the package files the shell keeps behind its omp and learn adapters.
-          { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "package", fileInternalPath: PACKAGE_FILES_BESIDES_PROTOCOLS } } } },
+          // The learn embed protocol is the package file the shell keeps behind its learn adapter.
+          { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "package", fileInternalPath: PACKAGE_FILES_BESIDES_PROTOCOL } } } },
           { from: { element: { type: "app" } }, allow: { to: { element: { type: "feature", fileInternalPath: publicEntry } } } },
-          { from: { element: { type: "feature", captured: { feature: "omp" } } }, allow: { to: { element: { type: "package", fileInternalPath: "src/protocol.*" } } } },
           { from: { element: { type: "feature", captured: { feature: "learn" } } }, allow: { to: { element: { type: "package", fileInternalPath: "src/learn-protocol.*" } } } },
           crossFeature("chat", "editor"),
           crossFeature("chat", "learn"),
@@ -60,15 +58,11 @@ export default defineConfig([
           crossFeature("learn", "settings"),
           crossFeature("latex", "workbench"),
           crossFeature("navigation", "memory"),
-          crossFeature("navigation", "omp"),
           crossFeature("navigation", "pi"),
           crossFeature("workbench", "editor"),
           crossFeature("workbench", "navigation"),
           crossFeature("workbench", "notebook"),
           crossFeature("workbench", "pi"),
-          crossFeature("omp", "chat"),
-          crossFeature("omp", "editor"),
-          crossFeature("omp", "settings"),
           crossFeature("pi", "chat"),
           crossFeature("pi", "editor"),
         ],
@@ -89,7 +83,7 @@ export default defineConfig([
     ignores: ["packages/**/__tests__/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: ["@/*"], message: "A package must not import the app it ships from." }] }],
-      // Only what the package's own manifest declares ships to a consumer, an import that resolves through the shell's node_modules breaks in omp-web's overlay.
+      // Only what the package's own manifest declares ships to a consumer, an import that resolves through the shell's node_modules breaks in LearnHarness's overlay.
       "import/no-extraneous-dependencies": ["error", { packageDir: [join(import.meta.dirname, "packages/chat-ui")], includeTypes: true }],
     },
   },

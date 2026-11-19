@@ -4,8 +4,8 @@
 //   node packages/chat-ui/pack.mjs --out <dir>
 //
 // Run from src/frontend, which supplies tsc and the dependency types. The package source here is the only copy:
-// the shell imports it as `@/packages/chat-ui/src`, run-omp-web.sh packs it on every start and installs the
-// tarball into the served omp-web checkout for the overlay (`ompweb-overlay/`).
+// the shell imports it as `@/packages/chat-ui/src`, run-learnharness.sh packs it on every start (`pack_chat_ui` in
+// deploy/lib.sh) and installs the tarball into the served LearnHarness checkout for its overlay (`learnharness-overlay/`).
 //
 // Sources import siblings with their .ts/.tsx extension so the shell's bundler, vitest and Node-valid output all
 // resolve them. The tarball is reproducible: tsc output is deterministic and npm pack writes fixed timestamps,

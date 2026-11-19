@@ -85,8 +85,8 @@ export interface SavedTabs { tabs: Tab[]; activeId: string }
 
 /** `item` as saved by an older build: a workbench or notebook item held its chat as an omp view, which no Pi chat can open, so it is dropped. */
 function savedItem(item: WorkspaceItem | null): WorkspaceItem | null {
-  if (!item || item.kind === "omp" || !("omp" in item)) return item
-  const kept = { ...item }
+  if (!item || !("omp" in item)) return item
+  const kept: WorkspaceItem & { omp?: unknown } = { ...item }
   delete kept.omp
   return kept
 }
@@ -94,14 +94,17 @@ function savedItem(item: WorkspaceItem | null): WorkspaceItem | null {
 /**
  * The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed.
  *
- * A non-`omp` item drops the omp chat it was saved with.
+ * Saved omp tabs are dropped, other items drop the omp chat they were saved with.
  */
 export function parseSavedTabs(raw: string | null): SavedTabs | null {
   if (!raw) return null
   try {
     const saved = JSON.parse(raw) as Partial<SavedTabs>
-    if (!Array.isArray(saved.tabs) || saved.tabs.length === 0) return null
-    const tabs = saved.tabs.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: savedItem(tab.workspaceItem) }))
+    if (!Array.isArray(saved.tabs)) return null
+    // An older build's omp tab: omp-web is gone, nothing shows it any more
+    const kept = saved.tabs.filter((tab) => (tab.appMode as string) !== "omp" && (tab.workspaceItem?.kind as string | undefined) !== "omp")
+    const tabs = kept.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: savedItem(tab.workspaceItem) }))
+    if (tabs.length === 0) return null
     return { tabs, activeId: tabs.some((tab) => tab.id === saved.activeId) ? saved.activeId! : tabs[0].id }
   } catch {
     return null
@@ -155,9 +158,6 @@ export function piSessionOf(tab: Tab): string | null {
 
 /** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */
 export function tabLocation(tab: Tab, shownName: ShownName) {
-  if (tab.appMode === "omp") {
-    return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
-  }
   if (tab.appMode === "pi") {
     return { category: "code", file: tab.name ?? tab.title ?? tab.workspaceItem?.pi?.repo ?? "Pi" }
   }
@@ -188,7 +188,6 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
 /** Activity description of `tab` for screen readers; a chat shows its latest mode label. */
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
-    if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
     if (tab.appMode === "pi") return tab.name ?? tab.title ?? tab.workspaceItem.pi?.repo ?? "Pi"
     if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
     if (tab.appMode === "workbench") return tab.name ?? baseName(tab.workspaceItem.path)

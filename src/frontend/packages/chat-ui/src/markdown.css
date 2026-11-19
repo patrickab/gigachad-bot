@@ -1,4 +1,4 @@
-/* Prose presentation of @gigachad/chat-ui, the only copy: the shell imports this file from source, the omp-web
+/* Prose presentation of @gigachad/chat-ui, the only copy: the shell imports this file from source, the LearnHarness
    overlay imports it through the package export `@gigachad/chat-ui/markdown.css`.
 
    Scope
@@ -9,13 +9,13 @@
      components. Only the prose around them is styled here.
 
    Host contract: the role tokens this file reads. The shell defines them in `app/globals.css`, a host with another
-   palette maps them on `[data-markdown-root]` (`ompweb-overlay/theme/chat-ui.css` does).
+   palette maps them on `[data-markdown-root]` (`learnharness-overlay/theme/prose.css` does).
      --ink  --ink-muted  --divider  --divider-strong  --surface  --surface-elevated
      --radius-sm  --radius-md  --inner-highlight  --font-mono  --font-symbols
 
    Utilities layer: Streamdown wraps its output in a div classed `space-y-4 whitespace-normal [&>*:first-child]:mt-0
    [&>*:last-child]:mb-0`, Tailwind utilities that only exist where Tailwind scans Streamdown's dist (the shell does,
-   omp-web does not). The block spacing is replicated below inside the same `utilities` layer, so unlayered prose
+   a host without Tailwind does not). The block spacing is replicated below inside the same `utilities` layer, so unlayered prose
    rules and a host's own utilities (e.g. `my-3`) win over it exactly as they do over the generated classes. */
 
 @layer theme, base, components, utilities;

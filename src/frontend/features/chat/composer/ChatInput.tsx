@@ -30,12 +30,12 @@ interface ChatInputProps {
   /** Enter and the send button submit while streaming (the agent queues the message), the button stops only with an empty draft. */
   sendWhileStreaming?: boolean
   slug?: string | null
-  /** gigachad's chat tools menu, off where another agent owns the tools (omp tabs). */
+  /** gigachad's chat tools menu, off where another agent owns the tools (Pi tabs). */
   toolsMenu?: boolean
   placeholder?: string
-  /** Suggestions while typing (omp commands and files), none without. */
+  /** Suggestions while typing (Pi commands and files), none without. */
   complete?: CompleteDraft
-  /** A choice the draft filters (an omp extension's `select`), shown instead of suggestions. Enter picks, never sends, while set. */
+  /** A choice the draft filters (a Pi extension's `select`), shown instead of suggestions. Enter picks, never sends, while set. */
   picker?: DraftPicker
   /** Mode note under the draft, e.g. that `!ls` runs in a shell, null for none. */
   hint?: (text: string, attachmentCount: number) => string | null
@@ -43,10 +43,8 @@ interface ChatInputProps {
   context?: ChatContext
   /** Extra entries of the "+" menu after the built-in ones. */
   attachMenuItems?: AttachMenuItem[]
-  /** Extra controls of the action row after the "+" menu, e.g. the folder an omp session starts in. */
+  /** Extra controls of the action row after the "+" menu, e.g. the folder a Pi session starts in. */
   leading?: ReactNode
-  /** Takes pasted videos (omp tabs store them for an `@` mention), without it a pasted video is ignored. */
-  onPasteVideo?: (video: File) => void
 }
 
 /** Attachments already in the chat with their context actions. */
@@ -67,7 +65,7 @@ export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
   /** Replace the draft text with `update(current)` and focus the input. */
   updateText: (update: (current: string) => string) => void
-  /** Upload and attach files, e.g. images pasted into an omp tab. */
+  /** Upload and attach files, e.g. a canvas screenshot put into a Pi chat. */
   addFiles: (files: File[]) => void
   focus: () => void
 }
@@ -90,7 +88,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   context,
   attachMenuItems = [],
   leading,
-  onPasteVideo,
 }, ref) {
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
@@ -142,14 +139,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (e.key === "Enter" && !e.shiftKey && !submitBlocked) { e.preventDefault(); handleSubmit() }
   }
 
-  // Videos go to `onPasteVideo`, only the first pasted image is attached, a large text becomes a chip
+  // Only the first pasted image is attached, a large text becomes a chip
   const handlePaste = (e: React.ClipboardEvent) => {
-    const videos = onPasteVideo ? [...e.clipboardData.files].filter((file) => file.type.startsWith("video/")) : []
-    if (videos.length > 0) {
-      e.preventDefault()
-      for (const video of videos) onPasteVideo?.(video)
-      return
-    }
     for (const item of e.clipboardData.items) {
       if (item.type.startsWith("image/")) {
         e.preventDefault()

@@ -2,7 +2,6 @@
  * postMessage protocol between gigachad-bot's shell (parent window) and LearnHarness's overlay (`learnharness-overlay/`) in its frame.
  *
  * - The one definition both sides import: the shell from source (only `features/learn`), the overlay as `@gigachad/chat-ui/learn-protocol`
- * - Separate from omp's `protocol.ts`: own channel, so neither frame reacts to the other's traffic
  * - Every message carries `channel: LEARN_EMBED_CHANNEL`, the frame accepts messages from `window.parent` only
  *   (LearnHarness's demo iframes post messages too) and pins the shell origin at `hello`
  * - Versioned: `ready` and `hello` carry `LEARN_PROTOCOL_VERSION`. Drive mode (the shell's model selector and chrome over
@@ -19,7 +18,7 @@ export type LearnTheme = "light" | "dark"
 export type LearnSessionKind = "teach" | "practice"
 
 /**
- * A model as LearnHarness stores it (`ChatSettings.model` is `{provider, id}`), keyed like omp's `ModelRef`.
+ * A model as LearnHarness stores it (`ChatSettings.model` is `{provider, id}`).
  * Gigachad's selector string is `modelId`, `provider` is "custom" for every served model.
  */
 export type LearnModelRef = { provider: string; modelId: string }
@@ -101,7 +100,7 @@ export type LearnFrameMessage =
   | { type: "models"; served: LearnModelRef[] }
   /** Upstream asked for its model menu (⌘K, the send guard's `openModelPicker`), the shell opens its selector. */
   | { type: "model-open"; sessionId: string | null }
-  /** A modal dialog (setup, settings) is open, like omp's `modal`. */
+  /** A modal dialog (setup, settings) is open. */
   | { type: "modal"; open: boolean }
   /**
    * What the hidden sidebar row and title bar showed for `sessionId`, on every change: title, kind, phase chip (null for

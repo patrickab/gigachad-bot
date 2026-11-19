@@ -14,7 +14,7 @@ type ReviewScopes = Partial<Record<MemoryScope, ReviewScope>>
 /** Stored topics per reviewed scope, the targets an operation can move to. */
 type StoredTopics = Partial<Record<MemoryScope, MemoryTopic[]>>
 
-/** What one memorization reads: the conversation and the id its extraction watermark is kept under (a chat or an omp session). */
+/** What one memorization reads: the conversation and the id its extraction watermark is kept under (a chat or a Pi session). */
 export interface MemorizeSource {
   messages: Pick<Message, "role" | "content">[]
   conversationId: string

@@ -1,7 +1,7 @@
 /* gigachad-bot's role colors per mode, the one place their values live.
 
    - Hosts map them onto their own role tokens per theme: the shell in `app/globals.css` (`:root` dark, `:root.light`),
-     the omp-web overlay in `ompweb-overlay/theme/palette.css` (`html.cf-embed`). The package's components read the
+     the LearnHarness overlay in `learnharness-overlay/theme/palette.css` (`html.cf-embed`). The package's components read the
      mapped roles (`--ink`, `--paper`, ...), never these
    - Namespaced `--gc-<mode>-<role>` and defined for both modes at once, so no host token collides and no theme
      selector is shared

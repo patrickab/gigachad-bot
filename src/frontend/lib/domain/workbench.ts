@@ -1,6 +1,6 @@
 import { extOf } from "@/lib/paths"
 
-/** The file types the workbench opens, one omp workspace each. */
+/** The file types the workbench opens. */
 export type WorkbenchKind = "latex" | "markdown"
 
 const WORKBENCH_KINDS: readonly string[] = ["latex", "markdown"] satisfies WorkbenchKind[]

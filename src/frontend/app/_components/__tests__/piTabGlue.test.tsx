@@ -11,7 +11,6 @@ vi.mock("@/features/pi/PiTab", () => ({ piSessionHistory: history }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   fetchPiRepositories: vi.fn(),
-  fetchOmpSessionHistory: vi.fn(),
 }))
 
 const CHAT: Message[] = [{ role: "user", content: "hidden chat" }]

@@ -34,7 +34,7 @@ function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: 
   // A drag cut short by unmounting (e.g. closing the tab) must not leave the app unselectable
   useEffect(() => () => stopDrag.current?.(), [])
 
-  // Pointer capture keeps the drag on the handle while the pointer crosses an iframe (omp frame, previews),
+  // Pointer capture keeps the drag on the handle while the pointer crosses an iframe (learn frame, previews),
   // which would otherwise swallow the moves and the release.
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !onWidthChange) return

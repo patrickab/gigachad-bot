@@ -134,7 +134,7 @@ it("keeps reports to itself while no learn tab shows the frame", () => {
 it("ignores messages off the learn channel and waits for ready after a reset", () => {
   const { bridge, sent, onReady, frame } = setup()
   bridge.receive({ type: "ready", version: VERSION })
-  bridge.receive({ channel: "omp-embed", type: "ready", version: VERSION })
+  bridge.receive({ channel: "other-embed", type: "ready", version: VERSION })
   bridge.receive(null)
   expect(onReady).not.toHaveBeenCalled()
 
@@ -293,6 +293,6 @@ it("drops malformed frame messages and strips fields the protocol does not name"
   ]) {
     expect(on(malformed), JSON.stringify(malformed)).toBeNull()
   }
-  expect(parseFrameMessage({ channel: "omp-embed", type: "modal", open: true })).toBeNull()
+  expect(parseFrameMessage({ channel: "other-embed", type: "modal", open: true })).toBeNull()
   expect(parseFrameMessage("learn-embed")).toBeNull()
 })

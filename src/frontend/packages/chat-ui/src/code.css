@@ -1,5 +1,5 @@
 /* Fenced code and diagrams of @gigachad/chat-ui (`CodeBlock`, `MermaidDiagram`, `MarkmapDiagram`), the only copy: the
-   shell imports this file from source, the omp-web overlay through the package export `@gigachad/chat-ui/code.css`.
+   shell imports this file from source, the LearnHarness overlay through the package export `@gigachad/chat-ui/code.css`.
 
    - The color scheme is the components' `theme` prop, set as `data-theme` on `.gc-code`, never a host theme class.
      Highlighted code carries both Shiki themes as CSS variables (`--shiki-dark`, `--shiki-light`), the scheme picks one
@@ -7,7 +7,7 @@
      numbers are never selected or copied. `--gc-code-gutter` (set by `CodeBlock`) fits the widest number
    - Host contract, the role tokens read here: --ink  --ink-subtle  --paper  --surface  --surface-elevated  --radius-md
      --shadow-sm  --shadow-md  --inner-highlight  --font-mono  --font-symbols. The shell defines them in
-     `app/globals.css`, the overlay maps them on `[data-markdown-root]` (`ompweb-overlay/theme/chat-ui.css`)
+     `app/globals.css`, the overlay maps them on `[data-markdown-root]` (`learnharness-overlay/theme/prose.css`)
    - Block margins sit in the `utilities` layer with a single class, where the shell's former `my-3` utilities were,
      so the renderer's first and last child rules (`markdown.css`) still zero them */
 

@@ -202,15 +202,3 @@ describe("ChatInput draft", () => {
     expect(draftOf().value).toBe("")
   })
 })
-
-describe("ChatInput video paste", () => {
-  afterEach(cleanup)
-
-  it("hands pasted videos to onPasteVideo", () => {
-    const onPasteVideo = vi.fn()
-    render(<ChatInput chatId="c1" onSend={() => {}} onPasteVideo={onPasteVideo} />)
-    const video = new File(["v"], "clip.mp4", { type: "video/mp4" })
-    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { files: [video], items: [] } })
-    expect(onPasteVideo).toHaveBeenCalledWith(video)
-  })
-})
