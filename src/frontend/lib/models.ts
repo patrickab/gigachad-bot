@@ -1,7 +1,11 @@
 import type { ModelProvider } from "@/lib/domain/types"
 
-/** LiteLLM prefix used for OMP-sourced models: `litellm_proxy/<omp-provider>/<id>`. */
-export const OMP_LITELLM_ID = "litellm_proxy"
+/** LiteLLM prefix used for Pi-sourced models: `litellm_proxy/<pi-provider>/<id>`. */
+export const PI_LITELLM_ID = "litellm_proxy"
+/** `source` of the catalog row holding every Pi gateway pick (backend `pi_models.SOURCE`). */
+export const PI_MODEL_SOURCE = "pi"
+/** Label of that row, one selector tab listing `<pi-provider>/<model>` (backend `pi_models.PROVIDER_LABEL`). */
+export const PI_PROVIDER_LABEL = "Pi"
 
 /** A provider's models as `litellm_id/model` ids. */
 export function qualifiedModelIds(provider: ModelProvider): string[] {
@@ -9,9 +13,9 @@ export function qualifiedModelIds(provider: ModelProvider): string[] {
 }
 
 export function displayName(m: string): string {
-  // Keep the OMP provider segment (`anthropic/claude-opus-5`) so rows stay distinct under the
-  // single OMP provider tab. Drop only the LiteLLM proxy hop.
-  if (m.startsWith(`${OMP_LITELLM_ID}/`)) return m.slice(OMP_LITELLM_ID.length + 1)
+  // Keep the Pi provider segment (`anthropic/claude-opus-5`) so rows stay distinct under the
+  // single Pi provider tab. Drop only the LiteLLM proxy hop.
+  if (m.startsWith(`${PI_LITELLM_ID}/`)) return m.slice(PI_LITELLM_ID.length + 1)
   const slash = m.indexOf("/")
   return slash === -1 ? m : m.slice(slash + 1)
 }

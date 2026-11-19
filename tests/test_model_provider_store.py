@@ -5,6 +5,7 @@ from lib.model_provider_store import (
     DEFAULT_MODEL_DEFAULTS,
     MODEL_DEFAULTS_FILE,
     MODEL_PROVIDERS_FILE,
+    MODEL_TAB_ORDER_FILE,
     OPENAI_PROVIDER,
     ModelProviderStore,
     providers_for_ui,
@@ -58,3 +59,39 @@ def test_model_defaults_file_with_unknown_keys_is_reset(data_store):
     defaults = ModelProviderStore(data_store).load_defaults()
 
     assert defaults == DEFAULT_MODEL_DEFAULTS
+
+
+def test_legacy_gateway_rows_migrate_once_into_the_pi_row(data_store):
+    """Pre-Pi `omp` rows, per login or already folded, become one `Pi` row; stored selectors keep their spelling."""
+    catalog = ModelProviderStore(data_store)
+    catalog.save({
+        "OMP · Anthropic": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "omp"},
+        "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.1-pro"]},
+        "OMP · OpenAI Codex": {
+            "litellm_id": "litellm_proxy",
+            "models": ["openai-codex/gpt-5.2", "anthropic/claude-opus-5"],
+            "source": "omp",
+        },
+    })
+
+    providers = catalog.load()
+
+    # Merged in row order at the first legacy row's position, deduped, the other provider untouched.
+    assert list(providers) == ["Pi", "Gemini"]
+    assert providers["Pi"] == {
+        "litellm_id": "litellm_proxy",
+        "models": ["anthropic/claude-opus-5", "openai-codex/gpt-5.2"],
+        "source": "pi",
+    }
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_PROVIDERS_FILE}")
+    assert "omp" not in content.decode()
+    assert catalog.load() == providers
+
+
+def test_legacy_tab_order_entry_is_renamed_once(data_store):
+    data_store.write_bytes(f"{MODEL}/{MODEL_TAB_ORDER_FILE}", b"- OMP\n- OpenAI\n")
+    catalog = ModelProviderStore(data_store)
+
+    assert catalog.load_tab_order() == ["Pi", "OpenAI"]
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_TAB_ORDER_FILE}")
+    assert content.decode() == "- Pi\n- OpenAI\n"

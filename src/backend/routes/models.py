@@ -123,8 +123,8 @@ async def save_model_tab_order(body: OrderBody, store: ModelProviderStore = Depe
     return await _models_payload(store, tab_order=tab_order)
 
 
-@router.get("/models/omp")
-async def get_omp_models(refresh: bool = False) -> dict:
+@router.get("/models/pi")
+async def get_pi_models(refresh: bool = False) -> dict:
     """Providers pi-host's gateway serves, and their models.
 
     Reachability is part of the payload, never an HTTP error: pi-host can be

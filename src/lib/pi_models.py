@@ -2,8 +2,8 @@
 
 - Consumes pi-host's OpenAI-compatible gateway (`pi_host.gateway_url()`, bearer `pi_host.token()`): `/v1/models`
   lists Pi's providers (Anthropic subscription and API keys, D13) with each model's `thinking_levels`
-- Provides the LiteLLM routing of the `litellm_proxy/` prefix, the gateway catalog for the settings panel, each
-  model's effort ladder for `reasoning_levels` and LearnHarness, and the folding of stored selector rows
+- Provides the LiteLLM routing of the `litellm_proxy/` prefix, the gateway catalog for the settings panel, and each
+  model's effort ladder for `reasoning_levels` and LearnHarness
 
 A Pi model is an ordinary selector string on every call path, `litellm_proxy/anthropic/claude-opus-4-5`. LiteLLM
 resolves that prefix from `LITELLM_PROXY_API_BASE`/`_KEY`, so the override reaches gateway models only and every other
@@ -26,10 +26,9 @@ log = logging.getLogger(__name__)
 # The LiteLLM provider prefix of a gateway model. Stored selectors carry it, so it never changes.
 LITELLM_ID = "litellm_proxy"
 
-# Every gateway pick shares one provider row. Stored catalogs and the browser still name it `OMP`/`omp`,
-# the browser builds its gateway row from these two values.
-PROVIDER_LABEL = "OMP"
-SOURCE = "omp"
+# Every gateway pick shares one provider row, labelled and sourced by these two values (the browser mirrors them).
+PROVIDER_LABEL = "Pi"
+SOURCE = "pi"
 
 _CATALOG_TTL_SECONDS = 60.0
 _REQUEST_TIMEOUT_SECONDS = 3.0
@@ -157,27 +156,3 @@ def thinking_levels(model_id: str) -> list[str] | None:
     except GatewayUnavailable:
         return None
     return levels.get(model_id)
-
-
-def fold_provider_rows(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Collapse every gateway-sourced row into the single `PROVIDER_LABEL` row.
-
-    Legacy catalogs hold one row per login ("OMP · Anthropic"). Folding on read migrates them (the browser posts the
-    folded snapshot back on its next save) and is a no-op once a single row remains.
-    """
-    sourced = [(label, provider) for label, provider in providers.items() if provider.get("source") == SOURCE]
-    if not sourced or (len(sourced) == 1 and sourced[0][0] == PROVIDER_LABEL):
-        return providers
-
-    models: list[str] = []
-    for _, provider in sourced:
-        models.extend(model for model in provider["models"] if model not in models)
-    merged = {"litellm_id": sourced[0][1]["litellm_id"], "models": models, "source": SOURCE}
-
-    folded: dict[str, dict[str, Any]] = {}
-    for label, provider in providers.items():
-        if provider.get("source") != SOURCE:
-            folded[label] = provider
-        elif PROVIDER_LABEL not in folded:
-            folded[PROVIDER_LABEL] = merged
-    return folded

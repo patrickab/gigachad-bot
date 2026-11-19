@@ -1,6 +1,6 @@
 import type { Attachment, ModelsResponse, OmpView } from "@/lib/domain/types"
 import { blobToDataUrl } from "@/lib/utils"
-import { OMP_LITELLM_ID } from "@/lib/models"
+import { PI_LITELLM_ID, PI_MODEL_SOURCE } from "@/lib/models"
 import { fuzzyPathScore, fuzzyScore, rankByScore } from "@/lib/fuzzy"
 import { buildHiddenContent, composeUserMessage, isImageAttachment } from "@/features/chat/attachments"
 import type { ComposerImage, FrameMessage, ModelRef } from "@gigachad/chat-ui/protocol"
@@ -11,8 +11,6 @@ export type ComposerCommands = Extract<FrameMessage, { type: "composer-commands"
 
 /** Command prefix of a skill: `/skill:<name>`. */
 export const SKILL_PREFIX = "skill:"
-
-const OMP_MODEL_SOURCE = "omp"
 
 /** Whether a composer message for `sessionId` belongs to `view`. The new-session screen has no session. */
 export function isComposerOf(view: OmpView, sessionId: string | null): boolean {
@@ -76,19 +74,19 @@ export function shellHint(text: string, attachmentCount: number): string | null 
   return draft.startsWith("!!") ? "Shell · output stays local" : "Shell · output sent to the model"
 }
 
-/** Selector models for omp tabs: only the providers picked from omp's logins, whose models are omp `provider/modelId` ids. */
+/** Selector models for omp tabs: only the Pi gateway row, whose models are `provider/modelId` ids omp shares. */
 export function ompSelectorModels(models: ModelsResponse): ModelsResponse {
-  return { ...models, ollama: [], providers: models.providers.filter((provider) => provider.source === OMP_MODEL_SOURCE) }
+  return { ...models, ollama: [], providers: models.providers.filter((provider) => provider.source === PI_MODEL_SOURCE) }
 }
 
 /** Selector id of an omp model: `litellm_proxy/anthropic/claude-opus-5`. */
 export function selectorModelId(model: ModelRef): string {
-  return `${OMP_LITELLM_ID}/${model.provider}/${model.modelId}`
+  return `${PI_LITELLM_ID}/${model.provider}/${model.modelId}`
 }
 
-/** The omp model a selector id names, null for ids outside the omp rows. */
+/** The omp model a selector id names, null for ids outside the Pi gateway row. */
 export function ompModelOf(selectorId: string): ModelRef | null {
-  const prefix = `${OMP_LITELLM_ID}/`
+  const prefix = `${PI_LITELLM_ID}/`
   if (!selectorId.startsWith(prefix)) return null
   const id = selectorId.slice(prefix.length)
   const slash = id.indexOf("/")

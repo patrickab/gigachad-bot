@@ -34,17 +34,17 @@ describe("omp selector ids", () => {
     expect(ompModelOf("litellm_proxy/anthropic/")).toBeNull()
   })
 
-  it("lists only the providers picked from omp", () => {
+  it("lists only the Pi gateway row", () => {
     const models: ModelsResponse = {
       ollama: ["llama3"],
       providers: [
         { label: "OpenAI", litellm_id: "openai", models: ["gpt-5.6"] },
-        { label: "OMP", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "omp" },
+        { label: "Pi", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
       ],
       defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", omp_model: "" },
       tab_order: [],
     }
-    expect(ompSelectorModels(models)).toMatchObject({ ollama: [], providers: [{ label: "OMP" }] })
+    expect(ompSelectorModels(models)).toMatchObject({ ollama: [], providers: [{ label: "Pi" }] })
   })
 })
 

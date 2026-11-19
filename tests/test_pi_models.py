@@ -1,4 +1,4 @@
-"""The Pi model source: catalog from pi-host's gateway, effort ladders, LiteLLM routing and stored row folding."""
+"""The Pi model source: catalog from pi-host's gateway, effort ladders and LiteLLM routing."""
 
 import os
 
@@ -6,7 +6,6 @@ import httpx
 import pytest
 
 from lib import pi_host, pi_models
-from lib.model_provider_store import providers_for_ui
 
 ENTRIES = [
     {
@@ -136,27 +135,3 @@ def test_configure_litellm_proxy_keeps_an_operator_override(tmp_path, monkeypatc
 
     assert os.environ["LITELLM_PROXY_API_BASE"] == "http://elsewhere/v1"
     assert os.environ["LITELLM_PROXY_API_KEY"] == "operator-key"
-
-
-def test_legacy_per_login_rows_fold_into_one(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    stored = {
-        "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.1-pro"]},
-        "OMP · Anthropic": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "omp"},
-        "OMP · OpenAI Codex": {
-            "litellm_id": "litellm_proxy",
-            "models": ["openai-codex/gpt-5.2", "anthropic/claude-opus-5"],
-            "source": "omp",
-        },
-    }
-
-    visible = providers_for_ui(stored)
-
-    assert list(visible) == ["Gemini", "OMP"]
-    # Merged in row order, deduped, and the other provider is untouched.
-    assert visible["OMP"] == {
-        "litellm_id": "litellm_proxy",
-        "models": ["anthropic/claude-opus-5", "openai-codex/gpt-5.2"],
-        "source": "omp",
-    }
-    assert visible["Gemini"] is stored["Gemini"]

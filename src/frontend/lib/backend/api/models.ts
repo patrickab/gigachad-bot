@@ -1,7 +1,7 @@
 // Model catalog, model settings and prompt routes.
 import { toQuery } from "../urls"
 import { del, put, request } from "./http"
-import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PromptMeta, ReasoningLevels } from "@/lib/domain/types"
+import type { ModelDefaults, ModelProvider, ModelsResponse, PiCatalog, PromptMeta, ReasoningLevels } from "@/lib/domain/types"
 
 export async function fetchModels(signal?: AbortSignal): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models", { signal })
@@ -23,8 +23,8 @@ export async function saveModelTabOrder(order: string[]): Promise<ModelsResponse
   return put<ModelsResponse>("/models/tab-order", { order })
 }
 
-export async function fetchOmpCatalog(refresh = false): Promise<OmpCatalog> {
-  return request<OmpCatalog>(`/models/omp${refresh ? "?refresh=true" : ""}`)
+export async function fetchPiCatalog(refresh = false): Promise<PiCatalog> {
+  return request<PiCatalog>(`/models/pi${refresh ? "?refresh=true" : ""}`)
 }
 
 export async function saveModelDefaults(defaults: ModelDefaults): Promise<ModelsResponse> {

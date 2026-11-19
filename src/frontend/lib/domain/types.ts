@@ -173,7 +173,7 @@ export interface ModelsResponse {
   ollama: string[]
   providers: ModelProvider[]
   defaults: ModelDefaults
-  /** Persisted selector-tab display order, e.g. `["Ollama", "OMP", "OpenAI"]`. Tabs missing from it fall to the end. */
+  /** Persisted selector-tab display order, e.g. `["Ollama", "Pi", "OpenAI"]`. Tabs missing from it fall to the end. */
   tab_order: string[]
 }
 
@@ -187,11 +187,11 @@ export interface ModelProvider {
   litellm_id: string
   /** Model name without the provider prefix; the selector sends `litellm_id/model`. */
   models: string[]
-  /** Where the models came from. `"omp"` rows were picked from OMP's logins. */
+  /** Where the models came from. `"pi"` rows were picked from Pi's logins through pi-host's gateway. */
   source?: string | null
 }
 
-interface OmpModel {
+interface PiModel {
   /** Gateway model id, already provider-qualified, e.g. `anthropic/claude-opus-5`. */
   id: string
   name: string
@@ -199,21 +199,21 @@ interface OmpModel {
   context_window: number | null
 }
 
-interface OmpProvider {
+interface PiProvider {
   id: string
   label: string
-  models: OmpModel[]
+  models: PiModel[]
 }
 
-export interface OmpCatalog {
-  /** OMP is present on this machine. */
+export interface PiCatalog {
+  /** pi-host has run on this machine (its gateway token exists). */
   installed: boolean
   /** Its gateway answered, so these models are callable right now. */
   online: boolean
   gateway: string
   /** LiteLLM prefix to build a selector with: `${litellm_id}/${model.id}`. */
   litellm_id: string
-  providers: OmpProvider[]
+  providers: PiProvider[]
   error: string | null
 }
 

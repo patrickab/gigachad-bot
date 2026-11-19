@@ -292,11 +292,12 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 - Return 503 for unavailable upstream, 502 naming invalid response fields, and preserve explicit upstream refusals. Share HTTP/error plumbing with factory through `lib/upstream.py`.
 - Gate frame URL/API availability by host access. Persisted OMP-message deletion is unsupported. Frame DOCX/PDF previews are blocked by `SAMEORIGIN`. Standalone omp-web keeps its native UI.
 
-### OMP model source is a separate integration
+### Pi model source is a separate integration
 
-- Route local model-chat OMP selections through LiteLLM's `litellm_proxy/` prefix to the auth gateway, not through the omp-web frame. Configure the proxy before first model use, preserving explicitly supplied LiteLLM environment values.
-- Use `GIGACHAD_OMP_GATEWAY_URL` (default `http://127.0.0.1:4000/v1`). Resolve the bearer from `GIGACHAD_OMP_GATEWAY_TOKEN`, then OMP's token file, then the no-auth fallback. `PI_CONFIG_DIR` overrides OMP's normal config directory.
-- Return an offline catalog with a reason when the gateway is unreachable. That catalog response is distinct from a failed generation and from omp-web's 503. Cache the catalog for 60 seconds and OMP CLI reasoning levels for five minutes.
+- Route local model-chat Pi selections through LiteLLM's `litellm_proxy/` prefix to pi-host's completion gateway (`src/lib/pi_models.py`), not through a frame. Configure the proxy before first model use, preserving explicitly supplied LiteLLM environment values.
+- The gateway is `pi_host.gateway_url()` (`GIGACHAD_PI_HOST_URL`, default `http://127.0.0.1:8300`, plus `/v1`), the bearer pi-host's token file. `GET /api/models/pi` returns its catalog. Every pick lands in one catalog row labelled `Pi` with `source: "pi"`. Stored selectors keep `litellm_proxy/<provider>/<model>`.
+- `ModelProviderStore` rewrites pre-Pi rows (`source: "omp"`, label `OMP` or one row per login) once on load into that row, and a tab-order entry `OMP` into `Pi`.
+- Return an offline catalog with a reason when the gateway is unreachable. That catalog response is distinct from a failed generation. Cache the catalog and the effort ladders for 60 seconds.
 
 ## Agent factory
 

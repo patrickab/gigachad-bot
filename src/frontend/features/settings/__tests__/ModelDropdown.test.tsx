@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
-import type { ModelsResponse, OmpCatalog } from "@/lib/domain/types"
+import type { ModelsResponse, PiCatalog } from "@/lib/domain/types"
 
-const fetchOmpCatalog = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/backend/api", () => ({ fetchOmpCatalog }))
+const fetchPiCatalog = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/backend/api", () => ({ fetchPiCatalog }))
 
 const models: ModelsResponse = {
   ollama: ["ollama/gemma4:31b-cloud"],
@@ -13,7 +13,7 @@ const models: ModelsResponse = {
   tab_order: [],
 }
 
-const onlineCatalog: OmpCatalog = {
+const onlineCatalog: PiCatalog = {
   installed: true,
   online: true,
   gateway: "http://127.0.0.1:4000/v1",
@@ -27,13 +27,13 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Manage models" }))
 }
 
-describe("ModelDropdown OMP source", () => {
+describe("ModelDropdown Pi source", () => {
   beforeEach(() => {
-    fetchOmpCatalog.mockReset()
+    fetchPiCatalog.mockReset()
   })
 
-  it("adds a picked OMP model as a proxy-prefixed provider entry", async () => {
-    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+  it("adds a picked Pi model as a proxy-prefixed provider entry", async () => {
+    fetchPiCatalog.mockResolvedValue(onlineCatalog)
     const onProvidersChange = vi.fn().mockResolvedValue(undefined)
     render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
 
@@ -44,16 +44,16 @@ describe("ModelDropdown OMP source", () => {
     await waitFor(() => expect(onProvidersChange).toHaveBeenCalled())
     expect(onProvidersChange.mock.calls[0][0]).toEqual([
       { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] },
-      { label: "OMP", litellm_id: "litellm_proxy", source: "omp", models: ["anthropic/claude-opus-5"] },
+      { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] },
     ])
   })
 
-  it("removes an already-picked OMP model instead of duplicating it", async () => {
-    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+  it("removes an already-picked Pi model instead of duplicating it", async () => {
+    fetchPiCatalog.mockResolvedValue(onlineCatalog)
     const onProvidersChange = vi.fn().mockResolvedValue(undefined)
     const withPick: ModelsResponse = {
       ...models,
-      providers: [...models.providers, { label: "OMP", litellm_id: "litellm_proxy", source: "omp", models: ["anthropic/claude-opus-5"] }],
+      providers: [...models.providers, { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-opus-5"] }],
     }
     render(<ModelDropdown models={withPick} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
 
@@ -66,18 +66,27 @@ describe("ModelDropdown OMP source", () => {
   })
 
   it("only probes the gateway once the settings panel is opened", async () => {
-    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+    fetchPiCatalog.mockResolvedValue(onlineCatalog)
     render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
     fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
-    expect(fetchOmpCatalog).not.toHaveBeenCalled()
+    expect(fetchPiCatalog).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Manage models" }))
-    await waitFor(() => expect(fetchOmpCatalog).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchPiCatalog).toHaveBeenCalledTimes(1))
+  })
+
+  it("points at run-pi-host.sh while the gateway is offline", async () => {
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, online: false })
+    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    openSettings()
+
+    expect(await screen.findByText(/not answering on http:\/\/127\.0\.0\.1:4000\/v1\. Start it with run-pi-host\.sh/)).toBeInTheDocument()
   })
 
   it("lists providers in the persisted order, unlisted providers last", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
     const withThree: ModelsResponse = {
       ...models,
       providers: [
@@ -96,7 +105,7 @@ describe("ModelDropdown OMP source", () => {
   })
 
   it("sorts models alphabetically within each provider", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
     const unsorted: ModelsResponse = {
       ...models,
       ollama: ["ollama/zulu", "ollama/alpha"],
@@ -113,7 +122,7 @@ describe("ModelDropdown OMP source", () => {
   })
 
   it("opens on the provider tab holding the currently selected model, not Ollama", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
     render(<ModelDropdown models={models} selectedModel="gemini/gemini-3.1-pro" onSelect={vi.fn()} onProvidersChange={vi.fn()} onTabOrderChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
     fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
@@ -123,7 +132,7 @@ describe("ModelDropdown OMP source", () => {
   })
 
   it("narrows only the pick list with pickModels: Manage models still saves the full catalog", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    fetchPiCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
     const onProvidersChange = vi.fn().mockResolvedValue(undefined)
     const ollamaOnly = (catalog: ModelsResponse): ModelsResponse => ({ ...catalog, providers: [] })
     render(<ModelDropdown models={models} pickModels={ollamaOnly} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)

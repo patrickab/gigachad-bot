@@ -2,22 +2,22 @@
 
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchOmpCatalog } from "@/lib/backend/api"
-import { displayName } from "@/lib/models"
-import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/domain/types"
+import { fetchPiCatalog } from "@/lib/backend/api"
+import { displayName, PI_MODEL_SOURCE, PI_PROVIDER_LABEL } from "@/lib/models"
+import type { ModelDefaults, ModelProvider, ModelsResponse, PiCatalog } from "@/lib/domain/types"
 import { errorMessage, cn } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 
 type SettingsTab = "providers" | "defaults"
 
-/** State of the model admin view, kept for the whole dropdown lifetime so the tab, draft defaults and OMP catalog survive closing it. */
+/** State of the model admin view, kept for the whole dropdown lifetime so the tab, draft defaults and Pi catalog survive closing it. */
 export function useModelSettings(onProvidersChange: (providers: ModelProvider[]) => Promise<void>, onDefaultsChange: (defaults: ModelDefaults) => Promise<void>): ModelSettings {
   const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers")
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
-  const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
+  const [piCatalog, setPiCatalog] = useState<PiCatalog | null>(null)
   // Default-model edits are buffered and flushed once on close, not saved per keystroke.
   const pendingDefaults = useRef<ModelDefaults | null>(null)
   const close = useCallback(() => {
@@ -27,13 +27,13 @@ export function useModelSettings(onProvidersChange: (providers: ModelProvider[])
     if (defaults) void onDefaultsChange(defaults).catch((reason) => setError(errorMessage(reason, "Could not save default models")))
   }, [onDefaultsChange])
   useEscapeLayer(() => setConfiguring(false), configuring)
-  // Loaded when the settings panel opens, not on mount: OMP is optional, so
+  // Loaded when the settings panel opens, not on mount: pi-host is optional, so
   // probing its gateway for every chat view would cost a request nobody asked
   // for. A failed probe stays null and simply hides the section.
   useEffect(() => {
-    if (!configuring || ompCatalog) return
-    fetchOmpCatalog().then(setOmpCatalog).catch(() => undefined)
-  }, [configuring, ompCatalog])
+    if (!configuring || piCatalog) return
+    fetchPiCatalog().then(setPiCatalog).catch(() => undefined)
+  }, [configuring, piCatalog])
 
   const persist = async (next: ModelProvider[]) => {
     setError(null)
@@ -41,7 +41,7 @@ export function useModelSettings(onProvidersChange: (providers: ModelProvider[])
   }
   const updateDefaults = (defaults: ModelDefaults) => { setDraftDefaults(defaults); pendingDefaults.current = defaults }
 
-  return { configuring, setConfiguring, settingsTab, setSettingsTab, error, setError, draftDefaults, ompCatalog, persist, updateDefaults, close }
+  return { configuring, setConfiguring, settingsTab, setSettingsTab, error, setError, draftDefaults, piCatalog, persist, updateDefaults, close }
 }
 
 /** Admin view state shared by the dropdown (open/close, error line) and the panel. */
@@ -53,14 +53,14 @@ export interface ModelSettings {
   error: string | null
   setError: (error: string | null) => void
   draftDefaults: ModelDefaults | null
-  ompCatalog: OmpCatalog | null
+  piCatalog: PiCatalog | null
   persist: (next: ModelProvider[]) => Promise<boolean>
   updateDefaults: (defaults: ModelDefaults) => void
   /** Leave the admin view and flush buffered default-model edits. */
   close: () => void
 }
 
-/** Provider/model admin view of the model dropdown: providers, OMP picks and default models. */
+/** Provider/model admin view of the model dropdown: providers, Pi picks and default models. */
 export function ModelSettingsPanel({ settings, models, choices }: { settings: ModelSettings; models: ModelsResponse; choices: string[] }) {
   const segmentClass = (active: boolean) => cn("flex-1 rounded-md px-2 py-1.5 text-xs transition-colors", active ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")
   return <>
@@ -72,7 +72,7 @@ export function ModelSettingsPanel({ settings, models, choices }: { settings: Mo
       </div>
     </div>
     {settings.settingsTab === "providers"
-      ? <ProviderSettings providers={models.providers} ompCatalog={settings.ompCatalog} onChange={settings.persist} />
+      ? <ProviderSettings providers={models.providers} piCatalog={settings.piCatalog} onChange={settings.persist} />
       : <DefaultModels defaults={settings.draftDefaults ?? models.defaults} choices={choices} onChange={settings.updateDefaults} />}
     <ModelSettingsError error={settings.error} />
   </>
@@ -123,39 +123,35 @@ function ProviderRow({ provider, expanded, onToggle, onAddModel, onDeleteModel, 
 const patchProvider = (providers: ModelProvider[], label: string, models: (current: string[]) => string[]): ModelProvider[] =>
   providers.map((item) => item.label === label ? { ...item, models: models(item.models) } : item)
 
-const OMP_SOURCE = "omp"
-/** One catalog row holds every OMP pick, so the selector shows a single OMP
- *  tab listing `<omp-provider>/<model>` instead of a tab per login. */
-const OMP_LABEL = "OMP"
-
-/** Picks models out of OMP's own logins, including OAuth subscription plans.
+/** Picks models out of Pi's own logins, including OAuth subscription plans.
  *
  * Every pick lands in the same provider catalog as a hand-entered provider:
- * one `OMP` row prefixed `litellm_proxy` so LiteLLM routes it at the OMP
- * gateway. Nothing downstream of the catalog needs to know OMP exists.
- * The picker still browses by login, because that is how OMP holds
- * credentials; only the destination row is shared.
+ * one `Pi` row prefixed `litellm_proxy` so LiteLLM routes it at pi-host's
+ * gateway, and the selector shows a single Pi tab instead of a tab per login.
+ * Nothing downstream of the catalog needs to know Pi exists. The picker still
+ * browses by login, because that is how Pi holds credentials; only the
+ * destination row is shared.
  */
-function OmpSection({ catalog, providers, onChange }: {
-  catalog: OmpCatalog | null
+function PiSection({ catalog, providers, onChange }: {
+  catalog: PiCatalog | null
   providers: ModelProvider[]
   onChange: (next: ModelProvider[]) => Promise<boolean>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   if (!catalog?.installed) return null
-  if (!catalog.online) return <p className="border-t border-divider px-3 py-2 text-[10px] text-ink-subtle">OMP is installed but its gateway is not answering on {catalog.gateway}. Start it with run-omp.sh to add subscription models.</p>
+  if (!catalog.online) return <p className="border-t border-divider px-3 py-2 text-[10px] text-ink-subtle">pi-host is set up but its gateway is not answering on {catalog.gateway}. Start it with run-pi-host.sh to add subscription models.</p>
 
-  const ompModels = providers.find((item) => item.label === OMP_LABEL)?.models ?? []
+  const piModels = providers.find((item) => item.label === PI_PROVIDER_LABEL)?.models ?? []
   const toggle = (modelId: string) => {
-    if (!providers.some((item) => item.label === OMP_LABEL)) return onChange([...providers, { label: OMP_LABEL, litellm_id: catalog.litellm_id, source: OMP_SOURCE, models: [modelId] }])
-    return onChange(patchProvider(providers, OMP_LABEL, (models) => models.includes(modelId) ? models.filter((value) => value !== modelId) : [...models, modelId]))
+    if (!providers.some((item) => item.label === PI_PROVIDER_LABEL)) return onChange([...providers, { label: PI_PROVIDER_LABEL, litellm_id: catalog.litellm_id, source: PI_MODEL_SOURCE, models: [modelId] }])
+    return onChange(patchProvider(providers, PI_PROVIDER_LABEL, (models) => models.includes(modelId) ? models.filter((value) => value !== modelId) : [...models, modelId]))
   }
 
   return <div className="border-t border-divider">
-    <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wide text-ink-subtle">From OMP</p>
+    <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wide text-ink-subtle">From Pi</p>
     <div className="max-h-64 space-y-0.5 overflow-y-auto p-1.5 pt-0">
       {catalog.providers.map((provider) => {
-        const picked = provider.models.filter((model) => ompModels.includes(model.id))
+        const picked = provider.models.filter((model) => piModels.includes(model.id))
         const open = expanded === provider.id
         return <div key={provider.id} className="rounded-md hover:bg-surface-elevated">
           <button onClick={() => setExpanded(open ? null : provider.id)} className="flex w-full items-center">
@@ -164,7 +160,7 @@ function OmpSection({ catalog, providers, onChange }: {
           </button>
           {open && <div className="border-t border-divider px-2 pb-2 pt-1">
             {provider.models.map((model) => {
-              const added = ompModels.includes(model.id)
+              const added = piModels.includes(model.id)
               return <button key={model.id} onClick={() => void toggle(model.id)} className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-surface-elevated", added ? "text-ink" : "text-ink-muted")}>
                 <span className="min-w-0 truncate">{displayName(model.id)}</span>
                 {added ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Plus className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />}
@@ -177,7 +173,7 @@ function OmpSection({ catalog, providers, onChange }: {
   </div>
 }
 
-function ProviderSettings({ providers, ompCatalog, onChange }: { providers: ModelProvider[]; ompCatalog: OmpCatalog | null; onChange: (next: ModelProvider[]) => Promise<boolean> }) {
+function ProviderSettings({ providers, piCatalog, onChange }: { providers: ModelProvider[]; piCatalog: PiCatalog | null; onChange: (next: ModelProvider[]) => Promise<boolean> }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const addProvider = async (labelInput: string, litellmIdInput: string) => {
@@ -190,7 +186,7 @@ function ProviderSettings({ providers, ompCatalog, onChange }: { providers: Mode
       {providers.map((provider) => <ProviderRow key={provider.label} provider={provider} expanded={expanded === provider.label} onToggle={() => setExpanded(expanded === provider.label ? null : provider.label)} onAddModel={(model) => { const value = model.trim(); if (value && !provider.models.includes(value)) void onChange(patchProvider(providers, provider.label, (current) => [...current, value])) }} onDeleteModel={(model) => void onChange(patchProvider(providers, provider.label, (current) => current.filter((value) => value !== model)))} onDeleteProvider={() => void onChange(providers.filter((item) => item.label !== provider.label))} />)}
       {adding ? <AddProvider onAdd={(label, id) => void addProvider(label, id)} /> : <button onClick={() => setAdding(true)} className="flex w-full items-center gap-1 rounded-md px-2 py-2 text-xs text-ink-muted hover:bg-surface-elevated hover:text-ink"><Plus className="h-3.5 w-3.5" /> Add provider</button>}
     </div>
-    <OmpSection catalog={ompCatalog} providers={providers} onChange={onChange} />
+    <PiSection catalog={piCatalog} providers={providers} onChange={onChange} />
   </>
 }
 

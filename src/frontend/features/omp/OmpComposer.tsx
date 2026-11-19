@@ -292,7 +292,7 @@ export function OmpComposer({ view, chatId, slug, shellCommands, insertion = nul
 
 type DropdownProps = ComponentProps<typeof ModelDropdown>
 
-/** gigachad's model selector for an omp tab: the OMP provider rows, applied to the session through the frame. Manage models edits the full catalog. */
+/** gigachad's model selector for an omp tab: the Pi gateway row, applied to the session through the frame. Manage models edits the full catalog. */
 export function OmpModelSelector({ view, ...dropdown }: { view: OmpView } & Omit<DropdownProps, "selectedModel" | "onSelect" | "pickModels">) {
   const { state, sendToComposer } = useComposerFor(view)
   if (view.kind === "settings") return null

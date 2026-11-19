@@ -16,10 +16,10 @@ describe("learnSelectorModels", () => {
     ollama: ["ollama/gemma4", "ollama/qwen3"],
     providers: [
       { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] },
-      { label: "OMP", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "omp" },
+      { label: "Pi", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
     ],
     defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", omp_model: "" },
-    tab_order: ["OMP"],
+    tab_order: ["Pi"],
   }
 
   it("offers only the models the proxy serves, by selector string", () => {
@@ -34,7 +34,7 @@ describe("learnSelectorModels", () => {
       ollama: ["ollama/qwen3"],
       providers: [
         { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.5-flash"] },
-        { label: "OMP", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "omp" },
+        { label: "Pi", litellm_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
       ],
     })
     expect(servedModelOf(served, "ollama/qwen3")).toEqual({ provider: "custom", modelId: "ollama/qwen3" })

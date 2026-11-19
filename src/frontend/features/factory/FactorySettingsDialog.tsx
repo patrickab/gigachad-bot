@@ -12,6 +12,7 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { fetchFactoryDefaults, fetchModels, saveFactoryDefaults } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
+import { PI_MODEL_SOURCE } from "@/lib/models"
 import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
@@ -61,7 +62,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
   })
 
   useLoadWhile(open, fetchFactoryDefaults, setDraft, (cause) => setError(errorMessage(cause, "Could not load the defaults")))
-  useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load OMP models")))
+  useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
 
   const changeSettings = (change: Partial<FactorySettings>) =>
     setDraft((current) => current && { ...current, settings: { ...current.settings, ...change } })
@@ -72,7 +73,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
 
   const modelOptions = [
     { value: "", label: "Agent's own model" },
-    ...(catalog?.providers.filter((provider) => provider.source === "omp").flatMap((provider) => provider.models.map((model) => ({
+    ...(catalog?.providers.filter((provider) => provider.source === PI_MODEL_SOURCE).flatMap((provider) => provider.models.map((model) => ({
       value: model,
       label: model,
     }))) ?? []),
@@ -128,7 +129,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
             </div>
             {modelError
               ? <ErrorText>{modelError}</ErrorText>
-              : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "OMP models added in Providers / Models. Applies to new tasks." : "Loading OMP models"}</p>}
+              : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "Pi models added in Providers / Models. Applies to new tasks." : "Loading Pi models"}</p>}
             <div className="flex flex-col gap-2">
               <PillTabs
                 options={AGENT_TABS}

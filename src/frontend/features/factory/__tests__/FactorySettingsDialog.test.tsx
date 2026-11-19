@@ -21,8 +21,8 @@ const DEFAULTS: FactoryDefaults = {
 const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
   providers: [
-    { label: "OMP", litellm_id: "litellm_proxy", source: "omp", models: ["openai-codex/fast", "openrouter/vendor/model"] },
-    { label: "OpenRouter", litellm_id: "openrouter", models: ["not-added-from-omp"] },
+    { label: "Pi", litellm_id: "litellm_proxy", source: "pi", models: ["openai-codex/fast", "openrouter/vendor/model"] },
+    { label: "OpenRouter", litellm_id: "openrouter", models: ["not-added-from-pi"] },
   ],
   defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", omp_model: "" },
   tab_order: [],
@@ -70,7 +70,7 @@ describe("FactorySettingsDialog", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("offers only added OMP models and preserves native selectors with slashes", async () => {
+  it("offers only added Pi models and preserves native selectors with slashes", async () => {
     const view = render(<FactorySettingsDialog open onClose={vi.fn()} />)
     fireEvent.click(await view.findByLabelText("Model of coder"))
     expect(await view.findByRole("option", { name: "openai-codex/fast" })).toBeVisible()
@@ -86,9 +86,9 @@ describe("FactorySettingsDialog", () => {
   })
 
   it("keeps saved selections when loading models fails and permits clearing them", async () => {
-    api.fetchModels.mockRejectedValue(new Error("Could not load OMP models"))
+    api.fetchModels.mockRejectedValue(new Error("Could not load Pi models"))
     const view = render(<FactorySettingsDialog open onClose={vi.fn()} />)
-    expect(await view.findByRole("alert")).toHaveTextContent("Could not load OMP models")
+    expect(await view.findByRole("alert")).toHaveTextContent("Could not load Pi models")
     fireEvent.click(view.getByLabelText("Model of coder"))
     expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "Agent's own model" }))

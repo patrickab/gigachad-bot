@@ -17,7 +17,7 @@ PROVIDERS = {
     "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.5-flash"]},
     "DeepSeek": {"litellm_id": "deepseek", "models": ["deepseek-chat"]},
     "OpenRouter": {"litellm_id": "openrouter", "models": []},
-    "OMP": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-3-haiku"], "source": "omp"},
+    "Pi": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-3-haiku"], "source": "pi"},
 }
 OLLAMA = ["ollama/gemma3:4b"]
 GATEWAY_ENTRIES = {

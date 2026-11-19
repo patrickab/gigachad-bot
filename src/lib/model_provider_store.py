@@ -29,17 +29,35 @@ OPENAI_PROVIDER = {"litellm_id": "openai", "models": ["gpt-5.6"]}
 # Seed values only: the user picks real models in the model selector, and those are authoritative.
 DEFAULT_MODEL_DEFAULTS = dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL)
 
+# Before Pi the gateway row was labelled `OMP` and sourced `omp`, in older catalogs one row per login
+# ("OMP · Anthropic"). The store rewrites such rows once into the single Pi row; their selectors stay as stored.
+LEGACY_SOURCE = "omp"
+LEGACY_LABEL = "OMP"
+
 
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Shape the stored catalog for the browser.
+    """The stored catalog plus the OpenAI default when its LiteLLM credential is available."""
+    if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in providers:
+        return {**providers, "OpenAI": OPENAI_PROVIDER}
+    return providers
 
-    Folds legacy per-login gateway rows into one, and adds the OpenAI default only
-    when its LiteLLM credential is available.
-    """
-    visible = pi_models.fold_provider_rows(providers)
-    if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in visible:
-        return {**visible, "OpenAI": OPENAI_PROVIDER}
-    return visible
+
+def _migrated_providers(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
+    """*providers* with every legacy gateway row merged into the Pi row, in place of the first; None without one."""
+    legacy = [provider for provider in providers.values() if provider.get("source") == LEGACY_SOURCE]
+    if not legacy:
+        return None
+    models: list[str] = []
+    for provider in legacy:
+        models.extend(model for model in provider["models"] if model not in models)
+    pi_row = {"litellm_id": legacy[0]["litellm_id"], "models": models, "source": pi_models.SOURCE}
+    migrated: dict[str, dict[str, Any]] = {}
+    for label, provider in providers.items():
+        if provider.get("source") != LEGACY_SOURCE:
+            migrated[label] = provider
+        elif pi_models.PROVIDER_LABEL not in migrated:
+            migrated[pi_models.PROVIDER_LABEL] = pi_row
+    return migrated
 
 
 def _nonempty(value: object, message: str) -> str:
@@ -127,8 +145,10 @@ class ModelProviderStore:
             return seed
 
     def load(self) -> dict[str, dict[str, Any]]:
-        """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored."""
-        return _validate(self._load_or_seed(MODEL_PROVIDERS_FILE, {}, DEFAULT_PROVIDERS, allow_unicode=True))
+        """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored and migrating legacy gateway rows."""
+        providers = _validate(self._load_or_seed(MODEL_PROVIDERS_FILE, {}, DEFAULT_PROVIDERS, allow_unicode=True))
+        migrated = _migrated_providers(providers)
+        return providers if migrated is None else self.save(migrated)
 
     def save(self, providers: object) -> dict[str, dict[str, Any]]:
         cleaned = _validate(providers)
@@ -151,7 +171,7 @@ class ModelProviderStore:
         return cleaned
 
     def load_tab_order(self) -> list[str]:
-        """Persisted selector-tab order, e.g. `["Ollama", "OMP", "OpenAI"]`.
+        """Persisted selector-tab order, e.g. `["Ollama", "Pi", "OpenAI"]`, a legacy `OMP` entry renamed once.
 
         Entries no longer present in the catalog are harmless leftovers; the
         caller ranks known tabs by position here and appends any unlisted
@@ -161,7 +181,10 @@ class ModelProviderStore:
             order = self._load_yaml(MODEL_TAB_ORDER_FILE, [])
         except StorageNotFoundError:
             return []
-        return _labels(order, "model-tab-order.yaml must be a list of non-empty tab labels")
+        labels = _labels(order, "model-tab-order.yaml must be a list of non-empty tab labels")
+        if LEGACY_LABEL not in labels or pi_models.PROVIDER_LABEL in labels:
+            return labels
+        return self.save_tab_order([pi_models.PROVIDER_LABEL if label == LEGACY_LABEL else label for label in labels])
 
     def save_tab_order(self, order: object) -> list[str]:
         cleaned = _labels(order, "Tab order must be a list of non-empty labels")

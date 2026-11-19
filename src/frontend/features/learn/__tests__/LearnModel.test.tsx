@@ -15,7 +15,7 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useSettings: () => ({ hostAccess: true, learnharnessUrl: FRAME_URL }),
 }))
 vi.mock("@/hooks/useThemeName", () => ({ useThemeName: () => "light" }))
-vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof Api>(), fetchOmpCatalog: () => new Promise(() => {}) }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof Api>(), fetchPiCatalog: () => new Promise(() => {}) }))
 vi.mock("../useLearnSessions", () => ({ useLearnSessions: () => ({ sessions: [], error: null, refresh: vi.fn(), claim: vi.fn() }) }))
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
 
