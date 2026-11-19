@@ -6,7 +6,8 @@
  *
  * Operations (fixed list, no generic exec or file read):
  * - `piVersion`: version the machine's Pi binary reports
- * - `spawn`: start a `pi --mode rpc` child for a profile through its spawn strategy (local now, AiB later, D5)
+ * - `spawn`: start a `pi --mode rpc` child for a profile through its spawn strategy (the Pi binary, or an AiB container
+ *   for `sandboxed`, D5)
  * - `lockSession` / `unlockSession`: the M1 lock on a session file
  * - `isDirectory`: check a working directory before the per-cwd operations
  * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd or across all cwds, header and entry
@@ -23,9 +24,12 @@
  * `watchSessions` listener, a stream of plain `string[]` messages a transport carries as frames.
  */
 
-/** `coding`: the user's Pi; `document`: the workbench chat's restricted Pi (D4, D9, `supervisor/profiles.ts`). */
-export type Profile = "coding" | "document";
-export const PROFILES: readonly Profile[] = ["coding", "document"];
+/**
+ * `coding`: the user's Pi; `document`: the workbench chat's restricted Pi (D4, D9, `supervisor/profiles.ts`);
+ * `sandboxed`: `coding` arguments in an Agents-in-a-box container that reaches models only through the gateway (C5).
+ */
+export type Profile = "coding" | "document" | "sandboxed";
+export const PROFILES: readonly Profile[] = ["coding", "document", "sandboxed"];
 
 export type SpawnRequest = {
   profile: Profile;

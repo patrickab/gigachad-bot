@@ -1,31 +1,33 @@
 /**
  * pi-host: Pi session supervisor, completion gateway and usage for gigachad-bot.
  *
- * - Consumes: the pinned `pi` binary, ~/.pi/agent (auth, sessions, extensions), `PI_HOST_BIND_HOST`, `PI_HOST_PORT`
- * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token
+ * - Consumes: the pinned `pi` binary, ~/.pi/agent (auth, sessions, extensions), `PI_HOST_BIND_HOST`, `PI_HOST_PORT`,
+ *   the full and gateway token files (`auth.ts`)
+ * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token (C1: the gateway
+ *   token opens `/v1/*` only)
  *
  * One `Host` (M23, `LocalHost` for this machine) serves the supervisor and the catalog.
  */
 import type { Server } from "bun";
-import { authorize, loadToken } from "./auth.ts";
+import { authorize, loadToken, type Tokens } from "./auth.ts";
 import { handleCatalog } from "./catalog/index.ts";
 import { handleGateway } from "./gateway/index.ts";
 import { LocalHost } from "./host/local/index.ts";
 import { loadConfig } from "./supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "./supervisor/index.ts";
 
-export type ServerOptions = { hostname: string; port: number; token: string; supervisor: Supervisor };
+export type ServerOptions = { hostname: string; port: number; tokens: Tokens; supervisor: Supervisor };
 
-/** Serve every route behind the Origin and bearer check (C3). */
-export function startServer({ hostname, port, token, supervisor }: ServerOptions): Server<SocketData> {
+/** Serve every route behind the Origin and bearer check (C3, C1). */
+export function startServer({ hostname, port, tokens, supervisor }: ServerOptions): Server<SocketData> {
   return Bun.serve<SocketData>({
     hostname,
     port,
     idleTimeout: 0,
     async fetch(request, server) {
-      const denied = authorize(request, token);
-      if (denied) return denied;
       const url = new URL(request.url);
+      const denied = authorize(request, url.pathname, tokens);
+      if (denied) return denied;
       if (url.pathname === "/ws") {
         return server.upgrade(request, { data: supervisor.socketData() })
           ? undefined
@@ -44,18 +46,19 @@ export function startServer({ hostname, port, token, supervisor }: ServerOptions
 }
 
 if (import.meta.main) {
-  const token = await loadToken();
+  const config = loadConfig();
+  const tokens = { full: await loadToken(), gateway: await loadToken(config.gatewayTokenPath) };
   let supervisor: Supervisor;
   try {
-    supervisor = await createSupervisor({ host: new LocalHost(loadConfig()) });
+    supervisor = await createSupervisor({ host: new LocalHost(config) });
   } catch (error) {
     console.error(`pi-host: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
   const server = startServer({
     hostname: process.env.PI_HOST_BIND_HOST ?? "127.0.0.1",
-    port: Number(process.env.PI_HOST_PORT ?? 8300),
-    token,
+    port: config.gatewayPort,
+    tokens,
     supervisor,
   });
   console.log(`pi-host listening on http://${server.hostname}:${server.port}`);

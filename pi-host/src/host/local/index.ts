@@ -1,14 +1,17 @@
 /**
  * `LocalHost`: the `Host` of the machine pi-host runs on (machine id `local`).
  *
- * - Consumes: the Pi binary, pi-host's environment, Pi's session files and sidecars, git in a requested cwd
+ * - Consumes: the Pi binary, the `agent-sandbox` CLI, pi-host's environment, the repo extensions dir, Pi's session
+ *   files and sidecars, git in a requested cwd
  * - Provides: `LocalHost`, the only place that spawns processes, touches or watches files or takes `flock`s
  *
- * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes only its
- * arguments (`supervisor/profiles.ts`). A sandboxed profile later maps to a strategy that runs
- * `agent-sandbox pi-rpc --profile ... -- <pi args>`, which keeps the same stdio, stdin-EOF and SIGTERM contract.
+ * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes its arguments
+ * (`supervisor/profiles.ts`) and `coding` also loads the repo extensions (C6). `sandboxed` runs the same arguments
+ * through `agent-sandbox pi-rpc` (`sandbox.ts`, C4, C5), which keeps the same stdio, stdin-EOF and SIGTERM contract.
  */
-import { stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   ForkRequest,
   ForkResult,
@@ -25,6 +28,7 @@ import { childEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
 import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
+import { spawnSandboxed } from "./sandbox.ts";
 import { searchSessions } from "./search.ts";
 import { findSession, listSessions, moveSession, sessionMeta } from "./sessions.ts";
 import { readState, writeState } from "./state.ts";
@@ -35,7 +39,37 @@ export type LocalHostOptions = {
   piBin: string;
   /** Extra variable names children inherit beyond the M6 allowlist. */
   extraChildEnv: string[];
+  /** Repo extensions dir, each top-level extension loaded into `coding` children (C6). */
+  extensionsDir: string;
+  /** `agent-sandbox` CLI running `sandboxed` children (C5). */
+  agentSandboxBin: string;
+  /** AiB profile of `sandboxed` children. */
+  sandboxProfile: string;
+  /** pi-host's own port, the completion gateway sandboxed children reach. */
+  gatewayPort: number;
+  /** The gateway-only token file (C1), the only credential a sandboxed child gets. */
+  gatewayTokenPath: string;
 };
+
+/** True for a C6 extension entry: a `*.ts` file (not `*.test.ts` or `*.d.ts`) or a directory holding `index.ts`. */
+async function isExtension(dir: string, entry: Dirent): Promise<boolean> {
+  if (entry.isFile()) return entry.name.endsWith(".ts") && !/\.(test|d)\.ts$/.test(entry.name);
+  if (!entry.isDirectory()) return false;
+  return (await stat(join(dir, entry.name, "index.ts")).catch(() => undefined))?.isFile() ?? false;
+}
+
+/** `-e <abs path>` for each extension in `dir`, sorted, listed per spawn; none when `dir` is missing. */
+async function extensionArgs(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  const kept = await Promise.all(entries.map(async (entry) => ((await isExtension(dir, entry)) ? entry.name : undefined)));
+  return kept
+    .filter((name): name is string => name !== undefined)
+    .sort()
+    .flatMap((name) => ["-e", join(dir, name)]);
+}
 
 export class LocalHost implements Host {
   readonly machine = "local";
@@ -54,9 +88,10 @@ export class LocalHost implements Host {
     return output.trim().split(/\s+/).pop() ?? "";
   }
 
-  async spawn({ cwd, piArgs }: SpawnRequest): Promise<PiChild> {
-    // Every profile runs the Pi binary directly.
-    return Bun.spawn([this.options.piBin, ...piArgs], {
+  async spawn({ profile, cwd, piArgs }: SpawnRequest): Promise<PiChild> {
+    if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs);
+    const extensions = profile === "coding" ? await extensionArgs(this.options.extensionsDir) : [];
+    return Bun.spawn([this.options.piBin, ...piArgs, ...extensions], {
       cwd,
       env: childEnv(this.options.extraChildEnv),
       stdin: "pipe",

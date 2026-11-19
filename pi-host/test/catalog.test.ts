@@ -353,7 +353,7 @@ describe("private state", () => {
     ]);
     expect((await listed("&profile=document")).map((session) => session.sessionId)).toEqual([OLD_ID]);
     expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID]);
-    expect((await call("GET", `/sessions?cwd=${cwd}&profile=sandboxed`)).json.error).toBe("invalid_profile");
+    expect((await call("GET", `/sessions?cwd=${cwd}&profile=remote`)).json.error).toBe("invalid_profile");
 
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "other" }));
     expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID, OLD_ID]);

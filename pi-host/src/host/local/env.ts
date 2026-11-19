@@ -1,8 +1,9 @@
 /**
- * The environment a local Pi child inherits (M6): an allowlist over pi-host's own environment.
+ * The environment a local Pi child or the `agent-sandbox` CLI of a sandboxed one inherits (M6): an allowlist over
+ * pi-host's own environment.
  *
  * - Consumes: pi-host's environment, extra names from `PI_HOST_CHILD_ENV`
- * - Provides: `childEnv`
+ * - Provides: `childEnv`, `sandboxEnv`
  */
 
 /** Exact variable names a child may inherit. Provider keys and backend secrets are not among them. */
@@ -45,5 +46,19 @@ export function childEnv(extraNames: string[], env: NodeJS.ProcessEnv = process.
     if (allowed.has(name) || CHILD_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) result[name] = value;
   }
   result.PI_SKIP_VERSION_CHECK = "1";
+  return result;
+}
+
+/** What `agent-sandbox pi-rpc` needs to run docker as this user (C4); the container sees none of it. */
+const SANDBOX_ENV_NAMES = ["HOME", "USER", "LOGNAME", "PATH", "LANG", "TZ", "TMPDIR", "XDG_RUNTIME_DIR"];
+
+/** The environment of a sandboxed child's `agent-sandbox` process: the C4 basics plus the gateway-only token (C1). */
+export function sandboxEnv(gatewayToken: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const name of SANDBOX_ENV_NAMES) {
+    const value = env[name];
+    if (value !== undefined) result[name] = value;
+  }
+  result.PI_GATEWAY_TOKEN = gatewayToken;
   return result;
 }

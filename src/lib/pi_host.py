@@ -61,7 +61,8 @@ class ContractModel(BaseModel):
 
 
 # `coding`: a repository session with Pi's own tools and prompt. `document`: a workbench chat, tools and prompt set by the backend.
-Profile = Literal["coding", "document"]
+# `sandboxed`: `coding` in an Agents-in-a-box container that reaches models only through the gateway.
+Profile = Literal["coding", "document", "sandboxed"]
 
 
 class LiveStatus(ContractModel):

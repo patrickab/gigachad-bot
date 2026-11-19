@@ -14,7 +14,7 @@ import type { Host, Profile, SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
-import { parseProfileSpec, profileArgs, sameProfile, type ProfileSpec } from "./profiles.ts";
+import { childModel, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
 import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
@@ -23,7 +23,7 @@ type StartRequest = {
   cwd: string;
   spec: ProfileSpec;
   resume: Resume;
-  model?: { provider: string; id: string };
+  model?: ModelRef;
   thinking?: string;
 };
 type Failure = { status: number; body: Record<string, unknown> };
@@ -294,7 +294,10 @@ export class SupervisorHost implements Supervisor {
     session.identify(data.sessionId, sessionPath ?? resolve(data.sessionFile));
 
     const settings: [string, Record<string, unknown>][] = [];
-    if (request.model) settings.push(["model", { type: "set_model", provider: request.model.provider, modelId: request.model.id }]);
+    if (request.model) {
+      const { provider, id } = childModel(request.spec, request.model);
+      settings.push(["model", { type: "set_model", provider, modelId: id }]);
+    }
     if (request.thinking) settings.push(["thinking", { type: "set_thinking_level", level: request.thinking }]);
     for (const [error, command] of settings) {
       const response = await session.requestAsync(command);

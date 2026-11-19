@@ -1,7 +1,8 @@
 /**
  * Fake `pi` binary for supervisor tests: `--version` and a scripted subset of `--mode rpc`, no model calls.
  *
- * - Consumes: `--session <path>`, `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, JSONL commands on stdin
+ * - Consumes: `--session <path>`, `--session-dir <dir>`, `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, JSONL
+ *   commands on stdin
  * - Provides: Pi-shaped responses and events. Prompt texts script the run: `hold` streams one delta and waits for
  *   `abort`, `dialog` opens a select dialog, `status <key> [text]` sets or clears a status, `compact` appends a
  *   compaction entry, `goto <entryId>` moves the leaf there (a branch switch), `orphan` starts a `sleep` that
@@ -24,8 +25,10 @@ if (args.includes("--version")) {
 
 const cwd = process.cwd();
 const sessionArg = args.indexOf("--session");
+const sessionDirArg = args.indexOf("--session-dir");
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 const sessionDir =
+  (sessionDirArg >= 0 ? args[sessionDirArg + 1] : undefined) ??
   process.env.PI_CODING_AGENT_SESSION_DIR ??
   join(agentDir, "sessions", `--${resolve(cwd).replace(/^\//, "").replace(/[/\\:]/g, "-")}--`);
 
