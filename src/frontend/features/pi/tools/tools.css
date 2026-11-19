@@ -1,0 +1,444 @@
+/* Ported from kahme247/ompweb app/globals.css (MIT, Copyright (c) 2026 agegr).
+
+   Pi tool call rows and the folded "Process details" group, on gigachad tokens (light and dark follow the theme).
+   - Every selector is `pi-` prefixed so nothing collides with the omp-web overlay or app CSS
+   - Monochrome chrome: only status (done, failed) and diff lines carry hue */
+
+.pi-process-details,
+.pi-activity-row {
+  --pi-mono: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --pi-panel: var(--surface);
+  --pi-subtle: color-mix(in oklab, var(--ink) 4%, transparent);
+  --pi-radius: 8px;
+  --pi-fast: 150ms ease-out;
+}
+
+/* Folded "Process details" toggle: quiet when collapsed, chevron flips when expanded */
+.pi-process-details {
+  margin-bottom: 4px;
+}
+.pi-process-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-align: left;
+  transition: color var(--pi-fast);
+}
+.pi-process-details-toggle:hover {
+  color: var(--ink);
+}
+.pi-process-details-icon {
+  flex-shrink: 0;
+  color: var(--ink);
+}
+.pi-process-details-chevron,
+.pi-activity-row-chevron {
+  flex-shrink: 0;
+  transition: transform var(--pi-fast);
+}
+.pi-process-details-chevron[data-expanded] {
+  transform: rotate(180deg);
+}
+.pi-process-details-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-process-details-content {
+  margin-top: 3px;
+}
+
+/* Terminal-like operation timeline: one quiet row per tool call */
+.pi-activity-row {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-muted);
+  font-family: var(--pi-mono);
+}
+.pi-activity-row-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 22px;
+  padding: 2px 0;
+  cursor: pointer;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.pi-activity-row-header:hover {
+  color: var(--ink);
+}
+.pi-activity-row-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.pi-activity-row-trigger[data-fill] {
+  flex: 1 1 auto;
+}
+.pi-activity-row-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex: 0 0 14px;
+  color: var(--diff-added);
+}
+.pi-activity-row-indicator[data-error],
+.pi-activity-row-tool[data-error] {
+  color: var(--danger);
+}
+.pi-activity-row-idle {
+  opacity: 0.5;
+}
+.pi-activity-row-spinner {
+  animation: pi-activity-row-spin 900ms linear infinite;
+}
+.pi-activity-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+}
+.pi-activity-tool-icon[data-category="terminal"] {
+  color: var(--diff-added);
+}
+.pi-activity-row-tool {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-weight: 650;
+}
+.pi-activity-row-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-activity-file-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+.pi-activity-file-link:hover {
+  color: var(--ink);
+  text-decoration-color: var(--ink);
+}
+.pi-activity-row-duration {
+  margin-left: auto;
+  min-width: 42px;
+  flex: 0 0 auto;
+  color: var(--ink-subtle);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.pi-activity-row-chevron:not([data-expanded]) {
+  transform: rotate(-90deg);
+}
+.pi-process-details-toggle:focus-visible,
+.pi-activity-row-trigger:focus-visible,
+.pi-activity-file-link:focus-visible,
+.pi-tool-call-input-toggle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+@keyframes pi-activity-row-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-activity-row-spinner { animation: none; }
+  .pi-process-details-chevron,
+  .pi-activity-row-chevron { transition: none; }
+}
+
+/* Expanded tool call: `$ command` bar, full input, todo badge, output or diff */
+.pi-tool-call-details {
+  width: min(calc(100% - 21px), 760px);
+  margin: 3px 0 4px 21px;
+  overflow: hidden;
+  border: 1px solid var(--divider);
+  border-radius: var(--pi-radius);
+  background: var(--pi-subtle);
+}
+.pi-tool-call-command {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--pi-panel);
+  color: var(--ink-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.pi-tool-call-command-prompt {
+  flex: 0 0 auto;
+  color: var(--ink);
+}
+.pi-tool-call-command code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--pi-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-tool-call-input-toggle {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--pi-radius);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.pi-tool-call-input-toggle:hover {
+  background: var(--hover-overlay);
+}
+.pi-tool-call-input {
+  padding: 8px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 12px;
+}
+.pi-tool-call-input dl,
+.pi-tool-call-input dd,
+.pi-tool-call-input pre {
+  margin: 0;
+}
+.pi-tool-call-input dl > div + div {
+  margin-top: 8px;
+}
+.pi-tool-call-input dt {
+  color: var(--ink-muted);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pi-tool-call-input pre {
+  color: var(--ink);
+  font-family: var(--pi-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pi-tool-call-running {
+  padding: 7px 8px;
+  color: var(--ink-subtle);
+  font-size: 12px;
+}
+.pi-tool-call-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+}
+.pi-tool-call-image {
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  object-fit: contain;
+}
+.pi-tool-call-output {
+  max-height: 260px;
+  overflow: auto;
+  background: var(--paper);
+}
+.pi-tool-call-output-text {
+  margin: 0;
+  padding: 7px 8px;
+  color: var(--ink-muted);
+  font-family: var(--pi-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pi-tool-call-output[data-error] .pi-tool-call-output-text {
+  color: var(--danger);
+}
+.pi-tool-call-todo-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--pi-panel);
+  font-size: 11px;
+}
+.pi-todo-op-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 10%, var(--paper));
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.pi-todo-op-tag[data-op="done"] {
+  background: color-mix(in oklab, var(--diff-added) 15%, var(--paper));
+  color: var(--diff-added);
+}
+.pi-todo-task-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Paired diff: side-by-side split view, or coloured patch lines when the text does not parse */
+.pi-diff {
+  max-height: 560px;
+  overflow: hidden auto;
+  border-top: 1px solid color-mix(in oklab, var(--diff-added) 15%, transparent);
+  background: var(--paper);
+  font-family: var(--pi-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.pi-diff-file {
+  min-width: 0;
+}
+.pi-diff-file + .pi-diff-file {
+  border-top: 1px solid var(--divider);
+}
+.pi-diff-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.pi-diff-row {
+  display: contents;
+}
+.pi-diff-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--divider);
+  background: var(--pi-panel);
+}
+.pi-diff-file-title {
+  padding: 5px 10px;
+  overflow: hidden;
+  color: var(--ink-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pi-diff-file-title:first-child,
+.pi-diff-cell:first-child {
+  border-right: 1px solid var(--divider);
+}
+.pi-diff-cell {
+  display: flex;
+  min-width: 0;
+}
+.pi-diff-cell[data-type="added"],
+.pi-patch-line[data-type="added"] {
+  background: color-mix(in oklab, var(--diff-added) 12%, transparent);
+}
+.pi-diff-cell[data-type="removed"],
+.pi-patch-line[data-type="removed"] {
+  background: color-mix(in oklab, var(--diff-removed) 13%, transparent);
+}
+.pi-diff-cell[data-type="empty"] {
+  background: var(--pi-subtle);
+}
+.pi-diff-lineno {
+  width: 42px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-right: 1px solid var(--divider);
+  background: var(--pi-panel);
+  color: var(--ink-subtle);
+  text-align: right;
+  user-select: none;
+}
+.pi-diff-marker {
+  width: 18px;
+  flex-shrink: 0;
+  padding: 0 5px;
+  color: var(--ink-subtle);
+  user-select: none;
+}
+.pi-diff-cell[data-type="added"] .pi-diff-marker {
+  color: var(--diff-added);
+  font-weight: 700;
+}
+.pi-diff-cell[data-type="removed"] .pi-diff-marker {
+  color: var(--diff-removed);
+  font-weight: 700;
+}
+.pi-diff-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px 0 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pi-diff-cell[data-type="empty"] .pi-diff-text {
+  color: var(--ink-subtle);
+}
+.pi-patch-line {
+  display: flex;
+  border-left: 3px solid transparent;
+}
+.pi-patch-line .pi-diff-lineno {
+  width: 48px;
+  padding: 0 8px;
+}
+.pi-patch-line .pi-diff-text {
+  padding: 0 10px;
+}
+.pi-patch-line[data-type="added"] {
+  border-left-color: var(--diff-added);
+}
+.pi-patch-line[data-type="added"] .pi-diff-text {
+  color: var(--diff-added);
+}
+.pi-patch-line[data-type="removed"] {
+  border-left-color: var(--diff-removed);
+}
+.pi-patch-line[data-type="removed"] .pi-diff-text {
+  color: var(--diff-removed);
+}
+.pi-patch-line[data-type="hunk"] {
+  border-left-color: var(--ink-subtle);
+  background: var(--pi-subtle);
+}
+.pi-patch-line[data-type="hunk"] .pi-diff-text {
+  color: var(--ink-muted);
+}

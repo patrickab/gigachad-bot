@@ -76,6 +76,11 @@ export function terminalSessionUrl(): string {
   return apiWsUrl("/terminal/session")
 }
 
+/** The page's one WebSocket to pi-host, every open Pi session multiplexed by `sessionId`, see `backend/routes/pi.py`. */
+export function piSocketUrl(): string {
+  return apiWsUrl("/pi/ws")
+}
+
 /** WebSocket that pushes the changes of watched disk files, see `backend/routes/file_watch.py`. */
 export function fileWatchUrl(): string {
   return apiWsUrl("/files/watch")

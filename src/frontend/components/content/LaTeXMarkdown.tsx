@@ -7,6 +7,7 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { apiRoot, fileViewerRawUrl } from "@/lib/backend/urls"
 import { offsetToCamera } from "@/lib/domain/viewport"
+import { remarkInlineCodeFileLinks, resolveLocalFileHref } from "@/lib/fileLinks"
 import { CitationPill, type CitationSource } from "./diagrams/CitationPill"
 import "katex/dist/katex.min.css"
 import "@gigachad/chat-ui/markdown.css"
@@ -61,8 +62,15 @@ function imageComponent(imageDirectory: string | undefined): MarkdownComponents[
   }
 }
 
-// Streamdown's hardening blocks relative image paths, a document that resolves them itself turns it off.
+// Streamdown's hardening blocks relative image and link paths, a document that resolves them itself turns it off.
 const RELATIVE_LINKS: LinkPolicy = { harden: false }
+const FILE_LINK_PLUGINS = [remarkInlineCodeFileLinks]
+
+/** Local file links of an agent answer: relative ones resolve against `base`, `open` shows the absolute path. */
+export interface FileLinks {
+  base: string
+  open: (path: string) => void
+}
 
 function LaTeXMarkdownInner({
   content,
@@ -72,6 +80,7 @@ function LaTeXMarkdownInner({
   onContentChange,
   style,
   imageDirectory,
+  fileLinks,
 }: {
   content: string
   citationMap?: Record<string, CitationSource>
@@ -81,14 +90,21 @@ function LaTeXMarkdownInner({
   style?: CSSProperties
   /** Host folder relative image paths resolve against, the document's own. Without it they stay blocked. */
   imageDirectory?: string
+  /** Opens local file links and inline-code paths in the shell instead of navigating. */
+  fileLinks?: FileLinks
 }) {
   const components = useMemo<MarkdownComponents>(() => ({
     img: imageComponent(imageDirectory),
     a({ children, ...props }) {
       const info = citationMap?.[String(children)]
-      return info ? <CitationPill source={info}>{children}</CitationPill> : <a {...props}>{children}</a>
+      if (info) return <CitationPill source={info}>{children}</CitationPill>
+      const path = fileLinks && props.href ? resolveLocalFileHref(props.href, fileLinks.base) : null
+      if (path && fileLinks) {
+        return <a {...props} title={path} onClick={(event) => { event.preventDefault(); fileLinks.open(path) }}>{children}</a>
+      }
+      return <a {...props}>{children}</a>
     },
-  }), [citationMap, imageDirectory])
+  }), [citationMap, imageDirectory, fileLinks])
 
   return (
     <MarkdownRenderer
@@ -98,7 +114,8 @@ function LaTeXMarkdownInner({
       style={style}
       codeRenderers={CODE_RENDERERS}
       components={components}
-      linkPolicy={imageDirectory === undefined ? undefined : RELATIVE_LINKS}
+      remarkPlugins={fileLinks ? FILE_LINK_PLUGINS : undefined}
+      linkPolicy={imageDirectory === undefined && !fileLinks ? undefined : RELATIVE_LINKS}
       onContentChange={onContentChange}
       checkboxClassName="mr-1.5 accent-ink cursor-pointer"
     />

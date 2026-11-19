@@ -68,6 +68,8 @@ export default defineConfig([
           crossFeature("omp", "chat"),
           crossFeature("omp", "editor"),
           crossFeature("omp", "settings"),
+          crossFeature("pi", "chat"),
+          crossFeature("pi", "editor"),
         ],
       }],
     },
