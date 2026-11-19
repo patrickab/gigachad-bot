@@ -65,13 +65,6 @@ if [[ "${GIGACHAD_PI_HOST:-1}" != "0" ]]; then
     service_pids+=($!)
 fi
 
-# Opt out with GIGACHAD_LEARNHARNESS=0. Serves learn mode (LearnHarness, started below) and the
-# LiteLLM proxy its models go through, each reusing an instance already on its port.
-if [[ "${GIGACHAD_LEARNHARNESS:-1}" != "0" ]]; then
-    "$root_dir/run-litellm-proxy.sh" &
-    service_pids+=($!)
-fi
-
 # Opt out with GIGACHAD_FACTORY=0. Serves the Factory board's engine and the gate its previews are framed through,
 # reusing an instance already on its port. The engine waits for the PostgreSQL run-backend.sh starts.
 if [[ "${GIGACHAD_FACTORY:-1}" != "0" ]]; then
@@ -87,8 +80,8 @@ backend_pid=$!
 "$root_dir/run-frontend.sh" &
 frontend_pid=$!
 
-# LearnHarness runs as a sandboxed systemd user unit: the TERM cleanup sends its
-# launcher stops the unit it started (a reused instance is left alone).
+# Opt out with GIGACHAD_LEARNHARNESS=0. LearnHarness runs as a sandboxed systemd user unit: the TERM cleanup sends its
+# launcher stops the unit it started (a reused instance is left alone). Its models go through pi-host's gateway.
 if [[ "${GIGACHAD_LEARNHARNESS:-1}" != "0" ]]; then
     "$root_dir/run-learnharness.sh" &
     service_pids+=($!)

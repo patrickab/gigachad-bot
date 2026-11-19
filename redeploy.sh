@@ -9,12 +9,12 @@
 # running a turn (M4, `running` in pi-host's /health; idle and pinned sessions resume after it).
 # A pi whose version differs from the pin stops the redeploy before any restart.
 #
-# Then learn mode, unless a learn session is busy: restarts the LiteLLM proxy (its start
-# regenerates learn mode's model list from the catalog), restarts LearnHarness when the
-# commit its launcher would serve moved (the newest release tag passing the overlay
-# checks, or the pinned GIGACHAD_LEARNHARNESS_REF: run-learnharness.sh --select) or
+# Then learn mode, unless a learn session is busy: restarts LearnHarness when the commit
+# its launcher would serve moved (the newest release tag passing the overlay checks, or
+# the pinned GIGACHAD_LEARNHARNESS_REF: run-learnharness.sh --select) or
 # learnharness-overlay/, the chat-ui package or run-learnharness.sh changed (the launcher
-# snapshots its data before moving to another commit), restarts its Tailnet gate and
+# snapshots its data before moving to another commit, and regenerates learn mode's models
+# from the catalog), else regenerates the models alone. Then restarts its Tailnet gate and
 # starts the backup timer.
 set -euo pipefail
 
@@ -25,7 +25,6 @@ port=8002
 pi_host_unit=gigachad-bot-pi-host.service
 pi_host_url=http://127.0.0.1:8301
 
-proxy_unit=gigachad-bot-litellm-proxy.service
 learn_unit=gigachad-bot-learnharness.service
 learn_gate_unit=gigachad-bot-learnharness-gate.service
 
@@ -60,10 +59,6 @@ backend_up() {
 # A setting from the production env file the units read, else the launcher's default.
 prod_setting() {
     (source "$prod/deploy/load-env.sh" && printf '%s' "${!1:-$2}")
-}
-
-proxy_up() {
-    systemctl --user is-active --quiet "$proxy_unit" && port_open "$proxy_bind"
 }
 
 learn_up() {
@@ -186,7 +181,7 @@ fi
 printf "%s is up on 127.0.0.1:%s at %s\n" "$unit" "$port" "$(git rev-parse --short HEAD)"
 
 # Learn mode
-if ! systemctl --user cat "$proxy_unit" "$learn_unit" "$learn_gate_unit" gigachad-bot-learnharness-backup.timer >/dev/null 2>&1; then
+if ! systemctl --user cat "$learn_unit" "$learn_gate_unit" gigachad-bot-learnharness-backup.timer >/dev/null 2>&1; then
     printf "learn mode units are not installed: run %s/deploy/install-systemd-service.sh\n" "$prod" >&2
     exit 1
 fi
@@ -194,7 +189,6 @@ learn_repo="$(prod_setting GIGACHAD_LEARNHARNESS_REPO "$HOME/git/learnharness")"
 learn_home="$(prod_setting GIGACHAD_LEARNHARNESS_HOME "$HOME/.local/share/gigachad-bot/learnharness")"
 learn_ref="$(prod_setting GIGACHAD_LEARNHARNESS_REF "")"
 learn_url="http://$(prod_setting GIGACHAD_LEARNHARNESS_BIND 127.0.0.1:30181)"
-proxy_bind="$(prod_setting GIGACHAD_LITELLM_PROXY_BIND 127.0.0.1:30183)"
 learn_gate_url="http://127.0.0.1:$(prod_setting GIGACHAD_LEARNHARNESS_GATE_PORT 30182)"
 # The launcher's own choice, from the unit's settings: unpinned, it fetches the release tags and runs the overlay checks
 # against a newer one (minutes, results kept) while LearnHarness keeps serving. A pinned remote-tracking ref
@@ -208,19 +202,10 @@ learn_old="$(cat "$learn_home/served-commit" 2>/dev/null || true)"
 
 busy="$(busy_learn_sessions 2>/dev/null || echo 0)"
 if [[ $busy != 0 ]]; then
-    # A turn's model calls go through the proxy, a restart of either ends it.
-    printf "Learn mode not restarted: %s learn session(s) busy, run systemctl --user restart %s %s when they are idle\n" \
-        "$busy" "$proxy_unit" "$learn_unit" >&2
+    # A restart ends a running turn.
+    printf "Learn mode not restarted: %s learn session(s) busy, run systemctl --user restart %s when they are idle\n" \
+        "$busy" "$learn_unit" >&2
 else
-    # Its start is the one point that regenerates the model list from the catalog, so it restarts on every redeploy.
-    systemctl --user restart "$proxy_unit"
-    if ! wait_until 300 1 proxy_up; then
-        systemctl --user --no-pager status "$proxy_unit" >&2 || true
-        printf "%s did not come up within 5 min\n" "$proxy_unit" >&2
-        exit 1
-    fi
-    printf "%s is up on %s\n" "$proxy_unit" "$proxy_bind"
-
     if [[ -z $learn_new || $learn_old != "$learn_new" ]] \
         || ! git diff --quiet "$old" "$new" -- learnharness-overlay src/frontend/packages/chat-ui run-learnharness.sh || ! learn_up; then
         if [[ -n $learn_old && -n $learn_new && $learn_old != "$learn_new" ]]; then
@@ -234,6 +219,9 @@ else
             printf "%s did not come up within 10 min\n" "$learn_unit" >&2
             exit 1
         fi
+    # A LearnHarness start regenerates the models, a running one gets them here (a failure keeps the last ones).
+    elif ! "$prod/deploy/run-production-learnharness.sh" models; then
+        printf "LearnHarness's models not regenerated, it keeps the last ones\n" >&2
     fi
 fi
 printf "%s is up on %s at %s\n" "$learn_unit" "$learn_url" "$(cut -c1-7 "$learn_home/served-commit" 2>/dev/null || echo unknown)"

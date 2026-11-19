@@ -1,7 +1,9 @@
 [Unit]
 Description=gigachad-bot LearnHarness (learn mode), runs the sandboxed unit gigachad-learnharness-<port>
-Wants=network-online.target gigachad-bot-litellm-proxy.service dbus.socket
-After=network-online.target gigachad-bot-litellm-proxy.service dbus.socket
+# The launcher generates LearnHarness's models from the production PostgreSQL (started by the backend) and pi-host's
+# gateway, LearnHarness's custom endpoint
+Wants=network-online.target gigachad-bot.service gigachad-bot-pi-host.service dbus.socket
+After=network-online.target gigachad-bot.service gigachad-bot-pi-host.service dbus.socket
 
 [Service]
 Type=exec
@@ -17,6 +19,8 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
 ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-learnharness.sh server
 Restart=on-failure
 RestartSec=5s
+# 78: GIGACHAD_LEARNHARNESS_LOGIN or the database password is missing, a restart would not help
+RestartPreventExitStatus=78
 # Only the launcher gets TERM: its trap stops the transient unit, which systemd-run alone would leave running, and exits
 # 143, a clean stop
 KillMode=mixed

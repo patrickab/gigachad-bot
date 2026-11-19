@@ -30,15 +30,15 @@ readonly units=(
     gigachad-bot-pi-host.service
     gigachad-bot-factory.service
     gigachad-bot-preview-gate.service
-    gigachad-bot-litellm-proxy.service
     gigachad-bot-learnharness.service
     gigachad-bot-learnharness-gate.service
 )
 # Started by its timer, not enabled itself.
 readonly timer_units=(gigachad-bot-learnharness-backup.service gigachad-bot-learnharness-backup.timer)
-# Units an earlier version installed: the OMP model source (its runner is gone, pi-host replaced it) and omp-web with its
-# host daemon and Tailnet gate (Pi replaced the omp tabs, their runner is gone too).
-retired_units=(gigachad-bot-omp.service)
+# Units an earlier version installed: the OMP model source (its runner is gone, pi-host replaced it), omp-web with its
+# host daemon and Tailnet gate (Pi replaced the omp tabs, their runner is gone too), and the LiteLLM proxy (LearnHarness
+# calls pi-host's gateway directly, its runner is gone).
+retired_units=(gigachad-bot-omp.service gigachad-bot-litellm-proxy.service)
 readonly omp_web_units=(gigachad-bot-omp-web-gate.service gigachad-bot-omp-web.service gigachad-bot-omp-web-host.service)
 readonly omp_web_host_unit=gigachad-bot-omp-web-host.service
 

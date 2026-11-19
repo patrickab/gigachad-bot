@@ -68,11 +68,13 @@ ALLOWED_ENVIRONMENT = {
     "PATH", "HOME", "LANG", "NODE_ENV", "LH_DATA_DIR", "LH_AUTH_FILE", "TMPDIR", "CHROME_PATH", "BRAVE_API_KEY",
     "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "CUSTOM_OPENAI_API_KEY", "GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS",
 }
-# The project venv's python records each generator call and answers `master-key` with the proxy's key.
-FAKE_PYTHON = """echo "$* home=$GIGACHAD_LEARNHARNESS_HOME proxy=$GIGACHAD_LITELLM_PROXY_HOME src=$PYTHONPATH" >>"$WRITE_CONFIG_LOG"
-[[ $* != *master-key* ]] || cat "$GIGACHAD_LITELLM_PROXY_HOME/master.key"
+# The project venv's python records each generator call with the database password it saw, fails it while
+# WRITE_CONFIG_FAILS is set, and prints pi-host's gateway token.
+FAKE_PYTHON = """if [[ $* == *gateway_token* ]]; then echo "gateway-only-token"; exit; fi
+echo "$* home=$GIGACHAD_LEARNHARNESS_HOME src=$PYTHONPATH db=${POSTGRES_PASSWORD_DEV:-none}" >>"$WRITE_CONFIG_LOG"
+[[ -z ${WRITE_CONFIG_FAILS:-} ]]
 """
-MASTER_KEY = "sk-master"
+GATEWAY_TOKEN = "gateway-only-token"
 # What the session model freeze wraps in upstream's components/model-picker.tsx.
 MODEL_PICKER = """export function ModelControl({ chatId }: { chatId?: string }) {
   window.addEventListener("lh:kbd-open-model-picker", open);
@@ -152,7 +154,7 @@ class Launcher:
 
         self.user_home = tmp_path / "user"
         self.user_home.mkdir()
-        (self.user_home / ".secrets").write_text("export OPENAI_API_KEY=provider-secret\n")
+        (self.user_home / ".secrets").write_text("export OPENAI_API_KEY=provider-secret\nexport POSTGRES_PASSWORD_DEV=db-secret\n")
         binaries = tmp_path / "bin"
         binaries.mkdir()
         self.npm_log = tmp_path / "npm.log"
@@ -178,9 +180,6 @@ class Launcher:
         self.worktree = tmp_path / "worktree"
         # A quote and a space: the Chrome wrapper and the unit properties must keep the path whole.
         self.home = tmp_path / "learn harness's home"
-        self.proxy = tmp_path / "proxy"
-        self.proxy.mkdir()
-        (self.proxy / "master.key").write_text(f"{MASTER_KEY}\n")
         self.write_config_log = tmp_path / "write-config.log"
         self.port = free_port()
         self.unit = f"gigachad-learnharness-{self.port}"
@@ -191,7 +190,6 @@ class Launcher:
             GIGACHAD_LEARNHARNESS_DIR=str(self.worktree),
             GIGACHAD_LEARNHARNESS_REF=REF,
             GIGACHAD_LEARNHARNESS_HOME=str(self.home),
-            GIGACHAD_LITELLM_PROXY_HOME=str(self.proxy),
             WRITE_CONFIG_LOG=str(self.write_config_log),
             GIGACHAD_LEARNHARNESS_BIND=f"127.0.0.1:{self.port}",
             OPENAI_API_KEY="provider-secret",
@@ -204,7 +202,10 @@ class Launcher:
             GIT_CONFIG_KEY_0=f"url.{self.source.as_uri()}.insteadOf",
             GIT_CONFIG_VALUE_0="https://github.com/amosblomqvist/learnharness.git",
         )
-        for name in ("XDG_DATA_HOME", "GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS", "UNIT_ACTIVE"):
+        for name in (
+            "XDG_DATA_HOME", "XDG_STATE_HOME", "PI_HOST_TOKEN_FILE", "PI_GATEWAY_TOKEN_FILE", "POSTGRES_PASSWORD_DEV",
+            "GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS", "UNIT_ACTIVE", "WRITE_CONFIG_FAILS",
+        ):
             self.environment.pop(name, None)
 
     def overlay(self, name: str) -> Path:
@@ -286,14 +287,14 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
     }
     user = launcher.user_home
     expected_hidden = {
-        ".secrets", ".ssh", ".omp", ".pi/agent/auth.json", ".local/state/gigachad-bot/pi-host.token",
+        ".secrets", ".ssh", ".omp", ".pi/agent/auth.json",
+        ".local/state/gigachad-bot/pi-host.token", ".local/state/gigachad-bot/pi-gateway.token",
         ".gnupg", ".config/gh", ".aws", ".netrc", ".git-credentials",
-        ".local/share/gigachad-bot/litellm-proxy",
         ".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".local/share/keyrings",
         ".password-store", ".docker", ".kube", ".config/gcloud", ".azure", ".npmrc", ".pypirc", ".var/app",
         ".config/google-chrome", ".mozilla",
     }
-    assert hidden == {str(user / name) for name in expected_hidden} | {str(launcher.proxy), str(launcher.root / ".env.local")}
+    assert hidden == {str(user / name) for name in expected_hidden} | {str(launcher.root / ".env.local")}
     assert "UMask=0077" in options
     command = unit_arguments[unit_arguments.index("--") + 1 :]
     assert command[:2] == ["env", "-i"]
@@ -308,7 +309,8 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
     assert served["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
     assert served["NODE_ENV"] == "production"
     assert served["BRAVE_API_KEY"] == "brave-key"
-    assert served["CUSTOM_OPENAI_API_KEY"] == MASTER_KEY
+    # pi-host's gateway-only token, by environment: its file stays hidden.
+    assert served["CUSTOM_OPENAI_API_KEY"] == GATEWAY_TOKEN
     assert served["GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS"] == SHELL_ORIGINS
     assert stat.S_IMODE((home).stat().st_mode) == 0o700
 
@@ -328,12 +330,23 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
 
     # Installs and the build never see a provider key.
     assert launcher.npm_calls() == ["ci openai=none", "install openai=none", "run openai=none"]
-    # The proxy's master key is read through the generator, which creates it when the proxy launcher has not yet.
+    # The models are generated right before the start, with the database password from ~/.secrets that the build and the
+    # unit never see.
     generator_calls = launcher.write_config_log.read_text()
-    assert generator_calls == f"-m lib.learnharness_config master-key home={home} proxy={launcher.proxy} src={launcher.root / 'src'}\n"
+    assert generator_calls == f"-m lib.learnharness_config write-config home={home} src={launcher.root / 'src'} db=db-secret\n"
     # LearnHarness listened: its data now belongs to this commit.
     assert (home / "served-commit").read_text() == first_commit
     assert launcher.snapshots() == []
+
+
+def test_a_failed_model_generation_serves_the_last_models(tmp_path):
+    launcher = Launcher(tmp_path)
+    launcher.environment["WRITE_CONFIG_FAILS"] = "1"
+
+    result = launcher.launch()
+
+    assert f"LearnHarness models not regenerated, serving the last ones in {launcher.home / 'data' / 'settings.json'}" in result.stderr
+    assert launcher.served_environment()["CUSTOM_OPENAI_API_KEY"] == GATEWAY_TOKEN
 
 
 def test_launcher_rebuilds_exactly_when_an_input_changed_and_after_a_failed_build(tmp_path):
@@ -485,6 +498,7 @@ def test_launcher_reuses_a_running_learnharness_without_side_effects(tmp_path):
     assert not launcher.home.exists()
     assert launcher.npm_calls() == []
     assert not launcher.systemd_run_log.exists()
+    assert not launcher.write_config_log.exists()
 
     # Its unit is still starting: reused too.
     launcher.environment["UNIT_ACTIVE"] = "1"

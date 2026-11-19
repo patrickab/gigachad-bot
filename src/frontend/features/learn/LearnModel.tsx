@@ -7,7 +7,7 @@ import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { displayName } from "@/lib/models"
 import type { LearnView } from "@/lib/domain/types"
-import { isFrameStateOf, learnSelectorModels, servedModelOf, type LearnModelState } from "./model"
+import { isFrameStateOf, learnSelectorModels, selectorIdOf, servedModelOf, type LearnModelState } from "./model"
 import { useLearn, useLearnDrive, useLearnFrameEvent, useLearnFrameState } from "./LearnProvider"
 
 /** The frame's model pills when it shows `view` in drive mode, null otherwise. A session's model is read-only unless it is no longer served. */
@@ -45,7 +45,7 @@ function openSelectorIn(root: HTMLElement | null): void {
 }
 
 /**
- * gigachad's model selector for a learn tab, offering only what LearnHarness's proxy serves.
+ * gigachad's model selector for a learn tab, offering only what LearnHarness serves (by Pi gateway id).
  *
  * - Home and new session: the pick moves LearnHarness's strong tier, the model new sessions start with
  * - Session: a read-only pill, or the selector again when its model is no longer served
@@ -72,7 +72,7 @@ export function LearnModelSelector({ view, models, ...dropdown }: { view: LearnV
         {...dropdown}
         models={served && models}
         pickModels={served ? (catalog) => learnSelectorModels(catalog, served) : undefined}
-        selectedModel={state.model?.modelId ?? ""}
+        selectedModel={state.model && models ? selectorIdOf(models, state.model.modelId) : state.model?.modelId ?? ""}
         onSelect={select}
       />
     </div>

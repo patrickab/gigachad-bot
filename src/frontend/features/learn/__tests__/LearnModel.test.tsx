@@ -27,12 +27,12 @@ const CATALOG: ModelsResponse = {
 }
 const SERVED: LearnFrameMessage = {
   type: "models",
-  served: [{ provider: "custom", modelId: "gemini/gemini-3.5-flash" }, { provider: "custom", modelId: "ollama/qwen3" }],
+  served: [{ provider: "custom", modelId: "google/gemini-3.5-flash" }, { provider: "custom", modelId: "ollama/qwen3" }],
 }
 
 type Model = Extract<LearnFrameMessage, { type: "model" }>
 const modelState = (fields: Partial<Model> = {}): Model => ({
-  type: "model", sessionId: null, model: { provider: "custom", modelId: "gemini/gemini-3.5-flash" },
+  type: "model", sessionId: null, model: { provider: "custom", modelId: "google/gemini-3.5-flash" },
   thinkingLevel: "medium", thinkingLevels: ["low", "medium", "high"], locked: false, unavailable: false, ...fields,
 })
 
@@ -73,13 +73,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it("offers only served models and moves the draft's strong tier through the frame", () => {
+it("offers only served models by gateway id and moves the draft's strong tier through the frame", () => {
   const { fromFrame, sent } = mountTopBar({ kind: "new" })
   fromFrame(SERVED)
   fromFrame(modelState())
 
   fireEvent.click(modelButton()!)
   expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["gemini-3.5-flash"])
+  expect(screen.getByRole("menuitemradio", { name: "gemini-3.5-flash" })).toHaveAttribute("aria-checked", "true")
   fireEvent.click(screen.getByRole("button", { name: "Ollama" }))
   expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["qwen3"])
   fireEvent.click(screen.getByRole("menuitemradio", { name: "qwen3" }))
@@ -118,10 +119,10 @@ it("shows a session's model as a read-only pill, the selector again once it is n
   expect(modelButton()).toBeNull()
   expect(screen.queryByRole("button", { name: /^Reasoning:/ })).toBeNull()
 
-  fromFrame(modelState({ sessionId: "s1", model: { provider: "custom", modelId: "gemini/gemini-2-flash" }, locked: true, unavailable: true }))
+  fromFrame(modelState({ sessionId: "s1", model: { provider: "custom", modelId: "google/gemini-2-flash" }, locked: true, unavailable: true }))
   fireEvent.click(modelButton()!)
   fireEvent.click(screen.getByRole("menuitemradio", { name: "gemini-3.5-flash" }))
-  expect(sent("set-model")).toEqual([{ type: "set-model", sessionId: "s1", provider: "custom", modelId: "gemini/gemini-3.5-flash" }])
+  expect(sent("set-model")).toEqual([{ type: "set-model", sessionId: "s1", provider: "custom", modelId: "google/gemini-3.5-flash" }])
 })
 
 it("opens the selector when LearnHarness asks for its model menu", () => {

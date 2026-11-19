@@ -19,7 +19,7 @@ Everything about learn mode: why it exists, the decisions behind it, how it is b
 | D5 | **gigachad's model selector stays** (model drive), LearnHarness's model pills are hidden but mounted, the session model is frozen (read-only) | The user picks from gigachad's catalog in gigachad's UI; one session is taught by one model |
 | D6 | **LearnHarness's sidebar and title bar are hidden**: the session title is the tab name, learn sessions are a category in gigachad's sidebar, and every feature they offered has a shell path (feature table below) | User decision. Cost: every new upstream feature in those surfaces needs a shell path, the inventory guard fails until it has one |
 | D7 | Prefer **opening upstream's own UI inside the frame** (popups, panels, dialogs) over re-rendering it in the shell. Plain data and API actions go through the backend adapter | Upstream keeps rendering and evolving it |
-| D8 | Models only from gigachad through a **LiteLLM proxy sidecar** generated from one login's catalog; LearnHarness gets no provider key, endpoint or subscription UI | One place for keys and models; any keyed builtin provider would add its models to LearnHarness's menus |
+| D8 | Models only from gigachad through **pi-host's completion gateway** as LearnHarness's one custom endpoint, its model snapshot generated from one login's catalog; LearnHarness gets no provider key, endpoint or subscription UI. (Until P7 a LiteLLM proxy sidecar stood in between) | One place for keys and models; any keyed builtin provider would add its models to LearnHarness's menus |
 | D9 | LearnHarness's 3 tiers kept: **strong** (prober, teacher; picked per draft, stamped per session), **cheap** (researcher, demo builder, extractor, auditor) and **vision** (visual maker, PDF reader), the latter two in LearnHarness Settings → Agent | Context-heavy background work stays affordable, figures and PDFs need an image model |
 | D10 | LearnHarness runs in a **sandboxed user unit** (environment allowlist, `InaccessiblePaths` denylist, private HOME); production adds a host-capability gate | Its agent reads any absolute path and has no auth |
 | D11 | Projects group learn sessions (`learn_sessions` in `project.json`); deleting a project deletes its sessions with `preserve-graph`, Knowledge stays. Sessions opened from a project join it | Like chats, without losing what was learned |
@@ -32,8 +32,8 @@ flowchart LR
     Shell["gigachad shell<br/>features/learn/ (one frame, model selector, sidebar)"] -->|"postMessage learn-embed v3"| Frame["LearnHarness (unmodified, pinned ref)<br/>+ learnharness-overlay/ as custom/"]
     Shell -->|"dev: loopback · prod: Serve → gate"| Frame
     Backend["gigachad backend<br/>src/lib/learnharness.py, /api/learn"] -->|"server to server"| Frame
-    Frame -->|"custom OpenAI endpoint"| Proxy["LiteLLM proxy<br/>generated from the catalog"]
-    Proxy --> Providers["API providers · OMP gateway"]
+    Frame -->|"custom OpenAI endpoint, gateway-only token"| Gateway["pi-host gateway /v1<br/>snapshot generated from the catalog"]
+    Gateway --> Providers["Pi's providers · Ollama"]
     Frame --> Data["LearnHarness home<br/>data/ (Knowledge), auth.json, snapshots/"]
 ```
 
@@ -71,16 +71,14 @@ LearnHarness runs unmodified in one iframe. Its teaching, sessions, composer, do
   src/frontend/features/learn/             shell adapter: frame, bridge, provider, model, sidebar, tabs, tool link
   src/frontend/packages/chat-ui/src/learn-protocol.ts   the postMessage protocol, shared by both sides
   src/lib/learnharness.py                  backend adapter (sessions API)
-  src/lib/learnharness_config.py           the model generator (write-config, master-key, check-proxy)
+  src/lib/learnharness_config.py           the model generator (write-config)
   src/backend/routes/learn.py              /api/learn (host only): sessions, rename, delete modes, export, projects
   src/backend/learnharness_gate.py         production Tailnet gate in front of the frame
   run-learnharness.sh                      builds and serves LearnHarness in its sandbox unit, refuses an unguarded ref
-  run-litellm-proxy.sh                     generates the model config, serves the LiteLLM proxy
 
 ~/git/learnharness/                        upstream clone amosblomqvist/learnharness, never edited for gigachad
 ~/.local/share/gigachad-bot/learnharness-upstream/   served worktree (D), owned by run-learnharness.sh, never edit by hand
 ~/.local/share/gigachad-bot/learnharness/            LearnHarness home: data/, auth.json, snapshots/, served-commit, home/ (private HOME), tmp/
-~/.local/share/gigachad-bot/litellm-proxy/           proxy home: config.yaml (generated), master.key
 ```
 
 ## Where a change belongs
@@ -91,7 +89,7 @@ LearnHarness runs unmodified in one iframe. Its teaching, sessions, composer, do
 | The postMessage protocol | `learn-protocol.ts`, both sides in the same commit | same gigachad-bot commit (the launcher packs chat-ui) |
 | Shell side (selectors, sidebar rows, tabs, tool link) | `src/frontend/features/learn/` | gigachad-bot commit, frontend hot-reloads |
 | Which LearnHarness API the backend calls, its shapes | `src/lib/learnharness.py` only, routes map its errors | gigachad-bot commit, backend restart |
-| Models LearnHarness offers | the generator in `src/lib/learnharness_config.py`, served by `run-litellm-proxy.sh` | next proxy start |
+| Models LearnHarness offers | the generator in `src/lib/learnharness_config.py`, run by `run-learnharness.sh` (and `redeploy.sh`) | next LearnHarness start |
 | Sandbox, environment allowlist, build, upstream markers | `run-learnharness.sh` | next LearnHarness restart |
 | LearnHarness lacks a seam or has a bug | upstream issue or pull request to amosblomqvist/learnharness (drafts: `.wayfinder/learnharness-integration/spec/upstream-proposals.md`), then bump the ref | ref the launcher serves |
 | LearnHarness's server API, sessions, teaching logic, storage | never | n/a |
@@ -150,7 +148,7 @@ Every LearnHarness v0.4.0 feature, and where it lives in learn mode: upstream's 
 - **Shell attachments**: gigachad's documents and images never reach a learn session, LearnHarness takes what its own composer takes. Dictation is keyless in learn mode (no Deepgram key in the sandbox).
 - **Shortcut rebinding**: LearnHarness's keymap (`lh:keymap`) applies in the frame only.
 - **Draft model pick is global**: it moves LearnHarness's strong tier for every draft and tab, running sessions keep their stamp.
-- **Catalog lag**: a new gigachad model reaches LearnHarness on the next proxy start.
+- **Catalog lag**: a new gigachad model reaches LearnHarness on its next start (or redeploy).
 - A coverage or activity card stays open until Escape or a click inside the frame (the frame cannot see a press in the shell). A row's Plan entry appears once the frame has shown that session.
 
 ## Upgrade guards
@@ -181,7 +179,7 @@ A failing guard means "a feature moved": give it a shell path (or a frame action
 1. Edit in `~/git/gigachad-bot` on `master`. `run.sh` serves this checkout's overlay and chat-ui.
 2. Protocol change: handle the message on both sides (`embed/channel.ts` + the driver, `features/learn/bridge.ts`) in the same commit, keep `IS_STATE` and `ANY_VERSION_SHELL_MESSAGE` exhaustive. A breaking change bumps `LEARN_PROTOCOL_VERSION`.
 3. Shell checks (`src/frontend`): `npx tsc --noEmit`, `npx eslint .`, `npx vitest run features/learn features/navigation`.
-4. Backend: `.venv/bin/python3 -m pytest -q tests/test_learnharness_sessions.py tests/test_learnharness_models.py tests/test_learnharness_gate.py tests/test_learnharness_launcher.py tests/test_litellm_proxy_launcher.py`.
+4. Backend: `.venv/bin/python3 -m pytest -q tests/test_learnharness_sessions.py tests/test_learnharness_models.py tests/test_learnharness_gate.py tests/test_learnharness_launcher.py`.
 5. Overlay checks need a private check checkout (below). Never rsync into the served worktree D: another agent's overlay would be replaced, and the launcher owns it.
 
 ### Private overlay check checkout
@@ -236,23 +234,22 @@ For a commit that is no release tag (`origin/main`), or to hold a version. Go th
 
 `run-learnharness.sh` runs LearnHarness as the transient user unit `gigachad-learnharness-<port>` (`systemd-run --user`, `UMask=0077`), because its agent reads any absolute path:
 
-- **Environment allowlist** (`env -i`): `PATH`, `HOME` (private, `<home>/home`), `LANG`, `NODE_ENV`, `LH_DATA_DIR`, `LH_AUTH_FILE`, `TMPDIR`, `CHROME_PATH`, `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `BRAVE_API_KEY`, `CUSTOM_OPENAI_API_KEY` (the proxy's master key). Never provider keys: one would list that provider's models in every LearnHarness menu. Never `LH_DESKTOP_*`: they lock the frame out of LearnHarness's API.
-- **Denylist** (`InaccessiblePaths`, absent paths skipped): `~/.secrets`, `~/.ssh`, `~/.omp`, `~/.gnupg`, `~/.config/gh`, `~/.aws`, `~/.netrc`, `~/.git-credentials`, the proxy home, `~/.claude`, `~/.claude.json`, `~/.codex`, opencode's config and data, `~/.local/share/keyrings`, `~/.password-store`, `~/.docker`, `~/.kube`, `~/.config/gcloud`, `~/.azure`, `~/.npmrc`, `~/.pypirc`, `~/.var/app` (flatpak app data, the user's Chrome profile), `~/.config/google-chrome`, `~/.mozilla`, and the `.env*` files of this checkout and the main checkout. A new credential store on the machine belongs on this list. A denylist is incomplete by nature, an allowlist (`ProtectHome=tmpfs` plus bind mounts) is the open alternative.
+- **Environment allowlist** (`env -i`): `PATH`, `HOME` (private, `<home>/home`), `LANG`, `NODE_ENV`, `LH_DATA_DIR`, `LH_AUTH_FILE`, `TMPDIR`, `CHROME_PATH`, `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `BRAVE_API_KEY`, `CUSTOM_OPENAI_API_KEY` (pi-host's gateway-only token, `pi_host.gateway_token()`: it opens `/v1/*` only, never pi-host's session routes). Never provider keys: one would list that provider's models in every LearnHarness menu. Never `LH_DESKTOP_*`: they lock the frame out of LearnHarness's API.
+- **Denylist** (`InaccessiblePaths`, absent paths skipped): `~/.secrets`, `~/.ssh`, `~/.omp`, `~/.pi/agent/auth.json`, pi-host's token files (`pi-host.token`, `pi-gateway.token`, or `PI_HOST_TOKEN_FILE`/`PI_GATEWAY_TOKEN_FILE`), `~/.gnupg`, `~/.config/gh`, `~/.aws`, `~/.netrc`, `~/.git-credentials`, `~/.claude`, `~/.claude.json`, `~/.codex`, opencode's config and data, `~/.local/share/keyrings`, `~/.password-store`, `~/.docker`, `~/.kube`, `~/.config/gcloud`, `~/.azure`, `~/.npmrc`, `~/.pypirc`, `~/.var/app` (flatpak app data, the user's Chrome profile), `~/.config/google-chrome`, `~/.mozilla`, and the `.env*` files of this checkout and the main checkout. A new credential store on the machine belongs on this list. A denylist is incomplete by nature, an allowlist (`ProtectHome=tmpfs` plus bind mounts) is the open alternative.
 - **Demos** run in flatpak Chrome through a wrapper (`<home>/chrome`) that shares `TMPDIR` with flatpak's private `/tmp`. flatpak needs the user session bus. Known risk: the bus and the user manager are reachable from inside, so code execution in LearnHarness could leave the sandbox with `systemd-run --user`. Node and npm must not be mise shims (a shim exits 1 under the private `HOME`).
 - `npm ci` and `next build` run outside the unit with an allowlisted environment (no provider keys).
 - Stopping the launcher stops the unit (its `EXIT` trap). Check a change with `nsenter -t <MainPID> -U -m --preserve-credentials` and the process's environment, as in the launcher tests.
 
-## Models: generator and proxy
+## Models: generator and gateway
 
-- `python -m lib.learnharness_config write-config` (run only by `run-litellm-proxy.sh`, right before the proxy starts) reads one login's catalog (`GIGACHAD_LEARNHARNESS_LOGIN`, else the OS user; read-only lookup) and writes, under a lock, staged and renamed:
-  - `config.yaml` in the proxy home: one route per model, named by its gigachad selector string. No secret: `os.environ/LITELLM_MASTER_KEY`, `os.environ/GIGACHAD_OMP_GATEWAY_TOKEN` and provider keys by name, exported by the proxy launcher only;
-  - LearnHarness's `settings.json`: `customProvider` (base URL, binding id, models with capabilities, `context` and `maxTokens`, assumed 128000/16384 when unknown) and the `strong`/`cheap`/`vision` tiers only when absent. Every other key is untouched;
+- LearnHarness's one custom endpoint is pi-host's completion gateway (`pi_host.gateway_url()`, `GIGACHAD_PI_HOST_URL` + `/v1`; production `127.0.0.1:8301`). Models come only from providers Pi serves, Ollama included through Pi's generated `ollama` provider (`lib.ollama_models.sync_pi_provider`).
+- `python -m lib.learnharness_config write-config` (run by `run-learnharness.sh` right before the unit starts, and by `redeploy.sh` through `deploy/run-production-learnharness.sh models`) reads one login's catalog (`GIGACHAD_LEARNHARNESS_LOGIN`, else the OS user; read-only lookup), the installed Ollama models, syncs Pi's Ollama provider, reads the gateway's `/v1/models`, and writes, under a lock, staged and renamed:
+  - LearnHarness's `settings.json`: `customProvider` (gateway base URL, binding id, models with `image` from the row's `input`, `reasoning` from its `thinking_levels`, `context` and `maxTokens` from `context_window`/`max_tokens`, assumed 128000/16384 when the row has none) and the `strong`/`cheap`/`vision` tiers only when absent or no longer served. Every other key is untouched;
   - the `auth.json` binding record, without the key.
-- A served model's LearnHarness id is its gigachad selector string, so the shell's selector offers exactly `models.served` and sends the selector string back.
-- A transient failure (gateway, OMP registry, Ollama, database, unknown login, empty catalog) writes nothing and exits 1: the last configuration stays.
-- The proxy listens on `127.0.0.1` or `localhost` only. `uv tool run` serves the LiteLLM version `uv.lock` pins (`proxy-tool-pin`), never from the project venv.
-- A catalog change reaches LearnHarness on the next proxy start, never by itself. A reused proxy is checked (`check-proxy`): a refused master key or another model list prints a "stale or mismatched" warning; stop it and rerun.
-- In production the proxy unit reads the production database (`deploy/run-production-learnharness.sh proxy`), and `redeploy.sh` restarts the proxy on every redeploy when no session is busy.
+- A served model's LearnHarness id is its gateway id, `pi_models.gateway_model_id(selector)` (`litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`, others unchanged), the model LearnHarness sends to the gateway. The shell maps both ways with the same function in TypeScript (`gatewayModelId` in `lib/models.ts`, `features/learn/model.ts`): its selector offers the catalog entries whose gateway id LearnHarness serves (`models.served`) and shows LearnHarness's model under its catalog selector.
+- A catalog model the gateway does not serve (Pi has no such provider or no key for it) is left out with a warning. A tier still naming a stored selector (written in the LiteLLM proxy days) keeps its pick and level under the gateway id.
+- A transient failure (gateway down or serving none of the catalog, database, unknown login, empty catalog) writes nothing and exits 1: the last configuration stays and LearnHarness starts with it. Ollama down only leaves its models out.
+- A catalog change reaches LearnHarness on its next start or the next redeploy, never by itself.
 
 ## Shell contracts
 
@@ -268,12 +265,12 @@ For a commit that is no release tag (`origin/main`), or to hold a version. Go th
 | Resource | Owner | Rule |
 |---|---|---|
 | Frontend 2999 + backend 8001 (`run.sh`, tmux `gigachad-bot`) | user | Never start a second copy, never restart without the user |
-| LearnHarness 30181, proxy 30183 (served worktree D, default homes) | integrator / production units | One instance per machine, development reuses it. Others never stop or rebuild it. Agents use their own ports and scratch homes |
+| LearnHarness 30181 (served worktree D, default home) | integrator / production units | One instance per machine, development reuses it. Others never stop or rebuild it. Agents use their own ports and scratch homes |
 | `~/git/learnharness` | user | Read only. Agent worktrees of it are registered there: name them in your report, remove only with the user's approval |
 | LearnHarness sessions | user | Never send turns in existing sessions. Live tests only in a throwaway session, deleted afterwards |
 | `master` (gigachad-bot) | user | Commit only on the user's request |
 
-An agent's own LearnHarness: `agent-proc start lh-<task> './run-learnharness.sh'` with `GIGACHAD_LEARNHARNESS_{BIND,DIR,HOME,FRAME_ANCESTORS}` and `GIGACHAD_LITELLM_PROXY_{BIND,HOME}` pointing at spare ports and a scratch directory (`~/.cache/learn-mode/<task>/`), or `next start` from a check checkout with a scratch `LH_DATA_DIR`/`LH_AUTH_FILE`. The launcher's unit is `gigachad-learnharness-<port>`. Stop it with `agent-proc stop`, which stops the unit. Never `pkill`/`pgrep -f` by script name: it matches other agents' launchers.
+An agent's own LearnHarness: `agent-proc start lh-<task> './run-learnharness.sh'` with `GIGACHAD_LEARNHARNESS_{BIND,DIR,HOME,FRAME_ANCESTORS}` pointing at a spare port and a scratch directory (`~/.cache/learn-mode/<task>/`), or `next start` from a check checkout with a scratch `LH_DATA_DIR`/`LH_AUTH_FILE`. The launcher's unit is `gigachad-learnharness-<port>`. Stop it with `agent-proc stop`, which stops the unit. Never `pkill`/`pgrep -f` by script name: it matches other agents' launchers.
 Delete `~/.cache/learn-mode/<task>/` once the task ends: each holds a full LearnHarness build (2-4 GB).
 
 Parallel-safe slices: one override or driver each (`embed/<driver>` + its override + its CSS + its test), shell `features/learn/` files, the backend adapter's HTTP section, the generator. Serialize: `learn-protocol.ts` (one owner at a time), `seams.patch`, `run-learnharness.sh`, `next.config.ts`, `root.tsx`, `theme/index.ts`, `inventory.test.mjs`.
@@ -281,7 +278,7 @@ Parallel-safe slices: one override or driver each (`embed/<driver>` + its overri
 ## Restart and live smoke (integrator)
 
 1. Check no session is busy: `curl -s http://127.0.0.1:30181/api/chats`.
-2. Development: restarting `run.sh` restarts the proxy and LearnHarness it started. A reused instance keeps running: stop its launcher (Ctrl-C in its window, or `systemctl --user stop gigachad-learnharness-30181`) first. Production: `systemctl --user restart gigachad-bot-litellm-proxy.service gigachad-bot-learnharness.service`, or `redeploy.sh`. Restart frame and shell together: across a protocol change the version gate shows upstream's UI and the restart banner until both match.
+2. Development: restarting `run.sh` restarts the LearnHarness it started. A reused instance keeps running: stop its launcher (Ctrl-C in its window, or `systemctl --user stop gigachad-learnharness-30181`) first. Production: `systemctl --user restart gigachad-bot-learnharness.service`, or `redeploy.sh`. Restart frame and shell together: across a protocol change the version gate shows upstream's UI and the restart banner until both match.
 3. A change rebuilds (about 2 min). `.next/gigachad-build` is the only proof of a complete build.
 4. Smoke at `http://localhost:2999` with a throwaway session: open Learn (`/chat/new`, upstream's composer and stats bar, no model pills, no LearnHarness sidebar or title bar), send, Stop, switch learn tabs (one frame, no reload), toggle the theme, open a row's panels, rename, start a session from a project and check it lands in the project's learn folder, delete it.
 
@@ -292,7 +289,7 @@ Parallel-safe slices: one override or driver each (`embed/<driver>` + its overri
 - `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS` is baked into the build. The shell origin must be in it, else the frame stays blank.
 - The settings CSS (`theme/settings.css`) still hides the Providers UI by upstream test ids; inventory's marker test fails when one is renamed.
 - A learner's Appearance colours and prose size in LearnHarness override the embed tokens (the type ladder scales with the prose size).
-- The unit's `ExecStart` in `/run/user/<uid>/systemd/transient/` holds the master key. Never log the launcher's command line.
+- The unit's `ExecStart` in `/run/user/<uid>/systemd/transient/` holds the gateway token. Never log the launcher's command line.
 
 ## Rules for changing learn mode
 
@@ -316,35 +313,34 @@ Parallel-safe slices: one override or driver each (`embed/<driver>` + its overri
 - **One frame**: one persistent iframe for all learn tabs, switched by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
 - **Data**: upstream keeps no backward compatibility for stored data. The launcher snapshots it before serving another commit, never bypass that by editing the served worktree
 - **Atomic commits**: one concern each (adapter, overlay, frame, generator, ...), the body names the LearnHarness contract it relies on
-- **After a LearnHarness, overlay or ref change**: run the overlay checks in a private check checkout and the learn pytest/vitest suites, then the integrator restarts the proxy and LearnHarness and smokes a learn tab, sending turns only in a throwaway session. Bumps, guards and concurrent work: the sections above
+- **After a LearnHarness, overlay or ref change**: run the overlay checks in a private check checkout and the learn pytest/vitest suites, then the integrator restarts LearnHarness and smokes a learn tab, sending turns only in a throwaway session. Bumps, guards and concurrent work: the sections above
 
 ## Production deployment
 
-- gigachad-bot's side is the overlay `learnharness-overlay/`, the launchers
-  `run-learnharness.sh` and `run-litellm-proxy.sh`, `src/lib/learnharness.py`, `src/lib/learnharness_config.py` and
+- gigachad-bot's side is the overlay `learnharness-overlay/`, the launcher
+  `run-learnharness.sh`, `src/lib/learnharness.py`, `src/lib/learnharness_config.py` and
   the gate.
-- LearnHarness's only model provider is a loopback LiteLLM proxy. Its model list
-  and LearnHarness's model menus are generated from one gigachad login's catalog
-  each time the proxy starts.
+- LearnHarness's only model provider is pi-host's completion gateway. LearnHarness's
+  model menus are generated from one gigachad login's catalog and the gateway's
+  model list each time LearnHarness starts or `redeploy.sh` runs.
 
 Host prerequisites:
 
 | Need | Why |
 | --- | --- |
 | Node.js >= 24 and npm on `PATH` outside mise shims (`/home/linuxbrew/.linuxbrew/bin` on this host) | `npm ci`, `next build`, `next start`. LearnHarness inherits the unit's `PATH`, and a mise shim exits 1 inside its sandbox (private `HOME`, so mise's config is untrusted) |
-| `git`, `rsync`, `curl`, `uv` | Worktree, overlay copy, health checks. `uv tool run` serves the proxy: its first start downloads the LiteLLM version `uv.lock` pins (network, or a warm uv cache) |
+| `git`, `rsync`, `curl` | Worktree, overlay copy, health checks |
 | `flatpak` with `com.google.Chrome` (system or user install) | LearnHarness renders every demo in Chrome through a wrapper the launcher writes |
 | A user session bus (`dbus.socket`, a static user unit) | flatpak reaches its portal over it. The unit sets `XDG_RUNTIME_DIR=%t` and `DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus` and orders after `dbus.socket`. Lingering (`loginctl enable-linger`) keeps the user manager and the bus up without a login |
 | systemd user manager with unprivileged user namespaces | The launcher starts LearnHarness with `systemd-run --user` and user-mode `InaccessiblePaths` (checked on systemd 262) |
 | `src/frontend/node_modules` | The launcher packs `@gigachad/chat-ui` with the frontend's TypeScript. `redeploy.sh` installs it |
-| Production PostgreSQL and the OMP gateway | The proxy generator reads the catalog from them |
+| Production PostgreSQL and pi-host (`gigachad-bot-pi-host.service`, `127.0.0.1:8301`) | The generator reads the catalog and the gateway's models from them, LearnHarness calls the gateway |
 
 Units (installed by `deploy/install-systemd-service.sh`, all through
-`deploy/run-production-learnharness.sh` with `proxy`, `server` or `gate`):
+`deploy/run-production-learnharness.sh` with `server` or `gate`; `models` regenerates the models alone):
 
 | Unit | Runs | Listens |
 | --- | --- | --- |
-| `gigachad-bot-litellm-proxy.service` | `run-litellm-proxy.sh`: `write-config`, then the proxy | `127.0.0.1:30183` |
 | `gigachad-bot-learnharness.service` | `run-learnharness.sh`, which starts the sandboxed transient unit `gigachad-learnharness-30181` | `127.0.0.1:30181` |
 | `gigachad-bot-learnharness-gate.service` | `uvicorn backend.learnharness_gate:app` | `127.0.0.1:30182`, Serve HTTPS `:8444` |
 | `gigachad-bot-learnharness-backup.timer` | `deploy/backup-learnharness.sh` daily, see below | - |
@@ -353,7 +349,7 @@ Units (installed by `deploy/install-systemd-service.sh`, all through
   itself. The launcher does what a static unit cannot: reset the worktree to the
   ref, snapshot the data before a commit change, apply the seams, copy the
   overlay, refuse a ref lacking a guarded upstream name, rebuild on a changed
-  input, read the proxy's master key, and compute the denylist (including the
+  input, generate the models, read pi-host's gateway token, and compute the denylist (including the
   `.env*` files of both checkouts). A unit with its own `InaccessiblePaths` would
   copy that list and drift from development, which runs the same launcher. So
   development and production run one sandbox, set in one place.
@@ -363,12 +359,11 @@ Units (installed by `deploy/install-systemd-service.sh`, all through
   (`SuccessExitStatus=143`). The wrapper has `NoNewPrivileges` and
   `UMask=0077`, but no `PrivateTmp`: that would put the launcher in a user
   namespace of its own.
-- The proxy unit exits 78 without restarting when `GIGACHAD_LEARNHARNESS_LOGIN`
+- The LearnHarness unit exits 78 without restarting when `GIGACHAD_LEARNHARNESS_LOGIN`
   or `POSTGRES_PASSWORD_PROD` is missing. Generation failures (database or gateway
-  not up yet) keep the last `config.yaml` and settings and serve them. Only a
-  first start with no `config.yaml` exits 1, and the unit retries it.
-- Exits of 143 (TERM) count as clean for the proxy too: `uv tool run` passes the
-  proxy's exit code on.
+  not up yet) keep the last settings and serve them.
+- The LiteLLM proxy unit (`gigachad-bot-litellm-proxy.service`) is retired:
+  `deploy/install-systemd-service.sh` stops and removes it.
 
 Add to `$ENV`:
 
@@ -381,10 +376,11 @@ GIGACHAD_LEARNHARNESS_FRAME_URL=https://<tailnet-hostname>:8444
   serves, `users.tailscale_login` in production (the OS user is only the
   development default). Read-only: the user must have signed in once. An unknown
   login fails generation and keeps the last configuration.
-- The proxy unit sets `GIGACHAD_DATABASE_URL` and `PGPASSWORD` for the production
+- `deploy/run-production-learnharness.sh` sets `GIGACHAD_DATABASE_URL` and `PGPASSWORD` for the production
   database the way `run-backend.sh --prod` does: `127.0.0.2:5433`, the OS user,
-  `POSTGRES_PASSWORD_PROD` from `~/.secrets`. Provider keys also come from
-  `~/.secrets` and stay in the proxy, `config.yaml` names them only.
+  `POSTGRES_PASSWORD_PROD` from `~/.secrets`, and `GIGACHAD_PI_HOST_URL` to
+  production's pi-host (`http://127.0.0.1:8301`) unless set. Only the generator
+  sees them, LearnHarness's environment is an allowlist.
 - `GIGACHAD_LEARNHARNESS_FRAME_URL`: the gate's HTTPS origin, the backend gives it
   to host logins in `/api/config` (`learnharness_url`).
 - `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS` defaults to `GIGACHAD_CORS_ORIGINS` in
@@ -404,34 +400,31 @@ GIGACHAD_LEARNHARNESS_FRAME_URL=https://<tailnet-hostname>:8444
 | `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
 | `GIGACHAD_LEARNHARNESS_GATE_PORT` | `30182`, loopback identity gate |
 | `GIGACHAD_LEARNHARNESS_LOGIN` | OS user in development, required in production |
-| `GIGACHAD_LITELLM_PROXY_BIND` | `127.0.0.1:30183`, `127.0.0.1` or `localhost` only |
-| `GIGACHAD_LITELLM_PROXY_HOME` | `~/.local/share/gigachad-bot/litellm-proxy`: generated `config.yaml`, `master.key` (mode 600, created once) |
 | `GIGACHAD_LEARNHARNESS_BACKUP_DIR` | `~/.local/share/gigachad-bot/backups/learnharness` |
 | `GIGACHAD_LEARNHARNESS_BACKUP_KEEP` | `14` archives |
-| `GIGACHAD_LEARNHARNESS` | `1`, set `0` to skip LearnHarness and the proxy in development (`run.sh`) |
+| `GIGACHAD_LEARNHARNESS` | `1`, set `0` to skip LearnHarness in development (`run.sh`) |
 
 ### Production: start and the Tailnet gate
 
 ```text
-private Serve :8444 -> identity gate 127.0.0.1:30182 -> LearnHarness 127.0.0.1:30181 -> LiteLLM proxy 127.0.0.1:30183
+private Serve :8444 -> identity gate 127.0.0.1:30182 -> LearnHarness 127.0.0.1:30181 -> pi-host gateway 127.0.0.1:8301/v1
 ```
 
 ```bash
 "$PROD/deploy/install-systemd-service.sh"
-systemctl --user start gigachad-bot-litellm-proxy.service gigachad-bot-learnharness.service \
+systemctl --user start gigachad-bot-learnharness.service \
   gigachad-bot-learnharness-gate.service gigachad-bot-learnharness-backup.timer
 "$PROD/deploy/tailscale-serve.sh" 30182 8444
 systemctl --user restart gigachad-bot.service
 ```
 
-- The first start runs `npm ci` and `next build` (about 2 minutes) and, for the
-  proxy, downloads LiteLLM.
-- Never publish LearnHarness or the proxy directly. LearnHarness has no login of
+- The first start runs `npm ci` and `next build` (about 2 minutes).
+- Never publish LearnHarness directly. LearnHarness has no login of
   its own and answers requests from any origin. The gate forwards only logins
   granted `gigachad.local/cap/host`, and refuses writes to LearnHarness's
   provider keys, custom endpoint and subscriptions.
 - One instance per machine. Development's `run.sh` reuses the
-  production LearnHarness and proxy on the default ports, with the same data.
+  production LearnHarness on the default port, with the same data.
   If a development instance already holds `30181` when the unit starts, the
   launcher reuses it and the unit exits as inactive: stop the development one
   and start the unit again.
@@ -440,7 +433,7 @@ systemctl --user restart gigachad-bot.service
   From a permitted device, open Learn in the sidebar and start a disposable session.
 - Logs: `journalctl --user -u gigachad-bot-learnharness.service` (launcher and
   LearnHarness output, through `systemd-run --pipe`), `-u gigachad-learnharness-30181.service`
-  (start and stop), `-u gigachad-bot-litellm-proxy.service`.
+  (start and stop).
 - Known risk: the session bus and the user manager are reachable from inside the
   sandbox, because flatpak needs them. Code execution inside LearnHarness could
   start processes outside it with `systemd-run --user`. LearnHarness's agent has
@@ -478,7 +471,7 @@ systemctl --user start gigachad-bot-learnharness.service gigachad-bot-learnharne
   launcher snapshots the restored data and then serves it with the new commit. To
   serve it with the commit that wrote it, pin `GIGACHAD_LEARNHARNESS_REF` to that
   commit first.
-- The next proxy start rewrites the restored custom provider snapshot and its
+- The next LearnHarness start rewrites the restored custom provider snapshot and its
   binding from the current catalog. The learner's tier choices stay.
 
 ## Context for future agents
@@ -493,8 +486,8 @@ systemctl --user start gigachad-bot-learnharness.service gigachad-bot-learnharne
 - Context and max output fall back to 8192/4096 for unknown custom models; the generator writes 128000/16384 instead.
 
 ### Known open issues
-- **Cheap/vision seeding (D3 of the final smoke)**: a fresh LearnHarness home seeds cheap and vision from gigachad's defaults; if those point at a provider without credits (OpenAI `gpt-5.6` today), background jobs and extraction fail silently. Pick served OMP models in LearnHarness Settings → Agent.
-- **Catalog lag**: a model added in gigachad reaches learn mode after a proxy and LearnHarness restart.
+- **Cheap/vision seeding (D3 of the final smoke)**: a fresh LearnHarness home seeds cheap and vision from gigachad's defaults when the gateway serves them, else the first served (image) model; a served model whose provider has no credits still makes background jobs and extraction fail silently. Pick other models in LearnHarness Settings → Agent.
+- **Catalog lag**: a model added in gigachad reaches learn mode after a LearnHarness restart or a redeploy.
 - **Unit stop**: the sandbox unit takes about 90 s to stop, an immediate restart fails with "already loaded".
 - **Flatpak Chrome**: demos need a wrapper and the session bus inside the sandbox (an escape path). A native Chromium (`CHROME_PATH=/usr/bin/chromium`) would remove both; undecided by the user.
 - **Sandbox denylist vs allowlist**: the denylist cannot be complete; `ProtectHome=tmpfs` plus bind mounts is the stronger, undecided alternative.
@@ -502,7 +495,7 @@ systemctl --user start gigachad-bot-learnharness.service gigachad-bot-learnharne
 
 ### Lessons from building it
 - The "Manage models" panel of `ModelDropdown` must always receive the **full** catalog; a narrowed pick list goes through `pickModels`. Passing a filtered catalog once wiped the user's `model-providers.yaml` (omp tabs had the same bug).
-- Agents must never point a scratch proxy or LearnHarness at the default homes (`~/.local/share/gigachad-bot/{learnharness,litellm-proxy}`): `write-config` rewrites `settings.json` and `auth.json` there. Always set `GIGACHAD_LEARNHARNESS_HOME` and `GIGACHAD_LITELLM_PROXY_HOME` to scratch paths, and never run a scratch backend's model routes against the user's database.
+- Agents must never point a scratch LearnHarness or generator at the default home (`~/.local/share/gigachad-bot/learnharness`): `write-config` rewrites `settings.json` and `auth.json` there. Always set `GIGACHAD_LEARNHARNESS_HOME` to a scratch path, and never run a scratch backend's model routes against the user's database.
 - Turbopack: never register suffixed sibling alias keys (`./X.tsx`); they captured `@/custom/embed/X`.
 - Keep subagent slices small (about 70 requests), briefs short, and live verification in a fresh agent; one oversized slice reached 444k context. Skill: `~/.agents/skills/parallelize-plan`.
 

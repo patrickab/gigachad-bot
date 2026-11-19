@@ -30,7 +30,10 @@ _GATEWAY_PROVIDER_ALIASES = {"gemini": "google"}
 
 
 def gateway_model_id(selector: str) -> str:
-    """The gateway's `<provider>/<id>` of a stored selector: `litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`."""
+    """The gateway's `<provider>/<id>` of a stored selector: `litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`.
+
+    Mirrored by the frontend's `gatewayModelId` (`src/frontend/lib/models.ts`), keep both in step.
+    """
     if selector.startswith(f"{LITELLM_ID}/"):
         return selector.removeprefix(f"{LITELLM_ID}/")
     provider, separator, model = selector.partition("/")

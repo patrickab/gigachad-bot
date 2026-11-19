@@ -197,6 +197,19 @@ def token() -> str:
     return value
 
 
+def gateway_token() -> str:
+    """The gateway-only token (`/v1/*`) pi-host wrote on first start, for sandboxed callers. `PiHostUnavailable` when absent."""
+    state_home = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    path = Path(os.environ.get("PI_GATEWAY_TOKEN_FILE") or Path(state_home) / "gigachad-bot" / "pi-gateway.token")
+    try:
+        value = path.read_text().strip()
+    except OSError as exc:
+        raise PiHostUnavailable(f"{LABEL} gateway token {path} is unreadable, is pi-host running? ({exc})") from exc
+    if not value:
+        raise PiHostUnavailable(f"{LABEL} gateway token {path} is empty")
+    return value
+
+
 def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token()}"}
 

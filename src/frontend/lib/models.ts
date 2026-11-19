@@ -6,6 +6,17 @@ export const PI_LITELLM_ID = "litellm_proxy"
 export const PI_MODEL_SOURCE = "pi"
 /** Label of that row, one selector tab listing `<pi-provider>/<model>` (backend `pi_models.PROVIDER_LABEL`). */
 export const PI_PROVIDER_LABEL = "Pi"
+/** Stored selectors keep LiteLLM's provider ids, the gateway names these providers differently. */
+const GATEWAY_PROVIDER_ALIASES: Record<string, string> = { gemini: "google" }
+
+/** The gateway's `<provider>/<id>` of a stored selector, mirror of backend `pi_models.gateway_model_id`: `litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`. */
+export function gatewayModelId(selector: string): string {
+  if (selector.startsWith(`${PI_LITELLM_ID}/`)) return selector.slice(PI_LITELLM_ID.length + 1)
+  const slash = selector.indexOf("/")
+  if (slash === -1) return selector
+  const provider = selector.slice(0, slash)
+  return `${Object.hasOwn(GATEWAY_PROVIDER_ALIASES, provider) ? GATEWAY_PROVIDER_ALIASES[provider] : provider}${selector.slice(slash)}`
+}
 
 /** A provider's models as `litellm_id/model` ids. */
 export function qualifiedModelIds(provider: ModelProvider): string[] {

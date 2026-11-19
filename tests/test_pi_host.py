@@ -110,6 +110,18 @@ async def test_a_missing_token_file_means_pi_host_is_unavailable(monkeypatch, to
         await pi_host.health()
 
 
+def test_the_gateway_token_is_its_own_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.delenv("PI_GATEWAY_TOKEN_FILE", raising=False)
+    (tmp_path / "gigachad-bot").mkdir()
+    (tmp_path / "gigachad-bot" / "pi-gateway.token").write_text("gateway-only\n")
+    assert pi_host.gateway_token() == "gateway-only"
+
+    monkeypatch.setenv("PI_GATEWAY_TOKEN_FILE", str(tmp_path / "absent"))
+    with pytest.raises(pi_host.PiHostUnavailable, match="gateway token"):
+        pi_host.gateway_token()
+
+
 def test_sessions_pass_through_camel_case_with_the_repo_resolved(monkeypatch, repositories):
     host = _serve(monkeypatch, {"GET /sessions": (200, {"sessions": [SESSION]})})
 

@@ -1,8 +1,8 @@
-"""Generator of LearnHarness's model configuration, the LiteLLM proxy config and its master key.
+"""Generator of LearnHarness's model configuration: its custom provider is pi-host's completion gateway.
 
-- Consumes the host user's model catalog (Postgres), pi-host's gateway (`lib.pi_models`), Ollama and LiteLLM's model registry
-- Provides `python -m lib.learnharness_config <command>` for the launchers:
-  (`write-config`, `master-key`, `check-proxy`, `proxy-tool-pin`)
+- Consumes the host user's model catalog (Postgres), the installed Ollama models (`lib.ollama_models`) and pi-host's
+  gateway model list (`lib.pi_models`)
+- Provides `python -m lib.learnharness_config write-config` for run-learnharness.sh
 - Standalone from the sessions adapter `lib.learnharness`: it may import from it, never the reverse
 """
 
@@ -12,35 +12,24 @@ import argparse
 import asyncio
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 import fcntl
 import getpass
-import importlib.metadata
 import json
 import os
 from pathlib import Path
-import re
 import secrets
 import sys
 import time
-import tomllib
 from typing import TYPE_CHECKING, Any
 
-import httpx
-from llm_baseclient.config import discover_ollama_models
 from psycopg.errors import UndefinedTable
 from psycopg_pool import PoolTimeout
-import yaml
 
-from config import OLLAMA_BASE_URL
-from lib import pi_host, pi_models
+from lib import ollama_models, pi_host, pi_models
 from lib.changes import UserScope
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.postgres_data_store import PostgresDataStore
 from lib.postgres_pool import close_postgres_pool, get_postgres_pool
-from lib.upstream import (
-    error_message,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -50,59 +39,40 @@ if TYPE_CHECKING:
 
 
 # ── Model configuration ──────────────────────────────────────────────────────────────────────────────────────────────
-# LearnHarness reaches gigachad's models through its one custom OpenAI endpoint, the LiteLLM proxy (run-litellm-proxy.sh).
-# `write-config` derives both sides from one read of the host user's model catalog, so every model id is a gigachad
-# selector string (`gemini/gemini-3.5-flash`, `litellm_proxy/anthropic/claude-sonnet-5-5`, `ollama/<tag>`).
-# run-litellm-proxy.sh is its only caller, right before it starts the proxy: the proxy's routes and LearnHarness's
-# snapshot never come from different catalog reads. `check-proxy` tells a reused proxy that serves another list apart.
-# - proxy `config.yaml`: an explicit model list (wildcards would list literal `*` rows), `drop_params` because LearnHarness
-#   always sends `store: false`. It holds no secret: the master key and the pi-host token are `os.environ/`
-#   references the proxy launcher exports, provider keys come from the proxy's environment like gigachad's own calls
-# - LearnHarness `settings.json`: the `customProvider` snapshot with capabilities, because the proxy's `/models` publishes
-#   none, and the strong/cheap/vision tiers, seeded when empty or no longer served. Every other key is LearnHarness's
-# - LearnHarness `auth.json`: the binding that enables the endpoint. The key itself is the master key, passed as
-#   `CUSTOM_OPENAI_API_KEY` by run-learnharness.sh, never stored there
-# A catalog that cannot be read whole (no such login, an empty catalog, pi-host's gateway or Ollama not
-# answering) writes nothing and exits non-zero: unknown capabilities are never stored as "no", the last good files stay.
+# LearnHarness reaches gigachad's models through its one custom OpenAI endpoint, pi-host's completion gateway.
+# `write-config` (run by run-learnharness.sh right before LearnHarness starts) derives the snapshot from one read of the
+# host user's catalog and one of the gateway's `/v1/models`. A model's LearnHarness id is its gateway id
+# (`pi_models.gateway_model_id`: `google/gemini-3.5-flash`, `anthropic/claude-sonnet-5-5`, `ollama/<tag>`), the id
+# LearnHarness sends back to the gateway. A catalog model the gateway does not serve is left out with a warning.
+# - LearnHarness `settings.json`: the `customProvider` snapshot with the gateway's capabilities, because LearnHarness
+#   reads none from `/models`, and the strong/cheap/vision tiers, seeded when empty or no longer served. A tier still
+#   naming a stored gigachad selector (`litellm_proxy/x`, from the LiteLLM proxy) keeps its pick under the gateway id.
+#   Every other key is LearnHarness's
+# - LearnHarness `auth.json`: the binding that enables the endpoint. The key itself is pi-host's gateway-only token,
+#   passed as `CUSTOM_OPENAI_API_KEY` by run-learnharness.sh, never stored there
+# A catalog that cannot be read whole (no such login, an empty catalog, pi-host's gateway not answering) writes
+# nothing and exits non-zero: unknown capabilities are never stored as "no", the last good files stay.
 
-DEFAULT_PROXY_BIND = "127.0.0.1:30183"
-DEFAULT_PROXY_HOME = "~/.local/share/gigachad-bot/litellm-proxy"
 DEFAULT_LEARNHARNESS_HOME = "~/.local/share/gigachad-bot/learnharness"
 CUSTOM_PROVIDER = "custom"
 CUSTOM_AUTH_BINDING = "__learnharness_custom_provider_binding"
 SETTINGS_VERSION = 1
-# The proxy launcher exports these, config.yaml only names them.
-MASTER_KEY_ENV = "LITELLM_MASTER_KEY"
-GATEWAY_TOKEN_ENV = "GIGACHAD_PI_GATEWAY_TOKEN"
 # LearnHarness tier ← the gigachad default that seeds it.
 TIER_DEFAULTS = {"strong": "default_model", "cheap": "small_model", "vision": "vision_model"}
-# Limits of a model no source describes. LearnHarness's own fallback (8192 context, 4096 output) would compact every
-# lesson early, current API models have at least this much. A `customProvider.overrides` pin in LearnHarness wins.
+# Limits of a model the gateway does not describe. LearnHarness's own fallback (8192 context, 4096 output) would compact
+# every lesson early, current API models have at least this much. A `customProvider.overrides` pin in LearnHarness wins.
 ASSUMED_CONTEXT = 128_000
 ASSUMED_MAX_TOKENS = 16_384
 # run.sh starts the backend, which starts PostgreSQL and creates the schema, alongside the launchers.
 DATABASE_WAIT_SECONDS = 90.0
 _SCHEMA_RETRY_SECONDS = 2.0
-_OLLAMA_TIMEOUT_SECONDS = 5.0
-_PROXY_TIMEOUT_SECONDS = 10.0
 # LearnHarness rewrites settings.json itself: a write of ours that would land on a newer file is redone this often.
 _SETTINGS_ATTEMPTS = 3
 _LOCK_NAME = "write-config.lock"
-_MASTER_KEY = re.compile(r"sk-[0-9a-f]{64}")
 
 
 class ConfigUnavailable(Exception):
     """gigachad's catalog cannot be read whole: nothing is written, the last configuration stays."""
-
-
-def proxy_home() -> Path:
-    """`config.yaml` (generated) and `master.key` (created once)."""
-    return Path(os.environ.get("GIGACHAD_LITELLM_PROXY_HOME") or DEFAULT_PROXY_HOME).expanduser()
-
-
-def proxy_base_url() -> str:
-    """The proxy as LearnHarness's custom endpoint. LearnHarness appends `/chat/completions` itself."""
-    return f"http://{os.environ.get('GIGACHAD_LITELLM_PROXY_BIND') or DEFAULT_PROXY_BIND}"
 
 
 def learnharness_home() -> Path:
@@ -112,10 +82,9 @@ def learnharness_home() -> Path:
 
 @dataclass(frozen=True)
 class ServedModel:
-    """One gigachad model as the proxy routes it and LearnHarness describes it. `None` limits are unknown."""
+    """One gateway model as LearnHarness describes it, by its gateway id. `None` limits are unknown."""
 
     id: str
-    litellm_params: dict[str, str]
     image: bool = False
     reasoning: bool = False
     context: int | None = None
@@ -132,88 +101,26 @@ class ServedModel:
         return {"id": self.id, "image": self.image, "reasoning": self.reasoning, "context": context, "maxTokens": max_tokens}
 
 
-def catalog_selectors(providers: Mapping[str, Mapping[str, Any]], ollama: Iterable[str]) -> list[str]:
-    """Every model gigachad's selector offers, in its order: `<litellm_id>/<model>` per provider row, then Ollama."""
+def catalog_model_ids(providers: Mapping[str, Mapping[str, Any]], ollama_tags: Iterable[str]) -> list[str]:
+    """Every model gigachad's selector offers, in its order, as gateway ids: each provider row's models, then Ollama's."""
     selectors = [f"{provider['litellm_id']}/{model}" for provider in providers.values() for model in provider["models"]]
-    return list(dict.fromkeys([*selectors, *ollama]))
+    selectors += [f"ollama/{tag}" for tag in ollama_tags]
+    return list(dict.fromkeys(pi_models.gateway_model_id(selector) for selector in selectors))
 
 
 def _positive(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-def _litellm_info(model: str) -> dict[str, Any]:
-    """LiteLLM's registry entry, empty for a model it does not know."""
-    import litellm  # ~2s: the master-key, check-proxy and proxy-tool-pin commands never need it
-
-    try:
-        return dict(litellm.get_model_info(model=model))
-    except Exception:
-        return {}
-
-
-def _supports_vision(model: str) -> bool:
-    import litellm  # ~2s, see _litellm_info
-
-    try:
-        return bool(litellm.supports_vision(model=model))
-    except Exception:
-        return False
-
-
-def _ollama_context(details: Mapping[str, Any]) -> int | None:
-    """`/api/show` reports the window as `<architecture>.context_length` in `model_info`."""
-    info = details.get("model_info") or {}
-    return _positive(info.get(f"{info.get('general.architecture')}.context_length"))
-
-
-def served_model(
-    selector: str,
-    *,
-    reasoning: bool,
-    gateway_entries: Mapping[str, Mapping[str, Any]],
-    ollama_details: Mapping[str, Mapping[str, Any]],
-) -> ServedModel:
-    """Route and capabilities of *selector*: the Pi gateway's rows, Ollama's `/api/show`, else LiteLLM's registry."""
-    gateway_prefix = f"{pi_models.LITELLM_ID}/"
-    if selector.startswith(gateway_prefix):
-        entry = gateway_entries.get(selector.removeprefix(gateway_prefix)) or {}
-        params = {"model": selector, "api_base": pi_host.gateway_url(), "api_key": f"os.environ/{GATEWAY_TOKEN_ENV}"}
-        return ServedModel(
-            selector,
-            params,
-            image="image" in (entry.get("input") or []),
-            reasoning=reasoning,
-            context=_positive(entry.get("context_window")),
-            max_tokens=_positive(entry.get("max_tokens")),
-        )
-    if selector.startswith("ollama/"):
-        details = ollama_details.get(selector.removeprefix("ollama/")) or {}
-        return ServedModel(
-            selector,
-            {"model": selector, "api_base": OLLAMA_BASE_URL},
-            image="vision" in (details.get("capabilities") or []),
-            reasoning=reasoning,
-            context=_ollama_context(details),
-        )
-    info = _litellm_info(selector)
+def served_model(entry: dict[str, Any]) -> ServedModel:
+    """A gateway `/v1/models` row as LearnHarness describes it: vision from `input`, reasoning from `thinking_levels`."""
     return ServedModel(
-        selector,
-        {"model": selector},
-        image=_supports_vision(selector),
-        reasoning=reasoning,
-        context=_positive(info.get("max_input_tokens")),
-        max_tokens=_positive(info.get("max_output_tokens") or info.get("max_tokens")),
+        str(entry["id"]),
+        image="image" in (entry.get("input") or []),
+        reasoning=any(level != "off" for level in pi_models.entry_thinking_levels(entry)),
+        context=_positive(entry.get("context_window")),
+        max_tokens=_positive(entry.get("max_tokens")),
     )
-
-
-def proxy_config(models: Iterable[ServedModel]) -> dict[str, Any]:
-    """LiteLLM proxy `config.yaml`: one route per model, named by its selector, secrets by environment name."""
-    return {
-        "model_list": [{"model_name": model.id, "litellm_params": dict(model.litellm_params)} for model in models],
-        "litellm_settings": {"drop_params": True},
-        "general_settings": {"master_key": f"os.environ/{MASTER_KEY_ENV}"},
-    }
 
 
 def _warn(message: str) -> None:
@@ -231,25 +138,29 @@ def _seed(tier: str, models: list[ServedModel], defaults: Mapping[str, str]) -> 
     """gigachad's default for *tier* when it is served, else the first model. Vision takes only image models, else none."""
     preferred = defaults.get(TIER_DEFAULTS[tier])
     candidates = [model.id for model in models if model.image or tier != "vision"]
-    if preferred in candidates:
-        return preferred
+    if preferred and pi_models.gateway_model_id(preferred) in candidates:
+        return pi_models.gateway_model_id(preferred)
     return candidates[0] if candidates else None
 
 
 def seeded_tiers(current: object, models: list[ServedModel], defaults: Mapping[str, str]) -> dict[str, Any]:
     """The `models` section with every chosen, served tier kept and every other one seeded.
 
-    A tier is empty when it has no model, or one the proxy does not serve: only the custom endpoint has a key. A reseeded
-    tier drops its `thinkingLevel`, the new model may not have it. Vision without an image model stays empty, LearnHarness
-    then refuses only visual and PDF jobs until the learner picks one. LearnHarness replaces the whole section on write.
+    A tier is empty when it has no model, or one the gateway does not serve: only the custom endpoint has a key. A tier
+    naming a stored selector keeps its pick and level under the gateway id. A reseeded tier drops its `thinkingLevel`,
+    the new model may not have it. Vision without an image model stays empty, LearnHarness then refuses only visual and
+    PDF jobs until the learner picks one. LearnHarness replaces the whole section on write.
     """
     served = {model.id for model in models}
     section = dict(current) if isinstance(current, dict) else {}
     for tier in TIER_DEFAULTS:
         slot = section[tier] if isinstance(section.get(tier), dict) else {}
         chosen = _tier_model(slot)
-        if chosen in served and slot["model"].get("provider") == CUSTOM_PROVIDER:
-            continue
+        if chosen is not None and slot["model"].get("provider") == CUSTOM_PROVIDER:
+            gateway_id = pi_models.gateway_model_id(chosen)
+            if gateway_id in served:
+                section[tier] = {**slot, "model": {**slot["model"], "id": gateway_id}}
+                continue
         seed = _seed(tier, models, defaults)
         if chosen is not None:
             print(f"note: LearnHarness's {tier} tier {chosen} is not served, reseeded with {seed}", file=sys.stderr)
@@ -344,37 +255,8 @@ def _locked(directory: Path) -> Iterator[None]:
         os.close(descriptor)
 
 
-def _master_key(home: Path) -> str:
-    path = home / "master.key"
-    try:
-        key = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        key = ""
-    if _MASTER_KEY.fullmatch(key):
-        return key
-    key = f"sk-{secrets.token_hex(32)}"
-    _write_private(path, f"{key}\n")
-    return key
-
-
-def master_key(home: Path) -> str:
-    """The proxy's master key in `<home>/master.key` (owner-only), created once. An empty or cut key is replaced.
-
-    LiteLLM wants the `sk-` prefix. The file appears whole (staged, then renamed) under the home's lock.
-    """
-    with _locked(home):
-        return _master_key(home)
-
-
-def write_config(
-    models: list[ServedModel],
-    defaults: Mapping[str, str],
-    *,
-    proxy_dir: Path,
-    learnharness_dir: Path,
-    base_url: str,
-) -> None:
-    """Write LearnHarness's settings and auth binding, then the proxy config, under both homes' locks. Idempotent.
+def write_config(models: list[ServedModel], defaults: Mapping[str, str], *, learnharness_dir: Path, base_url: str) -> None:
+    """Write LearnHarness's settings and auth binding under the home's lock. Idempotent.
 
     An empty catalog raises before anything is written. A settings file LearnHarness rewrote meanwhile is merged again.
     """
@@ -382,8 +264,7 @@ def write_config(
         raise ConfigUnavailable("the catalog has no model")
     settings_path = learnharness_dir / "data" / "settings.json"
     auth_path = learnharness_dir / "auth.json"
-    with _locked(proxy_dir), _locked(learnharness_dir):
-        _master_key(proxy_dir)
+    with _locked(learnharness_dir):
         for _ in range(_SETTINGS_ATTEMPTS):
             stamp = _stamp(settings_path)
             current = _read_json(settings_path)
@@ -398,51 +279,6 @@ def write_config(
         auth = _read_json(auth_path)
         auth[CUSTOM_AUTH_BINDING] = binding_record(binding, base_url)
         _write_private(auth_path, json.dumps(auth, indent=2) + "\n")
-        config = yaml.safe_dump(proxy_config(models), sort_keys=False, allow_unicode=True)
-        _write_private(proxy_dir / "config.yaml", config)
-
-
-def proxy_drift(base_url: str, key: str, config_path: Path) -> str | None:
-    """Why the proxy at *base_url* is not the one *config_path* and *key* describe, None when it is."""
-    try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except FileNotFoundError:
-        return f"there is no {config_path}"
-    expected = [route["model_name"] for route in config.get("model_list") or []]
-    try:
-        response = httpx.get(f"{base_url}/models", headers={"Authorization": f"Bearer {key}"}, timeout=_PROXY_TIMEOUT_SECONDS)
-    except httpx.HTTPError as exc:
-        return f"it does not answer ({exc})"
-    if response.status_code != httpx.codes.OK:
-        return (
-            f"it refuses the master key in {config_path.parent} (HTTP {response.status_code}: {error_message(response)}), "
-            "it started from another GIGACHAD_LITELLM_PROXY_HOME or before master.key changed"
-        )
-    rows = response.json().get("data") or []
-    served = {row.get("id") for row in rows if isinstance(row, dict)}
-    missing = [model for model in expected if model not in served]
-    extra = sorted(str(model) for model in served - set(expected))
-    if missing or extra:
-        return (
-            f"it serves another model list than {config_path} (missing: {', '.join(missing) or 'none'}, "
-            f"extra: {', '.join(extra) or 'none'}), it started before the last write-config"
-        )
-    return None
-
-
-def proxy_tool_pin(lock_path: Path) -> str:
-    """`<requirement> <python> <exclude-newer>` for `uv tool run`: the venv's LiteLLM, its Python, and the index as it was
-    one day after that LiteLLM's upload, so the proxy's other dependencies resolve the same way on every machine."""
-    version = importlib.metadata.version("litellm")
-    with lock_path.open("rb") as file:
-        packages = tomllib.load(file).get("package") or []
-    package = next((entry for entry in packages if entry.get("name") == "litellm" and entry.get("version") == version), None)
-    if package is None:
-        raise ConfigUnavailable(f"{lock_path} does not lock litellm {version}, sync the venv")
-    files = [package.get("sdist") or {}, *(package.get("wheels") or [])]
-    uploaded = max(datetime.fromisoformat(entry["upload-time"]) for entry in files if "upload-time" in entry)
-    exclude_newer = (uploaded + timedelta(days=1)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return f"litellm[proxy]=={version} {sys.version_info.major}.{sys.version_info.minor} {exclude_newer}"
 
 
 # ── Catalog sources (live) ───────────────────────────────────────────────────────────────────────────────────────────
@@ -487,66 +323,35 @@ def _host_catalog(login: str) -> tuple[dict[str, dict[str, Any]], dict[str, str]
 
 
 def _gateway_entries() -> dict[str, dict[str, Any]]:
-    """The Pi gateway's `/v1/models` rows by `<provider>/<model>`, capabilities and effort ladder included."""
+    """The Pi gateway's `/v1/models` rows by gateway id, capabilities and effort ladder included."""
     try:
-        entries = pi_models.catalog_entries()  # raw rows: group_by_provider drops max_tokens and thinking_levels
+        entries = pi_models.catalog_entries()  # raw rows: group_by_provider drops max_tokens
     except pi_models.GatewayUnavailable as exc:
-        raise ConfigUnavailable(f"{exc}, gateway models are undescribed") from exc
+        raise ConfigUnavailable(f"{exc}, LearnHarness's models are undescribed") from exc
     if not entries:
         raise ConfigUnavailable(f"the Pi gateway at {pi_host.gateway_url()} lists no model")
     return {str(entry.get("id") or "").lstrip("/"): entry for entry in entries}
 
 
-async def _ollama_show(client: httpx.AsyncClient, tag: str) -> dict[str, Any]:
-    try:
-        response = await client.post("/api/show", json={"model": tag})
-        response.raise_for_status()
-        details = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise ConfigUnavailable(f"Ollama at {OLLAMA_BASE_URL} does not describe {tag} ({exc})") from exc
-    if not isinstance(details, dict):
-        raise ConfigUnavailable(f"Ollama at {OLLAMA_BASE_URL} describes {tag} as {details!r}")
-    return details
-
-
-async def _reasons(selector: str, gateway_entries: Mapping[str, dict[str, Any]]) -> bool:
-    """gigachad's own answer (the gateway's ladder, Ollama, LiteLLM). A failed lookup raises, it never counts as "no"."""
-    from lib import reasoning_levels  # imports litellm, see _litellm_info
-
-    gateway_prefix = f"{pi_models.LITELLM_ID}/"
-    if selector.startswith(gateway_prefix):
-        entry = gateway_entries.get(selector.removeprefix(gateway_prefix))
-        # A model the gateway lacks falls back to LiteLLM's flags, as reasoning_levels.resolve does.
-        return bool(pi_models.entry_thinking_levels(entry) if entry is not None else reasoning_levels.litellm_levels(selector))
-    levels = await reasoning_levels.resolve(selector)
-    if levels is None:
-        raise ConfigUnavailable(f"no reasoning answer for {selector}")
-    return bool(levels)
+def _ollama_and_gateway() -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """The installed Ollama tags and the gateway's rows, read after Pi's Ollama provider caught up with those tags."""
+    ollama_models.sync_pi_provider()
+    return ollama_models.installed_chat_models(), _gateway_entries()
 
 
 async def served_catalog(login: str) -> tuple[list[ServedModel], dict[str, str]]:
-    """Every model gigachad's selector offers *login*, routed and described, plus its defaults."""
-    (providers, defaults), ollama = await asyncio.gather(
-        asyncio.to_thread(_host_catalog, login), asyncio.to_thread(discover_ollama_models)
+    """Every model gigachad's selector offers *login* that the gateway serves, described, plus its defaults."""
+    (providers, defaults), (ollama_tags, entries) = await asyncio.gather(
+        asyncio.to_thread(_host_catalog, login), asyncio.to_thread(_ollama_and_gateway)
     )
-    selectors = catalog_selectors(providers, ollama)
-    if not selectors:
+    model_ids = catalog_model_ids(providers, ollama_tags)
+    if not model_ids:
         raise ConfigUnavailable(f"{login}'s catalog has no model")
-    gateway_prefix = f"{pi_models.LITELLM_ID}/"
-    gateway_models = [selector.removeprefix(gateway_prefix) for selector in selectors if selector.startswith(gateway_prefix)]
-    gateway_entries: dict[str, dict[str, Any]] = {}
-    if gateway_models:
-        gateway_entries = await asyncio.to_thread(_gateway_entries)
-        if unlisted := [model for model in gateway_models if model not in gateway_entries]:
-            _warn(f"the Pi gateway does not list {', '.join(unlisted)}: served as text-only")
-    tags = [selector.removeprefix("ollama/") for selector in selectors if selector.startswith("ollama/")]
-    async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=_OLLAMA_TIMEOUT_SECONDS) as ollama_client:
-        shown = await asyncio.gather(*(_ollama_show(ollama_client, tag) for tag in tags))
-    reasoning = await asyncio.gather(*(_reasons(selector, gateway_entries) for selector in selectors))
-    models = [
-        served_model(selector, reasoning=reasons, gateway_entries=gateway_entries, ollama_details=dict(zip(tags, shown, strict=True)))
-        for selector, reasons in zip(selectors, reasoning, strict=True)
-    ]
+    if unserved := [model_id for model_id in model_ids if model_id not in entries]:
+        _warn(f"the Pi gateway does not serve {', '.join(unserved)}: left out of LearnHarness")
+    models = [served_model(entries[model_id]) for model_id in model_ids if model_id in entries]
+    if not models:
+        raise ConfigUnavailable(f"the Pi gateway at {pi_host.gateway_url()} serves none of {login}'s models")
     if assumed := [model.id for model in models if model.assumed_limits]:
         _warn(
             f"no context or max output figure for {', '.join(assumed)}: assuming {ASSUMED_CONTEXT} and "
@@ -558,35 +363,18 @@ async def served_catalog(login: str) -> tuple[list[ServedModel], dict[str, str]]
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m lib.learnharness_config", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    write = commands.add_parser(
-        "write-config", help="write the LiteLLM proxy config and LearnHarness's models from gigachad's catalog"
-    )
+    write = commands.add_parser("write-config", help="write LearnHarness's models from gigachad's catalog and the Pi gateway")
     write.add_argument(
         "--login",
         default=os.environ.get("GIGACHAD_LEARNHARNESS_LOGIN") or getpass.getuser(),
         help="gigachad login whose model catalog LearnHarness serves (default: GIGACHAD_LEARNHARNESS_LOGIN, else the OS user)",
     )
-    commands.add_parser("master-key", help="print the proxy's master key, created on first use")
-    commands.add_parser("check-proxy", help="exit 1 when the running proxy is not the one this proxy home describes")
-    pin = commands.add_parser("proxy-tool-pin", help="print the `uv tool run` requirement, Python and exclude-newer")
-    pin.add_argument("lock", type=Path, help="the project's uv.lock")
     args = parser.parse_args(argv)
 
+    base_url = pi_host.gateway_url()
     try:
-        if args.command == "master-key":
-            print(master_key(proxy_home()))
-            return 0
-        if args.command == "proxy-tool-pin":
-            print(proxy_tool_pin(args.lock))
-            return 0
-        if args.command == "check-proxy":
-            drift = proxy_drift(proxy_base_url(), master_key(proxy_home()), proxy_home() / "config.yaml")
-            if drift is not None:
-                _warn(f"the LiteLLM proxy at {proxy_base_url()} is stale or mismatched: {drift}. Stop it, rerun run-litellm-proxy.sh")
-                return 1
-            return 0
         models, defaults = asyncio.run(served_catalog(args.login))
-        write_config(models, defaults, proxy_dir=proxy_home(), learnharness_dir=learnharness_home(), base_url=proxy_base_url())
+        write_config(models, defaults, learnharness_dir=learnharness_home(), base_url=base_url)
     except ConfigUnavailable as exc:
         print(f"error: {exc}. Nothing written, the last configuration stays", file=sys.stderr)
         return 1
@@ -594,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     reasoning = sum(model.reasoning for model in models)
     assumed = sum(model.assumed_limits for model in models)
     summary = f"{len(models)} ({images} image, {reasoning} reasoning, {assumed} with assumed limits)"
-    print(f"LearnHarness models from {args.login}'s catalog: {summary} via {proxy_base_url()}")
+    print(f"LearnHarness models from {args.login}'s catalog: {summary} via {base_url}")
     return 0
 
 

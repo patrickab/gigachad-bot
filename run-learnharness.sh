@@ -27,7 +27,7 @@
 #   framing   GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS (default the local :2999 shell) may frame LearnHarness (CSP
 #             frame-ancestors) and talk to its bridge, baked into the build (custom/framing.ts)
 #   sandbox   LearnHarness runs as the transient user service gigachad-learnharness-<port> (systemd-run): its agent reads
-#             any absolute path, so the user's credentials, gigachad's .env files and the LiteLLM proxy's home are
+#             any absolute path, so the user's credentials, gigachad's .env files and pi-host's token files are
 #             InaccessiblePaths, and HOME is GIGACHAD_LEARNHARNESS_HOME/home. Stopping this script stops the unit
 #   env       LearnHarness starts from an allowlisted environment, never this one or the user manager's: a provider key in
 #             it would list that provider's models in every LearnHarness model menu, LH_DESKTOP_* would lock the frame out
@@ -35,9 +35,10 @@
 #   demos     LearnHarness runs every demo in Chrome (CHROME_PATH) from a file in TMPDIR. Flatpak Chrome has a private
 #             /tmp, so TMPDIR is GIGACHAD_LEARNHARNESS_HOME/tmp and CHROME_PATH a wrapper sharing it with the sandbox.
 #             flatpak reaches its portal over the session bus (XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS)
-#   models    the only provider is the custom endpoint, the LiteLLM proxy. run-litellm-proxy.sh writes LearnHarness's model
-#             snapshot and tiers when it starts the proxy, so both list the same models. The proxy's master key reaches
-#             LearnHarness as CUSTOM_OPENAI_API_KEY (created here when the proxy has not yet) and is never stored in its files
+#   models    the only provider is the custom endpoint, pi-host's completion gateway. `python -m lib.learnharness_config
+#             write-config` writes LearnHarness's model snapshot and tiers from gigachad's catalog right before the unit
+#             starts (a failure serves the last ones). pi-host's gateway-only token reaches LearnHarness as
+#             CUSTOM_OPENAI_API_KEY and is never stored in its files
 #   markers   the overlay drives upstream's own components, events and URLs, and the backend adapter its chat API: a ref
 #             lacking one of the names below is refused rather than served with a silently broken learn mode
 #
@@ -69,7 +70,6 @@ auto_update="${GIGACHAD_AUTO_UPDATE:-1}"
 home="${GIGACHAD_LEARNHARNESS_HOME:-$HOME/.local/share/gigachad-bot/learnharness}"
 frame_ancestors="${GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS:-http://127.0.0.1:2999 http://localhost:2999}"
 overlay="$root_dir/learnharness-overlay"
-proxy_home="${GIGACHAD_LITELLM_PROXY_HOME:-$HOME/.local/share/gigachad-bot/litellm-proxy}"
 chrome_app=com.google.Chrome
 unit="gigachad-learnharness-${bind##*:}"
 
@@ -455,10 +455,15 @@ printf '#!/usr/bin/env bash\nexport FLATPAK_USER_DIR=%q\nexec flatpak run --file
     "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak" "$demo_tmp" "$chrome_app" >"$chrome"
 chmod 700 "$chrome"
 
-# Created here when the proxy launcher has not yet: both read the same file, which appears whole.
-if ! master_key="$(GIGACHAD_LITELLM_PROXY_HOME="$proxy_home" PYTHONPATH="$root_dir/src" \
-    "$root_dir/.venv/bin/python" -m lib.learnharness_config master-key)"; then
-    master_key=""
+# The model snapshot and tiers, from gigachad's catalog and pi-host's gateway (src/lib/learnharness_config.py). The
+# subshell keeps ~/.secrets (the development database password) to the generator. A failure serves the last ones.
+if ! (load_secrets && GIGACHAD_LEARNHARNESS_HOME="$home" PYTHONPATH="$root_dir/src" \
+    "$root_dir/.venv/bin/python" -m lib.learnharness_config write-config); then
+    printf 'warning: LearnHarness models not regenerated, serving the last ones in %s\n' "$data_dir/settings.json" >&2
+fi
+if ! gateway_token="$(PYTHONPATH="$root_dir/src" "$root_dir/.venv/bin/python" -c \
+    'from lib import pi_host; print(pi_host.gateway_token())')"; then
+    gateway_token=""
 fi
 
 environment=(
@@ -477,19 +482,20 @@ for name in XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS BRAVE_API_KEY; do
         environment+=("$name=${!name}")
     fi
 done
-if [[ -n "$master_key" ]]; then
-    environment+=(CUSTOM_OPENAI_API_KEY="$master_key")
+if [[ -n "$gateway_token" ]]; then
+    environment+=(CUSTOM_OPENAI_API_KEY="$gateway_token")
 else
-    printf 'warning: no LiteLLM proxy master key in %s, LearnHarness has no models\n' "$proxy_home" >&2
+    printf 'warning: no pi-host gateway token yet, LearnHarness has no models until it restarts after pi-host\n' >&2
 fi
 
-# Unreadable inside the unit ("-": skipped when absent): the user's credentials and secrets, the LiteLLM proxy's home
-# (master key, gateway token), the logins of other agents and browsers (the unit's own Chrome keeps its profile in the
-# private HOME). The main checkout's .env files too when this is a worktree.
+# Unreadable inside the unit ("-": skipped when absent): the user's credentials and secrets, pi-host's tokens (the
+# gateway token reaches LearnHarness by environment only), the logins of other agents and browsers (the unit's own
+# Chrome keeps its profile in the private HOME). The main checkout's .env files too when this is a worktree.
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/gigachad-bot"
 hidden_paths=(
-    "$HOME/.secrets" "$HOME/.ssh" "$HOME/.omp" "$HOME/.pi/agent/auth.json" "$HOME/.local/state/gigachad-bot/pi-host.token"
-    "$HOME/.gnupg" "$HOME/.config/gh" "$HOME/.aws" "$HOME/.netrc"
-    "$HOME/.git-credentials" "$proxy_home" "$HOME/.local/share/gigachad-bot/litellm-proxy"
+    "$HOME/.secrets" "$HOME/.ssh" "$HOME/.omp" "$HOME/.pi/agent/auth.json"
+    "${PI_HOST_TOKEN_FILE:-$state_dir/pi-host.token}" "${PI_GATEWAY_TOKEN_FILE:-$state_dir/pi-gateway.token}"
+    "$HOME/.gnupg" "$HOME/.config/gh" "$HOME/.aws" "$HOME/.netrc" "$HOME/.git-credentials"
     "$HOME/.claude" "$HOME/.claude.json" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.local/share/opencode"
     "$HOME/.local/share/keyrings" "$HOME/.password-store" "$HOME/.docker" "$HOME/.kube" "$HOME/.config/gcloud"
     "$HOME/.azure" "$HOME/.npmrc" "$HOME/.pypirc" "$HOME/.var/app" "$HOME/.config/google-chrome" "$HOME/.mozilla"
@@ -510,7 +516,7 @@ done
 
 printf 'Starting LearnHarness on %s (unit %s)\n' "$bind" "$unit"
 # `env -i`: the unit would otherwise inherit the user manager's environment. The description replaces the default, the
-# command line, which holds the master key and would land in the journal.
+# command line, which holds the gateway token and would land in the journal.
 systemd-run --user --unit="$unit" --description="LearnHarness (gigachad-bot learn mode) on $bind" --collect --quiet --pipe \
     --working-directory="$dir" "${unit_properties[@]}" \
     -- env -i "${environment[@]}" "$dir/node_modules/.bin/next" start --hostname "${bind%%:*}" --port "${bind##*:}" &
