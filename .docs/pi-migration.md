@@ -129,10 +129,10 @@ From the P0 spike (`pi-ai` 1.5.2, LiteLLM 1.98 through `litellm_proxy/`: text, s
 | # | Phase | Delivers | Removes |
 |---|---|---|---|
 | P0 | Spikes, done | Gateway (Gateway details), Pi over stdio in an AiB container (D5, M1, M6), usage meters (Extensions) | |
-| P1 | pi-host sessions | Supervisor with M1-M6, M13, M15-M23, `coding` profile, `src/lib/pi_host.py`, `/api/pi` WS proxy | The prototype's process per WebSocket |
+| P1 | pi-host sessions, done | Supervisor with M1-M6, M13, M15-M23, `coding` profile, `src/lib/pi_host.py`, `/api/pi` WS proxy, resync (M2, M22), `Host` seam (M23) | The prototype's process per WebSocket |
 | P2 | Coding tabs | Pi tab kind, sidebar sessions per repo and mount (worktrees grouped under their main repo), session picker (Alt+A, `features/omp/SessionPicker.tsx` today), both showing per session: running, waiting on a dialog (M3), unread, context usage and cost. Project selector, file panel, drafts, `/memorize`, model and thinking selector (D10), branching (D11), M7, M9, M24, M25, F2, F2b, F3-F8, composer chips, notifications, smooth streaming, prompt-cache miss notices | `ompweb-overlay/`, `src/frontend/features/omp/`, `src/lib/omp_web.py`, `src/backend/omp_web_gate.py`, `run-omp-web.sh`, `packages/chat-ui/src/protocol.ts` |
 | P3 | Workbench | `document` profile (D9) | `.omp/` mirroring in `src/lib/workbench/` |
-| P4 | Gateway | Completion gateway, Pi model source, `thinking_blocks` round trip in `src/lib/toolcalling.py`, reasoning levels from `/v1/models`, `/usage`, M14 | `src/lib/omp_source.py`, `src/lib/omp_cli.py`, `omp auth-gateway`, OMP units in `deploy/` |
+| P4 | Gateway, done | Completion gateway, Pi model source, `thinking_blocks` round trip in `src/lib/toolcalling.py`, reasoning levels from `/v1/models`, `/usage`, M14 (production unit on 8301), K9 | `src/lib/omp_source.py`, `src/lib/omp_cli.py`, `omp auth-gateway`, OMP units in `deploy/` |
 | P5 | Agents-in-a-box | `pi --mode json` runner, `~/.pi/agent` seeding (with `npm/`), `.factory/agents/` (D12), `agent-sandbox pi-rpc` subcommand (per-session container name, no namespace lease, unbounded stdio, same-path mounts), `sandboxed` profile on the P4 gateway, F9 | AiB `omp.py`, `.omp/agents/` |
 | P6 | Extensions | `files`, `context-usage`, video paste, GitHub tool, `codemode` | The `omp` binary |
 
@@ -141,6 +141,8 @@ From the P0 spike (`pi-ai` 1.5.2, LiteLLM 1.98 through `litellm_proxy/`: text, s
 **Notifications** (`~/git/ompweb_original/docs/specs/2026-10-06-notifications-design.md`): in-page system notifications, no Web Push (needs HTTPS and a service worker). "Finished" fires on `agent_settled`, not `agent_end` (background work and queued follow-ups done too), "Waiting for your answer" on a dialog request (M3), "Run failed" once per run. Tag `sessionId:type`, a repeat replaces the previous one. Nothing for the session in view, nothing for subagent or aborted runs.
 
 **Smooth streaming**: buffer Pi's deltas and render at most once per animation frame (`~/git/ompweb_original/lib/message-update-coalescer.ts`), group the transcript into rows in one pass and create elements only for the visible window (`~/git/ompweb_original/lib/chat-transcript-plan.ts`). `features/pi/transcript.ts` re-renders on every delta today.
+
+**Entry edits**: `context_edit` (omit or replace an earlier message) and `label` entries arrive after the entry they target, also via resync `append`. The transcript applies them to their target (or marks the edited message) instead of rendering them as rows. `features/pi/transcript.ts` ignores both today.
 
 Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/git/ompweb_original` (omp-web, MIT). Port its logic, adapt to Pi's records.
 
