@@ -170,7 +170,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       body: chatBody,
     }),
     canvas: () => ({
-      left: <TopBarSlot name="drawing">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
+      left: null,
+      center: <TopBarSlot name="drawing">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
       right: <>
         <TopBarPill>
           <TopBarSlot name="view">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
