@@ -1221,7 +1221,8 @@ describe("Project navigation", () => {
   it("keeps a session whose archive fails, saying why", async () => {
     pi.repositories = piRepositories("tool")
     pi.sessions = [piSession("busy", "/git/tool")]
-    api.archivePiSession.mockRejectedValueOnce(new Error("Session is running"))
+    const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
+    api.archivePiSession.mockRejectedValueOnce(new ApiError("live", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
       const section = within(view.getByLabelText("Code"))
