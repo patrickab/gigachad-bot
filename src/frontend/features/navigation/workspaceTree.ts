@@ -3,12 +3,11 @@ import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import type { AppSurface } from "@/contexts/TabContext"
-import { projectMount } from "@/features/omp/sessions"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { mountOf, type FileTreeNode } from "@/lib/domain/files"
 import type { BranchMeta } from "@/lib/domain/histories"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
-import { isInside } from "@/lib/paths"
+import { baseName, isInside, trimSlash } from "@/lib/paths"
 import type { ArchiveEntry } from "./ArchiveSelector"
 import type { useBranches } from "./BranchContext"
 import type { useCodeMounts } from "./useCodeMounts"
@@ -51,12 +50,12 @@ type ProjectTreeContext =
     onProjectSelect?: (slug: string) => void
   }
 
-/** Everything the Code tree shows and does: the omp-web parts are session folders and extra actions of directory rows. */
+/** Everything the Code tree shows and does: the Pi parts are session folders and extra actions of directory rows. */
 type CodeTreeContext =
   & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "folder" | "archived" | "setArchived" | "removeMount">
   & FolderRowContext
   & {
-    omp: Pick<CodeMounts["omp"], "directoryCode" | "directoryActions" | "archivedSessions">
+    sessions: Pick<CodeMounts["sessions"], "directoryCode" | "directoryActions" | "archivedSessions">
     projects: ProjectListItem[]
     pending: (key: string) => boolean
     onDiffSelect?: (path: string) => void
@@ -72,6 +71,11 @@ const isRenamableFile = (path: string) => isStoredProjectFile(path) || path.star
 function isPromotableLatex(path: string, slug: string): boolean {
   const [workbench, kind, owner, folder, file] = path.split("/").slice(-5)
   return workbench === "workbench" && kind === "latex" && owner === slug && Boolean(folder) && file?.toLowerCase().endsWith(".tex") === true
+}
+
+/** File mount linked to a project: the mount whose folder name is the project slug (same rule as the backend's architecture store). */
+function projectMount(slug: string, mounts: readonly string[]): string | null {
+  return mounts.find((mount) => baseName(trimSlash(mount)) === slug) ?? null
 }
 
 /** Slug of the project the file `path` belongs to: the one listing it (as an entry or inside a folder entry), else the one whose linked folder holds it, null when none does. */
@@ -223,20 +227,20 @@ function projectChats(project: ProjectListItem, branchMeta: Record<string, Branc
   })
 }
 
-/** Mount rows, omp workspaces outside every mount, then the archived sessions folder. */
+/** Mount rows, checkouts with Pi sessions outside every mount, then the archived sessions folder. */
 export function codeItems(context: CodeTreeContext): FileTreeItem<string>[] {
-  const archivedSessions = context.omp.archivedSessions()
+  const archivedSessions = context.sessions.archivedSessions()
   return [...mountItems(context), ...unmountedItems(context), ...(archivedSessions ? [archivedSessions] : [])]
 }
 
 /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */
 function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
-  const { omp, projects, mounts, archived } = context
+  const { sessions, projects, mounts, archived } = context
   return context.rootTreeData
     .filter((node) => !context.pending(`root:${mountOf(node)}`) && !archived.has(mountOf(node)))
     .map((node) => {
       const mount = mountOf(node)
-      const code = omp.directoryCode(mount, node.name, projects.find((project) => (project.linked_root ?? projectMount(project.slug, mounts)) === mount)?.slug ?? null)
+      const code = sessions.directoryCode(mount, node.name, projects.find((project) => (project.linked_root ?? projectMount(project.slug, mounts)) === mount)?.slug ?? null)
       return {
         id: mount,
         label: node.name,
@@ -246,7 +250,7 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
         actions: [
           { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, onClick: () => context.onDiffSelect?.(node.path) },
           { label: `Archive ${node.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.setArchived(mount, true) },
-          ...omp.directoryActions(mount, node.name),
+          ...sessions.directoryActions(mount, node.name),
         ],
         onDelete: () => context.removeMount(mount, node.name),
         create: holdsTex(node.children) ? createFileAction(context, node.path, node.name) : undefined,
@@ -284,21 +288,21 @@ function rootFileItems(context: FolderRowContext, nodes: FileTreeNode[]): FileTr
   }))
 }
 
-/** Omp workspaces outside every mount: a directory row holding only its sessions. */
-function unmountedItems({ unmounted, archived, omp, setArchived }: CodeTreeContext): FileTreeItem<string>[] {
+/** Checkouts with Pi sessions outside every mount: a directory row holding only its sessions. */
+function unmountedItems({ unmounted, archived, sessions, setArchived }: CodeTreeContext): FileTreeItem<string>[] {
   return unmounted
     .filter((workspace) => !archived.has(workspace.path))
     .map((workspace) => {
-      const code = omp.directoryCode(workspace.path, workspace.label, null, workspace.sessions)
+      const code = sessions.directoryCode(workspace.path, workspace.label, null, workspace.sessions)
       return {
         id: workspace.path,
         label: workspace.label,
         type: "folder",
         actions: [
           { label: `Archive ${workspace.label}`, menuLabel: "Archive", icon: Archive, onClick: () => setArchived(workspace.path, true) },
-          ...omp.directoryActions(workspace.path, workspace.label),
+          ...sessions.directoryActions(workspace.path, workspace.label),
         ],
-        children: code ? [code] : [],
+        children: [code],
       }
     })
 }

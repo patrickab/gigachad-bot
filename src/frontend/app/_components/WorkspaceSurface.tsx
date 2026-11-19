@@ -31,7 +31,7 @@ import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { PiTab, type PiLaunch } from "@/features/pi/PiTab"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
-import { SessionPicker } from "@/features/omp/SessionPicker"
+import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -379,7 +379,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
 
   return <>
     <TopBar
-      left={<><TopBarTransparent><div className="flex items-center gap-3">{sidebarToggle}<SessionPicker onOpenItem={onOpenItem} /></div></TopBarTransparent>{surface.left}</>}
+      left={<><TopBarTransparent><div className="flex items-center gap-3">{sidebarToggle}<PiSessionPicker onOpenItem={onOpenItem} /></div></TopBarTransparent>{surface.left}</>}
       center={surface.center}
       right={surface.right}
       raised={surface.raised}

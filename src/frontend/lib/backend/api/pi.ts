@@ -77,3 +77,21 @@ export async function openPiSession(repo: string, resume: PiResume, options: PiS
   const { session } = await post<{ session: PiSessionInfo }>("/pi/sessions", { repo, resume, ...options })
   return session
 }
+
+/** Move a session file into the archive (M9). */
+export async function archivePiSession(sessionId: string): Promise<PiSessionInfo> {
+  const { session } = await post<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/archive`, {})
+  return session
+}
+
+/** Move an archived session file back (M9). */
+export async function restorePiSession(sessionId: string): Promise<PiSessionInfo> {
+  const { session } = await post<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/restore`, {})
+  return session
+}
+
+/** Pin or unpin a session: pinned ones are never evicted or archived automatically (M20). */
+export async function pinPiSession(sessionId: string, pinned: boolean): Promise<PiSessionInfo> {
+  const { session } = await request<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/pin`, { method: "PUT", body: JSON.stringify({ pinned }) })
+  return session
+}

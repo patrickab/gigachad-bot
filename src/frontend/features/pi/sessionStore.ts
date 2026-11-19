@@ -184,6 +184,16 @@ export function usePiSessions(filter: { repo?: string; archived?: boolean } = {}
   return { sessions, loading: state.loading, error: state.error }
 }
 
+/** Read every watched list again, for changes pi-host does not announce with `sessions_changed` (a pin writes no session file). */
+export function refreshPiSessions(): void {
+  refreshWatched()
+}
+
+/** The checkouts under `~/git` (`/api/pi/repos`), read along with the session lists: empty until a `usePiSessions` read them. */
+export function usePiRepositories(): PiRepository[] {
+  return useSyncExternalStore(subscribeLists, () => repositories, () => NO_REPOSITORIES)
+}
+
 function readUnread(): Set<string> {
   try {
     const stored: unknown = JSON.parse(readStorage(UNREAD_KEY) ?? "[]")

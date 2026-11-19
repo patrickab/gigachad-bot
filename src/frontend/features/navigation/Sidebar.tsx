@@ -49,7 +49,7 @@ interface SidebarProps {
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
   onArchitectureSelect?: (slug: string) => void
-  /** Show an omp-web session, new session or settings, or the factory board, in the current tab unless `inNewTab`. */
+  /** Show a Pi session or new session, a learn view, or the factory board, in the current tab unless `inNewTab`. */
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
@@ -75,7 +75,6 @@ export function Sidebar(props: SidebarProps) {
   const { renameOf } = useInlineRename()
   const documents = useWorkspaceDocuments({ ...props, projects, moveHistory: branches.moveHistory })
   const code = useCodeMounts(props)
-  const { omp } = code
   const fileRename = useFileRename({
     // Opening a stored file in the workbench moves it to disk, so the row may hold the key it had before
     currentPath: ({ path, name, scope }) => {
@@ -143,10 +142,9 @@ export function Sidebar(props: SidebarProps) {
           <div role="separator" className="my-3 border-t border-divider/50" />
           <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
             headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}
-            labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
             create={code.hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
           />
-          <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
+          <ErrorText className="px-2 py-1">{code.sessions.error}</ErrorText>
           {code.hostAccess && <>
             <div role="separator" className="my-3 border-t border-divider/50" />
             <LearnSection section={learn.section} />

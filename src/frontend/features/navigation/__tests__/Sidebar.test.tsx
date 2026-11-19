@@ -13,6 +13,8 @@ import { fileRootsEnabledResource } from "@/lib/backend/resources"
 import { useResource } from "@/hooks/useResource"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
+import type { PiRepository, PiSessionInfo } from "@/lib/backend/api"
+import type { PiSessionStatus } from "@/features/pi/sessionStore"
 
 const render = (element: ReactElement) => testingRender(
   <TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
@@ -60,9 +62,9 @@ const api = vi.hoisted(() => ({
   fetchWorktrees: vi.fn<typeof import("@/lib/backend/api").fetchWorktrees>(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
   removeWorktree: vi.fn<typeof import("@/lib/backend/api").removeWorktree>(async () => {}),
   deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
-  fetchOmpArchive: vi.fn<typeof import("@/lib/backend/api").fetchOmpArchive>(async () => []),
-  archiveOmpSession: vi.fn<typeof import("@/lib/backend/api").archiveOmpSession>(async () => {}),
-  restoreOmpSession: vi.fn<typeof import("@/lib/backend/api").restoreOmpSession>(async () => "restored"),
+  archivePiSession: vi.fn<typeof import("@/lib/backend/api").archivePiSession>(),
+  restorePiSession: vi.fn<typeof import("@/lib/backend/api").restorePiSession>(),
+  pinPiSession: vi.fn<typeof import("@/lib/backend/api").pinPiSession>(),
   fetchFactoryRepos: vi.fn<typeof import("@/lib/backend/api").fetchFactoryRepos>(async () => []),
   exportLearnSession: vi.fn<typeof import("@/lib/backend/api").exportLearnSession>(),
   registerFactoryRepo: vi.fn<typeof import("@/lib/backend/api").registerFactoryRepo>(),
@@ -106,8 +108,18 @@ vi.mock("@/contexts/ProjectContext", async () => {
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
 const undo = vi.hoisted(() => ({ schedule: vi.fn<(key: string, label: string, run: () => Promise<void>) => void>() }))
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: undo.schedule, pending: () => false }) }))
-const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null, refreshOverview: () => {} }))
-vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => omp }))
+const pi = vi.hoisted(() => ({
+  sessions: [] as PiSessionInfo[],
+  archived: [] as PiSessionInfo[],
+  repositories: [] as PiRepository[],
+  statuses: {} as Record<string, PiSessionStatus>,
+}))
+vi.mock("@/features/pi/sessionStore", () => ({
+  usePiSessions: ({ archived = false }: { archived?: boolean } = {}) => ({ sessions: archived ? pi.archived : pi.sessions, loading: false, error: null }),
+  usePiRepositories: () => pi.repositories,
+  usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false },
+  refreshPiSessions: vi.fn(),
+}))
 const learn = vi.hoisted(() => ({
   sessions: {
     sessions: [] as import("@/lib/domain/types").LearnSession[], error: null as string | null, refresh: vi.fn(async () => {}), claim: async () => {},
@@ -159,11 +171,21 @@ function renderInLearnTab(element: ReactElement, sessionId: string, setWorkspace
   )
 }
 
-function ompSession(id: string, cwd: string, extra: Partial<import("@/lib/domain/types").OmpSession> = {}) {
+function piSession(sessionId: string, cwd: string, extra: Partial<PiSessionInfo> = {}): PiSessionInfo {
   return {
-    id, path: `/s/${id}.jsonl`, cwd, name: id, created: "2026-01-01", modified: "2026-01-01", message_count: 1,
-    first_message: "", parent_session_id: null, project_root: null, worktree_branch: null, ...extra,
+    sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: "2026-01-01T00:00:00Z", modifiedAt: "2026-01-01T00:00:00Z",
+    firstMessage: sessionId, messageCount: 1, live: null, pinned: false, archived: false, ...extra,
   }
+}
+
+/** Pi checkouts `/git/<name>` for every name. */
+const piRepositories = (...names: string[]) => names.map((name) => ({ name, path: `/git/${name}` }))
+
+function resetPi() {
+  pi.sessions = []
+  pi.archived = []
+  pi.repositories = []
+  pi.statuses = {}
 }
 
 beforeEach(() => {
@@ -728,51 +750,115 @@ describe("Project navigation", () => {
     expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
   })
 
-  it("lists a mount's sessions (worktrees included) under its Sessions, not under the project named like it, and keeps the project link", async () => {
+  it("lists a mount's Pi sessions (worktrees included) under its Sessions, not under the project named like it, and keeps the project link", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
-    omp.overview = {
-      running_session_ids: ["fork"],
-      workspaces: [],
-      sessions: [
-        ompSession("main", "/git/proj/src"),
-        ompSession("fork", "/git/proj", { parent_session_id: "main" }),
-        ompSession("worktree", "/git/proj-worktrees/feat", { project_root: "/git/proj" }),
-        ompSession("elsewhere", "/git/project-old"),
-      ],
-    }
+    pi.repositories = piRepositories("proj", "project-old")
+    pi.sessions = [
+      piSession("main", "/git/proj/src"),
+      piSession("worktree", "/git/worktrees/proj/feat"),
+      piSession("elsewhere", "/git/project-old"),
+    ]
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Sessions" })).not.toBeInTheDocument()
       const section = within(view.getByLabelText("Code"))
+      expect(section.queryByRole("button", { name: "Open omp settings" })).not.toBeInTheDocument()
       fireEvent.click(await section.findByRole("button", { name: "proj" }))
       fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
-      expect(code.getByRole("button", { name: "worktree" })).toBeVisible()
+      expect(code.getByRole("button", { name: "worktree feat" })).toBeVisible()
       expect(code.queryByRole("button", { name: "elsewhere" })).not.toBeInTheDocument()
 
       fireEvent.click(code.getByRole("button", { name: "main" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "session", sessionId: "main" } })
-      expect(code.getByRole("button", { name: "fork running" })).toBeVisible()
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: "main", repo: "proj" } })
+      fireEvent.click(code.getByRole("button", { name: "worktree feat" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: "worktree", repo: "proj" } })
 
       fireEvent.click(section.getByRole("button", { name: "New session in proj" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: null, repo: "proj" } }, true)
     } finally {
-      omp.overview = null
+      resetPi()
       api.fileRootTree.mockImplementation(listTree!)
     }
   })
 
-  it("lists omp-only directories beside the mounts, each with its sessions under Sessions, and hides them while omp-web never answered", async () => {
+  it("nests forks under their parent and marks running, waiting and unread sessions with their context use and cost", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
-    omp.overview = {
-      running_session_ids: [],
-      workspaces: [{ path: "/git/proj", alias: null, added_at: null }, { path: "/git/tool", alias: null, added_at: null }],
-      sessions: [ompSession("linked", "/git/proj"), ompSession("tooling", "/git/tool/src")],
+    pi.repositories = piRepositories("proj")
+    pi.sessions = [
+      piSession("main", "/git/proj"),
+      piSession("fork", "/git/proj", { parentSession: "/s/main.jsonl" }),
+      piSession("asking", "/git/proj"),
+      piSession("done", "/git/proj"),
+      piSession("quiet", "/git/proj"),
+    ]
+    pi.statuses = {
+      fork: { running: true, waiting: false, unread: false, contextPercent: 41.6, cost: 0.123 },
+      asking: { running: true, waiting: true, unread: false },
+      done: { running: false, waiting: false, unread: true },
     }
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const section = within(view.getByLabelText("Code"))
+      fireEvent.click(await section.findByRole("button", { name: "proj" }))
+      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const code = within(section.getByRole("group", { name: "Sessions contents" }))
+      fireEvent.click(code.getByRole("button", { name: "main" }))
+      const forks = within(code.getByRole("group", { name: "main contents" }))
+      expect(forks.getByRole("img", { name: "Running" })).toBeInTheDocument()
+      expect(forks.getByText("42% · $0.12")).toBeVisible()
+      expect(code.getByRole("img", { name: "Waiting" })).toBeInTheDocument()
+      expect(code.getByRole("img", { name: "Unread" })).toBeInTheDocument()
+      expect(code.getAllByRole("img", { name: /Running|Waiting|Unread/ })).toHaveLength(3)
+    } finally {
+      resetPi()
+      api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
+  it("archives a session from its menu, hiding it at once, restores it from the archived folder, and pins it", async () => {
+    const listTree = api.fileRootTree.getMockImplementation()
+    api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
+    pi.repositories = piRepositories("proj")
+    pi.sessions = [piSession("keep", "/git/proj"), piSession("old", "/git/proj")]
+    pi.archived = [piSession("stored", "/git/proj", { archived: true })]
+    api.archivePiSession.mockImplementation(async (id) => piSession(id, "/git/proj", { archived: true }))
+    api.restorePiSession.mockImplementation(async (id) => piSession(id, "/git/proj"))
+    api.pinPiSession.mockImplementation(async (id, pinned) => piSession(id, "/git/proj", { pinned }))
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const section = within(view.getByLabelText("Code"))
+      fireEvent.click(await section.findByRole("button", { name: "proj" }))
+      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const code = within(section.getByRole("group", { name: "Sessions contents" }))
+
+      fireEvent.click(rowMenuItem(code, "keep", "Pin keep"))
+      expect(api.pinPiSession).toHaveBeenCalledWith("keep", true)
+      expect(await code.findByRole("img", { name: "Pinned" })).toBeInTheDocument()
+
+      fireEvent.click(code.getByRole("button", { name: "Archive old" }))
+      expect(code.queryByRole("button", { name: "old" })).not.toBeInTheDocument()
+      await waitFor(() => expect(api.archivePiSession).toHaveBeenCalledWith("old"))
+
+      fireEvent.click(section.getByRole("button", { name: "archived" }))
+      fireEvent.click(section.getByRole("button", { name: "Restore stored" }))
+      await waitFor(() => expect(api.restorePiSession).toHaveBeenCalledWith("stored"))
+      expect(section.queryByRole("button", { name: "Restore stored" })).not.toBeInTheDocument()
+    } finally {
+      resetPi()
+      api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
+  it("lists checkouts with Pi sessions beside the mounts, each with its sessions under Sessions, and leaves out sessions outside every checkout", async () => {
+    const listTree = api.fileRootTree.getMockImplementation()
+    api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
+    pi.repositories = piRepositories("proj", "tool")
+    pi.sessions = [piSession("linked", "/git/proj"), piSession("tooling", "/git/tool/src"), piSession("home", "/home/me")]
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
@@ -788,33 +874,21 @@ describe("Project navigation", () => {
       fireEvent.click(tool.getByRole("button", { name: "Sessions" }))
       expect(tool.getByRole("button", { name: "tooling" })).toBeVisible()
       expect(tool.queryByRole("button", { name: "linked" })).not.toBeInTheDocument()
+      expect(section.queryByRole("button", { name: "me" })).not.toBeInTheDocument()
 
-      fireEvent.click(section.getByRole("button", { name: "Open omp settings" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
       fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: null, repo: "tool" } }, true)
       fireEvent.click(tool.getByRole("button", { name: "tooling" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "session", sessionId: "tooling" } })
-
-      omp.overview = null
-      view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-        <Sidebar appMode="chat" onItemOpen={onItemOpen} />
-      </TabContext.Provider>)
-      expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
-      expect(section.queryByRole("button", { name: "Open omp settings" })).not.toBeInTheDocument()
-      expect(section.getByRole("button", { name: "proj" })).toBeVisible()
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: "tooling", repo: "tool" } })
     } finally {
-      omp.overview = null
+      resetPi()
       api.fileRootTree.mockImplementation(listTree!)
     }
   })
 
-  it("archives a directory like a project, listing it in the header popover until restored, for mounts and omp-only directories alike", async () => {
-    omp.overview = {
-      running_session_ids: [],
-      workspaces: [{ path: "/git/tool", alias: null, added_at: null }],
-      sessions: [],
-    }
+  it("archives a directory like a project, listing it in the header popover until restored, for mounts and session-only checkouts alike", async () => {
+    pi.repositories = piRepositories("tool")
+    pi.sessions = [piSession("tooling", "/git/tool")]
     try {
       const view = render(<Sidebar appMode="chat" />)
       const section = within(view.getByLabelText("Code"))
@@ -830,16 +904,13 @@ describe("Project navigation", () => {
       expect(await section.findByRole("button", { name: "source" })).toBeVisible()
       expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
     } finally {
-      omp.overview = null
+      resetPi()
     }
   })
 
   it("opens the factory of any workspace, registering its checkout first unless the engine knows it, for host access only", async () => {
-    omp.overview = {
-      running_session_ids: [],
-      workspaces: [{ path: "/git/known", alias: null, added_at: null }, { path: "/git/fresh", alias: null, added_at: null }, { path: "/git/broken", alias: null, added_at: null }],
-      sessions: [],
-    }
+    pi.repositories = piRepositories("known", "fresh", "broken")
+    pi.sessions = [piSession("a", "/git/known"), piSession("b", "/git/fresh"), piSession("c", "/git/broken")]
     login.hostAccess = true
     api.fetchFactoryRepos.mockResolvedValue([{ name: "known-repo", path: "/git/known" }])
     api.registerFactoryRepo.mockResolvedValueOnce({ name: "fresh", path: "/git/fresh" }).mockRejectedValueOnce(new Error("Not a git checkout: /git/broken"))
@@ -871,7 +942,7 @@ describe("Project navigation", () => {
       </TabContext.Provider>)
       expect(view.queryByRole("button", { name: /Open factory for/ })).not.toBeInTheDocument()
     } finally {
-      omp.overview = null
+      resetPi()
       login.hostAccess = false
     }
   })
@@ -1147,35 +1218,21 @@ describe("Project navigation", () => {
     }
   })
 
-  it("archives a session from its row, explains a refusal for sessions with forks and restores from the archive", async () => {
-    const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
-    omp.overview = {
-      running_session_ids: [],
-      workspaces: [{ path: "/git/tool", alias: null, added_at: null }],
-      sessions: [ompSession("parent", "/git/tool"), ompSession("child", "/git/tool", { parent_session_id: "parent" }), ompSession("solo", "/git/tool")],
-    }
-    api.fetchOmpArchive.mockImplementation(async () => [{ key: "old.jsonl", id: "old", cwd: "/git/tool", name: "old", created: "", archived_at: "", message_count: 1, first_message: "", status: null }])
-    api.archiveOmpSession.mockRejectedValueOnce(new ApiError("session_has_children", 409))
+  it("keeps a session whose archive fails, saying why", async () => {
+    pi.repositories = piRepositories("tool")
+    pi.sessions = [piSession("busy", "/git/tool")]
+    api.archivePiSession.mockRejectedValueOnce(new Error("Session is running"))
     try {
       const view = render(<Sidebar appMode="chat" />)
       const section = within(view.getByLabelText("Code"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
       fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
 
-      fireEvent.click(section.getByRole("button", { name: "Archive parent" }))
-      expect(await view.findByRole("alert")).toHaveTextContent("Archive the forks of parent first")
-      expect(section.getByRole("button", { name: "parent" })).toBeVisible()
-
-      fireEvent.click(section.getByRole("button", { name: "Archive solo" }))
-      await waitFor(() => expect(section.queryByRole("button", { name: "solo" })).not.toBeInTheDocument())
-      expect(api.archiveOmpSession).toHaveBeenLastCalledWith("solo")
-      expect(view.queryByRole("alert")).not.toBeInTheDocument()
-
-      fireEvent.click(await section.findByRole("button", { name: "archived" }))
-      fireEvent.click(section.getByRole("button", { name: "Restore old" }))
-      await waitFor(() => expect(api.restoreOmpSession).toHaveBeenCalledWith("old.jsonl"))
+      fireEvent.click(section.getByRole("button", { name: "Archive busy" }))
+      expect(await view.findByRole("alert")).toHaveTextContent("Session is running")
+      expect(section.getByRole("button", { name: "busy" })).toBeVisible()
     } finally {
-      omp.overview = null
+      resetPi()
     }
   })
 

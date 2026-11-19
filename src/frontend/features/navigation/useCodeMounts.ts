@@ -7,7 +7,7 @@ import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
-import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
+import { usePiSidebar } from "@/features/pi/usePiSidebar"
 import { useResource } from "@/hooks/useResource"
 import { removeFileRoot } from "@/lib/backend/api"
 import { fileRootsEnabledResource, refreshRootTree, revalidateOnActivation, rootTreeResource } from "@/lib/backend/resources"
@@ -23,7 +23,7 @@ interface CodeMountsOptions {
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
 }
 
-/** File mounts of the Code section: their tree, worktrees, omp sessions and archive state. Every tab shares the tree and worktrees. */
+/** File mounts of the Code section: their tree, worktrees, Pi sessions and archive state. Every tab shares the tree and worktrees. */
 export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const hostAccess = useHostAccess()
   const isActive = useTabActive()
@@ -34,7 +34,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const rootTreeData = shownTree ?? NO_TREE
   const mounts = rootTreeData.map(mountOf)
   const openFactoryRepo = useFactoryRepos(hostAccess)
-  const omp = useOmpSidebar({
+  const sessions = usePiSidebar({
     onOpen: onItemOpen,
     workspaceActions: (directory, label, reportError) => !hostAccess ? [] : [{
       label: `Open factory for ${label}`,
@@ -75,7 +75,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   })
 
   return {
-    hostAccess, omp, rootTreeData, mounts, unmounted: omp.unmountedWorkspaces(mounts), folder: worktrees.folder,
+    hostAccess, sessions, rootTreeData, mounts, unmounted: sessions.unmountedWorkspaces(mounts), folder: worktrees.folder,
     archived, setArchived, mountThen, removeMount,
   }
 }
