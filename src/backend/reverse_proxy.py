@@ -2,7 +2,8 @@
 
 - `streaming_response` relays an upstream answer unbuffered, hop-by-hop fields dropped (`lib.upstream.forwardable_headers`)
 - `forward` is the whole request path of the omp-web and LearnHarness gates, standalone Starlette apps whose
-  `app.state.client` has the upstream as `base_url`
+  `app.state.client` has the upstream as `base_url`. `METHODS` is the gates' route methods, `LOGIN_HEADER` the login
+  Tailscale Serve vouches for, `is_tailnet_host` their identity check
 - `relay_websocket` joins a browser WebSocket to an upstream one the caller opened
 """
 
@@ -18,7 +19,16 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 
+from backend.identity import CAPABILITIES_HEADER, is_host_capability_granted
 from lib.upstream import forwardable_headers
+
+LOGIN_HEADER = "tailscale-user-login"
+METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
+def is_tailnet_host(request: Request) -> bool:
+    """Whether Tailscale Serve vouched for a login holding the host capability."""
+    return bool(request.headers.get(LOGIN_HEADER)) and is_host_capability_granted(request.headers.get(CAPABILITIES_HEADER))
 
 
 async def _browser_to_upstream(websocket: WebSocket, upstream: ClientConnection) -> None:
@@ -39,7 +49,7 @@ async def _upstream_to_browser(websocket: WebSocket, upstream: ClientConnection)
 
 
 async def relay_websocket(websocket: WebSocket, upstream: ClientConnection) -> None:
-    """Accept *websocket* with the subprotocol the open *upstream* chose and relay both ways until either side closes, then close both."""
+    """Accept *websocket* with the subprotocol the open *upstream* chose, relay both ways until either side closes, close both."""
     try:
         await websocket.accept(subprotocol=upstream.subprotocol)
         relays = [

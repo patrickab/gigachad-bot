@@ -27,8 +27,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidHandshake
 
 from backend.identity import CAPABILITIES_HEADER, development_login, has_host_access, host_denied
-from backend.omp_web_gate import LOGIN_HEADER, METHODS
-from backend.reverse_proxy import relay_websocket, streaming_response
+from backend.reverse_proxy import LOGIN_HEADER, METHODS, relay_websocket, streaming_response
 from lib.factory import PREVIEW_PORTS
 from lib.upstream import forwardable_headers
 

@@ -1,7 +1,7 @@
 """Tailnet identity gate in front of LearnHarness, for browsers on other devices.
 
-- Same contract as `omp_web_gate` (whose login check it reuses, `reverse_proxy.forward` does the proxying): Tailscale Serve
-  terminates HTTPS and vouches for the login, only logins granted `HOST_CAPABILITY` pass, everyone else gets 403
+- Tailscale Serve terminates HTTPS and vouches for the login (`reverse_proxy.is_tailnet_host`), only logins granted
+  `HOST_CAPABILITY` pass, everyone else gets 403. `reverse_proxy.forward` does the proxying
 - A plain identity-checking proxy: keeps `Host`, marks the request HTTPS, streams both ways (LearnHarness streams its turns).
   No LearnHarness knowledge lives here, `lib/learnharness.py` owns that, except one policy: LearnHarness takes no provider
   key, custom endpoint or subscription (models come from gigachad-bot through the LiteLLM proxy), so writes to those
@@ -21,8 +21,7 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
 from backend.identity import host_denied
-from backend.omp_web_gate import METHODS, is_allowed
-from backend.reverse_proxy import forward
+from backend.reverse_proxy import METHODS, forward, is_tailnet_host
 from lib.learnharness import learnharness_url
 
 # Tests swap in an `httpx.MockTransport`, None is the real network.
@@ -51,7 +50,7 @@ def is_credential_write(method: str, path: str) -> bool:
 
 
 async def proxy(request: Request) -> Response:
-    if not is_allowed(request):
+    if not is_tailnet_host(request):
         return PlainTextResponse(f"{host_denied('LearnHarness')}\n", status_code=403)
     if is_credential_write(request.method, request.url.path):
         return PlainTextResponse(f"{_CREDENTIALS_REFUSED}\n", status_code=403)
