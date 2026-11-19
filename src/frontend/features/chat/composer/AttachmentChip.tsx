@@ -14,7 +14,11 @@ export interface ContextAttachment {
   attachment: Attachment
 }
 
-const CHIP_BUTTON_CLASS = "shrink-0 rounded p-0.5 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+/** The pill every composer chip is drawn as, `group/chip` reveals its remove button on hover. */
+export const CHIP_CLASS = "group/chip inline-flex max-w-56 items-center gap-1 rounded-xl border border-divider-strong/50 bg-surface-elevated py-1 pl-1.5 pr-1 text-xs transition-opacity"
+export const CHIP_BUTTON_CLASS = "shrink-0 rounded p-0.5 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+/** A chip's remove button, shown on hover or keyboard focus. */
+export const CHIP_REMOVE_CLASS = cn(CHIP_BUTTON_CLASS, "text-ink-faint opacity-0 hover:text-danger focus-visible:opacity-100 group-hover/chip:opacity-100")
 
 /**
  * One attachment pill above the composer.
@@ -41,7 +45,7 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
 
   return (
     <div className={cn(
-      "group/chip inline-flex max-w-56 items-center gap-1 rounded-xl border border-divider-strong/50 bg-surface-elevated py-1 pl-1.5 pr-1 text-xs transition-opacity",
+      CHIP_CLASS,
       !attachment.active && "opacity-50 hover:opacity-80 focus-within:opacity-80",
     )}>
       {onToggleActive ? (
@@ -69,7 +73,7 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
         type="button"
         aria-label={`Remove ${label}`}
         onClick={onRemove}
-        className={cn(CHIP_BUTTON_CLASS, "text-ink-faint opacity-0 hover:text-danger focus-visible:opacity-100 group-hover/chip:opacity-100")}
+        className={CHIP_REMOVE_CLASS}
       >
         <X className="h-3 w-3" />
       </button>

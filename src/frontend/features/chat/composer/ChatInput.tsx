@@ -15,10 +15,12 @@ import { AttachMenu, SendButton, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
 import { useDraftAttachments } from "./useDraftAttachments"
 import { useComposerDraft } from "./useComposerDraft"
+import { largePasteChip, useComposerChips, withChips } from "./composerChips"
+import { TextChip } from "./TextChip"
 
 interface ChatInputProps {
   chatId: string
-  /** Conversation the unsent text is kept for across closing the tab (`useComposerDraft`), none keeps it in memory only. */
+  /** Conversation the unsent text and staged chips are kept for (`useComposerDraft`, `composerChips`), none keeps them in memory only. */
   draftKey?: string | null
   onSend: (text: string, attachments: Attachment[]) => void
   disabled?: boolean
@@ -93,6 +95,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
   const [text, setText] = useComposerDraft(draftKey)
+  const chips = useComposerChips(draftKey)
   const [drawing, setDrawing] = useState<DrawingMode | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -121,13 +124,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     focus: () => textareaRef.current?.focus(),
   }), [drafts.add, setText, upload])
 
+  // Staged chips go after the typed text, verbatim
   const handleSubmit = () => {
     const trimmed = text.trim()
-    if (!trimmed && attachments.length === 0) return
+    if (!trimmed && attachments.length === 0 && chips.chips.length === 0) return
     completions.close()
-    onSend(trimmed || "", attachments)
+    onSend(withChips(trimmed, chips.chips), attachments)
     setText("")
     drafts.clear()
+    chips.clear()
   }
 
   // Escape layers (completion menu, dialogs) take Escape first, a free Escape leaves the draft
@@ -137,7 +142,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (e.key === "Enter" && !e.shiftKey && !submitBlocked) { e.preventDefault(); handleSubmit() }
   }
 
-  // Videos go to `onPasteVideo`, only the first pasted image is attached
+  // Videos go to `onPasteVideo`, only the first pasted image is attached, a large text becomes a chip
   const handlePaste = (e: React.ClipboardEvent) => {
     const videos = onPasteVideo ? [...e.clipboardData.files].filter((file) => file.type.startsWith("video/")) : []
     if (videos.length > 0) {
@@ -151,8 +156,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         const blob = item.getAsFile()
         if (!blob) continue
         upload(blob, blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`)
-        break
+        return
       }
+    }
+    const pasted = largePasteChip(e.clipboardData.getData("text/plain"))
+    if (pasted) {
+      e.preventDefault()
+      chips.stage(pasted)
     }
   }
 
@@ -167,7 +177,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   )
   const activeContext = context?.attachments.filter(({ attachment }) => attachment.active) ?? []
   const inactiveContext = context?.attachments.filter(({ attachment }) => !attachment.active) ?? []
-  const canSend = !picker && (text.trim().length > 0 || attachments.length > 0)
+  const canSend = !picker && (text.trim().length > 0 || attachments.length > 0 || chips.chips.length > 0)
   const submitBlocked = Boolean(extracting) || (Boolean(isStreaming) && !sendWhileStreaming)
   const showStop = Boolean(isStreaming) && !(sendWhileStreaming && canSend)
   const hintText = hint?.(text, attachments.length) ?? null
@@ -179,7 +189,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
-      {((context?.attachments.length ?? 0) > 0 || attachments.length > 0) && (
+      {((context?.attachments.length ?? 0) > 0 || attachments.length > 0 || chips.chips.length > 0) && (
         <div className="relative z-10 mb-2 flex flex-wrap gap-1.5">
           {activeContext.map(contextChip)}
           {attachments.map((attachment) => (
@@ -191,6 +201,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onRemove={() => drafts.remove(attachment.name)}
             />
           ))}
+          {chips.chips.map((chip) => <TextChip key={chip.id} chip={chip} onRemove={() => chips.remove(chip.id)} />)}
           {inactiveContext.length > 0 && (
             <InactiveAttachments count={inactiveContext.length}>{inactiveContext.map(contextChip)}</InactiveAttachments>
           )}
