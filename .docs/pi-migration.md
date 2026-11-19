@@ -50,7 +50,7 @@ src/frontend/features/pi/   the only frontend code that knows Pi's protocol
 | D5 | Agents-in-a-box integration is a spawn strategy. pi-host spawns an AiB CLI command (`agent-sandbox pi-rpc --profile … --cwd … --session-dir … -- <pi args>`) that `exec`s `docker run -i --rm` with AiB's hardened flags, so the child has the same stdio, stdin-EOF and SIGTERM contract as a local `pi --mode rpc` (spike: about 1 s cold start, no orphans). Workspace and session directory are bind-mounted at their host paths, so session `cwd` and listing match local sessions. Pi's install directory is mounted read-only (it is a glibc-only binary plus sibling assets). The sandboxed Pi reaches models only through the pi-host gateway (AiB host service, custom provider), so no Anthropic credential enters the container. Factory one-shot runs use `pi --mode json` instead of `omp --print` |
 | D6 | The backend is the gatekeeper: only `src/lib/pi_host.py` knows pi-host, host access gates `/api/pi/*`, the browser never reaches pi-host |
 | D7 | The UI renders Pi natively in `features/pi/`: no iframe, overlay, seam patch or postMessage protocol |
-| D8 | Normal chats keep the completion API through LiteLLM. `omp_source` becomes a Pi model source pointing at the gateway |
+| D8 | Normal chats keep the completion API, served by the pi-host gateway. Through LiteLLM (`litellm_proxy/`) until P7 removes LiteLLM and chats call the gateway with an OpenAI-compatible client |
 | D9 | The `document` profile passes its system prompt explicitly, it does not rely on Pi's project trust for `.pi/SYSTEM.md` |
 | D10 | Model and thinking are per session from the start. The selector lists Pi's models (`get_available_models`) with Pi's default model preselected, new sessions start at thinking `medium` |
 | D11 | Branching works like chat branching: each turn's branch action forks into a new session (Pi `fork` at that prompt, or `clone` at the end) that opens in the tab |
@@ -135,6 +135,7 @@ From the P0 spike (`pi-ai` 1.5.2, LiteLLM 1.98 through `litellm_proxy/`: text, s
 | P4 | Gateway, done | Completion gateway, Pi model source, `thinking_blocks` round trip in `src/lib/toolcalling.py`, reasoning levels from `/v1/models`, `/usage`, M14 (production unit on 8301), K9 | `src/lib/omp_source.py`, `src/lib/omp_cli.py`, `omp auth-gateway`, OMP units in `deploy/` |
 | P5 | Agents-in-a-box | `pi --mode json` runner, `~/.pi/agent` seeding (with `npm/`), `.factory/agents/` (D12), `agent-sandbox pi-rpc` subcommand (per-session container name, no namespace lease, unbounded stdio, same-path mounts), `sandboxed` profile on the P4 gateway, F9 | AiB `omp.py`, `.omp/agents/` |
 | P6 | Extensions | `files`, `context-usage`, video paste, GitHub tool, `codemode` | The `omp` binary |
+| P7 | LiteLLM out | K1 then K11: LearnHarness and backend chats call the pi-host gateway directly (OpenAI-compatible client), Ollama through Pi's `models.json` custom provider, `research.py` on the gateway | `run-litellm-proxy.sh` and its unit, `litellm` and `langchain-litellm`, `llm_resilience.py`, the gpt-researcher shim |
 
 **Composer chips** are a shared composer feature (`features/chat/composer/ChatInput.tsx`), used by Pi tabs and normal chats alike: labeled, removable text staged above the draft, appended verbatim on send, kept per conversation, sendable without typed text. Sources: a large paste (above a size threshold it becomes a chip instead of filling the draft), a file panel selection, a diff hunk, test output, a canvas or PDF region, an extension's context.
 
@@ -152,9 +153,9 @@ Beyond the "Removes" column, from a source inventory (LOC from file reads, savin
 
 | # | Item | Verdict | Phase | Saves |
 |---|---|---|---|---|
-| K1 | LiteLLM proxy (`run-litellm-proxy.sh`, its unit, proxy half of `learnharness_config.py`), used only by LearnHarness | LearnHarness's custom endpoint points at the pi-host gateway. Needs every provider its tiers use in the gateway: API-key providers (Gemini) already are, Ollama via Pi's `models.json` custom provider | after P4 | ~400 |
+| K1 | LiteLLM proxy (`run-litellm-proxy.sh`, its unit, proxy half of `learnharness_config.py`), used only by LearnHarness | decided: LearnHarness's custom endpoint points at the pi-host gateway. Needs every provider its tiers use in the gateway: API-key providers (Gemini) already are, Ollama via Pi's `models.json` custom provider | P7 | ~400 |
 | K2 | `features/omp/` and its outside consumers (`WorkbenchChat`, `TabContent`, `WorkspaceSurface`, `useTabChat`, `useCodeMounts`, `workspaceTree`, `TabContext` kind `omp`, `api/omp.ts`, `routes/omp.py`) | cut the consumers, then delete | P2 | ~2,000 |
-| K3 | `packages/chat-ui` `protocol.ts`, `hints.ts`, `hints.css` | remove. The app-wide `f` click hints are installed only by `OmpProvider`: re-mount `installClickHints` in `AppShell` to keep them | P2 | ~430 |
+| K3 | `packages/chat-ui` `protocol.ts`, `hints.ts`, `hints.css` | remove `protocol.ts`. Decided: keep the `f` click hints app-wide, mount `installClickHints` in `AppShell` (today only `OmpProvider` installs it) | P2 | ~140 |
 | K4 | Tailnet gates: `learnharness_gate.py`, `preview_gate.py` import helpers from `omp_web_gate.py` | move the helpers to `reverse_proxy.py`, delete `omp_web_gate.py`, merge the two remaining gates into one app | P2 | ~80 |
 | K5 | `features/pi/tools/patch.ts` duplicates `lib/diff.ts` `parsePatch` | one parser in `lib/diff.ts` | P2 | ~100 |
 | K6 | pi-host `catalog/files.ts` fuzzy ranker duplicates `frontend/lib/fuzzy.ts` | pi-host serves the cached file list per cwd, the UI ranks (as `/` commands do). Measure with a 20k-file repo first | P2 | ~65 |
@@ -162,7 +163,7 @@ Beyond the "Removes" column, from a source inventory (LOC from file reads, savin
 | K8 | `workbench/links.py` (file to omp session ids, rename notices) | keep file to Pi session id and the rename notice, state moves into M19 | P3 | ~80 |
 | K9 | Model catalog: `source:"omp"` row and label, `fold_provider_rows` legacy fold | rename to Pi, drop the fold, stored `litellm_proxy/...` selectors unchanged | P4 | ~150 |
 | K10 | `omp_model` setting is the AiB sandbox model (`deps.py:114` into `SandboxInvocation`) | Pi model id, key renamed (`config.py`, `types.ts`, test fixtures) | P5 | small |
-| K11 | Backend LiteLLM (`llm_resilience.py`, `reasoning_levels.py`, `model_reasoning_levels` table, gpt-researcher shim, `langchain-litellm`) | defer: dropping it reverses D8, `research.py` and Ollama depend on it | Future | ~200 |
+| K11 | Backend LiteLLM (`llm_resilience.py`, `reasoning_levels.py`, `model_reasoning_levels` table, gpt-researcher shim, `langchain-litellm`) | decided: remove. Reverses D8 (chats keep the completion API, through the gateway without LiteLLM). `research.py` and Ollama move first | P7 | ~200 |
 
 Stays: LearnHarness (own engine on the Pi SDK, ADR 0001), `packages/chat-ui` minus K3 (app markdown, code and turn components, packed for LearnHarness), the chat tool loop (`toolcalling.py`, `tools.py`), the chat sandbox (staged workspace per turn, no Pi equivalent), memory, research, prompt store, factory, terminal, Neovim, Jupyter.
 
