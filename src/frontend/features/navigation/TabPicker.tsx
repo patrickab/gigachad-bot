@@ -9,7 +9,8 @@ import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { PATH_COLLATOR } from "@/lib/paths"
 import { isAltOnly, isEditableTarget } from "@/lib/utils"
-import { TabStripContext, tabLocation, type TabStripValue } from "./tabs"
+import { usePiSessionStatus } from "@/features/pi/sessionStore"
+import { TabStripContext, piSessionOf, tabLocation, type TabStripValue } from "./tabs"
 
 const GENERAL = "general"
 
@@ -20,6 +21,12 @@ interface TabEntry { tab: Tab; project: string; category: string; file: string }
 
 function Spinner() {
   return <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
+}
+
+/** A dot after the title of a Pi tab whose session settled since it was last viewed. */
+function UnreadMark({ sessionId }: { sessionId: string | null }) {
+  const { unread } = usePiSessionStatus(sessionId)
+  return unread ? <span role="img" aria-label="Unread" className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-ink" /> : null
 }
 
 /** A bare Space pressed outside text fields and controls that take it, nothing else took it. */
@@ -112,6 +119,7 @@ export function TabPicker() {
     renderItem={(entry) => <>
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="truncate leading-5">{entry.file}</span>
+        <UnreadMark sessionId={piSessionOf(entry.tab)} />
         <span className="shrink-0 text-[10px] text-ink-faint">{entry.category}{entry.tab.id === strip.activeTabId && " · current"}</span>
       </span>
       {strip.isLoading(entry.tab) && <Spinner />}

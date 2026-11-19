@@ -71,10 +71,12 @@ export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceIte
   return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
-/** The tab already showing file `item`, the active one first: opening it again switches there instead of duplicating it. */
+/** The tab already showing file `item` or Pi session `item`, the active one first: opening it again switches there instead of duplicating it. */
 export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: string): Tab | undefined {
-  if (!FILE_ITEM_KINDS.includes(item.kind)) return undefined
-  const shows = ({ workspaceItem }: Tab) => workspaceItem?.kind === item.kind && workspaceItem.path === item.path
+  const sessionId = item.kind === "pi" ? item.pi?.sessionId : null
+  if (!sessionId && !FILE_ITEM_KINDS.includes(item.kind)) return undefined
+  const shows = ({ workspaceItem }: Tab) => workspaceItem?.kind === item.kind
+    && (sessionId ? workspaceItem.pi?.sessionId === sessionId : workspaceItem.path === item.path)
   return tabs.find((tab) => tab.id === activeId && shows(tab)) ?? tabs.find(shows)
 }
 
@@ -132,6 +134,11 @@ export function tabsAfterRemoval(tabs: Tab[], path: string, activeId: string, fr
 export function tabAfterClosing(tabs: Tab[], id: string): string {
   const remaining = tabs.filter((tab) => tab.id !== id)
   return remaining[Math.max(0, tabs.findIndex((tab) => tab.id === id) - 1)]?.id ?? ""
+}
+
+/** The Pi session `tab` shows, null for other tabs and a Pi tab before its first message. */
+export function piSessionOf(tab: Tab): string | null {
+  return tab.appMode === "pi" ? tab.workspaceItem?.pi?.sessionId ?? null : null
 }
 
 /** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */

@@ -5,7 +5,7 @@ import type { ChatFocus } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
-import { nextTab } from "@/features/navigation/tabs"
+import { nextTab, piSessionOf, tabLabel } from "@/features/navigation/tabs"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
@@ -18,7 +18,8 @@ import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
-import { PiSessionsProvider } from "@/features/pi/sessionStore"
+import { markPiSessionRead, PiSessionsProvider } from "@/features/pi/sessionStore"
+import { startPiNotifications } from "@/features/pi/notifications"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
@@ -70,6 +71,24 @@ export function AppShell() {
     setActiveTabId(tab.id)
     if (tab.projectSlug) lastProjectTabs.current.set(tab.projectSlug, tab.id)
     setDashboardSlug((current) => current === tab.projectSlug ? current : null)
+    // The frontmost Pi tab's session is read while the page shows it
+    const sessionId = piSessionOf(tab)
+    if (sessionId && document.visibilityState === "visible") markPiSessionRead(sessionId)
+  }, [])
+
+  useEffect(() => {
+    const tabOf = (sessionId: string) => tabManagerRef.current?.getTabs().find((tab) => piSessionOf(tab) === sessionId)
+    return startPiNotifications({
+      activeSession: () => activeTabRef.current && piSessionOf(activeTabRef.current),
+      titleOf: (sessionId) => {
+        const tab = tabOf(sessionId)
+        return tab ? tabLabel(tab, undefined, () => undefined) : null
+      },
+      open: (sessionId) => {
+        const tab = tabOf(sessionId)
+        if (tab) tabManagerRef.current?.switchToTab(tab.id)
+      },
+    })
   }, [])
 
   const handleTabsChange = useCallback((tabs: Tab[]) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { newPiItem, showingItem, type WorkspaceItem } from "@/contexts/TabContext"
-import { nextTab, parseSavedTabs, relocatedTab, renamedTab, tabLabel, tabLocation, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
+import { nextTab, parseSavedTabs, piSessionOf, relocatedTab, renamedTab, tabLabel, tabLocation, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
@@ -154,6 +154,27 @@ describe("tabShowingItem", () => {
     expect(tabShowingItem([first], { ...canvas, path: "project/proj/document/other.canvas" }, "")).toBeUndefined()
     const omp: WorkspaceItem = { kind: "omp", path: "/repo", projectSlug: null }
     expect(tabShowingItem([tabWith(omp)], omp, "")).toBeUndefined()
+  })
+
+  const piItem = (sessionId: string | null): WorkspaceItem => ({ kind: "pi", path: "repo", projectSlug: null, pi: { sessionId, repo: "repo" } })
+  const piTab = (sessionId: string | null) => ({ ...nextTab(), ...showingItem(piItem(sessionId)) })
+
+  it("finds the tab showing a Pi session, the active one first", () => {
+    const [a, b, other] = [piTab("s1"), piTab("s1"), piTab("s2")]
+    expect(tabShowingItem([other, a, b], piItem("s1"), "")).toBe(a)
+    expect(tabShowingItem([other, a, b], piItem("s1"), b.id)).toBe(b)
+    expect(tabShowingItem([other], piItem("s1"), "")).toBeUndefined()
+  })
+
+  it("never matches a Pi tab without a session", () => {
+    expect(tabShowingItem([piTab(null)], piItem(null), "")).toBeUndefined()
+  })
+})
+
+describe("piSessionOf", () => {
+  it("reads the session of Pi tabs only", () => {
+    expect(piSessionOf({ ...nextTab(), ...showingItem({ kind: "pi", path: "repo", projectSlug: null, pi: { sessionId: "s1", repo: "repo" } }) })).toBe("s1")
+    expect(piSessionOf(nextTab())).toBeNull()
   })
 })
 
