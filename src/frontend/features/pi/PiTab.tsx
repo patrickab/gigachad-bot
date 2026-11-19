@@ -127,7 +127,6 @@ export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit,
  */
 export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null, onLaunched }: {
   view: PiView
-  tabId: string
   onViewChange: (view: PiView) => void
   topBar?: HTMLElement | null
   launch?: PiLaunch | null

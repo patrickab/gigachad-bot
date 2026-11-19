@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { fetchPiSessions, openPiSession, type PiSessionInfo } from "@/lib/backend/api"
-import { PiTab } from "../PiTab"
-import { EMPTY_TRANSCRIPT } from "../transcript"
+import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiSessionInfo } from "@/lib/backend/api"
+import type { PiCatalog } from "@/lib/domain/types"
+import { piSessionHistory, PiTab } from "../PiTab"
+import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -15,16 +16,19 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   fetchPiFiles: vi.fn(async () => []),
   fetchPiSessions: vi.fn(async () => []),
+  fetchPiCatalog: vi.fn(),
   openPiSession: vi.fn(),
+  restorePiSession: vi.fn(),
 }))
+vi.mock("../sessionStore", () => ({ refreshPiSessions: vi.fn() }))
 vi.mock("../PiTranscript", () => ({
   PiTranscript: ({ onBranch }: { onBranch?: (entryId: string) => void }) => onBranch ? <button type="button" onClick={() => onBranch("entry-7")}>Branch</button> : null,
 }))
 
-const { send } = vi.hoisted(() => ({ send: vi.fn(async () => {}) }))
+const { send, session } = vi.hoisted(() => ({ send: vi.fn(async () => {}), session: { transcript: null as Transcript | null } }))
 vi.mock("../usePiSession", () => ({
   usePiSession: () => ({
-    transcript: EMPTY_TRANSCRIPT,
+    transcript: session.transcript ?? EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
     state: { model: null, thinkingLevel: "medium", isStreaming: false, sessionId: "s1", sessionFile: "/sessions/s1.jsonl" },
     commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null, models: [], thinkingLevels: [], stats: null,
@@ -33,6 +37,18 @@ vi.mock("../usePiSession", () => ({
   }),
 }))
 
+const CATALOG: PiCatalog = {
+  installed: true, online: true, gateway: "", litellm_id: "litellm_proxy", error: null,
+  providers: [{
+    id: "anthropic",
+    label: "Anthropic",
+    models: [
+      { id: "anthropic/claude-haiku-4-5", name: "Claude Haiku 4.5", vision: true, context_window: 200000, thinking_levels: ["off", "minimal", "low", "medium", "high"] },
+      { id: "anthropic/claude-3-haiku", name: "Claude Haiku 3", vision: false, context_window: 200000, thinking_levels: [] },
+    ],
+  }],
+}
+
 function sessionInfo(sessionId: string): PiSessionInfo {
   return {
     sessionId, sessionPath: `/sessions/${sessionId}.jsonl`, cwd: "/home/u/git/repo", machine: "local", createdAt: "", modifiedAt: "",
@@ -40,14 +56,22 @@ function sessionInfo(sessionId: string): PiSessionInfo {
   }
 }
 
+function sendText(text: string) {
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: text } })
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+}
+
 describe("PiTab", () => {
+  let stored: Map<string, string>
   beforeEach(() => {
-    const stored = new Map<string, string>()
+    stored = new Map<string, string>()
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => { stored.set(key, value) },
       removeItem: (key: string) => { stored.delete(key) },
     })
+    vi.mocked(fetchPiCatalog).mockResolvedValue(CATALOG)
+    session.transcript = null
   })
   afterEach(() => {
     cleanup()
@@ -58,21 +82,97 @@ describe("PiTab", () => {
   it("starts a new session at thinking medium on Pi's default model, then sends the first message", async () => {
     vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
     const onViewChange = vi.fn()
-    const { rerender } = render(<PiTab view={{ repo: "repo", sessionId: null }} tabId="t1" onViewChange={onViewChange} />)
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hello" } })
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    const { rerender } = render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={onViewChange} />)
+    sendText("hello")
 
     await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ repo: "repo", sessionId: "s1" }))
     expect(openPiSession).toHaveBeenCalledWith("repo", null, { thinking: "medium" })
-    rerender(<PiTab view={{ repo: "repo", sessionId: "s1" }} tabId="t1" onViewChange={onViewChange} />)
+    rerender(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={onViewChange} />)
     await waitFor(() => expect(send).toHaveBeenCalledWith("hello", [], "steer"))
+  })
+
+  it("starts a new session on the model and thinking level picked in the empty tab's top bar", async () => {
+    vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
+    const topBar = document.createElement("div")
+    document.body.append(topBar)
+    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} topBar={topBar} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Model: Default" }))
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Claude Haiku 4.5" }))
+    fireEvent.click(screen.getByRole("button", { name: "Thinking: medium" }))
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "high" }))
+    sendText("hello")
+
+    await waitFor(() => expect(openPiSession).toHaveBeenCalledWith("repo", null, { model: { provider: "anthropic", id: "claude-haiku-4-5" }, thinking: "high" }))
+    topBar.remove()
+  })
+
+  it("keeps an empty tab's draft per repo", () => {
+    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} />)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "half a thought" } })
+    expect(stored.get("gigachad:draft:pi:new:repo")).toBe("half a thought")
+  })
+
+  it("runs a shell command (/memorize) instead of starting a session with it", async () => {
+    const run = vi.fn(async (text: string) => text === "/memorize")
+    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} shellCommands={{ names: ["memorize"], run }} />)
+    sendText("/memorize")
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith("/memorize"))
+    expect(openPiSession).not.toHaveBeenCalled()
+  })
+
+  it("runs /memorize in an open session through the shell, and exposes the session's prompts and replies for it", async () => {
+    vi.mocked(fetchPiSessions).mockResolvedValue([sessionInfo("s1")])
+    vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
+    session.transcript = {
+      ...EMPTY_TRANSCRIPT,
+      messages: [
+        { role: "user", content: "fix the bug", timestamp: 1 },
+        { role: "assistant", content: [{ type: "thinking", thinking: "hm" }, { type: "text", text: "Fixed." }], timestamp: 2 } as never,
+        { role: "toolResult", toolCallId: "t", toolName: "bash", content: [], isError: false, timestamp: 3 } as never,
+      ],
+    }
+    const run = vi.fn(async (text: string) => text === "/memorize")
+    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} shellCommands={{ names: ["memorize"], run }} />)
+    await screen.findByRole("textbox")
+    await waitFor(() => expect(piSessionHistory("s1")).toEqual([{ role: "user", content: "fix the bug" }, { role: "assistant", content: "Fixed." }]))
+
+    sendText("/memorize")
+    await waitFor(() => expect(run).toHaveBeenCalledWith("/memorize"))
+    expect(send).not.toHaveBeenCalled()
+    cleanup()
+    expect(piSessionHistory("s1")).toBeNull()
+  })
+
+  it("restores an archived session before reopening it", async () => {
+    vi.mocked(fetchPiSessions).mockImplementation(async (_repo, options) => (options?.archived ? [{ ...sessionInfo("s1"), archived: true }] : []))
+    vi.mocked(restorePiSession).mockResolvedValue(sessionInfo("s1"))
+    vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
+    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} />)
+
+    await waitFor(() => expect(openPiSession).toHaveBeenCalledWith("repo", { sessionPath: "/sessions/s1.jsonl" }))
+    expect(restorePiSession).toHaveBeenCalledWith("s1")
+  })
+
+  it("says a session neither listed nor archived no longer exists", async () => {
+    render(<PiTab view={{ repo: "repo", sessionId: "gone" }} onViewChange={vi.fn()} />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("This session no longer exists")
+    expect(restorePiSession).not.toHaveBeenCalled()
+  })
+
+  it("explains a repo outside ~/git", async () => {
+    vi.mocked(openPiSession).mockRejectedValue(new ApiError("Unknown repository notes", 404))
+    render(<PiTab view={{ repo: "notes", sessionId: null }} onViewChange={vi.fn()} />)
+    sendText("hello")
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes is not a Git checkout under ~/git, Pi sessions start only there")
   })
 
   it("opens a turn's branch as a fork of the session in the same tab", async () => {
     vi.mocked(fetchPiSessions).mockResolvedValue([sessionInfo("s1")])
     vi.mocked(openPiSession).mockResolvedValueOnce(sessionInfo("s1")).mockResolvedValueOnce(sessionInfo("s2"))
     const onViewChange = vi.fn()
-    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} tabId="t1" onViewChange={onViewChange} />)
+    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={onViewChange} />)
     fireEvent.click(await screen.findByRole("button", { name: "Branch" }))
 
     await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ repo: "repo", sessionId: "s2" }))

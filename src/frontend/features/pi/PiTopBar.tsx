@@ -53,14 +53,15 @@ export function PiSessionControlsBar({ controls }: { controls: PiSessionControls
   )
 }
 
-/** A Pi tab's top bar: live dot, repo, session name, then the session's controls once it runs. */
-export function PiTopBar({ repo, header }: { repo: string; header: PiSessionHeader | null }) {
+/** A Pi tab's top bar: live dot, repo, session name, then the session's controls once it runs, or `controls` (what a new session starts on) before. */
+export function PiTopBar({ repo, header, controls }: { repo: string; header: PiSessionHeader | null; controls?: PiSessionControls }) {
+  const shown = header?.controls ?? controls
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm">
       {header && <StatusDot tone={header.tone} />}
       <span className="font-medium text-ink">{repo}</span>
       {header?.sessionName && <span className="truncate text-ink-muted">{header.sessionName}</span>}
-      {header && <div className="ml-auto"><PiSessionControlsBar controls={header.controls} /></div>}
+      {shown && <div className="ml-auto"><PiSessionControlsBar controls={shown} /></div>}
     </div>
   )
 }

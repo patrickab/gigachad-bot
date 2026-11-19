@@ -323,7 +323,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         runsUnderTopBar: false,
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} tabId={tab.id} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} shellCommands={ompShellCommands} />
           </div>
         ) : chatBody,
       }

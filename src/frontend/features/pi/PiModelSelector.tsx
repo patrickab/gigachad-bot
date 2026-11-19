@@ -26,7 +26,7 @@ export function PiModelSelector({ models, selected, onSelect }: {
     return [...byProvider].map(([provider, items]) => ({ key: provider, label: provider, items }))
   }, [models])
   const selectedKey = selected ? modelKey(selected) : null
-  const label = selected ? selected.name ?? selected.id : "Model"
+  const label = selected ? selected.name ?? selected.id : "Default"
 
   return (
     <PopoverSelector

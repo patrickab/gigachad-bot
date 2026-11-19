@@ -72,6 +72,9 @@ def test_catalog_groups_gateway_models_by_provider(tmp_path, monkeypatch):
     assert [model["id"] for model in anthropic["models"]] == ["anthropic/claude-3-haiku", "anthropic/claude-opus-4-5"]
     assert [model["vision"] for model in anthropic["models"]] == [False, True]
     assert anthropic["models"][1]["context_window"] == 200000
+    # Pi's thinking ladder per model, empty for a model that cannot reason or a row without one.
+    assert [model["thinking_levels"] for model in anthropic["models"]] == [[], ["off", "minimal", "low", "medium", "high"]]
+    assert openrouter["models"][0]["thinking_levels"] == []
     assert openrouter["models"][0]["name"] == "openrouter/vendor/model"
 
 

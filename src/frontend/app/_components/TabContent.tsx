@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState, type RefCallback } from "react"
+import { useCallback, useRef, useState, type RefCallback } from "react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -19,7 +19,8 @@ import type { Attachment } from "@/lib/domain/types"
 import type { PiLaunch } from "@/features/pi/PiTab"
 import { WorkspacePicker } from "@/features/omp/WorkspacePicker"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { writeRootFile } from "@/lib/backend/api"
+import { fetchPiRepositories, writeRootFile } from "@/lib/backend/api"
+import { baseName } from "@/lib/paths"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
@@ -50,6 +51,33 @@ function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
   observer.observe(main)
   observer.observe(tab)
   return () => observer.disconnect()
+}
+
+/**
+ * The checkout an empty chat's first message starts a Pi session in, picked by path.
+ *
+ * Pi starts sessions only in checkouts under ~/git (`/api/pi/repos`): any other folder (a mount elsewhere) is refused on pick with `folderError`, before a message could be lost.
+ * Of overlapping picks the latest wins.
+ */
+export function usePiFolder(): { folder: string | null; folderError: string | null; pickFolder: (picked: string | null) => void } {
+  const [folder, setFolder] = useState<string | null>(null)
+  const [folderError, setFolderError] = useState<string | null>(null)
+  const latestPick = useRef<string | null>(null)
+  const pickFolder = useCallback((picked: string | null) => {
+    const path = picked?.replace(/\/+$/, "") ?? null
+    latestPick.current = path
+    setFolderError(null)
+    setFolder(null)
+    if (path === null) return
+    fetchPiRepositories().then((repositories) => {
+      if (latestPick.current !== path) return
+      if (repositories.some((repository) => repository.path === path)) setFolder(path)
+      else setFolderError(`${baseName(path)} is not a Git checkout under ~/git, Pi sessions start only there`)
+    }, (reason: unknown) => {
+      if (latestPick.current === path) setFolderError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }, [])
+  return { folder, folderError, pickFolder }
 }
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
@@ -87,7 +115,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
 
   // A folder picked in an empty chat makes its first message start a Pi session there, the Pi tab sends it once the session is ready.
   // The picker shows only in an empty chat, so a folder left over from one never redirects another chat's message
-  const [folder, setFolder] = useState<string | null>(null)
+  const { folder, folderError, pickFolder } = usePiFolder()
   const [launch, setLaunch] = useState<PiLaunch | null>(null)
   const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
   const handleSend = (text: string, attachments: Attachment[]) => {
@@ -96,7 +124,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       return
     }
     setLaunch({ text, attachments })
-    setFolder(null)
+    pickFolder(null)
     onOpenItem(newPiItem(folder, projectSlug))
   }
 
@@ -120,8 +148,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       slug={projectSlug}
       attachmentActions={attachmentActions}
       attachMenuItems={attachMenuItems}
-      composerLeading={isEmptyChat ? <WorkspacePicker folder={folder} onChange={setFolder} /> : undefined}
-      composerNotice={docs.architectureError || undefined}
+      composerLeading={isEmptyChat ? <WorkspacePicker folder={folder} onChange={pickFolder} /> : undefined}
+      composerNotice={(isEmptyChat && folderError) || docs.architectureError || undefined}
     />
   )
 

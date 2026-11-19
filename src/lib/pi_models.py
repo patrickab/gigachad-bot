@@ -97,6 +97,7 @@ def group_by_provider(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "name": str(entry.get("name") or model_id),
                 "vision": isinstance(modalities, list) and "image" in modalities,
                 "context_window": entry.get("context_window"),
+                "thinking_levels": entry_thinking_levels(entry),
             }
         )
     return [

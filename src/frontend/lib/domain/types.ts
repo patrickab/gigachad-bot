@@ -197,6 +197,8 @@ interface PiModel {
   name: string
   vision: boolean
   context_window: number | null
+  /** Pi's thinking ladder for the model, empty when it cannot reason. */
+  thinking_levels: string[]
 }
 
 interface PiProvider {

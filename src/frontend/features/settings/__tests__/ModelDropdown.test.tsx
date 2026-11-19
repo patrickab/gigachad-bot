@@ -18,7 +18,7 @@ const onlineCatalog: PiCatalog = {
   online: true,
   gateway: "http://127.0.0.1:4000/v1",
   litellm_id: "litellm_proxy",
-  providers: [{ id: "anthropic", label: "Anthropic", models: [{ id: "anthropic/claude-opus-5", name: "Claude Opus 5", vision: true, context_window: 200000 }] }],
+  providers: [{ id: "anthropic", label: "Anthropic", models: [{ id: "anthropic/claude-opus-5", name: "Claude Opus 5", vision: true, context_window: 200000, thinking_levels: ["off", "low", "medium", "high"] }] }],
   error: null,
 }
 

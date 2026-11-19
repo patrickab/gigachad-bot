@@ -15,6 +15,7 @@ import type { MemorizeSource } from "@/features/memory/useMemorizeFlow"
 import type { ShellCommands } from "@/features/omp/OmpComposer"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
 import { useSlashCommands } from "@/features/navigation/useSlashCommands"
+import { piSessionHistory } from "@/features/pi/PiTab"
 import { fetchOmpSessionHistory, loadChatHistory } from "@/lib/backend/api"
 import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
@@ -23,15 +24,24 @@ import { isEditableTarget, isModKey, isTerminalKeyEvent } from "@/lib/utils"
 import { useBusyCount } from "@/hooks/useBusyCount"
 import { useEventListener } from "@/hooks/useEventListener"
 
-/** What `/memorize` reads in `tab`: the omp session an omp tab shows, else the chat, never a branch chat. Null when there is none. */
-function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branchMessageIdx: number | null): (() => Promise<MemorizeSource>) | null {
-  const isOmpTab = tab.appMode === "omp"
-  const ompView = isOmpTab ? itemOf(tab, "omp")?.omp : null
+/** The open Pi session `sessionId`'s history, or why there is none. */
+async function piSource(sessionId: string): Promise<MemorizeSource> {
+  const messages = piSessionHistory(sessionId)
+  if (!messages) throw new Error("The Pi session is not open yet")
+  return { messages, conversationId: sessionId }
+}
+
+/** What `/memorize` reads in `tab`: the Pi or omp session an agent tab shows, else the chat, never a branch chat. Null when there is none. */
+export function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branchMessageIdx: number | null): (() => Promise<MemorizeSource>) | null {
+  const { appMode } = tab
+  const ompView = appMode === "omp" ? itemOf(tab, "omp")?.omp : null
   const ompSessionId = ompView?.kind === "session" ? ompView.sessionId : null
+  const piSessionId = appMode === "pi" ? itemOf(tab, "pi")?.pi?.sessionId ?? null : null
   return useMemo(() => {
-    if (isOmpTab) return ompSessionId ? async () => ({ messages: await fetchOmpSessionHistory(ompSessionId), conversationId: ompSessionId }) : null
+    if (appMode === "pi") return piSessionId ? () => piSource(piSessionId) : null
+    if (appMode === "omp") return ompSessionId ? async () => ({ messages: await fetchOmpSessionHistory(ompSessionId), conversationId: ompSessionId }) : null
     return branchMessageIdx == null ? async () => ({ messages, conversationId: chatId }) : null
-  }, [isOmpTab, ompSessionId, branchMessageIdx, messages, chatId])
+  }, [appMode, piSessionId, ompSessionId, branchMessageIdx, messages, chatId])
 }
 
 /** Run one tab's chat (history, turns, attachments, memory commands, shortcuts); called in every mode so the chat survives mode switches. */
@@ -61,7 +71,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
   const memory = useMemoryCommandBar({ loadSource: useMemorizeSource(tab, messages, chatId, branchMessageIdx) })
   const { menuItems, runSlashCommand } = useSlashCommands({
-    filesEnabled: filesEnabled && appMode !== "omp",
+    filesEnabled: filesEnabled && appMode === "chat",
     openFilePicker: filePicker.openFilePicker,
     memorize: memory.memorize,
   })
@@ -116,19 +126,20 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
     return () => { stale = true }
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage, syncReferences])
 
-  // Capture phase so the shortcuts win over handlers inside focused editors.
+  // Capture phase so the shortcuts win over handlers inside focused editors. A Pi tab keeps only Alt+M (memorize its session), the rest belong to the chat.
   useEventListener("window", "keydown", (e) => {
     if (isTerminalKeyEvent(e)) return
+    if (e.altKey && e.key.toLowerCase() === "m") {
+      e.preventDefault()
+      if (memory.isIdle) void memory.memorize()
+    }
+    if (appMode !== "chat") return
     if (e.altKey && e.key === "s") {
       e.preventDefault()
       if (persistence.isTitled) persistence.handleQuickSave()
       else persistence.setSaveModalOpen(true)
     }
     if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
-    if (e.altKey && e.key.toLowerCase() === "m") {
-      e.preventDefault()
-      if (memory.isIdle) void memory.memorize()
-    }
     if (e.altKey && e.key.toLowerCase() === "o") {
       e.preventDefault()
       if (filesEnabled) filePicker.openFilePicker()
@@ -146,7 +157,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
         memory.openMenu()
       }
     }
-  }, { active: isActive && appMode === "chat", capture: true })
+  }, { active: isActive && (appMode === "chat" || appMode === "pi"), capture: true })
 
   // Picking a menu entry always closes the menu first; memorizing then replaces it with the review panel.
   const { closeMenu: closeMemoryMenu } = memory
