@@ -25,6 +25,19 @@ log = logging.getLogger(__name__)
 
 # The LiteLLM provider prefix of a gateway model. Stored selectors carry it, so it never changes.
 LITELLM_ID = "litellm_proxy"
+# Stored selectors keep LiteLLM's provider ids, the gateway names these providers differently.
+_GATEWAY_PROVIDER_ALIASES = {"gemini": "google"}
+
+
+def gateway_model_id(selector: str) -> str:
+    """The gateway's `<provider>/<id>` of a stored selector: `litellm_proxy/x` -> `x`, `gemini/m` -> `google/m`."""
+    if selector.startswith(f"{LITELLM_ID}/"):
+        return selector.removeprefix(f"{LITELLM_ID}/")
+    provider, separator, model = selector.partition("/")
+    if not separator:
+        return selector
+    return f"{_GATEWAY_PROVIDER_ALIASES.get(provider, provider)}/{model}"
+
 
 # Every gateway pick shares one provider row, labelled and sourced by these two values (the browser mirrors them).
 PROVIDER_LABEL = "Pi"
