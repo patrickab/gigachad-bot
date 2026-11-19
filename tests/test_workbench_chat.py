@@ -1,6 +1,9 @@
 """Workbench chats on Pi: the prompt of each kind, the `/api/workbench/chat*` routes against a fake pi-host and the PDF text."""
 
+import asyncio
+from contextlib import suppress
 import json
+import threading
 
 import httpx
 import pytest
@@ -10,9 +13,11 @@ from backend.routes import workbench as workbench_route
 from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 import config
 from lib import extract_queue, latex_templates, pi_host
+from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.git import run_git
 from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench import prompts
+from lib.workbench.links import SessionLinks
 from tests.conftest import mounted_roots, request_identity, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, StoredAsset
 
@@ -22,6 +27,43 @@ OMP_TOOL_WORDS = ("glob", "`cp`", "shell (", ".omp/", "sed", "perl")
 class Docs(MemoryDataStore):
     def is_file(self, key: str) -> bool:
         return self.exists(key)
+
+
+class RevisionedDocs(Docs):
+    """Refuses a stale `expected` revision like `PostgresDataStore` (None writes unguarded).
+
+    - With *meet*, reads of the links meet in pairs: two concurrent requests both read before either writes (a lone
+      reader goes on after a short wait)
+    - *interloper* (path, link) is stored once just before the first guarded write of the links, as by another worker
+    """
+
+    def __init__(self, *, meet: bool = False, interloper: tuple[str, dict] | None = None) -> None:
+        super().__init__()
+        self._meeting = threading.Barrier(2, timeout=0.5) if meet else None
+        self._interloper = interloper
+
+    def read_bytes(self, key):
+        try:
+            return super().read_bytes(key)
+        finally:
+            if key == WORKBENCH_CHATS and self._meeting is not None:
+                with suppress(threading.BrokenBarrierError):
+                    self._meeting.wait()
+
+    def write_bytes(self, key, content, *, expected=None, meta=None):
+        if key == WORKBENCH_CHATS and expected is not None and self._interloper is not None:
+            path, link = self._interloper
+            self._interloper = None
+            stored = json.loads(super().read_bytes(key)[0])
+            super().write_bytes(key, json.dumps({**stored, path: link}).encode())
+        if expected is not None:
+            try:
+                current = super().read_bytes(key)[1]
+            except StorageNotFoundError:
+                current = None
+            if current != expected:
+                raise StorageConflictError(f"{key} changed")
+        return super().write_bytes(key, content, expected=expected, meta=meta)
 
 
 class MirroringAssets(MemoryAssetStore):
@@ -345,3 +387,69 @@ def test_logins_without_host_access_cannot_open_chats(root, vault, docs, host):
     })
     assert client.post("/api/workbench/chat", json={"path": str(_markdown(root))}).status_code == 403
     assert host.bodies == []
+
+
+# Concurrent opens
+
+
+def _async_client(root, vault, docs):
+    overrides = {
+        get_request_identity: request_identity(), get_file_roots: mounted_roots(vault, root),
+        get_document_store: docs, get_asset_store: MirroringAssets(),
+    }
+    app = route_client(workbench_route.router, overrides=overrides).app
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+def _seeded(docs, links):
+    docs.write_bytes(WORKBENCH_CHATS, json.dumps(links).encode())
+
+
+@pytest.mark.parametrize("seeded", [False, True], ids=["first-links", "stored-links"])
+async def test_concurrent_first_opens_of_two_files_keep_both_links(root, vault, documents, host, seeded):
+    docs = RevisionedDocs(meet=True)
+    other = {"/elsewhere.md": {"active": "s0", "sessions": ["s0"]}} if seeded else {}
+    if seeded:
+        _seeded(docs, other)
+    first, second = _markdown(root), root / "markdown" / "thesis" / "notes" / "draft.md"
+    second.write_text("# Draft\n", encoding="utf-8")
+
+    async with _async_client(root, vault, docs) as client:
+        opened = await asyncio.gather(*(client.post("/api/workbench/chat", json={"path": str(path)}) for path in (first, second)))
+
+    assert [response.status_code for response in opened] == [200, 200]
+    paths = (str(first), str(second))
+    sessions = {path: response.json()["session"]["sessionId"] for path, response in zip(paths, opened, strict=True)}
+    assert _stored(docs, WORKBENCH_CHATS) == {
+        **other, **{path: {"active": session, "sessions": [session]} for path, session in sessions.items()},
+    }
+
+
+@pytest.mark.parametrize("seeded", [False, True], ids=["first-links", "stored-links"])
+async def test_concurrent_first_opens_of_one_file_share_one_session(root, vault, documents, host, seeded):
+    docs = RevisionedDocs(meet=True)
+    other = {"/elsewhere.md": {"active": "s0", "sessions": ["s0"]}} if seeded else {}
+    if seeded:
+        _seeded(docs, other)
+    file = _markdown(root)
+
+    async with _async_client(root, vault, docs) as client:
+        opened = await asyncio.gather(*(client.post("/api/workbench/chat", json={"path": str(file)}) for _ in range(2)))
+
+    assert [response.status_code for response in opened] == [200, 200]
+    assert [response.json()["session"]["sessionId"] for response in opened] == ["s1", "s1"]
+    assert list(host.sessions) == ["s1"]
+    assert _stored(docs, WORKBENCH_CHATS) == {**other, str(file): {"active": "s1", "sessions": ["s1"]}}
+
+
+def test_a_link_another_worker_stored_meanwhile_is_kept():
+    docs = RevisionedDocs(interloper=("/c.md", {"active": "s3", "sessions": ["s3"]}))
+    _seeded(docs, {"/b.md": {"active": "s2", "sessions": ["s2"]}})
+
+    SessionLinks(docs).activate("/a.md", "s1")
+
+    assert _stored(docs, WORKBENCH_CHATS) == {
+        "/b.md": {"active": "s2", "sessions": ["s2"]},
+        "/c.md": {"active": "s3", "sessions": ["s3"]},
+        "/a.md": {"active": "s1", "sessions": ["s1"]},
+    }

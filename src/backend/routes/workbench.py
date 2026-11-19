@@ -10,6 +10,7 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
+from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -45,6 +46,8 @@ _CONTENT: dict[Kind, str] = {"latex": latex.NEW_DOCUMENT, "markdown": ""}
 _IMAGE_DIRECTORY = latex_templates.IMAGE_DIRECTORY
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# The chat of each file key being opened in this process, so concurrent first opens share the session the first one starts.
+_OPENING: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 class FilePath(BaseModel):
@@ -424,12 +427,11 @@ async def post_chat(
     - The active session is replaced by a new one when pi-host no longer knows it (404, it is unlinked) or cannot
       start it (502 `spawn_failed`, e.g. its stored folder moved away; it stays listed). A named one passes the error on
     - A PDF answers where its extracted text is, or that the extraction is pending (G3)
+    - Opens of one file in this process take turns (`_OPENING`): two tabs opening it at once share one new session
     """
     chat, prompt, pdf_text = await asyncio.to_thread(_prepare_chat, body.path, docs, roots, assets)
     key = chat.file
     links = SessionLinks(docs)
-    link = await asyncio.to_thread(links.of, key, roots)
-    wanted = None if body.new else body.session_id or link.active
 
     async def open_chat(session_id: str | None) -> pi_host.SessionInfo:
         if session_id is None:
@@ -439,17 +441,28 @@ async def post_chat(
         resume = pi_host.ResumeById(session_id=session_id)
         return await pi_host.open_session(str(chat.cwd), resume, profile="document", system_prompt=prompt)
 
-    try:
-        session = await _pi(open_chat(wanted))
-    except HTTPException as exc:
-        lost = exc.status_code == 404
-        if not (lost or _spawn_failed(exc)) or wanted is None or body.session_id is not None:
-            raise
-        if lost:
-            await asyncio.to_thread(links.discard, key, wanted)
-        session = await _pi(open_chat(None))
-    link = await asyncio.to_thread(links.activate, key, session.session_id)
+    async with _opening(key):
+        link = await asyncio.to_thread(links.of, key, roots)
+        wanted = None if body.new else body.session_id or link.active
+        try:
+            session = await _pi(open_chat(wanted))
+        except HTTPException as exc:
+            lost = exc.status_code == 404
+            if not (lost or _spawn_failed(exc)) or wanted is None or body.session_id is not None:
+                raise
+            if lost:
+                await asyncio.to_thread(links.discard, key, wanted)
+            session = await _pi(open_chat(None))
+        link = await asyncio.to_thread(links.activate, key, session.session_id)
     return OpenedChat(session=session, link=_linked_session(link), kind=chat.kind, cwd=str(chat.cwd), pdf_text=pdf_text)
+
+
+def _opening(key: str) -> asyncio.Lock:
+    """The lock of the chat of *key* while any open of it holds it."""
+    lock = _OPENING.get(key)
+    if lock is None:
+        lock = _OPENING[key] = asyncio.Lock()
+    return lock
 
 
 def _spawn_failed(exc: HTTPException) -> bool:

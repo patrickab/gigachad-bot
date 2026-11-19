@@ -3,6 +3,9 @@
 Consumes the user's `DataStore`, read and written through `JsonDocs` against the revision read, and `FileRoots` to find
 the root file of a LaTeX project. Provides `Link`, `SessionLinks` and `owe_new_paths` for relocations.
 
+Writers in one process take turns (`_WRITING`), so a first write, which no revision guards, never drops another's link.
+A write another process landed in between is read again and the change reapplied (`_ATTEMPTS`).
+
 Stored shape: absolute path -> `{"active", "sessions", "moved"}` (`moved` only when not empty), or a bare session id as
 stored before sessions were kept.
 """
@@ -11,10 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import threading
 from typing import TYPE_CHECKING
 
 from lib import latex
-from lib.data_store import DataStore, Revision, StorageNotFoundError
+from lib.data_store import DataStore, Revision, StorageConflictError, StorageNotFoundError
 from lib.json_docs import JsonDocs
 from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench import kind_of
@@ -23,6 +27,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from lib.file_roots import FileRoots
+
+_WRITING = threading.Lock()
+_ATTEMPTS = 10
 
 
 @dataclass(frozen=True)
@@ -54,7 +61,8 @@ class Link:
 class SessionLinks:
     """One user's session links (`WORKBENCH_CHATS`).
 
-    Every write expects the revision it read, so a concurrent change raises `StorageConflictError`.
+    Every change rereads the links and retries when another process wrote them meanwhile, raising
+    `StorageConflictError` only when they keep changing.
     """
 
     def __init__(self, docs: DataStore) -> None:
@@ -66,14 +74,13 @@ class SessionLinks:
         - A folder without a link adopts the links of the LaTeX files inside it (any depth), merged in the order they
           were stored, once: the root file's active session is the folder's, else the first file's
         """
-        links, revision = self._read()
-        if path not in links:
-            adopted = _adopted(links, path, roots)
-            if adopted is not None:
-                merged, link = adopted
-                self._json.write(WORKBENCH_CHATS, merged, expected=revision)
-                return link
-        return Link.parse(links.get(path))
+        def adopting(links: dict) -> tuple[dict | None, Link]:
+            if path not in links:
+                adopted = _adopted(links, path, roots)
+                if adopted is not None:
+                    return adopted
+            return None, Link.parse(links.get(path))
+        return self._change(adopting)
 
     def activate(self, path: str, session: str | None) -> Link:
         """Make *session* the active one of the absolute file *path*, listed once after the earlier ones. None starts a new session."""
@@ -100,10 +107,10 @@ class SessionLinks:
 
     def forget_inside(self, folders: list[Path]) -> None:
         """Remove the links of the *folders* and of the files inside them."""
-        links, revision = self._read()
-        kept = {key: link for key, link in links.items() if not any(Path(key).is_relative_to(folder) for folder in folders)}
-        if kept != links:
-            self._json.write(WORKBENCH_CHATS, kept, expected=revision)
+        def outside(links: dict) -> tuple[dict | None, None]:
+            kept = {key: link for key, link in links.items() if not any(Path(key).is_relative_to(folder) for folder in folders)}
+            return (kept if kept != links else None), None
+        self._change(outside)
 
     def _read(self) -> tuple[dict, Revision | None]:
         """The links and their revision, empty and unrevised when there are none."""
@@ -115,12 +122,32 @@ class SessionLinks:
 
     def _update(self, path: str, change: Callable[[Link], Link]) -> Link:
         """Apply *change* to the link of *path* and store it when it changed or was not stored in the current shape."""
-        links, revision = self._read()
-        current = Link.parse(links.get(path))
-        link = change(current)
-        if link != current or not isinstance(links.get(path), dict):
-            self._json.write(WORKBENCH_CHATS, {**links, path: link.stored()}, expected=revision)
-        return link
+        def updated(links: dict) -> tuple[dict | None, Link]:
+            current = Link.parse(links.get(path))
+            link = change(current)
+            if link != current or not isinstance(links.get(path), dict):
+                return {**links, path: link.stored()}, link
+            return None, link
+        return self._change(updated)
+
+    def _change[Result](self, change: Callable[[dict], tuple[dict | None, Result]]) -> Result:
+        """Store the links *change* returns for the current ones (None: unchanged) and return its result.
+
+        - *change* reruns on the links read again when another process wrote them in between
+        - Raises StorageConflictError when they keep changing
+        """
+        for _ in range(_ATTEMPTS):
+            with _WRITING:
+                links, revision = self._read()
+                changed, result = change(links)
+                if changed is None:
+                    return result
+                try:
+                    self._json.write(WORKBENCH_CHATS, changed, expected=revision)
+                except StorageConflictError:
+                    continue
+                return result
+        raise StorageConflictError(f"{WORKBENCH_CHATS} kept changing while it was updated")
 
 
 def _root_key(files: Iterable[str], roots: FileRoots) -> str | None:
