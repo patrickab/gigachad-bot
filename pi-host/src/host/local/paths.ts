@@ -1,5 +1,5 @@
 /**
- * Where Pi keeps session files, resolved the way Pi 1.5.2 does.
+ * Where Pi keeps session files on this machine, resolved the way Pi 1.5.2 does.
  *
  * - Consumes: `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) and `PI_CODING_AGENT_SESSION_DIR`
  * - Provides: the live and archive session roots (C7) and the directory holding one cwd's sessions

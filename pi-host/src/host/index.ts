@@ -1,0 +1,84 @@
+/**
+ * The machine seam (M23): every machine-local action of pi-host goes through one `Host`.
+ *
+ * - Consumes: nothing; `LocalHost` (`./local/index.ts`) implements it for this machine
+ * - Provides: `Host`, the data types its operations take and return, `PiChild`, `Profile`
+ *
+ * Operations (fixed list, no generic exec or file read):
+ * - `piVersion`: version the machine's Pi binary reports
+ * - `spawn`: start a `pi --mode rpc` child for a profile through its spawn strategy (local now, AiB later, D5)
+ * - `lockSession` / `unlockSession`: the M1 lock on a session file
+ * - `isDirectory`: check a working directory before the per-cwd operations
+ * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd, header and entry metadata, lookup by id
+ * - `moveSession`: archive or restore a session file and its sidecar
+ * - `readState` / `writeState`: the private state sidecar (M19, M20)
+ * - `listFiles`: `@` completion candidates of a cwd (M7)
+ *
+ * Inputs and outputs are plain serializable data, so a future `RemoteHost` proxies each operation over a link.
+ * The one exception is `PiChild`, a narrow stdio stream type a transport can carry as a byte pipe.
+ */
+
+export type Profile = "coding";
+export const PROFILES: readonly Profile[] = ["coding"];
+
+export type SpawnRequest = {
+  profile: Profile;
+  cwd: string;
+  /** Arguments after the binary, starting with `--mode rpc`. */
+  piArgs: string[];
+};
+
+/** A Pi child's stdio, exit and signals; a `Bun.Subprocess` locally, a proxied pipe remotely. */
+export interface PiChild {
+  readonly stdin: { write(data: string): unknown; flush(): unknown; end(): unknown };
+  readonly stdout: AsyncIterable<Uint8Array>;
+  readonly stderr: AsyncIterable<Uint8Array>;
+  readonly exited: Promise<number>;
+  kill(signal: "SIGTERM" | "SIGKILL"): void;
+}
+
+/** A held lock is addressed by `lockId`; `busy` when another holder has the file. */
+export type LockResult = { ok: true; lockId: string } | { ok: false; error: "busy" | "missing" };
+
+/** What a session file says about itself plus where it lives. */
+export type SessionMeta = {
+  sessionId: string;
+  /** Absolute path as listed. */
+  sessionPath: string;
+  /** `sessionPath` with symlinks resolved, the key live sessions are deduplicated by. */
+  realPath: string;
+  cwd: string;
+  createdAt: string;
+  modifiedAt: string;
+  firstMessage: string;
+  messageCount: number;
+  parentSession?: string;
+  archived: boolean;
+};
+
+export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown> };
+
+export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
+
+export interface Host {
+  /** Machine id in every `SessionInfo`, `local` for this machine. */
+  readonly machine: string;
+  piVersion(): Promise<string>;
+  spawn(request: SpawnRequest): Promise<PiChild>;
+  lockSession(sessionPath: string): Promise<LockResult>;
+  unlockSession(lockId: string): Promise<void>;
+  isDirectory(path: string): Promise<boolean>;
+  /** Sessions whose header cwd is `cwd`, newest first. */
+  listSessions(cwd: string, archived: boolean): Promise<SessionMeta[]>;
+  /** Undefined when the file is missing or not a Pi session. */
+  sessionMeta(sessionPath: string): Promise<SessionMeta | undefined>;
+  /** Path of the session with Pi id `sessionId`, live root first. */
+  findSession(sessionId: string): Promise<string | undefined>;
+  /** Move between the live and archive roots under the session's lock. */
+  moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
+  /** Defaults when there is no sidecar; other read errors throw. */
+  readState(sessionPath: string): Promise<PrivateState>;
+  writeState(sessionPath: string, state: PrivateState): Promise<void>;
+  /** Relative paths of the cwd's candidate files. */
+  listFiles(cwd: string): Promise<string[]>;
+}

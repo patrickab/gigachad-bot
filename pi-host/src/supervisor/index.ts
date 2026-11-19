@@ -1,7 +1,7 @@
 /**
  * Session supervisor: one `pi --mode rpc` child per live session, attach with replay, many clients, idle eviction.
  *
- * - Consumes: the pinned `pi` binary (checked at start, M13), Pi's session files, Catalog's session helpers
+ * - Consumes: a `Host` (spawn, session lock, session metadata; Pi version checked at start, M13), Catalog's helpers
  * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
  *   `POST /sessions/:id/close`), the multiplexed `/ws` handler (M16, M18, resync M2) and `LiveSessions.liveStatus`
  *   for the catalog
@@ -11,7 +11,9 @@
  */
 import type { WebSocketHandler } from "bun";
 import { isPinned } from "../catalog/index.ts";
-import { childEnv, loadConfig, PINNED_PI_VERSION, type SupervisorConfig } from "./config.ts";
+import type { Host } from "../host/index.ts";
+import { LocalHost } from "../host/local/index.ts";
+import { loadConfig, PINNED_PI_VERSION, type SupervisorConfig } from "./config.ts";
 import { SupervisorHost } from "./host.ts";
 
 export type SocketData = { clientId: string };
@@ -27,6 +29,8 @@ export interface LiveSessions {
 }
 
 export interface Supervisor extends LiveSessions {
+  /** The machine the sessions run on, shared with the catalog. */
+  readonly host: Host;
   socketData(): SocketData;
   websocket: WebSocketHandler<SocketData>;
   handle(request: Request, url: URL): Promise<Response | undefined>;
@@ -35,28 +39,20 @@ export interface Supervisor extends LiveSessions {
 }
 
 export type SupervisorOptions = Partial<SupervisorConfig> & {
+  /** Machine seam (M23), a `LocalHost` over the config by default. */
+  host?: Host;
   /** Pin lookup (M20), Catalog's sidecar by default. */
   isPinned?: (sessionPath: string) => Promise<boolean>;
 };
 
-/** Version the Pi binary reports, rejected unless it is the pinned one (M13). */
-async function checkPiVersion(config: SupervisorConfig): Promise<string> {
-  const child = Bun.spawn([config.piBin, "--version"], {
-    env: childEnv(config.extraChildEnv),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  const version = output.trim().split(/\s+/).pop() ?? "";
-  if (code !== 0 || version !== PINNED_PI_VERSION) {
-    throw new Error(`${config.piBin} --version reported "${output.trim()}" (exit ${code}), pi-host needs ${PINNED_PI_VERSION}`);
-  }
-  return version;
-}
-
-/** Check the Pi binary and start the supervisor. Throws on a version mismatch. */
+/** Check the host's Pi binary and start the supervisor. Throws unless it is the pinned version (M13). */
 export async function createSupervisor(options: SupervisorOptions = {}): Promise<Supervisor> {
-  const { isPinned: pinLookup = isPinned, ...overrides } = options;
+  const { host: givenHost, isPinned: pinLookup, ...overrides } = options;
   const config = { ...loadConfig(), ...overrides };
-  return new SupervisorHost(config, await checkPiVersion(config), pinLookup);
+  const host = givenHost ?? new LocalHost(config);
+  const version = await host.piVersion();
+  if (version !== PINNED_PI_VERSION) {
+    throw new Error(`Pi on ${host.machine} reported "${version}", pi-host needs ${PINNED_PI_VERSION}`);
+  }
+  return new SupervisorHost(config, version, pinLookup ?? ((sessionPath) => isPinned(host, sessionPath)), host);
 }

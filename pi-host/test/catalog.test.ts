@@ -4,11 +4,12 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { copyPrivateState, handleCatalog, isPinned, type LiveStatus, type SessionInfo } from "../src/catalog/index.ts";
+import type { LiveStatus, SessionInfo } from "../src/catalog/index.ts";
 import type { RankedFile } from "../src/catalog/files.ts";
-import { cwdDirName } from "../src/catalog/paths.ts";
+import { tryLockFile } from "../src/host/local/lock.ts";
+import { cwdDirName } from "../src/host/local/paths.ts";
 import type { LiveSessions } from "../src/supervisor/index.ts";
-import { tryLockFile } from "../src/supervisor/lock.ts";
+import { copyPrivateState, handleCatalog, isPinned } from "./fixtures/local-catalog.ts";
 
 /** Union of the catalog response bodies; each assertion reads the fields of its route. */
 type Body = {

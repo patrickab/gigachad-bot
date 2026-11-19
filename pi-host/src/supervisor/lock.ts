@@ -1,37 +1,39 @@
 /**
- * One writer per session file (M1): an exclusive, non-blocking `flock(2)` held by pi-host for a child's lifetime.
+ * The M1 lock a live session holds on its session file, taken and released through the `Host`.
  *
- * - Consumes: libc `flock` through `bun:ffi` (Bun has no flock binding), compatible with `flock(1)` and other hosts
- * - Provides: `tryLockFile` returning a release handle, or undefined when another open file description holds it
- *
- * The descriptor is opened close-on-exec, so no child inherits another session's lock. The lock drops with
- * pi-host's process, and the children then see stdin EOF and shut down.
+ * - Consumes: `Host.lockSession` / `Host.unlockSession`
+ * - Provides: `SessionLock`; a resumed session takes it before its child starts, a new one once Pi wrote the file
  */
-import { dlopen, FFIType } from "bun:ffi";
-import { closeSync, openSync } from "node:fs";
+import type { Host } from "../host/index.ts";
 
-const LOCK_EX = 2;
-const LOCK_NB = 4;
+export type TakeOutcome = "held" | "busy" | "missing";
 
-const libc = dlopen(process.platform === "darwin" ? "libSystem.B.dylib" : "libc.so.6", {
-  flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-});
+export class SessionLock {
+  private lockId: string | undefined;
+  private released = false;
 
-export type FileLock = { release(): void };
+  constructor(private readonly host: Host) {}
 
-/** Lock an existing file exclusively, undefined when it is held elsewhere. */
-export function tryLockFile(path: string): FileLock | undefined {
-  const fd = openSync(path, "r");
-  if (libc.symbols.flock(fd, LOCK_EX | LOCK_NB) !== 0) {
-    closeSync(fd);
-    return undefined;
+  get held(): boolean {
+    return this.lockId !== undefined;
   }
-  let released = false;
-  return {
-    release() {
-      if (released) return;
-      released = true;
-      closeSync(fd);
-    },
-  };
+
+  /** Lock `sessionPath`; a lock that arrives after `release` is given back at once. */
+  async take(sessionPath: string): Promise<TakeOutcome> {
+    if (this.lockId) return "held";
+    const result = await this.host.lockSession(sessionPath);
+    if (!result.ok) return result.error;
+    if (this.released) {
+      void this.host.unlockSession(result.lockId).catch(() => undefined);
+      return "busy";
+    }
+    this.lockId = result.lockId;
+    return "held";
+  }
+
+  release(): void {
+    this.released = true;
+    if (this.lockId) void this.host.unlockSession(this.lockId).catch(() => undefined);
+    this.lockId = undefined;
+  }
 }

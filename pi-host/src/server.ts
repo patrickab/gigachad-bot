@@ -3,11 +3,15 @@
  *
  * - Consumes: the pinned `pi` binary, ~/.pi/agent (auth, sessions, extensions), `PI_HOST_BIND_HOST`, `PI_HOST_PORT`
  * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token
+ *
+ * One `Host` (M23, `LocalHost` for this machine) serves the supervisor and the catalog.
  */
 import type { Server } from "bun";
 import { authorize, loadToken } from "./auth.ts";
 import { handleCatalog } from "./catalog/index.ts";
 import { handleGateway } from "./gateway/index.ts";
+import { LocalHost } from "./host/local/index.ts";
+import { loadConfig } from "./supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "./supervisor/index.ts";
 
 export type ServerOptions = { hostname: string; port: number; token: string; supervisor: Supervisor };
@@ -31,7 +35,7 @@ export function startServer({ hostname, port, token, supervisor }: ServerOptions
       return (
         (await handleGateway(request, url)) ??
         (await supervisor.handle(request, url)) ??
-        (await handleCatalog(request, url, supervisor)) ??
+        (await handleCatalog(request, url, supervisor, supervisor.host)) ??
         new Response("not found", { status: 404 })
       );
     },
@@ -43,7 +47,7 @@ if (import.meta.main) {
   const token = await loadToken();
   let supervisor: Supervisor;
   try {
-    supervisor = await createSupervisor();
+    supervisor = await createSupervisor({ host: new LocalHost(loadConfig()) });
   } catch (error) {
     console.error(`pi-host: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);

@@ -9,10 +9,13 @@
  * response, so the entries plus the replayed records are exactly what Pi had emitted up to that point. Records after
  * it are queued for the client until its `attached` or `resync` frame is out. `get_state` is sent after that point,
  * so the state is never older than the entries; the queued records bring it forward.
+ *
+ * A client not yet attached gets its frames held from attach start: at the snapshot point the ones the snapshot
+ * reproduces (entries, replay, UI state) are dropped, the rest (responses to its own commands, transient UI requests)
+ * go out after the replay.
  */
-import { existsSync } from "node:fs";
-import { tryLockFile, type FileLock } from "./lock.ts";
-import type { PiChild, Profile } from "./spawn.ts";
+import type { PiChild, Profile } from "../host/index.ts";
+import type { SessionLock } from "./lock.ts";
 
 /** Anything a frame can be sent to, a `ServerWebSocket` in production. */
 export interface FrameSink {
@@ -54,7 +57,9 @@ type PendingSnapshot = {
   /** The snapshot frame without `state`, set at the snapshot point. */
   frame?: Record<string, unknown>;
   replay?: string[];
-  /** Frames emitted after the snapshot, sent once the snapshot frame and the replay are out. */
+  /** Frames for a client not yet attached, from attach start to the snapshot point; `covered` ones the snapshot reproduces. */
+  early?: { frame: string; covered: boolean }[];
+  /** Frames held until the snapshot frame and the replay are out. */
   queued: string[];
 };
 
@@ -144,12 +149,13 @@ export class LiveSession {
   private requestCounter = 0;
   private stderrLines: string[] = [];
   private lockFailed = false;
+  private locking = false;
 
   constructor(
     private readonly child: PiChild,
     readonly cwd: string,
     readonly profile: Profile,
-    private lock: FileLock | undefined,
+    private readonly lock: SessionLock | undefined,
     private readonly onExit: (session: LiveSession) => void,
   ) {
     const readers = Promise.all([
@@ -268,6 +274,7 @@ export class LiveSession {
    * frame closes the client's socket: a gap would go unnoticed, a reconnect resyncs.
    */
   deliver(client: FrameSink, frame: string): void {
+    if (this.hold(client, frame, false)) return;
     const sequence = (this.sequences.get(client) ?? -1) + 1;
     this.sequences.set(client, sequence);
     if (client.send(stamp(frame, this.streamId, sequence)) !== 0) return;
@@ -324,7 +331,7 @@ export class LiveSession {
     type: "attached" | "resync",
     take: (pending: PendingSnapshot, done: (failure?: PiRecord) => void) => void,
   ): void {
-    const pending: PendingSnapshot = { queued: [] };
+    const pending: PendingSnapshot = { queued: [], ...(this.clients.has(client) ? {} : { early: [] }) };
     this.pending.set(client, pending);
     const fail = (record: PiRecord) => {
       if (this.pending.get(client) !== pending) return;
@@ -354,6 +361,17 @@ export class LiveSession {
     this.clients.delete(client);
     pending.frame = { ...frame, ui: this.uiState() };
     pending.replay = this.replay.map((buffered) => buffered.line);
+    pending.queued = (pending.early ?? []).filter((held) => !held.covered).map((held) => held.frame);
+    pending.early = undefined;
+  }
+
+  /** Hold a frame for a client whose snapshot is in progress, false when it is sent now (attached, or done). */
+  private hold(client: FrameSink, frame: string, covered: boolean): boolean {
+    const pending = this.pending.get(client);
+    if (pending?.replay) pending.queued.push(frame);
+    else if (pending?.early) pending.early.push({ frame, covered });
+    else return false;
+    return true;
   }
 
   private write(record: PiRecord): boolean {
@@ -382,9 +400,10 @@ export class LiveSession {
     };
   }
 
-  private broadcast(frame: string): void {
+  /** Send a frame to attached clients and hold it for snapshotting ones; `covered` when a snapshot reproduces it. */
+  private broadcast(frame: string, covered: boolean): void {
     for (const client of this.clients) this.deliver(client, frame);
-    for (const pending of this.pending.values()) if (pending.replay) pending.queued.push(frame);
+    for (const client of this.pending.keys()) if (!this.clients.has(client)) this.hold(client, frame, covered);
   }
 
   private noteStderr(line: string): void {
@@ -430,34 +449,33 @@ export class LiveSession {
       this.settleRequest(record.id, record);
       return;
     }
-    this.track(type, record, line);
-    this.broadcast(piFrame(this.sessionId, line));
+    const covered = this.track(type, record, line);
+    this.broadcast(piFrame(this.sessionId, line), covered);
     if (!STREAMING_RECORDS.has(type)) this.lockCreatedFile();
   }
 
-  /** Update run, UI and replay state from one stdout record. */
-  private track(type: string, record: PiRecord, line: string): void {
+  /** Update run, UI and replay state from one stdout record; true when a snapshot reproduces the record. */
+  private track(type: string, record: PiRecord, line: string): boolean {
     switch (type) {
       case "response":
         // A bash command's result is an entry now, its streamed output is history.
         if (record.command === "bash") this.dropReplay((buffered) => buffered.type === "bash_execution_update");
-        return;
+        return false;
       case "entry_appended":
         // The entry is persisted, `get_entries` returns it.
-        return;
+        return true;
       case "extension_ui_request":
-        this.trackUi(record);
-        return;
+        return this.trackUi(record);
       case "queue_update":
         this.queue = { steering: asArray(record.steering), followUp: asArray(record.followUp) };
-        return;
+        return true;
       case "agent_start":
         this.running = true;
         break;
       case "agent_settled":
         this.running = false;
         this.dropReplay(() => true);
-        return;
+        return true;
       case "compaction_start":
         this.compacting = true;
         break;
@@ -467,16 +485,17 @@ export class LiveSession {
       case "message_end":
         // The message is persisted now, `get_entries` returns it.
         this.dropReplay(() => true);
-        return;
+        return true;
       case "tool_execution_update": {
         // `partialResult` is the latest whole partial, older updates of the same call add nothing.
         const toolCallId = String(record.toolCallId);
         this.dropReplay((buffered) => buffered.toolCallId === toolCallId);
         this.bufferReplay({ line, type, toolCallId });
-        return;
+        return true;
       }
     }
     this.bufferReplay({ line, type });
+    return true;
   }
 
   private bufferReplay(buffered: BufferedRecord): void {
@@ -495,17 +514,22 @@ export class LiveSession {
     this.replayBytes = this.replay.reduce((total, buffered) => total + buffered.line.length, 0);
   }
 
-  private trackUi(record: PiRecord): void {
+  /** Track dialogs and statuses, true for the UI requests the snapshot's UI state carries. */
+  private trackUi(record: PiRecord): boolean {
     const method = String(record.method);
     if (DIALOG_METHODS.has(method) && typeof record.id === "string") {
       const id = record.id;
       const timeout = typeof record.timeout === "number" && record.timeout > 0 ? record.timeout : undefined;
       const timer = timeout === undefined ? undefined : setTimeout(() => this.closeDialog(id), timeout);
       this.dialogs.set(id, { record, timer });
-    } else if (method === "setStatus" && typeof record.statusKey === "string") {
+      return true;
+    }
+    if (method === "setStatus" && typeof record.statusKey === "string") {
       if (typeof record.statusText === "string" && record.statusText) this.statuses.set(record.statusKey, record.statusText);
       else this.statuses.delete(record.statusKey);
+      return true;
     }
+    return false;
   }
 
   /** Forget an answered or timed-out dialog and tell every client (`ui_closed`). */
@@ -514,23 +538,27 @@ export class LiveSession {
     if (!dialog) return;
     clearTimeout(dialog.timer);
     this.dialogs.delete(id);
-    this.broadcast(envelope("ui_closed", this.sessionId, { id }));
+    this.broadcast(envelope("ui_closed", this.sessionId, { id }), true);
   }
 
-  /** M1 for new sessions: Pi writes the file lazily, the lock is taken once it exists. */
+  /** M1 for new sessions: Pi writes the file lazily, the lock is taken once it exists (a missing file retries). */
   private lockCreatedFile(): void {
-    if (this.lock || this.lockFailed || !this.sessionPath || this.exitCode !== undefined) return;
-    if (!existsSync(this.sessionPath)) return;
-    try {
-      this.lock = tryLockFile(this.sessionPath);
-    } catch {
-      // Gone between the check and the open: the next record retries.
-      return;
-    }
-    if (this.lock) return;
-    this.lockFailed = true;
-    this.broadcast(envelope("lock_held", this.sessionId));
-    this.terminate();
+    const lock = this.lock;
+    if (!lock || lock.held || this.locking || this.lockFailed || !this.sessionPath || this.exitCode !== undefined) return;
+    this.locking = true;
+    lock.take(this.sessionPath).then(
+      (outcome) => {
+        this.locking = false;
+        if (outcome !== "busy" || this.exitCode !== undefined) return;
+        this.lockFailed = true;
+        this.broadcast(envelope("lock_held", this.sessionId), false);
+        this.terminate();
+      },
+      (error) => {
+        this.locking = false;
+        this.noteStderr(`session lock failed: ${String(error)}`);
+      },
+    );
   }
 
   private handleExit(code: number): void {
@@ -541,7 +569,7 @@ export class LiveSession {
     for (const id of [...this.requests.keys()]) {
       this.settleRequest(id, { type: "response", success: false, error: "pi exited" });
     }
-    this.broadcast(envelope("exit", this.sessionId, { code, stderrTail: this.stderrTail }));
+    this.broadcast(envelope("exit", this.sessionId, { code, stderrTail: this.stderrTail }), false);
     this.clients.clear();
     this.pending.clear();
     this.sequences.clear();

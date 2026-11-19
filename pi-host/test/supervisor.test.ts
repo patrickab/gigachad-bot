@@ -6,12 +6,12 @@ import { join } from "node:path";
 import type { Server } from "bun";
 import { loadToken } from "../src/auth.ts";
 import { startServer } from "../src/server.ts";
-import { childEnv } from "../src/supervisor/config.ts";
-import { tryLockFile } from "../src/supervisor/lock.ts";
+import type { PiChild } from "../src/host/index.ts";
+import { childEnv } from "../src/host/local/env.ts";
+import { tryLockFile } from "../src/host/local/lock.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 import type { SupervisorHost } from "../src/supervisor/host.ts";
 import { LiveSession } from "../src/supervisor/session.ts";
-import type { PiChild } from "../src/supervisor/spawn.ts";
 
 type Frame = { type: string; sessionId: string; [field: string]: any };
 
@@ -606,6 +606,40 @@ describe("LiveSession against a scripted child", () => {
       "replay_end",
       "agent_settled",
     ]);
+    scripted.exit(0);
+    await session.exited;
+  });
+
+  test("an attaching client keeps frames from before its snapshot point the snapshot does not carry", async () => {
+    const scripted = scriptedChild();
+    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    session.identify("scripted", join(root, "missing.jsonl"));
+    const frames: Frame[] = [];
+    const sink = { send: (data: string) => frames.push(JSON.parse(data)) };
+    session.attach(sink);
+    expect(session.command(sink, { type: "get_commands", id: "mine" })).toBeUndefined();
+    const entriesRequest = scripted.commands[0]!;
+    // Before the snapshot point: a replayed record, the answer to the client's command, a transient and a status.
+    scripted.emit({ type: "agent_start" });
+    scripted.emit({ type: "response", id: "mine", command: "get_commands", success: true, data: { commands: [] } });
+    scripted.emit({ type: "extension_ui_request", id: "n1", method: "notify", message: "hi" });
+    scripted.emit({ type: "extension_ui_request", id: "s1", method: "setStatus", statusKey: "build", statusText: "on" });
+    scripted.emit({ type: "response", id: entriesRequest.id, command: "get_entries", success: true, data: { entries: [], leafId: null } });
+    const stateRequest = await until(() => scripted.commands.find((command) => command.type === "get_state"));
+    scripted.emit({ type: "message_update" });
+    scripted.emit({ type: "response", id: stateRequest.id, command: "get_state", success: true, data: {} });
+    await until(() => (frames.length === 7 ? true : undefined));
+    expect(frames.map((frame) => (frame.type === "pi" ? `pi:${frame.record.method ?? frame.record.id ?? frame.record.type}` : frame.type))).toEqual([
+      "attached",
+      "replay_start",
+      "pi:agent_start",
+      "replay_end",
+      "pi:mine",
+      "pi:notify",
+      "pi:message_update",
+    ]);
+    expect(frames[0]!.ui.statuses).toEqual({ build: "on" });
+    expect(frames.map((frame) => frame.sequence)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     scripted.exit(0);
     await session.exited;
   });
