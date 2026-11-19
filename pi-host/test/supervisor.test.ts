@@ -7,8 +7,9 @@ import type { Server } from "bun";
 import { loadToken } from "../src/auth.ts";
 import { startServer } from "../src/server.ts";
 import type { PiChild } from "../src/host/index.ts";
-import { childEnv } from "../src/host/local/env.ts";
+import { childEnv, sandboxEnv } from "../src/host/local/env.ts";
 import { tryLockFile } from "../src/host/local/lock.ts";
+import { cwdDirName } from "../src/host/local/paths.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 import type { SupervisorHost } from "../src/supervisor/host.ts";
 import { LiveSession } from "../src/supervisor/session.ts";
@@ -16,6 +17,7 @@ import { LiveSession } from "../src/supervisor/session.ts";
 type Frame = { type: string; sessionId: string; [field: string]: any };
 
 const TOKEN = "test-token";
+const TOKENS = { full: TOKEN, gateway: "test-gateway-token" };
 const root = mkdtempSync(join(tmpdir(), "pi-host-supervisor-"));
 const agentDir = join(root, "agent");
 const savedEnv = { agentDir: process.env.PI_CODING_AGENT_DIR, sessionDir: process.env.PI_CODING_AGENT_SESSION_DIR };
@@ -151,7 +153,7 @@ beforeAll(async () => {
   // The watcher (M25) starts with the supervisor; without a root it would only retry after 5 s.
   mkdirSync(join(agentDir, "sessions"), { recursive: true });
   supervisor = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, isPinned: async () => false });
-  server = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor });
+  server = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor });
 });
 
 afterAll(async () => {
@@ -201,7 +203,7 @@ describe("live sessions", () => {
 
   test("rejects an invalid body and a model Pi refuses", async () => {
     expect((await startSession({ cwd: "relative" })).status).toBe(400);
-    expect((await startSession({ cwd, profile: "sandboxed" })).status).toBe(400);
+    expect((await startSession({ cwd, profile: "remote" })).status).toBe(400);
     const refused = await startSession({ cwd, model: { provider: "bad", id: "x" } });
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: "model" });
@@ -338,7 +340,7 @@ test("idle eviction skips pinned, streaming and liveness-reporting sessions", as
   const pinned = new Set<string>();
   const idleMs = 60_000;
   const evicting = await createSupervisor({ piBin: fakePi, idleMs, isPinned: async (path) => pinned.has(path) });
-  const evictingServer = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor: evicting });
+  const evictingServer = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor: evicting });
   try {
     const start = async (name: string) =>
       (await (await startSession({ cwd: workdir(name) }, evictingServer.port)).json()).session as {
@@ -431,7 +433,7 @@ test("an attached frame above Bun's default 16 MB backpressure limit keeps its r
 test("archive during a spawn is refused and the resumed child keeps its file", async () => {
   const slowPi = wrapper("pi-slow", `[ "$1" = --version ] || sleep 1.5\nexec "${fakePi}" "$@"`);
   const slow = await createSupervisor({ piBin: slowPi, idleMs: 3_600_000, isPinned: async () => false });
-  const slowServer = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor: slow });
+  const slowServer = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor: slow });
   try {
     const cwd = workdir("archive-race");
     const { sessionId, sessionPath } = writeSessionFile(cwd, [
@@ -898,5 +900,172 @@ describe("profiles (G1, G5, G6)", () => {
       );
     expect(await listed("document")).toEqual([document.sessionId]);
     expect(await listed("coding")).toEqual([coding.sessionId]);
+  });
+});
+
+test("the gateway token opens /v1/* only, the full token every route (C1)", async () => {
+  const base = `http://127.0.0.1:${server.port}`;
+  const gateway = { authorization: `Bearer ${TOKENS.gateway}` };
+  expect((await fetch(`${base}/v1/models`, { headers: gateway })).status).toBe(200);
+  expect((await api("/v1/models")).status).toBe(200);
+  const body = JSON.stringify({ cwd: workdir("gateway-token"), profile: "coding", resume: null });
+  expect((await fetch(`${base}/sessions`, { method: "POST", headers: gateway, body })).status).toBe(401);
+  expect((await fetch(`${base}/sessions?cwd=/`, { headers: gateway })).status).toBe(401);
+  expect((await fetch(`${base}/health`, { headers: gateway })).status).toBe(401);
+  expect((await fetch(`${base}/usage`, { headers: gateway })).status).toBe(401);
+  expect((await fetch(`${base}/ws`, { headers: { ...gateway, upgrade: "websocket" } })).status).toBe(401);
+});
+
+describe("spawn strategies (C5, C6)", () => {
+  const extensionsDir = join(root, "pi-extensions");
+  const recordDir = join(root, "sandbox-record");
+  const gatewayTokenPath = join(root, "state", "pi-gateway.token");
+  const fakeSandbox = wrapper(
+    "agent-sandbox",
+    [
+      `mkdir -p "${recordDir}"`,
+      `printf '%s\\n' "$@" > "${recordDir}/argv"`,
+      `env > "${recordDir}/env"`,
+      `while [ "$1" != "--" ]; do shift; done`,
+      "shift",
+      `exec "${fakePi}" "$@"`,
+    ].join("\n"),
+  );
+  type Started = { session: { sessionId: string; sessionPath: string; cwd: string; profile: string }; argv: string[] };
+  let strategies: Supervisor;
+  let strategiesServer: Server<SocketData>;
+
+  async function argvOf(body: object): Promise<Started> {
+    const response = await startSession(body, strategiesServer.port);
+    expect(response.status).toBe(200);
+    const { session } = await response.json();
+    const driver = await client(strategiesServer);
+    return { session, argv: (await driver.attach(session.sessionId)).attached.state.argv };
+  }
+
+  beforeAll(async () => {
+    for (const dir of ["tools", "empty", "node_modules"]) mkdirSync(join(extensionsDir, dir), { recursive: true });
+    for (const file of ["files.ts", "alpha.ts", "alpha.test.ts", "types.d.ts", "README.md", "tools/index.ts"]) {
+      writeFileSync(join(extensionsDir, file), "");
+    }
+    strategies = await createSupervisor({
+      piBin: fakePi,
+      idleMs: 3_600_000,
+      isPinned: async () => false,
+      extensionsDir,
+      agentSandboxBin: fakeSandbox,
+      sandboxProfile: "test-profile",
+      gatewayPort: 8399,
+      gatewayTokenPath,
+    });
+    strategiesServer = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor: strategies });
+  });
+
+  afterAll(async () => {
+    await strategies.shutdown();
+    strategiesServer.stop(true);
+  });
+
+  test("coding children load each top-level extension sorted, document children none", async () => {
+    const coding = await argvOf({ cwd: workdir("extensions") });
+    expect(coding.argv).toEqual([
+      "--mode",
+      "rpc",
+      "-e",
+      join(extensionsDir, "alpha.ts"),
+      "-e",
+      join(extensionsDir, "files.ts"),
+      "-e",
+      join(extensionsDir, "tools"),
+    ]);
+    const document = await argvOf({ cwd: workdir("extensions"), profile: "document", systemPrompt: "Doc" });
+    expect(document.argv).not.toContain("-e");
+  });
+
+  test("a missing extensions dir adds no flags", async () => {
+    const bare = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, extensionsDir: join(root, "no-extensions") });
+    const bareServer = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor: bare });
+    try {
+      const response = await startSession({ cwd: workdir("no-extensions") }, bareServer.port);
+      const { session } = await response.json();
+      const driver = await client(bareServer);
+      expect((await driver.attach(session.sessionId)).attached.state.argv).toEqual(["--mode", "rpc"]);
+    } finally {
+      await bare.shutdown();
+      bareServer.stop(true);
+    }
+  });
+
+  test("a sandboxed child runs through agent-sandbox pi-rpc with the gateway token only and a gateway model", async () => {
+    process.env.ANTHROPIC_API_KEY = "secret";
+    const cwd = workdir("sandboxed");
+    const sessionDir = join(agentDir, "sessions", cwdDirName(cwd));
+    let started: Started;
+    try {
+      started = await argvOf({ cwd, profile: "sandboxed", model: { provider: "anthropic", id: "claude-x" } });
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+    const piArgs = ["--mode", "rpc", "--session-dir", sessionDir];
+    expect(started.argv).toEqual(piArgs);
+    expect(readFileSync(join(recordDir, "argv"), "utf8").trimEnd().split("\n")).toEqual([
+      "pi-rpc",
+      "--profile",
+      "test-profile",
+      "--cwd",
+      cwd,
+      "--session-dir",
+      sessionDir,
+      "--gateway-port",
+      "8399",
+      "--",
+      ...piArgs,
+    ]);
+    const env = Object.fromEntries(
+      readFileSync(join(recordDir, "env"), "utf8")
+        .trimEnd()
+        .split("\n")
+        .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+    );
+    expect(env.PI_GATEWAY_TOKEN).toBe(readFileSync(gatewayTokenPath, "utf8").trim());
+    const shellOwn = ["PWD", "OLDPWD", "SHLVL", "_"];
+    const allowed = ["HOME", "USER", "LOGNAME", "PATH", "LANG", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "PI_GATEWAY_TOKEN"];
+    expect(Object.keys(env).filter((name) => !shellOwn.includes(name) && !allowed.includes(name))).toEqual([]);
+
+    const { session } = started;
+    expect(session).toMatchObject({ cwd, profile: "sandboxed" });
+    expect(session.sessionPath.startsWith(`${sessionDir}/`)).toBe(true);
+    const driver = await client(strategiesServer);
+    driver.send({ type: "attach", sessionId: session.sessionId });
+    const attached = await driver.next((frame) => frame.type === "attached");
+    expect(attached.state.model).toEqual({ provider: "gateway", id: "anthropic/claude-x" });
+  });
+
+  test("a resumed sandboxed session mounts its file's directory and refuses another profile", async () => {
+    const cwd = workdir("sandboxed");
+    const { sessionPath } = writeSessionFile(cwd, [messageEntry("u1", null, "user", "hi")]);
+    const marker = { revision: 1, pinned: false, data: {}, profile: "sandboxed" };
+    writeFileSync(`${sessionPath}.gigachad.json`, JSON.stringify(marker));
+    const resumed = await startSession({ cwd, profile: "sandboxed", resume: { sessionPath } }, strategiesServer.port);
+    expect(resumed.status).toBe(200);
+    const recorded = readFileSync(join(recordDir, "argv"), "utf8").trimEnd().split("\n");
+    expect(recorded.slice(5, 7)).toEqual(["--session-dir", join(agentDir, "sessions", cwdDirName(cwd))]);
+    expect(recorded.slice(10)).toEqual(["--mode", "rpc", "--session", sessionPath, "--session-dir", join(agentDir, "sessions", cwdDirName(cwd))]);
+    const { session } = await resumed.json();
+    await api(`/sessions/${session.sessionId}/close`, { method: "POST" }, strategiesServer.port);
+    const coding = await startSession({ cwd, resume: { sessionPath } }, strategiesServer.port);
+    expect(coding.status).toBe(409);
+  });
+
+  test("sandboxEnv keeps only what agent-sandbox needs plus the gateway token", () => {
+    const env = sandboxEnv("gw", {
+      PATH: "/bin",
+      HOME: "/home/someone",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      SSH_AUTH_SOCK: "/tmp/agent",
+      PI_CODING_AGENT_DIR: "/scratch",
+      ANTHROPIC_API_KEY: "secret",
+    });
+    expect(env).toEqual({ PATH: "/bin", HOME: "/home/someone", XDG_RUNTIME_DIR: "/run/user/1000", PI_GATEWAY_TOKEN: "gw" });
   });
 });

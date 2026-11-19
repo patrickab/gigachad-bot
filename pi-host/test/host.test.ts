@@ -18,6 +18,7 @@ import { PINNED_PI_VERSION } from "../src/supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 
 const TOKEN = "test-token";
+const TOKENS = { full: TOKEN, gateway: "test-gateway-token" };
 const CWD = "/remote/project";
 const SESSION_ID = "01a1f3fe-0000-7000-8000-00000000000a";
 const LIVE_ROOT = "/remote/sessions";
@@ -178,7 +179,7 @@ beforeAll(async () => {
     archived: false,
   });
   supervisor = await createSupervisor({ host, idleMs: 3_600_000 });
-  server = startServer({ hostname: "127.0.0.1", port: 0, token: TOKEN, supervisor });
+  server = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor });
 });
 
 afterAll(async () => {
