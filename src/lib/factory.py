@@ -68,7 +68,7 @@ class NewMessage(ContractModel):
 
 
 class RepoInfo(ContractModel):
-    """A repo registered with the engine, `path` is its main checkout, matched against omp workspaces."""
+    """A repo registered with the engine, `path` is its main checkout, matched against workspace directories."""
 
     name: str
     path: str

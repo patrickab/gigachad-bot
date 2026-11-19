@@ -262,7 +262,7 @@ class References:
         return sorted(gone)
 
     def orphan_uploads(self) -> list[Asset]:
-        """Chat uploads whose chat is not stored, such as uploads of omp composers or of chats never saved."""
+        """Chat uploads whose chat is not stored, such as uploads of chats never saved."""
         chat_ids = {meta["chat_id"] for meta in self._chats.tree_metas().values() if meta}
         return [asset for asset in self._assets.list(ATTACHMENT) if _upload_chat_id(asset.logical_path) not in chat_ids]
 

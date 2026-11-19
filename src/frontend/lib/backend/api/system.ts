@@ -4,7 +4,7 @@ import { toQuery } from "../urls"
 import { request, requestVoid, sseStream } from "./http"
 import type { BackendConfig, ProviderUsageReport } from "@/lib/domain/types"
 
-/** Subscription usage per OMP login; `refresh` skips the server's 5 minute cache. */
+/** Subscription usage per Pi login; `refresh` skips the server's 5 minute cache. */
 export async function fetchProviderUsage(refresh = false): Promise<{ reports: ProviderUsageReport[] }> {
   return request<{ reports: ProviderUsageReport[] }>(`/provider-usage${toQuery({ refresh })}`)
 }

@@ -242,7 +242,7 @@ export interface ProviderUsageReport {
   provider: string
   account: string | null
   no_limits: boolean
-  /** omp could not read this account's usage this time, e.g. a rate-limited usage API. */
+  /** pi-host could not read this account's usage this time, e.g. a rate-limited usage API. */
   unavailable?: boolean
   windows: ProviderUsageWindow[]
 }

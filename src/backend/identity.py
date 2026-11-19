@@ -18,7 +18,7 @@ from config import is_development
 from lib.identity_store import resolve_user
 from lib.postgres_pool import get_postgres_pool
 
-# Granted in the tailnet policy file: the holder acts as the host user (omp, Neovim, every file outside the mounts).
+# Granted in the tailnet policy file: the holder acts as the host user (Pi sessions, Neovim, every file outside the mounts).
 HOST_CAPABILITY = "gigachad.local/cap/host"
 CAPABILITIES_HEADER = "Tailscale-App-Capabilities"
 
