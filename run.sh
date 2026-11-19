@@ -58,10 +58,10 @@ printf 'Installing frontend deps\n'
 install_frontend_deps
 export GIGACHAD_FRONTEND_DEPS_INSTALLED=1
 
-# Opt out with GIGACHAD_OMP=0. The script exits quietly when OMP is absent,
-# and the backend hides the OMP model source when its gateway is unreachable.
-if [[ "${GIGACHAD_OMP:-1}" != "0" ]]; then
-    "$root_dir/run-omp.sh" &
+# Opt out with GIGACHAD_PI_HOST=0. Serves Pi sessions and the completion gateway the backend's chats and model list
+# use, reusing an instance already on its port. Started before the backend so its first requests find it.
+if [[ "${GIGACHAD_PI_HOST:-1}" != "0" ]]; then
+    "$root_dir/run-pi-host.sh" &
     service_pids+=($!)
 fi
 

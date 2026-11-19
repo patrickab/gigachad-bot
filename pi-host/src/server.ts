@@ -1,0 +1,64 @@
+/**
+ * pi-host: Pi session supervisor, completion gateway and usage for gigachad-bot.
+ *
+ * - Consumes: the pinned `pi` binary, ~/.pi/agent (auth, sessions, extensions), `PI_HOST_BIND_HOST`, `PI_HOST_PORT`
+ * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token
+ */
+import type { Server } from "bun";
+import { authorize, loadToken } from "./auth.ts";
+import { handleCatalog } from "./catalog/index.ts";
+import { handleGateway } from "./gateway/index.ts";
+import { createSupervisor, type SocketData, type Supervisor } from "./supervisor/index.ts";
+
+export type ServerOptions = { hostname: string; port: number; token: string; supervisor: Supervisor };
+
+/** Serve every route behind the Origin and bearer check (C3). */
+export function startServer({ hostname, port, token, supervisor }: ServerOptions): Server<SocketData> {
+  return Bun.serve<SocketData>({
+    hostname,
+    port,
+    idleTimeout: 0,
+    async fetch(request, server) {
+      const denied = authorize(request, token);
+      if (denied) return denied;
+      const url = new URL(request.url);
+      if (url.pathname === "/ws") {
+        return server.upgrade(request, { data: supervisor.socketData() })
+          ? undefined
+          : new Response("upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/health") return Response.json(supervisor.health());
+      return (
+        (await handleGateway(request, url)) ??
+        (await supervisor.handle(request, url)) ??
+        (await handleCatalog(request, url, supervisor)) ??
+        new Response("not found", { status: 404 })
+      );
+    },
+    websocket: supervisor.websocket,
+  });
+}
+
+if (import.meta.main) {
+  const token = await loadToken();
+  let supervisor: Supervisor;
+  try {
+    supervisor = await createSupervisor();
+  } catch (error) {
+    console.error(`pi-host: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+  const server = startServer({
+    hostname: process.env.PI_HOST_BIND_HOST ?? "127.0.0.1",
+    port: Number(process.env.PI_HOST_PORT ?? 8300),
+    token,
+    supervisor,
+  });
+  console.log(`pi-host listening on http://${server.hostname}:${server.port}`);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, async () => {
+      await supervisor.shutdown();
+      process.exit(0);
+    });
+  }
+}
