@@ -2,11 +2,10 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
-from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from lib import pi_models, reasoning_levels
+from lib import ollama_models, pi_models, reasoning_levels
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
 from lib.provider_usage import UsageUnavailable, provider_usage
@@ -37,13 +36,18 @@ async def _models_payload(
             store.load_tab_order() if tab_order is None else tab_order,
         )
 
-    # `ollama list` is a subprocess, so it runs alongside the store reads instead of after them.
-    ollama, (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
-        asyncio.to_thread(discover_ollama_models), asyncio.to_thread(stored)
+    def ollama() -> list[str]:
+        """Installed Ollama chat models as selectors, synced into Pi first so the gateway serves a new pull."""
+        ollama_models.sync_pi_provider()
+        return [f"ollama/{tag}" for tag in ollama_models.installed_chat_models()]
+
+    # Ollama's API runs alongside the store reads instead of after them.
+    installed, (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
+        asyncio.to_thread(ollama), asyncio.to_thread(stored)
     )
     visible = providers_for_ui(all_providers)
     return {
-        "ollama": ollama,
+        "ollama": installed,
         "providers": [{"label": label, **provider} for label, provider in visible.items()],
         "defaults": all_defaults,
         "tab_order": all_tab_order,

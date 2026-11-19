@@ -34,6 +34,14 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 requires_proc = pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="reads processes from /proc (Linux)")
 
 
+@pytest.fixture(autouse=True)
+def scratch_pi_agent_dir(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A scratch Pi agent dir, so no test writes the user's `~/.pi/agent` (Ollama's `models.json` sync)."""
+    agent_dir = tmp_path_factory.mktemp("pi-agent")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
+    return agent_dir
+
+
 def create_user(pool: ConnectionPool, login: str | None = None) -> UUID:
     """Insert a user (a unique throwaway login by default) and return its id."""
     login = login or f"test-{uuid4()}@example.test"

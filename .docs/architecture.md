@@ -287,6 +287,7 @@ Coding tabs, the session picker and the workbench file chats (Markdown, LaTeX, n
 - The gateway is `pi_host.gateway_url()` (`GIGACHAD_PI_HOST_URL`, default `http://127.0.0.1:8300`, plus `/v1`), the bearer pi-host's token file. `GET /api/models/pi` returns its catalog. Every pick lands in one catalog row labelled `Pi` with `source: "pi"`. Stored selectors keep `litellm_proxy/<provider>/<model>`.
 - `ModelProviderStore` rewrites pre-Pi rows (`source: "omp"`, label `OMP` or one row per login) once on load into that row, and a tab-order entry `OMP` into `Pi`.
 - Return an offline catalog with a reason when the gateway is unreachable. That catalog response is distinct from a failed generation. Cache the catalog and the effort ladders for 60 seconds.
+- Ollama is Pi's custom provider `ollama` in Pi's `models.json` (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`), so the gateway serves `ollama/<tag>`. `lib/ollama_models.py` reads Ollama's API at `OLLAMA_BASE_URL` (`/api/tags`, `/api/show` cached per digest; embedding models left out) and merges the installed chat models into that provider (vision as image `input`, thinking as `reasoning` with the ladder off/low/medium/high where off sends `reasoning_effort: "none"`, `contextWindow`), keeping other providers and keys, writing atomically and only on change. The backend syncs on start and on every `GET /api/models`. pi-host reloads `models.json` when its inode, size or mtime change, so a new pull is served without a restart. Ollama down: no models, nothing written, Ollama is never started.
 
 ## Agent factory
 

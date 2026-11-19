@@ -44,6 +44,7 @@ from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
 from lib import jupyter_service, pi_models
+from lib import ollama_models
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.file_attach import router as file_attach_router
@@ -99,6 +100,8 @@ async def lifespan(app: FastAPI):
     pi_models.configure_litellm_proxy()
     # LLMClient imports LiteLLM (~1.5 s, most of the backend's import time): load it beside serving, not before.
     asyncio.get_running_loop().run_in_executor(None, _warm_client)
+    # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
+    asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())
     reset_cancel()
     from lib import extract_queue

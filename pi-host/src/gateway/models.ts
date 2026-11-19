@@ -7,7 +7,7 @@
 import { type Api, getSupportedThinkingLevels, type Model, type Models } from "@earendil-works/pi-ai";
 import { HttpError } from "./openai.ts";
 
-/** D13: Anthropic (subscription) plus providers configured by API key, never Codex. */
+/** D13: Anthropic (subscription) plus providers with an API key (`models.json` custom ones like `ollama` too), never Codex. */
 export async function listedProvider(models: Models, providerId: string): Promise<boolean> {
   if (providerId === "openai-codex") return false;
   if (providerId === "anthropic") return true;
