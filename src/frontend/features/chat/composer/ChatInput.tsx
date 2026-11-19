@@ -45,6 +45,8 @@ interface ChatInputProps {
   attachMenuItems?: AttachMenuItem[]
   /** Extra controls of the action row after the "+" menu, e.g. the folder a Pi session starts in. */
   leading?: ReactNode
+  /** Takes pasted, dropped and attached videos (a Pi tab stores them for an `@` mention), without it they upload like other files. */
+  onVideo?: (video: File) => void
 }
 
 /** Attachments already in the chat with their context actions. */
@@ -65,7 +67,7 @@ export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
   /** Replace the draft text with `update(current)` and focus the input. */
   updateText: (update: (current: string) => string) => void
-  /** Upload and attach files, e.g. a canvas screenshot put into a Pi chat. */
+  /** Upload and attach files, e.g. a canvas screenshot put into a Pi chat. Videos go to `onVideo` when given. */
   addFiles: (files: File[]) => void
   focus: () => void
 }
@@ -88,6 +90,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   context,
   attachMenuItems = [],
   leading,
+  onVideo,
 }, ref) {
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
@@ -111,15 +114,23 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const draftPicker = useDraftPicker(picker, text, focusDraft, clearDraft)
   const { isListening, toggleListening } = useSpeechInput(text, setText)
 
+  /** Videos go to `onVideo` when given, other files upload as attachments. */
+  const takeFiles = useCallback((files: File[]) => {
+    for (const file of files) {
+      if (onVideo && file.type.startsWith("video/")) onVideo(file)
+      else upload(file, file.name)
+    }
+  }, [onVideo, upload])
+
   useImperativeHandle(ref, () => ({
     addAttachment: drafts.add,
     updateText: (update) => {
       setText(update)
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
-    addFiles: (files) => { for (const file of files) upload(file, file.name) },
+    addFiles: takeFiles,
     focus: () => textareaRef.current?.focus(),
-  }), [drafts.add, setText, upload])
+  }), [drafts.add, setText, takeFiles])
 
   // Staged chips go after the typed text, verbatim
   const handleSubmit = () => {
@@ -139,8 +150,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (e.key === "Enter" && !e.shiftKey && !submitBlocked) { e.preventDefault(); handleSubmit() }
   }
 
-  // Only the first pasted image is attached, a large text becomes a chip
+  // Videos go to `onVideo`, only the first pasted image is attached, a large text becomes a chip
   const handlePaste = (e: React.ClipboardEvent) => {
+    const videos = onVideo ? [...e.clipboardData.files].filter((file) => file.type.startsWith("video/")) : []
+    if (videos.length > 0) {
+      e.preventDefault()
+      takeFiles(videos)
+      return
+    }
     for (const item of e.clipboardData.items) {
       if (item.type.startsWith("image/")) {
         e.preventDefault()
@@ -155,6 +172,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       e.preventDefault()
       chips.stage(pasted)
     }
+  }
+
+  // Only where videos are taken: dropped files join the draft like attached ones
+  const handleDragOver = (e: React.DragEvent) => {
+    if (onVideo && e.dataTransfer.types.includes("Files")) e.preventDefault()
+  }
+  const handleDrop = (e: React.DragEvent) => {
+    if (!onVideo || e.dataTransfer.files.length === 0) return
+    e.preventDefault()
+    takeFiles([...e.dataTransfer.files])
   }
 
   const contextChip = ({ messageIndex, attachment }: ContextAttachment) => context && (
@@ -199,7 +226,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>
       )}
 
-      <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
+      <div onDragOver={handleDragOver} onDrop={handleDrop} className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
           {picker ? (
             <CompletionMenu
               label={picker.label}

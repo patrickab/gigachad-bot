@@ -1,5 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
-import { post, request } from "./http"
+import { toQuery } from "../urls"
+import { fileForm, post, request } from "./http"
 
 export interface PiRepository {
   name: string
@@ -79,6 +80,12 @@ export async function fetchPiFiles(scope: PiFileScope): Promise<string[]> {
   const where = "repo" in scope ? `repo=${encodeURIComponent(scope.repo)}` : `cwd=${encodeURIComponent(scope.cwd)}`
   const { files } = await request<{ files: { path: string }[] }>(`/pi/files?${where}&limit=500`)
   return files.map((file) => file.path)
+}
+
+/** Store `video` in `.pi/pastes/` of `scope`'s folder, resolves to its path relative to that folder (what follows `@`). */
+export async function pastePiVideo(video: File, scope: PiFileScope): Promise<string> {
+  const { mention } = await request<{ mention: string }>(`/pi/pastes${toQuery(scope)}`, { method: "POST", body: fileForm(video) })
+  return mention
 }
 
 /** Spawn a session in `repo`, or get the already-live one. Rejects with status 409 while another process holds the file. */

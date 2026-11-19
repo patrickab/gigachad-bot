@@ -5,7 +5,9 @@ import { X } from "lucide-react"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import type { DraftPicker } from "@/features/chat/composer/CompletionMenu"
 import { stageChip, useComposerChips } from "@/features/chat/composer/composerChips"
-import { fetchPiFiles, type PiFileScope } from "@/lib/backend/api"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { fetchPiFiles, pastePiVideo, type PiFileScope } from "@/lib/backend/api"
 import type { Attachment } from "@/lib/domain/types"
 import { composerAction, piCompletions, type ComposerAction } from "./composerInput"
 import type { ExtensionDialog, ImageContent, PiCommand } from "./types"
@@ -64,7 +66,7 @@ function useScopeFiles(scope: PiFileScope): string[] {
  * Text or files put into the composer from outside (a quoted selection, a canvas screenshot), `id` tells one request from the next.
  *
  * - `text` with a `label` is staged as a composer chip, without one it is appended to the draft
- * - `files` are attached like pasted files, images go to Pi as image blocks
+ * - `files` are attached like pasted files, images go to Pi as image blocks, videos are mentioned like pasted ones
  */
 export interface PiInsertion {
   id: number
@@ -116,6 +118,8 @@ interface PiComposerProps {
  * - `insertion` goes into the composer once, as soon as it is enabled (`PiInsertion`), `onInserted` follows
  * - `select`/`confirm` dialogs pick in the composer's menu, `input`/`editor` dialogs take the next send as their answer
  * - Queued steering and follow-ups, extension status lines and notices sit above it
+ * - A pasted, dropped or attached video is stored in the session folder's `.pi/pastes/` and mentioned as `@<path>`,
+ *   `pi-extensions/video-paste.ts` turns the mention into a frame grid
  */
 export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
   const inputRef = useRef<ChatInputHandle>(null)
@@ -128,6 +132,10 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
   /** Set while an Alt+Enter keydown passes through `ChatInput`, so its send queues a follow-up. */
   const followUpRef = useRef(false)
   useInsertion(insertion, !disabled, draftKey, onInserted, inputRef)
+  const { run: pasteVideo, pending: pasting, error: pasteError } = useAsyncAction(async (video: File) => {
+    const mention = await pastePiVideo(video, fileScope)
+    inputRef.current?.updateText((current) => `${current}${/(^|\s)$/.test(current) ? "" : " "}@${mention} `)
+  }, "Could not paste this video")
 
   useEffect(() => {
     if (editorText) inputRef.current?.updateText(() => editorText.text)
@@ -170,6 +178,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
   return (
     <div className="shrink-0 px-4 pb-4" onKeyDownCapture={handleKeyDownCapture} onKeyDown={() => { followUpRef.current = false }}>
       <div className="mx-auto mb-2 flex w-full max-w-2xl flex-col gap-1 text-xs">
+        <ErrorText>{pasteError}</ErrorText>
         {notices.map((notice) => (
           <p key={notice.id} role="status" className={notice.tone === "error" ? "text-danger" : notice.tone === "warning" ? "text-warning" : "text-ink-muted"}>{notice.text}</p>
         ))}
@@ -192,6 +201,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
         draftKey={draftKey}
         onSend={(text, attachments) => void handleSend(text, attachments)}
         disabled={disabled}
+        extracting={pasting}
         isStreaming={running}
         sendWhileStreaming
         onCancel={() => void handleAbort()}
@@ -199,6 +209,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
         placeholder={textDialog && textDialog.method === "input" ? textDialog.placeholder ?? "Message" : "Message"}
         complete={textDialog ? undefined : complete}
         picker={picker}
+        onVideo={(video) => void pasteVideo(video)}
       />
     </div>
   )

@@ -45,7 +45,8 @@ export interface ToolResultMessage {
 }
 
 export interface BashExecutionMessage { role: "bashExecution"; command: string; output: string; exitCode?: number; cancelled: boolean; timestamp: number }
-export interface CustomMessage { role: "custom"; customType: string; content: string | (TextContent | ImageContent)[]; display: boolean; timestamp: number }
+/** `details` is the sending extension's own data for its renderer, never sent to the model. */
+export interface CustomMessage { role: "custom"; customType: string; content: string | (TextContent | ImageContent)[]; display: boolean; details?: unknown; timestamp: number }
 export interface CompactionSummaryMessage { role: "compactionSummary"; summary: string; tokensBefore: number; timestamp: number }
 
 export type AgentMessage =

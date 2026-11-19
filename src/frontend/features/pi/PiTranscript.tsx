@@ -11,6 +11,8 @@ import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
+// Registers the `video-preview` card (`pi-extensions/video-paste.ts`)
+import "./VideoPreview"
 
 const MAX_LABEL_LENGTH = 80
 /** Turns mounted at first and added per "Show earlier turns": older ones create no elements (smooth streaming). */

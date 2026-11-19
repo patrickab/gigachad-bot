@@ -57,7 +57,7 @@ function entryMessage(entry: SessionEntry): AgentMessage | null {
     case "message": return entry.message as AgentMessage
     case "compaction": return { role: "compactionSummary", summary: String(entry.summary ?? ""), tokensBefore: Number(entry.tokensBefore ?? 0), timestamp }
     case "branch_summary": return { role: "branchSummary", timestamp }
-    case "custom_message": return { role: "custom", customType: String(entry.customType), content: entry.content as CustomMessage["content"], display: Boolean(entry.display), timestamp }
+    case "custom_message": return { role: "custom", customType: String(entry.customType), content: entry.content as CustomMessage["content"], display: Boolean(entry.display), details: entry.details, timestamp }
     default: return null
   }
 }

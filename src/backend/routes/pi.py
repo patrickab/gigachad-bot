@@ -4,6 +4,8 @@
 - `repo` is a checkout name under `~/git`, resolved to the session folder here (`pi_host.resolve_repository`)
 - `GET /files` also takes an absolute `cwd` for the `@` completion of workbench chats: inside the file roots or the
   workbench folder only
+- `POST /pastes` stores a video pasted into a Pi composer in the session folder's `.pi/pastes/` (`lib.pi_pastes`), the
+  composer mentions it and `pi-extensions/video-paste.ts` previews it
 - pi-host failures map to HTTP: unreachable 503, unknown shape 502, refusal keeps its status and answers
   `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`, 409 stale state with the current `{revision, data}`)
 - `WS /api/pi/ws`: byte-transparent proxy to pi-host's `/ws` (M16), nothing is parsed. Either side closing closes both
@@ -13,21 +15,23 @@ Host code execution: `host_access_only` on HTTP, the origin and host-access gate
 
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
+from datetime import datetime
 import logging
 from pathlib import Path as FilePath
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, WebSocket
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, Response, UploadFile, WebSocket
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
+from backend.http_plumbing import http_errors
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.reverse_proxy import relay_websocket
 from backend.routes.deps import get_file_roots
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 import config
-from lib import pi_host
+from lib import pi_host, pi_pastes
 from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
@@ -71,6 +75,13 @@ class OpenSessionBody(pi_host.ContractModel):
 
 class PinBody(pi_host.ContractModel):
     pinned: bool
+
+
+class PastedVideo(BaseModel):
+    """A stored paste: `path` absolute, `mention` relative to the session folder (what the composer puts after `@`)."""
+
+    path: str
+    mention: str
 
 
 async def _call[Result](request: Awaitable[Result]) -> Result:
@@ -174,6 +185,30 @@ async def get_files(
         raise HTTPException(status_code=400, detail="Give either repo or cwd")
     folder = await asyncio.to_thread(_cwd, repo) if repo is not None else await asyncio.to_thread(_allowed_cwd, cwd, roots)
     return pi_host.FileList(files=await _call(pi_host.find_files(folder, q, limit)))
+
+
+@http_router.post("/pastes")
+async def post_paste(
+    roots: Annotated[FileRoots, Depends(get_file_roots)],
+    file: Annotated[UploadFile, File()],
+    repo: str | None = None,
+    cwd: str | None = None,
+) -> PastedVideo:
+    """Store a video pasted into the composer of a session in *repo* or the absolute folder *cwd* as
+    `.pi/pastes/<YYYYMMDD-HHMMSS>-<name>.<ext>`. Unknown folder 404, no mp4/webm/mov/mkv 400, over 200 MB 413."""
+    if (repo is None) == (cwd is None):
+        raise HTTPException(status_code=400, detail="Give either repo or cwd")
+    filename = file.filename or ""
+    with http_errors((ValueError, 400, None)):
+        suffix = pi_pastes.paste_suffix(filename, file.content_type)
+    content = await file.read(pi_pastes.MAX_PASTE_BYTES + 1)
+    if len(content) > pi_pastes.MAX_PASTE_BYTES:
+        raise HTTPException(status_code=413, detail="Videos are at most 200 MB")
+    folder = FilePath(await asyncio.to_thread(_cwd, repo) if repo is not None else cwd or "")
+    mention = pi_pastes.paste_mention(filename, suffix, datetime.now())
+    with http_errors((pi_pastes.UnknownFolder, 404, None), (FileExistsError, 409, "A paste with that name exists already"), (ValueError, 400, None)):
+        stored = await asyncio.to_thread(pi_pastes.store_paste, roots, folder, mention, content)
+    return PastedVideo(path=str(stored), mention=mention.as_posix())
 
 
 @router.websocket("/ws")

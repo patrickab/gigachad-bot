@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { clearChips, stageChip } from "@/features/chat/composer/composerChips"
-import { fetchPiFiles, type PiFileScope } from "@/lib/backend/api"
+import { fetchPiFiles, pastePiVideo, type PiFileScope } from "@/lib/backend/api"
 import { PiComposer, type PiInsertion, type PiSubmit } from "../PiComposer"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
@@ -13,6 +13,7 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   fetchPiFiles: vi.fn(async () => ["src/app.ts"]),
+  pastePiVideo: vi.fn(async (video: File) => `.pi/pastes/20261119-120000-${video.name}`),
 }))
 
 const SESSION = "s1"
@@ -152,5 +153,30 @@ describe("PiComposer", () => {
     await waitFor(() => expect(onInserted).toHaveBeenCalledOnce())
     send("tighten this")
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "prompt", text: "tighten this\n\n\\begin{frame}" } })))
+  })
+
+  it("stores a pasted, dropped or inserted video and mentions it in the draft", async () => {
+    const clip = new File(["v"], "clip.mp4", { type: "video/mp4" })
+    const { textbox, update } = renderComposer()
+    fireEvent.change(textbox, { target: { value: "what happens in" } })
+    fireEvent.paste(textbox, { clipboardData: { files: [clip], items: [], getData: () => "" } })
+    await waitFor(() => expect(textbox).toHaveValue("what happens in @.pi/pastes/20261119-120000-clip.mp4 "))
+    expect(pastePiVideo).toHaveBeenLastCalledWith(clip, { repo: "repo" })
+
+    const dropped = new File(["v"], "drop.webm", { type: "video/webm" })
+    fireEvent.drop(textbox, { dataTransfer: { files: [dropped], types: ["Files"] } })
+    await waitFor(() => expect(textbox).toHaveValue("what happens in @.pi/pastes/20261119-120000-clip.mp4 @.pi/pastes/20261119-120000-drop.webm "))
+
+    const inserted = new File(["v"], "screen.mov", { type: "video/quicktime" })
+    update({ disabled: false, insertion: { id: 3, text: "", files: [inserted] } })
+    await waitFor(() => expect((textbox as HTMLTextAreaElement).value).toMatch(/drop\.webm @\.pi\/pastes\/20261119-120000-screen\.mov $/))
+  })
+
+  it("shows why a video could not be stored", async () => {
+    vi.mocked(pastePiVideo).mockRejectedValueOnce(new Error("Videos are at most 200 MB"))
+    const { textbox } = renderComposer()
+    fireEvent.paste(textbox, { clipboardData: { files: [new File(["v"], "big.mp4", { type: "video/mp4" })], items: [], getData: () => "" } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("Videos are at most 200 MB")
+    expect(textbox).toHaveValue("")
   })
 })
