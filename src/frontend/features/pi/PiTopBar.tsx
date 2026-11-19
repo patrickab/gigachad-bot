@@ -47,7 +47,9 @@ export function PiSessionControlsBar({ controls, compact = false }: { controls: 
     <div className={compact ? "flex min-w-0 items-center gap-1" : "flex shrink-0 items-center gap-1"}>
       {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
       {controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
-        <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
+        <div className="shrink-0">
+          <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
+        </div>
       )}
       {stats && <span aria-label={stats.label} className="shrink-0 whitespace-nowrap px-1.5 font-mono text-xs tabular-nums text-ink-faint">{stats.text}</span>}
     </div>

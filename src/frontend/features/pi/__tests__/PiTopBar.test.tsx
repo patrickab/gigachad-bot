@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { PiSessionControlsBar, statsText, type PiSessionControls } from "../PiTopBar"
+import { PiPanelBar, PiSessionControlsBar, statsText, type PiSessionControls } from "../PiTopBar"
 import type { PiModel } from "../types"
 
 const HAIKU: PiModel = { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }
@@ -49,6 +49,17 @@ describe("PiSessionControlsBar", () => {
   it("shows context use and cost", () => {
     render(<PiSessionControlsBar controls={controls({ stats: { cost: 0.4512, contextUsage: { tokens: 60_000, contextWindow: 200_000, percent: 30 } } })} />)
     expect(screen.getByLabelText("Context 60k of 200k tokens, cost $0.45")).toHaveTextContent("30% · $0.45")
+  })
+
+  it("lets only the model name give way in a narrow side panel, thinking, usage and actions keep their width", () => {
+    render(<PiPanelBar header={{ tone: "ready", sessionName: "Notes", controls: controls({ stats: { cost: 0.01 } }) }} actions={<button type="button">New session</button>} />)
+    const model = screen.getByRole("button", { name: "Model: Claude Opus 4.5" })
+    expect(model).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
+    expect(model.parentElement).toHaveClass("min-w-0")
+    expect(model.querySelector("span")).toHaveClass("min-w-0", "truncate")
+    expect(screen.getByRole("button", { name: "Thinking: medium" }).parentElement?.parentElement).toHaveClass("shrink-0")
+    expect(screen.getByLabelText("Cost $0.01")).toHaveClass("shrink-0")
+    expect(screen.getByRole("button", { name: "New session" }).parentElement).toHaveClass("shrink-0")
   })
 })
 
