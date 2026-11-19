@@ -1,12 +1,14 @@
 [Unit]
 Description=gigachad-bot FastAPI backend
-Wants=network-online.target gigachad-bot-omp.service
-After=network-online.target gigachad-bot-omp.service
+Wants=network-online.target gigachad-bot-pi-host.service
+After=network-online.target gigachad-bot-pi-host.service
 
 [Service]
 Type=exec
 WorkingDirectory=%h/git/gigachad-bot-prod
 Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+# Production's pi-host (gigachad-bot-pi-host.service), development's runs on the default 127.0.0.1:8300
+Environment=GIGACHAD_PI_HOST_URL=http://127.0.0.1:8301
 ExecStart=%h/git/gigachad-bot-prod/run-backend.sh --prod
 Restart=on-failure
 RestartSec=5s

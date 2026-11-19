@@ -3,6 +3,11 @@
 # backend (gigachad-bot.service, which also starts the C4 service) from a clean
 # environment, so nothing inherited from the calling shell reaches uv, npm or the unit.
 #
+# Before the backend, pi-host (gigachad-bot-pi-host.service, M14): restarted only when
+# pi-host/ changed (code, the Pi pin in its package.json, the lockfile), the installed pi
+# is another version than the one it runs, or it is down, never while a Pi session is
+# live (M4). A pi whose version differs from the pin stops the redeploy before any restart.
+#
 # Then omp-web (omp tabs): restarts gigachad-bot-omp-web.service when the upstream ref
 # it serves (GIGACHAD_OMP_WEB_REF, default origin/main, fetched here) moved, origin/main
 # moved past a local ref branch (the launcher moves it on start), or ompweb-overlay/ or the
@@ -21,6 +26,9 @@ set -euo pipefail
 unit=gigachad-bot.service
 prod="${GIGACHAD_PROD_DIR:-$HOME/git/gigachad-bot-prod}"
 port=8002
+
+pi_host_unit=gigachad-bot-pi-host.service
+pi_host_url=http://127.0.0.1:8301
 
 omp_web_unit=gigachad-bot-omp-web.service
 omp_web_host_unit=gigachad-bot-omp-web-host.service
@@ -99,6 +107,30 @@ busy_learn_sessions() {
     curl -sf "$learn_url/api/chats" | python3 -c 'import json, sys; print(sum(1 for chat in json.load(sys.stdin).get("chats", []) if chat.get("busy")))'
 }
 
+# The Pi version the running pi-host checked at its start (M13), empty when it does not answer.
+pi_host_version() {
+    curl -sf -H "Authorization: Bearer $(cat "$pi_host_token_file")" "$pi_host_url/health" \
+        | python3 -c 'import json, sys; print(json.load(sys.stdin)["piVersion"])'
+}
+
+pi_host_up() {
+    systemctl --user is-active --quiet "$pi_host_unit" && [[ -n $(pi_host_version 2>/dev/null) ]]
+}
+
+# Pi sessions pi-host is running (each is a `pi` child in the unit's cgroup), live ones end with a restart.
+live_pi_sessions() {
+    local cgroup pid count=0
+    cgroup="$(systemctl --user show -p ControlGroup --value "$pi_host_unit")"
+    if [[ -n $cgroup && -r /sys/fs/cgroup$cgroup/cgroup.procs ]]; then
+        while read -r pid; do
+            if [[ $(cat "/proc/$pid/comm" 2>/dev/null) == pi ]]; then
+                count=$((count + 1))
+            fi
+        done <"/sys/fs/cgroup$cgroup/cgroup.procs"
+    fi
+    printf '%s\n' "$count"
+}
+
 old="$(git -C "$prod" rev-parse HEAD)"
 git -C "$prod" fetch origin master
 git -C "$prod" rebase origin/master
@@ -122,6 +154,44 @@ fi
 if ! git diff --quiet "$old" "$new" -- deploy; then
     printf "deploy/ changed: run deploy/install-systemd-service.sh to reinstall the units\n" >&2
 fi
+
+# pi-host, before the backend that talks to it
+if ! systemctl --user cat "$pi_host_unit" >/dev/null 2>&1; then
+    printf "%s is not installed: run %s/deploy/install-systemd-service.sh\n" "$pi_host_unit" "$prod" >&2
+    exit 1
+fi
+pi_host_token_file="$(prod_setting PI_HOST_TOKEN_FILE "$HOME/.local/state/gigachad-bot/pi-host.token")"
+pi_pinned="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["dependencies"]["@earendil-works/pi-coding-agent"])' \
+    pi-host/package.json)"
+pi_installed="$(timeout 30 pi --version 2>/dev/null || true)"
+pi_served="$(pi_host_version 2>/dev/null || true)"
+if [[ -z $pi_served || $pi_served != "$pi_installed" ]] || ! git diff --quiet "$old" "$new" -- pi-host || ! pi_host_up; then
+    if [[ $pi_installed != "$pi_pinned" ]]; then
+        printf "pi-host not restarted: pi-host pins Pi %s, PATH has %s: install pi %s (mise), it keeps serving %s\n" \
+            "$pi_pinned" "${pi_installed:-no pi}" "$pi_pinned" "${pi_served:-nothing}" >&2
+        exit 1
+    fi
+    live="$(live_pi_sessions)"
+    if [[ $live != 0 ]]; then
+        printf "pi-host not restarted: %s Pi session(s) live, run systemctl --user restart %s when they are idle\n" \
+            "$live" "$pi_host_unit" >&2
+    else
+        printf "Restarting %s with Pi %s\n" "$pi_host_unit" "$pi_pinned"
+        systemctl --user restart "$pi_host_unit"
+        # The first start installs pi-host's dependencies (bun install).
+        if ! wait_until 300 1 pi_host_up; then
+            journalctl --user -u "$pi_host_unit" -n 30 --no-pager -o cat >&2 || true
+            printf "%s did not come up within 5 min, see the log above\n" "$pi_host_unit" >&2
+            exit 1
+        fi
+    fi
+fi
+if ! pi_host_up; then
+    systemctl --user --no-pager status "$pi_host_unit" >&2 || true
+    printf "%s is not up on %s\n" "$pi_host_unit" "$pi_host_url" >&2
+    exit 1
+fi
+printf "%s is up on %s with Pi %s\n" "$pi_host_unit" "$pi_host_url" "$(pi_host_version)"
 
 systemctl --user restart "$unit"
 if ! wait_until 30 1 backend_up; then

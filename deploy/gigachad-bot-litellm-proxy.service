@@ -1,15 +1,16 @@
 [Unit]
 Description=gigachad-bot LiteLLM proxy (learn mode's models)
-# The generator reads the catalog from the production PostgreSQL (started by the backend) and the OMP gateway
-Wants=network-online.target gigachad-bot.service gigachad-bot-omp.service
-After=network-online.target gigachad-bot.service gigachad-bot-omp.service
+# The generator reads the catalog from the production PostgreSQL (started by the backend) and pi-host's gateway
+Wants=network-online.target gigachad-bot.service gigachad-bot-pi-host.service
+After=network-online.target gigachad-bot.service gigachad-bot-pi-host.service
 
 [Service]
 Type=exec
 WorkingDirectory=%h/git/gigachad-bot-prod
 Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
-# uv serves the proxy (uv tool run), its first start downloads the pinned LiteLLM into uv's cache. omp (its model registry)
-# is in ~/.local/bin
+# Production's pi-host (gigachad-bot-pi-host.service): the generator lists its gateway, Pi models route to it
+Environment=GIGACHAD_PI_HOST_URL=http://127.0.0.1:8301
+# uv serves the proxy (uv tool run), its first start downloads the pinned LiteLLM into uv's cache
 Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-learnharness.sh proxy
 Restart=on-failure

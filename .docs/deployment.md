@@ -149,7 +149,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 ### Provision the systemd services
 
-Install the backend and optional OMP model-source supervisor without starting them:
+Install the backend, pi-host and the other units without starting them:
 
 ```bash
 "$PROD/deploy/install-systemd-service.sh"
@@ -161,8 +161,8 @@ loginctl enable-linger "$USER"
 - Start only after configuration is ready:
 
 ```bash
-systemctl --user start gigachad-bot.service
-systemctl --user status gigachad-bot.service gigachad-bot-omp.service
+systemctl --user start gigachad-bot-pi-host.service gigachad-bot.service
+systemctl --user status gigachad-bot.service gigachad-bot-pi-host.service
 curl --fail --show-error http://127.0.0.1:8002/healthz
 ```
 
@@ -171,13 +171,31 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
   reload. Keep `NoNewPrivileges`, `PrivateTmp`, `UMask=0077`, restart handling,
   and stop timeout. Never bind FastAPI to a LAN, Tailnet, or wildcard address.
 - Units use `%h` and `GIGACHAD_ENV_FILE`, not `EnvironmentFile`, to avoid systemd
-  parsing credentials. The OMP unit also supplies a `PATH` including mise shims.
-- The backend orders startup after `gigachad-bot-omp.service`. Its runner starts
-  or reuses OMP's auth broker/gateway, hides the model source when OMP or its
-  credentials are absent, and exits successfully in that case. Credential root:
-  `~/.omp/agent/agent.db`, overridden by `PI_CONFIG_DIR`.
-- OMP runner: `deploy/run-production-omp.sh` → `run-omp.sh`. Override binds with
-  `GIGACHAD_OMP_BROKER_BIND` and `GIGACHAD_OMP_GATEWAY_BIND` if needed.
+  parsing credentials. The pi-host unit also supplies a `PATH` with mise shims (`pi`) and linuxbrew (`bun`).
+- The backend orders startup after `gigachad-bot-pi-host.service` and reaches it
+  through `GIGACHAD_PI_HOST_URL=http://127.0.0.1:8301`, set in its unit (and the
+  LiteLLM proxy's), not in the shared `$ENV`: development's pi-host holds the
+  default `127.0.0.1:8300`.
+- pi-host runner: `deploy/run-production-pi-host.sh` → `run-pi-host.sh` with
+  `PI_HOST_PORT=8301` from the unit. It loads `~/.secrets` (the gateway's API-key
+  providers) and `$ENV`, installs `pi-host/`'s locked dependencies when they are
+  missing or older than its manifest or lockfile, and exits non-zero when `pi --version`
+  differs from the pin (M13). Pi sessions get only pi-host's environment allowlist.
+- Both pi-hosts share the token file (`~/.local/state/gigachad-bot/pi-host.token`,
+  `PI_HOST_TOKEN_FILE` overrides) and `~/.pi/agent` (logins, sessions): one host
+  user, like `$ENV` and `~/.secrets`. That path is the one `src/lib/host_access.py`
+  and the LearnHarness sandbox hide. pi-host's session-file lock (M1) keeps one
+  writer per session across both: a session live in one answers `409 locked` in the other.
+- Like omp-web, the pi-host unit has no `NoNewPrivileges`, `PrivateTmp` or
+  `UMask`: it runs the user's Pi agents.
+- `redeploy.sh` restarts pi-host before the backend, only when `pi-host/` changed
+  (code, the Pi pin, the lockfile), the installed `pi --version` differs from the
+  one `/health` reports, or pi-host is down (M14). It never restarts while a Pi
+  session is live (a `pi` child in the unit's cgroup: pi-host stops idle, unattached,
+  unpinned ones after `PI_HOST_IDLE_MINUTES`, 15, pinned ones stay) and prints the
+  restart command instead (M4). An installed `pi` other than the pin stops the
+  redeploy before any restart, the running pi-host keeps serving.
+  The installer stops, disables and removes the retired `gigachad-bot-omp.service`.
 - The backend starts the stateless LikeC4 service, points `C4_SERVICE_URL` at it,
   and stops it on exit. Each start uses `npm ci` against its lockfile. If unavailable,
   architecture routes return 503, other features remain available.
@@ -187,7 +205,7 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 | FastAPI | `127.0.0.1:8001` | `127.0.0.1:8002` |
 | LikeC4 | `127.0.0.1:8011` | `127.0.0.1:8012` |
 | PostgreSQL | `gigachad-dev` container/volume | `gigachad-prod` container/volume |
-| OMP auth broker / gateway | `127.0.0.1:8765` / `127.0.0.1:4000` | Same defaults, reuse existing listeners |
+| pi-host (Pi sessions, completion gateway, usage) | `127.0.0.1:8300` (`run.sh`) | `127.0.0.1:8301`, same token file and `~/.pi/agent` |
 | omp-web / its gate | `127.0.0.1:30177` / - | Same omp-web, gate `127.0.0.1:30179` (Serve `:8443`) |
 | LearnHarness / LiteLLM proxy / gate | `127.0.0.1:30181` / `127.0.0.1:30183` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
 | Factory engine / preview gate | `127.0.0.1:8090` / `127.0.0.1:30185` | Same defaults, one instance per machine, gate behind Serve `:8445` |
@@ -196,7 +214,7 @@ Inspect failures rather than exposing another listener:
 
 ```bash
 journalctl --user -u gigachad-bot.service -n 100 --no-pager
-journalctl --user -u gigachad-bot-omp.service -n 100 --no-pager
+journalctl --user -u gigachad-bot-pi-host.service -n 100 --no-pager
 ```
 
 ### Provision the code sandbox
@@ -465,7 +483,7 @@ systemctl --user restart gigachad-bot.service
 1. Update the production worktree and install locked dependencies.
 2. Confirm nonsecret `$ENV` and separate `~/.secrets`. Leave `GIGACHAD_BASE_DIR`
    unset, leave `MINERU_SERVER_URL` unset when using local OCR.
-3. Provision sandbox/optional OMP/factory/learn mode services, then pass sandbox doctor.
+3. Provision sandbox/pi-host/factory/learn mode services, then pass sandbox doctor.
 4. Start or restart the backend and verify loopback health.
 5. Publish private Serve ingress and verify it from another permitted device.
 6. Deploy the frontend with the matching API base and authorized origin.
@@ -497,14 +515,24 @@ From a permitted Tailnet device:
 3. Send a disposable chat and verify `/api/chat` SSE streams and completes.
    Health checks alone do not prove streaming.
 4. Refresh and reopen that chat to verify persistence, then delete it.
-5. Confirm `sudo ss -ltnp '( sport = :8002 )'` shows loopback only and
+5. Confirm `sudo ss -ltnp '( sport = :8002 or sport = :8301 )'` shows loopback only and
    `tailscale serve status` shows private ingress. Never test with Funnel.
+6. Check pi-host with its token, it answers the pinned Pi version (no `Origin` header, which it refuses):
+
+   ```bash
+   curl --fail --show-error -H "Authorization: Bearer $(cat ~/.local/state/gigachad-bot/pi-host.token)" \
+     http://127.0.0.1:8301/health
+   ```
+
+   Then open the Pi page, start a disposable session, send one prompt and delete it.
 
 ## 6. Roll back safely
 
 Keep the private hostname and loopback port stable:
 
-1. `systemctl --user stop gigachad-bot.service`.
+1. `systemctl --user stop gigachad-bot.service`. Stop `gigachad-bot-pi-host.service`
+   too when the rollback crosses a `pi-host/` change, after its Pi sessions are idle:
+   stopping ends their turns, the sessions themselves persist.
 2. Restore a known-good code revision in `$PROD` and its matching locked
    dependencies. Restore configuration only if changed, restore database or
    mirror backups only when reverting data is necessary. Do not overwrite newer
@@ -515,7 +543,7 @@ Keep the private hostname and loopback port stable:
 3. Start the service and repeat loopback/Tailnet health checks:
 
    ```bash
-   systemctl --user start gigachad-bot.service
+   systemctl --user start gigachad-bot-pi-host.service gigachad-bot.service
    curl --fail --show-error http://127.0.0.1:8002/healthz
    ```
 
@@ -523,6 +551,11 @@ Keep the private hostname and loopback port stable:
    exact CORS origin. Restart the backend if its origin configuration changes.
 5. To withdraw ingress immediately, use `tailscale serve off`. Restore it with
    the section 2 helper, never by exposing the backend directly.
+6. pi-host refuses a `pi` other than its revision's pin (`pi-host/package.json`):
+   install that version (mise) before starting it. Its dependencies reinstall on
+   start from the restored lockfile. A revision from before pi-host runs the OMP
+   model source instead: reinstall that revision's units with its
+   `deploy/install-systemd-service.sh` and disable `gigachad-bot-pi-host.service`.
 
 Schema steps stay applied after a code rollback. Older code runs against them
 unchanged: step 0013 only deleted superseded `changes` rows (replay output is
