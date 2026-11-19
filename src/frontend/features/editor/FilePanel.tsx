@@ -115,9 +115,10 @@ export function FilePanelSlot() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the open width is measured from the laid-out surfaces
     setSharedWidth(opened)
     setOpenWidth(ownerWidth ?? Math.round(opened * OPEN_SHARE))
-    // A window or left sidebar resize changes the shared width, the panel shrinks into the new limit
+    // A window or left sidebar resize changes the shared width, the panel shrinks into the new limit. A hidden tab measures 0, its width stays
     const observer = new ResizeObserver(() => {
       const shared = measureShared()
+      if (shared === 0) return
       setSharedWidth(shared)
       setOpenWidth((width) => Math.min(width, Math.round(shared * MAX_SHARE)))
     })
