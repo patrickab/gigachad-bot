@@ -26,6 +26,13 @@ describe("patch parsing", () => {
     ])
   })
 
+  it("splits a multi-file patch with its paths and drops text that is no patch", () => {
+    const files = parseUnifiedPatch("--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/y.ts\n+++ b/y.ts\n@@ -3 +3 @@\n-c\n+d\n\\ No newline at end of file")
+    expect(files?.map(({ oldPath, newPath }) => [oldPath, newPath])).toEqual([["a/x.ts", "b/x.ts"], ["a/y.ts", "b/y.ts"]])
+    expect(files?.[1].rows.at(-1)).toEqual({ type: "hunk", text: "\\ No newline at end of file" })
+    expect(parseUnifiedPatch("plain text output")).toBeNull()
+  })
+
   it("parses Pi's display diff and derives new line numbers of context lines", () => {
     const files = parsePiDisplayDiff("   ...\n  4 keep\n- 5 old\n+ 5 new\n+ 6 more\n  6 tail")
     const lines = files?.[0].rows.filter((row) => row.type === "line") ?? []

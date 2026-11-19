@@ -1,4 +1,10 @@
-import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, ToolResultMessage, ToolRun, UserMessage } from "./types"
+import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, ImageContent, TextContent, ToolResultMessage, ToolRun, UserMessage } from "./types"
+
+/** What entry edits left on a confirmed message: a `context_edit` (omitted from or replaced in the model's context) and a `label`. */
+export interface MessageMarks {
+  context?: "omitted" | "replaced"
+  label?: string
+}
 
 /**
  * What the transcript shows: confirmed messages (persisted entries), then live ones not yet confirmed, the streaming reply and live tool state.
@@ -6,8 +12,12 @@ import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, Too
  * Live messages (`unconfirmed`, `optimistic`, `streaming`) are rendered after the confirmed ones and dropped once a snapshot or resync brings their entry (M2).
  */
 export interface Transcript {
-  /** The active branch's persisted messages, from `attached` and `resync`. */
+  /** The active branch's persisted messages, from `attached` and `resync`, `context_edit` replacements applied. */
   messages: AgentMessage[]
+  /** Entry id of each confirmed message, parallel to `messages`. */
+  entryIds: string[]
+  /** Entry edits by target entry id. */
+  marks: Record<string, MessageMarks>
   /** Messages a live `message_end` reported whose entry no resync has brought yet. */
   unconfirmed: AgentMessage[]
   /** The prompt this tab sent, shown until Pi reports it. */
@@ -21,7 +31,7 @@ export interface Transcript {
   queue: { steering: string[]; followUp: string[] }
 }
 
-export const EMPTY_TRANSCRIPT: Transcript = { messages: [], unconfirmed: [], optimistic: null, streaming: null, runs: {}, running: false, queue: { steering: [], followUp: [] } }
+export const EMPTY_TRANSCRIPT: Transcript = { messages: [], entryIds: [], marks: {}, unconfirmed: [], optimistic: null, streaming: null, runs: {}, running: false, queue: { steering: [], followUp: [] } }
 
 type PiEvent = { type: string; [field: string]: unknown }
 
@@ -52,8 +62,8 @@ function entryMessage(entry: SessionEntry): AgentMessage | null {
   }
 }
 
-/** The active branch's messages, root to leaf, including what compactions summarized (the transcript shows the whole history). */
-export function messagesOfEntries({ entries, leafId }: SessionEntries): AgentMessage[] {
+/** The active branch's entries, root to leaf. */
+function branchEntries({ entries, leafId }: SessionEntries): SessionEntry[] {
   const byId = new Map(entries.map((entry) => [entry.id, entry]))
   const branch: SessionEntry[] = []
   let entry = leafId ? byId.get(leafId) : undefined
@@ -62,7 +72,59 @@ export function messagesOfEntries({ entries, leafId }: SessionEntries): AgentMes
     branch.push(entry)
     entry = entry.parentId ? byId.get(entry.parentId) : undefined
   }
-  return branch.reverse().flatMap((branchEntry) => entryMessage(branchEntry) ?? [])
+  return branch.reverse()
+}
+
+/** The confirmed part of a transcript. */
+type Confirmed = Pick<Transcript, "messages" | "entryIds" | "marks">
+
+const NO_CONFIRMED: Confirmed = { messages: [], entryIds: [], marks: {} }
+
+/** `message` with its content replaced by a `context_edit`; assistant and tool result content is always a block array. */
+function withContent(message: AgentMessage, replacement: string | (TextContent | ImageContent)[]): AgentMessage {
+  if (!("content" in message)) return message
+  const blocks = typeof replacement === "string" ? [{ type: "text" as const, text: replacement }] : replacement
+  if (message.role === "assistant") return { ...message, content: blocks.filter((block): block is TextContent => block.type === "text") }
+  if (message.role === "toolResult") return { ...message, content: blocks }
+  return { ...message, content: replacement } as AgentMessage
+}
+
+/**
+ * `confirmed` with `entries` appended in order: messages join, `context_edit` and `label` apply to their (earlier) target.
+ *
+ * - Every edit applies in turn, so the latest one on the branch wins like in Pi
+ * - An omitted message stays shown, marked; a replaced one shows its replacement
+ */
+function appendEntries(confirmed: Confirmed, entries: SessionEntry[]): Confirmed {
+  if (entries.length === 0) return confirmed
+  const messages = [...confirmed.messages]
+  const entryIds = [...confirmed.entryIds]
+  const marks = { ...confirmed.marks }
+  for (const entry of entries) {
+    if (entry.type === "context_edit" || entry.type === "label") {
+      const targetId = String(entry.targetId)
+      const { label, ...mark } = marks[targetId] ?? {}
+      if (entry.type === "label") {
+        marks[targetId] = typeof entry.label === "string" && entry.label ? { ...mark, label: entry.label } : mark
+        continue
+      }
+      const index = entryIds.lastIndexOf(targetId)
+      const replacement = entry.replacement as string | (TextContent | ImageContent)[] | null | undefined
+      if (replacement != null && index >= 0) messages[index] = withContent(messages[index], replacement)
+      marks[targetId] = { ...(label ? { label } : {}), context: replacement == null ? "omitted" : "replaced" }
+      continue
+    }
+    const message = entryMessage(entry)
+    if (!message) continue
+    messages.push(message)
+    entryIds.push(entry.id)
+  }
+  return { messages, entryIds, marks }
+}
+
+/** The active branch's messages, root to leaf, including what compactions summarized (the transcript shows the whole history). */
+export function messagesOfEntries(entries: SessionEntries): AgentMessage[] {
+  return appendEntries(NO_CONFIRMED, branchEntries(entries)).messages
 }
 
 /** Identity of a message across live events and persisted entries: `role:timestamp[:toolCallId]`. */
@@ -80,13 +142,14 @@ function promptsWithText(messages: AgentMessage[], text: string): number {
   return messages.filter((message) => message.role === "user" && textOf(message.content) === text).length
 }
 
-/** Replace the confirmed messages, dropping the live messages they now hold. The optimistic prompt goes once a new prompt with its text is confirmed. */
-function withConfirmed(transcript: Transcript, messages: AgentMessage[]): Transcript {
+/** Replace the confirmed state, dropping the live messages it now holds. The optimistic prompt goes once a new prompt with its text is confirmed. */
+function withConfirmed(transcript: Transcript, confirmed: Confirmed): Transcript {
+  const { messages } = confirmed
   const unconfirmed = transcript.unconfirmed.filter((message) => !hasMessage(messages, message))
   const pending = transcript.optimistic
   const pendingText = pending && textOf(pending.content)
-  const confirmed = pendingText !== null && promptsWithText(messages, pendingText) > promptsWithText(transcript.messages, pendingText)
-  return { ...transcript, messages, unconfirmed, optimistic: confirmed ? null : pending }
+  const promptConfirmed = pendingText !== null && promptsWithText(messages, pendingText) > promptsWithText(transcript.messages, pendingText)
+  return { ...transcript, ...confirmed, unconfirmed, optimistic: promptConfirmed ? null : pending }
 }
 
 /** A host `resync` answer: `append` = entries after the cursor on the current branch, `replace` = the whole current branch. */
@@ -99,6 +162,8 @@ export interface ResyncEntries {
 export type TranscriptAction =
   /** One Pi stdout record, live or replayed. */
   | { kind: "event"; event: PiEvent }
+  /** Records buffered for one animation frame (`coalescer.ts`), applied in order. */
+  | { kind: "events"; events: PiEvent[] }
   /** An `attached` snapshot: replayed records rebuild the streaming reply and tool runs. */
   | { kind: "snapshot"; entries: SessionEntries; running: boolean; queue: Transcript["queue"] }
   /** A `resync` answer: live state stays for the replay that follows. `running` and `queue` from its `state` and `ui` when sent. */
@@ -114,16 +179,15 @@ export type TranscriptAction =
 export function transcriptReducer(transcript: Transcript, action: TranscriptAction): Transcript {
   switch (action.kind) {
     case "event": return reduceTranscript(transcript, action.event)
+    case "events": return action.events.reduce(reduceTranscript, transcript)
     case "snapshot": {
-      const confirmed = withConfirmed(transcript, messagesOfEntries(action.entries))
+      const confirmed = withConfirmed(transcript, appendEntries(NO_CONFIRMED, branchEntries(action.entries)))
       return { ...confirmed, unconfirmed: [], streaming: null, runs: {}, running: action.running, queue: action.queue }
     }
     case "resync": {
       const { mode, entries, leafId } = action.resync
-      const messages = mode === "append"
-        ? [...transcript.messages, ...entries.flatMap((entry) => entryMessage(entry) ?? [])]
-        : messagesOfEntries({ entries, leafId })
-      return { ...withConfirmed(transcript, messages), running: action.running ?? transcript.running, queue: action.queue ?? transcript.queue }
+      const confirmed = mode === "append" ? appendEntries(transcript, entries) : appendEntries(NO_CONFIRMED, branchEntries({ entries, leafId }))
+      return { ...withConfirmed(transcript, confirmed), running: action.running ?? transcript.running, queue: action.queue ?? transcript.queue }
     }
     case "prompt": return { ...transcript, optimistic: action.prompt }
     case "stream_changed": return { ...transcript, unconfirmed: [], optimistic: null, streaming: null, runs: {} }
@@ -132,7 +196,7 @@ export function transcriptReducer(transcript: Transcript, action: TranscriptActi
 }
 
 /** Confirmed messages, then the live ones, then the optimistic prompt: what the transcript renders. */
-export function shownMessages(transcript: Transcript): AgentMessage[] {
+export function shownMessages(transcript: Pick<Transcript, "messages" | "unconfirmed" | "optimistic">): AgentMessage[] {
   const live = transcript.optimistic ? [...transcript.unconfirmed, transcript.optimistic] : transcript.unconfirmed
   return live.length > 0 ? [...transcript.messages, ...live] : transcript.messages
 }
@@ -211,7 +275,7 @@ export function reduceTranscript(transcript: Transcript, event: PiEvent): Transc
 }
 
 /** Tool state by call id: committed `toolResult` messages, overridden by this connection's live runs (which carry durations). */
-export function toolRunsOf(transcript: Transcript): Record<string, ToolRun> {
+export function toolRunsOf(transcript: Pick<Transcript, "messages" | "unconfirmed" | "optimistic" | "runs">): Record<string, ToolRun> {
   const runs: Record<string, ToolRun> = {}
   for (const message of shownMessages(transcript)) {
     if (message.role !== "toolResult") continue
