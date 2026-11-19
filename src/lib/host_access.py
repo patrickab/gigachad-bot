@@ -23,15 +23,21 @@ _SECRET_NAMES = frozenset({
     ".bash_history", ".zsh_history", ".psql_history", ".python_history",
 })
 _OMP_SECRET_NAMES = ("agent.db", "models.yml")
+_PI_SECRET_NAMES = frozenset({"auth.json", "auth.json.lock"})
+_GIGACHAD_SECRET_NAMES = frozenset({"env", "pi-host.token"})
 
 
 def is_secret_path(path: Path) -> bool:
-    """Whether *path* is a credential store: SSH/GPG/cloud keys, browser profiles, token files, env files, omp's API keys."""
+    """Whether *path* is a credential store: SSH/GPG/cloud keys, browser profiles, token files, env files, omp/Pi keys."""
     name = path.name.lower()
     pairs = zip(path.parts, path.parts[1:], strict=False)
     if _SECRET_DIRECTORIES.intersection(path.parts) or _SECRET_SUBDIRECTORIES.intersection(pairs):
         return True
-    if name in _SECRET_NAMES or name == ".env" or name.startswith(".env.") or (name == "env" and path.parent.name == "gigachad-bot"):
+    if name in _SECRET_NAMES or name == ".env" or name.startswith(".env."):
+        return True
+    if name in _GIGACHAD_SECRET_NAMES and path.parent.name == "gigachad-bot":
+        return True
+    if ".pi" in path.parts and name in _PI_SECRET_NAMES:
         return True
     return ".omp" in path.parts and name.startswith(_OMP_SECRET_NAMES)
 

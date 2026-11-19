@@ -286,7 +286,8 @@ def test_launcher_serves_overlay_in_a_sandboxed_unit_from_an_allowlisted_environ
     }
     user = launcher.user_home
     expected_hidden = {
-        ".secrets", ".ssh", ".omp", ".gnupg", ".config/gh", ".aws", ".netrc", ".git-credentials",
+        ".secrets", ".ssh", ".omp", ".pi/agent/auth.json", ".local/state/gigachad-bot/pi-host.token",
+        ".gnupg", ".config/gh", ".aws", ".netrc", ".git-credentials",
         ".local/share/gigachad-bot/litellm-proxy",
         ".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".local/share/keyrings",
         ".password-store", ".docker", ".kube", ".config/gcloud", ".azure", ".npmrc", ".pypirc", ".var/app",

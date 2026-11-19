@@ -487,7 +487,8 @@ fi
 # (master key, gateway token), the logins of other agents and browsers (the unit's own Chrome keeps its profile in the
 # private HOME). The main checkout's .env files too when this is a worktree.
 hidden_paths=(
-    "$HOME/.secrets" "$HOME/.ssh" "$HOME/.omp" "$HOME/.gnupg" "$HOME/.config/gh" "$HOME/.aws" "$HOME/.netrc"
+    "$HOME/.secrets" "$HOME/.ssh" "$HOME/.omp" "$HOME/.pi/agent/auth.json" "$HOME/.local/state/gigachad-bot/pi-host.token"
+    "$HOME/.gnupg" "$HOME/.config/gh" "$HOME/.aws" "$HOME/.netrc"
     "$HOME/.git-credentials" "$proxy_home" "$HOME/.local/share/gigachad-bot/litellm-proxy"
     "$HOME/.claude" "$HOME/.claude.json" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.local/share/opencode"
     "$HOME/.local/share/keyrings" "$HOME/.password-store" "$HOME/.docker" "$HOME/.kube" "$HOME/.config/gcloud"
