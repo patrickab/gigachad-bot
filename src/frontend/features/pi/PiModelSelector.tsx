@@ -33,7 +33,7 @@ export function PiModelSelector({ models, selected, onSelect, compact = false }:
     <PopoverSelector
       triggerLabel={`Model: ${label}`}
       triggerClassName="gap-1.5 px-2.5"
-      triggerContent={<><Cpu className="h-3 w-3 shrink-0" aria-hidden="true" /><span className={compact ? "block max-w-24 truncate" : "block max-w-40 truncate"}>{label}</span></>}
+      triggerContent={<><Cpu className="h-3 w-3 shrink-0" aria-hidden="true" /><span className={compact ? "block min-w-0 max-w-24 truncate" : "block max-w-40 truncate"}>{label}</span></>}
       label="Model"
       categories={categories}
       itemKey={modelKey}

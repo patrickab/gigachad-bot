@@ -44,12 +44,12 @@ export function statsText(stats: PiSessionStats | null): { text: string; label: 
 export function PiSessionControlsBar({ controls, compact = false }: { controls: PiSessionControls; compact?: boolean }) {
   const stats = statsText(controls.stats)
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className={compact ? "flex min-w-0 items-center gap-1" : "flex shrink-0 items-center gap-1"}>
       {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
       {controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
         <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
       )}
-      {stats && <span aria-label={stats.label} className="px-1.5 font-mono text-xs tabular-nums text-ink-faint">{stats.text}</span>}
+      {stats && <span aria-label={stats.label} className="shrink-0 whitespace-nowrap px-1.5 font-mono text-xs tabular-nums text-ink-faint">{stats.text}</span>}
     </div>
   )
 }
@@ -75,12 +75,12 @@ export function PiTopBar({ repo, header, controls }: { repo: string; header: PiS
 export function PiPanelBar({ header, controls, actions }: { header: PiSessionHeader | null; controls?: PiSessionControls; actions?: ReactNode }) {
   const shown = header?.controls ?? controls
   return (
-    <div className="flex h-8 min-w-0 shrink-0 items-center gap-1.5 px-2 text-xs">
+    <div className="flex h-8 min-w-0 flex-1 items-center gap-1.5 px-2 text-xs">
       {header && <StatusDot tone={header.tone} />}
       {header?.sessionName && <span className="min-w-0 truncate text-ink-muted">{header.sessionName}</span>}
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex min-w-0 items-center gap-1">
         {shown && <PiSessionControlsBar controls={shown} compact />}
-        {actions}
+        {actions && <div className="flex shrink-0 items-center">{actions}</div>}
       </div>
     </div>
   )
