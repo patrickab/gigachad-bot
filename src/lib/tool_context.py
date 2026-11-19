@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from agent_sandbox import PromptImage
-    from llm_baseclient.client import LLMClient
 
     from lib.project_store import ProjectStore
     from lib.sandbox_service import SandboxService
@@ -33,7 +32,6 @@ class ToolOptions(BaseModel):
 class ToolContext:
     """Provide one tool call with request-owned dependencies."""
 
-    client: LLMClient
     model: str
     opts: ToolOptions
     chat_id: str = ""

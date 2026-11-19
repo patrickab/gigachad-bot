@@ -15,7 +15,6 @@ def test_resolve_chat_images_reads_postgres_upload_without_nextcloud_copy() -> N
     assets = _assets_with_upload()
 
     resolved = resolve_chat_image_paths(
-        client=object(),
         chat_id="chat-123",
         slug=None,
         filenames=["diagram.png"],

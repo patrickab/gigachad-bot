@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from backend.routes.deps import get_memory_store, get_model_defaults, request_client
+from backend.routes.deps import get_memory_store, get_model_defaults
 from lib.memory_extract import MemoryExtractor, ScopeProposal
 from lib.memory_store import MemoryOperation, MemoryScope, MemoryStore, ScopeKind
 
@@ -74,8 +74,8 @@ def _proposal_json(proposal: ScopeProposal | None) -> dict | None:
 @router.post("/extract")
 async def extract_memories(req: MemoryExtractRequest, store: MemoryStoreDep, defaults: ModelDefaultsDep) -> dict:
     """Propose memory operations from a conversation for user review, a scope is None when not extracted."""
-    with http_errors(_STORE_FAILURE), request_client() as client:
-        extractor = MemoryExtractor(store, client, defaults["memory_model"])
+    with http_errors(_STORE_FAILURE):
+        extractor = MemoryExtractor(store, defaults["memory_model"])
         result = await extractor.extract(req.messages, project_slug=req.project_slug, chat_id=req.chat_id)
     return {
         "review_id": result.review_id,
@@ -130,5 +130,5 @@ def set_topics(req: TopicSetRequest, store: MemoryStoreDep) -> dict:
 @router.post("/regroup")
 async def regroup_memories(req: ScopedRequest, store: MemoryStoreDep, defaults: ModelDefaultsDep) -> dict:
     """Propose subject topics for a scope's facts as `{topics, memories}`, nothing is written."""
-    with http_errors(_STORE_FAILURE), request_client() as client:
-        return await MemoryExtractor(store, client, defaults["memory_model"]).propose_regroup(req.memory_scope())
+    with http_errors(_STORE_FAILURE):
+        return await MemoryExtractor(store, defaults["memory_model"]).propose_regroup(req.memory_scope())

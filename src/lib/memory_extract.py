@@ -12,14 +12,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 import json
 import logging
-from typing import Any, Protocol
+from typing import Any
 import uuid
 
+from lib import completions
 from lib.llm_json import extract_json_from_llm
-from lib.llm_resilience import completion_text
 from lib.memory_store import (
     FALLBACK_TOPIC,
     MemoryOperation,
@@ -32,10 +33,6 @@ from lib.memory_store import (
 )
 
 log = logging.getLogger(__name__)
-
-
-class MemoryLLM(Protocol):
-    def api_query(self, **kwargs: object) -> object: ...
 
 
 EXTRACT_TIMEOUT = 90
@@ -184,8 +181,9 @@ class MemoryExtractor:
     """Runs the memory model over a store's facts. *model* is the user's stored default, nothing here names one."""
 
     store: MemoryStore
-    llm: MemoryLLM
     model: str
+    # `(model, messages, **kwargs) -> answer text`, the gateway unless a test scripts the replies.
+    complete: Callable[..., str] = completions.text
 
     async def extract(
         self,
@@ -326,16 +324,9 @@ Return JSON with this exact shape:
         """
 
         def call(force_json: bool) -> str:
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "user_msg": user_prompt,
-                "user_msg_history": [],
-                "system_prompt": system_prompt,
-                "stream": False,
-            }
-            if force_json:
-                kwargs["response_format"] = {"type": "json_object"}
-            return completion_text(self.llm, **kwargs) or "{}"
+            messages = completions.build_messages(user_prompt, system_prompt=system_prompt)
+            json_format = {"response_format": {"type": "json_object"}} if force_json else {}
+            return self.complete(self.model, messages, **json_format) or "{}"
 
         last_err: Exception | None = None
         for force_json in (True, False):

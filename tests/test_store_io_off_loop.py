@@ -84,7 +84,7 @@ def test_memory_extract_and_regroup_touch_the_store_off_the_loop(data_store, mon
     )
     add = {"operations": [{"op": "add", "topic": "profile", "text": "Runs iwd"}], "topics": []}
     regroup = {"topics": [{"name": "profile", "summary": "Who the user is"}], "assignments": [{"id": "m1", "topic": "profile"}]}
-    extractor = MemoryExtractor(store, ScriptedLLM(add, regroup), "test")
+    extractor = MemoryExtractor(store, "test", complete=ScriptedLLM(add, regroup))
 
     result = asyncio.run(extractor.extract([{"role": "user", "content": "hi"}], chat_id="c1"))
     regrouped = asyncio.run(extractor.propose_regroup(GLOBAL))
@@ -102,7 +102,7 @@ def test_memory_regroup_of_an_empty_scope_reads_off_the_loop(data_store, monkeyp
     store = MemoryStore(data_store)
     calls = on_loop_calls(monkeypatch, MemoryStore, "get_topics", "read_memories")
 
-    regrouped = asyncio.run(MemoryExtractor(store, ScriptedLLM(), "test").propose_regroup(MemoryScope("project", "shop")))
+    regrouped = asyncio.run(MemoryExtractor(store, "test", complete=ScriptedLLM()).propose_regroup(MemoryScope("project", "shop")))
 
     assert regrouped == {"topics": store.get_topics(MemoryScope("project", "shop")), "memories": []}
     assert calls[:2] == [("read_memories", False), ("get_topics", False)]

@@ -8,20 +8,16 @@ import gzip
 import hashlib
 import json
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 import zlib
 
 from fastapi import HTTPException
-from fastapi.concurrency import run_in_threadpool
 from sse_starlette.sse import EventSourceResponse
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from lib import completions
 from lib.async_utils import aiter_in_thread
-from lib.llm_resilience import api_query_resilient
-
-if TYPE_CHECKING:
-    from llm_baseclient.client import LLMClient  # imports LiteLLM (~1.5 s), which loads on the first model call
 
 # `(exception or exceptions, status, detail)`, a `None` detail uses `str(exc)`.
 Rule = tuple[type[Exception] | tuple[type[Exception], ...], int, str | None]
@@ -75,12 +71,11 @@ def _sse(events: AsyncIterator[tuple[str, str]]) -> EventSourceResponse:
     return EventSourceResponse(event_stream(), headers=_SSE_HEADERS)
 
 
-async def stream_completion(client: "LLMClient", **query: Any) -> EventSourceResponse:
-    """Stream a completion as SSE: string chunks become `token` events, dict chunks `usage` events."""
-    chunks = await run_in_threadpool(api_query_resilient, client, stream=True, **query)
+def stream_completion(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> EventSourceResponse:
+    """Stream a completion as SSE: text becomes `token` events, the usage dict a `usage` event, a failure an `error` event."""
 
     async def events() -> AsyncIterator[tuple[str, str]]:
-        async for chunk in aiter_in_thread(chunks):
+        async for chunk in aiter_in_thread(completions.stream_text(model, messages, **kwargs)):
             yield ("usage", json.dumps(chunk)) if isinstance(chunk, dict) else ("token", chunk)
 
     return _sse(events())

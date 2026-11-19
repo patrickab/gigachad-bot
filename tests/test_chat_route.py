@@ -3,27 +3,16 @@
 from typing import Any
 
 from fastapi.testclient import TestClient
-import litellm
 import pytest
 
-from backend import http_plumbing
 from backend.routes import chat as chat_route
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
-from lib import toolcalling, tools
+from lib import completions, toolcalling, tools
 from tests.conftest import request_identity, route_client
-from tests.fakes import ClientStub, text_chunk, tool_chunk
-
-
-class _client_ctx:  # noqa: N801 - stands in for the request_client contextmanager
-    def __enter__(self) -> ClientStub:
-        return ClientStub()
-
-    def __exit__(self, *_: Any) -> None:
-        return None
+from tests.fakes import text_chunk, tool_chunk
 
 
 def _chat_client(monkeypatch: pytest.MonkeyPatch, *, has_host_access: bool = True) -> TestClient:
-    monkeypatch.setattr(chat_route, "request_client", lambda: _client_ctx())
     monkeypatch.setattr(chat_route, "augment_system_prompt", lambda store, prompt, slug: prompt)  # noqa: ARG005 - signature parity
     monkeypatch.setattr(chat_route, "_resolve_images", lambda *_, **__: None)
     return route_client(
@@ -58,7 +47,7 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
         iter([tool_chunk(0, "call_a", "web_search", '{"query": "cheesecake"}')]),
         iter([text_chunk("Try [ap]")]),
     ]
-    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: rounds.pop(0))
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="[ap] evidence", summary="1 sources", sources=[{"label": "ap", "url": "u"}])
@@ -86,7 +75,7 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
 
 def test_chat_route_streams_plain_turn_without_proxy_buffering(monkeypatch: pytest.MonkeyPatch) -> None:
     """The ordinary chat path uses the same unbuffered SSE contract as tool turns."""
-    monkeypatch.setattr(http_plumbing, "api_query_resilient", lambda *_, **__: iter(["First", " answer"]))
+    monkeypatch.setattr(completions, "stream_text", lambda *_, **__: iter(["First", " answer"]))
 
     response = _chat_client(monkeypatch).post(
         "/api/chat",
@@ -99,16 +88,30 @@ def test_chat_route_streams_plain_turn_without_proxy_buffering(monkeypatch: pyte
     assert _sse_events(response.text) == [("token", "First"), ("token", " answer"), ("done", "")]
 
 
+def test_a_model_the_gateway_does_not_serve_reaches_the_browser_as_an_error_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The plain path opens the gateway stream inside the SSE response, so the named model reaches the UI."""
+
+    def unserved(model: str, *_: Any, **__: Any) -> Any:
+        raise completions.ModelNotServed(f"Model {model} is not served by pi-host's gateway (unknown model nope/x).")
+
+    monkeypatch.setattr(completions, "stream", unserved)
+
+    response = _chat_client(monkeypatch).post("/api/chat", json={"model": "nope/x", "chat_id": "c1", "user_msg": "hello"})
+
+    assert response.status_code == 200, response.text
+    assert _sse_events(response.text) == [("error", "Model nope/x is not served by pi-host's gateway (unknown model nope/x).")]
+
+
 @pytest.mark.parametrize(("has_host_access", "offered"), [(True, ["web_search", "start_learn_session"]), (False, ["web_search"])])
 def test_learn_sessions_are_offered_to_host_logins_only(monkeypatch: pytest.MonkeyPatch, has_host_access, offered) -> None:
     """A browser asking for a host tool without the host capability never gets it in front of the model."""
     offers: list[list[str]] = []
 
-    def completion(**kwargs: Any) -> Any:
+    def fake_stream(*_: Any, **kwargs: Any) -> Any:
         offers.append([spec["function"]["name"] for spec in kwargs.get("tools") or []])
         return iter([text_chunk("Hi")])
 
-    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
 
     response = _chat_client(monkeypatch, has_host_access=has_host_access).post(
         "/api/chat",

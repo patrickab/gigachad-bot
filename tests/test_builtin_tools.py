@@ -1,18 +1,17 @@
 """Built-in tools: web search labels, the workspace agent, the LLM-rendered mind map, diagram and OCR cards, learn sessions."""
 
-from types import SimpleNamespace
+import base64
 from typing import Any
 
-import litellm
 import pytest
 
 from config import TEST_MODEL
-from lib import learnharness, llm_resilience, toolcalling, tools, web_search
+from lib import completions, learnharness, toolcalling, tools, web_search
 from lib.chat_store import ChatStore
 from lib.project_store import ProjectStore
 from lib.tool_context import ToolContext, ToolOptions
 from lib.upstream import UpstreamContractError, UpstreamRequestFailed
-from tests.fakes import ClientStub, MemoryDataStore, SandboxServiceStub, collect_tool_turn, text_chunk, tool_chunk
+from tests.fakes import MemoryDataStore, SandboxServiceStub, collect_tool_turn, text_chunk, tool_chunk
 
 
 def test_source_label_extracts_a_stable_hostname_label() -> None:
@@ -26,7 +25,7 @@ async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monke
         iter([tool_chunk(0, "call_1", "workspace_agent", '{"prompt": "write a script"}')]),
         iter([text_chunk("OK")]),
     ]
-    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: rounds.pop(0))
 
     events = await collect_tool_turn(enabled=["workspace_agent"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused"))
     (result,) = [data for name, data in events if name == "tool_result"]
@@ -54,7 +53,7 @@ async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monke
 @pytest.mark.asyncio
 async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_raising() -> None:
     """A missing sandbox must become a tool error the model can talk about, never a dead stream."""
-    ctx = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions(), chat_id="chat-1", sandbox_service=None)
+    ctx = ToolContext(model=TEST_MODEL, opts=ToolOptions(), chat_id="chat-1", sandbox_service=None)
 
     outcome = await tools.BUILTIN_TOOLS.execute("workspace_agent", {"prompt": "do work"}, ctx)
 
@@ -66,13 +65,12 @@ async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_rai
 async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_query(_client: Any, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```markmap\n# Topic\n```"))])
+    def fake_text(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+        calls.append({"model": model, "messages": messages, **kwargs})
+        return "```markmap\n# Topic\n```"
 
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
+    monkeypatch.setattr(completions, "text", fake_text)
     context = ToolContext(
-        client=ClientStub(),
         model=TEST_MODEL,
         opts=ToolOptions(),
         history=({"role": "assistant", "content": "Prior explanation"},),
@@ -82,21 +80,19 @@ async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.Mon
     outcome = await tools.BUILTIN_TOOLS.execute("mindmap", {}, context)
 
     assert outcome.detail["mindmap"] == "```markmap\n# Topic\n```"
-    assert "<transcript>" in calls[0]["user_msg"]
-    assert calls[0]["stream"] is False
+    assert "<transcript>" in calls[0]["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio
 async def test_diagram_tool_returns_mermaid_source_for_the_tool_card(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_query(_client: Any, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```diagram\nflowchart LR\nA --> B\n```"))])
+    def fake_text(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+        calls.append({"model": model, "messages": messages, **kwargs})
+        return "```diagram\nflowchart LR\nA --> B\n```"
 
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
+    monkeypatch.setattr(completions, "text", fake_text)
     context = ToolContext(
-        client=ClientStub(),
         model=TEST_MODEL,
         opts=ToolOptions(),
         history=({"role": "assistant", "content": "Prior explanation"},),
@@ -110,8 +106,8 @@ async def test_diagram_tool_returns_mermaid_source_for_the_tool_card(monkeypatch
     assert "extremely concise companion explanation" not in outcome.content
     assert "skimmable Markdown layout" not in outcome.content
     assert "```mermaid\nflowchart LR\nA --> B\n```" in outcome.content
-    assert "<transcript>" in calls[0]["user_msg"]
-    assert calls[0]["system_prompt"] == tools.SYS_DIAGRAM_MERMAID
+    assert "<transcript>" in calls[0]["messages"][-1]["content"]
+    assert calls[0]["messages"][0] == {"role": "system", "content": tools.SYS_DIAGRAM_MERMAID}
     assert "significantly reduce the text needed" in tools.BUILTIN_TOOLS.specs(["diagram"])[0]["function"]["description"]
 
 
@@ -123,15 +119,15 @@ async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source
     ]
     sent: list[list[dict[str, Any]]] = []
 
-    def fake_completion(**kwargs: Any) -> Any:
-        sent.append(kwargs["messages"])
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+        sent.append(messages)
         return rounds.pop(0)
 
-    def fake_query(_client: Any, **_kwargs: Any) -> Any:
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```mermaid\nflowchart LR\nA --> B\n```"))])
+    def fake_text(*_: Any, **__: Any) -> str:
+        return "```mermaid\nflowchart LR\nA --> B\n```"
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
+    monkeypatch.setattr(completions, "stream", fake_stream)
+    monkeypatch.setattr(completions, "text", fake_text)
 
     events = await collect_tool_turn(
         user_msg="Show the request lifecycle",
@@ -150,13 +146,12 @@ async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source
 async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_query(_client: Any, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="$a^2 + b^2 = c^2$"))])
+    def fake_text(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> str:
+        calls.append({"model": model, "messages": messages, **kwargs})
+        return "$a^2 + b^2 = c^2$"
 
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
+    monkeypatch.setattr(completions, "text", fake_text)
     context = ToolContext(
-        client=ClientStub(),
         model=TEST_MODEL,
         vision_model="provider/vision",
         opts=ToolOptions(),
@@ -167,7 +162,8 @@ async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypa
 
     assert outcome.detail["text"] == "$a^2 + b^2 = c^2$"
     assert calls[0]["model"] == "provider/vision"
-    assert calls[0]["img"] == b"image-bytes"
+    image_url = calls[0]["messages"][-1]["content"][-1]["image_url"]["url"]
+    assert image_url == f"data:image/jpeg;base64,{base64.b64encode(b'image-bytes').decode()}"
 
 
 class _LearnHarnessStub:
@@ -193,7 +189,7 @@ class _LearnHarnessStub:
 def _learn_context(project_slug: str | None) -> tuple[ToolContext, ProjectStore]:
     store = ProjectStore(ChatStore(data_store=MemoryDataStore()), rename=lambda *_: None)
     store.create_project("Physics")
-    context = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions(), project_slug=project_slug, project_store=store)
+    context = ToolContext(model=TEST_MODEL, opts=ToolOptions(), project_slug=project_slug, project_store=store)
     return context, store
 
 

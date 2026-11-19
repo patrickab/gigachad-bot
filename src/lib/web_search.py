@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from lib import completions
 from lib.llm_json import extract_json_from_llm
-from lib.llm_resilience import completion_text
 from lib.toolcalling import Source
-
-if TYPE_CHECKING:
-    from llm_baseclient.client import LLMClient
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 
@@ -119,16 +116,12 @@ def search_plan(raw_query: str, plan: dict[str, Any]) -> tuple[str, dict[str, in
     return query, SEARCH_PROFILES.get(complexity, SEARCH_PROFILES["medium"])
 
 
-def plan_query(client: LLMClient, raw_query: str, model: str) -> tuple[str, dict[str, int]]:
+def plan_query(raw_query: str, model: str) -> tuple[str, dict[str, int]]:
     """Plan with the caller's fast model, falling back safely when it cannot plan JSON."""
     try:
-        reply = completion_text(
-            client,
-            model=model,
-            user_msg=raw_query,
-            user_msg_history=[],
-            system_prompt=QUERY_PLANNER_PROMPT,
-            stream=False,
+        reply = completions.text(
+            model,
+            completions.build_messages(raw_query, system_prompt=QUERY_PLANNER_PROMPT),
             response_format={"type": "json_object"},
         )
         return search_plan(raw_query, extract_json_from_llm(reply or "{}"))

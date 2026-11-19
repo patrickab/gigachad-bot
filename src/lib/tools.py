@@ -7,9 +7,8 @@ from dataclasses import replace
 import re
 from typing import TYPE_CHECKING, Any
 
-from lib import learnharness
+from lib import completions, learnharness
 from lib.data_store import StorageConflictError
-from lib.llm_resilience import completion_text
 from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_OCR_TEXT_EXTRACTION, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
@@ -51,7 +50,7 @@ _NO_ARGUMENTS: dict[str, Any] = {"type": "object", "additionalProperties": False
 async def _web_search(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
     stage("Planning search")
     planner_model = context.small_model or context.model
-    search_query, profile = await asyncio.to_thread(plan_query, context.client, args["query"], planner_model)
+    search_query, profile = await asyncio.to_thread(plan_query, args["query"], planner_model)
     # Domain scoping is a plain keyword prefix on the planned query.
     domain = context.opts.search_domain.strip()
     if domain:
@@ -126,16 +125,8 @@ async def _transcript_completion(context: ToolContext, instruction: str, system_
         f"[{message.get('role', 'user')}]: {message.get('content', '')}"
         for message in (*context.history, {"role": "user", "content": context.user_msg})
     )
-    text = await asyncio.to_thread(
-        completion_text,
-        context.client,
-        model=context.model,
-        user_msg=f"{instruction}\n\n<transcript>\n{transcript}\n</transcript>",
-        user_msg_history=[],
-        system_prompt=system_prompt,
-        img=None,
-        stream=False,
-    )
+    messages = completions.build_messages(f"{instruction}\n\n<transcript>\n{transcript}\n</transcript>", system_prompt=system_prompt)
+    text = await asyncio.to_thread(completions.text, context.model, messages)
     return text.strip()
 
 
@@ -170,16 +161,10 @@ async def _latex_ocr(_args: dict[str, Any], context: ToolContext, stage: Stage) 
             error="Attach an image before requesting LaTeX OCR.",
         )
     stage("Extracting text and LaTeX")
-    text = await asyncio.to_thread(
-        completion_text,
-        context.client,
-        model=context.vision_model or context.model,
-        user_msg="Extract all text and LaTeX from this image.",
-        user_msg_history=[],
-        system_prompt=SYS_OCR_TEXT_EXTRACTION,
-        img=context.img,
-        stream=False,
+    messages = completions.build_messages(
+        "Extract all text and LaTeX from this image.", system_prompt=SYS_OCR_TEXT_EXTRACTION, img=context.img
     )
+    text = await asyncio.to_thread(completions.text, context.vision_model or context.model, messages)
     text = text.strip()
     return ToolOutcome(content=text, summary="Text extracted", detail={"text": text})
 
@@ -317,7 +302,6 @@ async def stream_chat_with_tools(
     *host_access*: the login holds the host capability, without it `HOST_TOOLS` are never offered.
     """
     async for event in stream_tool_turn(
-        client=context.client,
         model=context.model,
         user_msg=context.user_msg,
         history=list(context.history),

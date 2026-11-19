@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -7,7 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.http_plumbing import sse_tool_event_stream, stream_completion
 from backend.identity import RequestIdentity, get_request_identity
-from lib import reasoning_levels
+from lib import completions, reasoning_levels
 from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
 from lib.memory_context import augment_system_prompt
@@ -23,11 +23,7 @@ from .deps import (
     get_model_defaults,
     get_project_store,
     get_sandbox_service,
-    request_client,
 )
-
-if TYPE_CHECKING:
-    from llm_baseclient.client import LLMClient
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -49,9 +45,8 @@ class ChatRequest(BaseModel):
     tool_options: ToolOptions = ToolOptions()
 
 
-def _resolve_images(c: "LLMClient", req: ChatRequest, assets: AssetStore) -> list | None:
+def _resolve_images(req: ChatRequest, assets: AssetStore) -> list | None:
     paths = resolve_chat_image_paths(
-        c,
         req.chat_id,
         req.project_slug,
         req.img_paths,
@@ -74,56 +69,44 @@ async def chat(
     project_store: Annotated[ProjectStore, Depends(get_project_store)],
 ) -> EventSourceResponse:
     """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
-    with request_client() as c:
-        kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort, req.model)
+    kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort, req.model)
 
-        def prepare() -> tuple[list | bytes | str | None, str, tuple]:
-            img = _resolve_images(c, req, assets)
-            system_prompt = augment_system_prompt(memory_store, req.system_prompt, req.project_slug)
-            prompt_images = (
-                resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
-                if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
-                else ()
-            )
-            return img, system_prompt, prompt_images
-
-        # Upload reads, downscaling and the memory lookup block, so they run off the event loop.
-        img, system_prompt, prompt_images = await asyncio.to_thread(prepare)
-        if req.tools:
-            # The tool loop owns its own model calls, so it needs the client to outlive this
-            # `with` block; `request_client` only guards conversation state, which the loop
-            # never touches (it passes an explicit message list on every call).
-            return sse_tool_event_stream(
-                stream_chat_with_tools(
-                    ToolContext(
-                        client=c,
-                        model=req.model,
-                        opts=req.tool_options,
-                        chat_id=req.chat_id,
-                        sandbox_service=sandbox_service,
-                        prompt_images=prompt_images,
-                        small_model=model_defaults["small_model"],
-                        history=tuple(req.messages),
-                        user_msg=req.user_msg,
-                        img=img,
-                        vision_model=model_defaults["vision_model"],
-                        project_slug=req.project_slug,
-                        project_store=project_store,
-                    ),
-                    system_prompt=system_prompt,
-                    enabled=req.tools,
-                    host_access=identity.has_host_access,
-                    **kwargs,
-                )
-            )
-        return await stream_completion(
-            c,
-            model=req.model,
-            user_msg=req.user_msg,
-            user_msg_history=req.messages,
-            system_prompt=system_prompt,
-            img=img,
-            return_usage=True,
-            **kwargs,
+    def prepare() -> tuple[list | bytes | str | None, str, tuple]:
+        img = _resolve_images(req, assets)
+        system_prompt = augment_system_prompt(memory_store, req.system_prompt, req.project_slug)
+        prompt_images = (
+            resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
+            if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
+            else ()
         )
+        return img, system_prompt, prompt_images
+
+    # Upload reads, downscaling and the memory lookup block, so they run off the event loop.
+    img, system_prompt, prompt_images = await asyncio.to_thread(prepare)
+    if req.tools:
+        return sse_tool_event_stream(
+            stream_chat_with_tools(
+                ToolContext(
+                    model=req.model,
+                    opts=req.tool_options,
+                    chat_id=req.chat_id,
+                    sandbox_service=sandbox_service,
+                    prompt_images=prompt_images,
+                    small_model=model_defaults["small_model"],
+                    history=tuple(req.messages),
+                    user_msg=req.user_msg,
+                    img=img,
+                    vision_model=model_defaults["vision_model"],
+                    project_slug=req.project_slug,
+                    project_store=project_store,
+                ),
+                system_prompt=system_prompt,
+                enabled=req.tools,
+                host_access=identity.has_host_access,
+                **kwargs,
+            )
+        )
+    # Encoding undownscaled uploads as data URIs blocks too.
+    messages = await asyncio.to_thread(completions.build_messages, req.user_msg, req.messages, system_prompt, img)
+    return stream_completion(req.model, messages, **kwargs)
 

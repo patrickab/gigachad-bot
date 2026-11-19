@@ -3,22 +3,21 @@
 from types import SimpleNamespace
 from typing import Any
 
-import litellm
 import pytest
 
 from config import TEST_MODEL
-from lib import toolcalling, tools
+from lib import completions, toolcalling, tools
 from lib.tool_context import ToolContext, ToolOptions
-from tests.fakes import ClientStub, collect_tool_turn, text_chunk, tool_chunk, usage_chunk
+from tests.fakes import collect_tool_turn, text_chunk, tool_chunk, usage_chunk
 
 
 @pytest.mark.asyncio
 async def test_tool_free_turn_streams_tokens_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """With tools offered but unused, the turn is an ordinary streamed answer."""
     monkeypatch.setattr(
-        litellm,
-        "completion",
-        lambda **_: iter([text_chunk("no "), text_chunk("tools"), usage_chunk(7)]),
+        completions,
+        "stream",
+        lambda *_, **__: iter([text_chunk("no "), text_chunk("tools"), usage_chunk(7)]),
     )
 
     usage = {"prompt_tokens": 7, "completion_tokens": 0, "total_tokens": 7}
@@ -37,8 +36,8 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
     sentinel_script = "UI_SCRIPT_SENTINEL"
     source_evidence = "SOURCE_EVIDENCE_SENTINEL"
 
-    def fake_completion(**kwargs: Any) -> Any:
-        sent.append(kwargs["messages"])
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+        sent.append(messages)
         return rounds.pop(0)
 
     async def fake_execute(name: str, args: dict[str, Any], _ctx: Any, **_kwargs: Any) -> toolcalling.ToolOutcome:
@@ -51,7 +50,7 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
             detail={"script": sentinel_script},
         )
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     events = await collect_tool_turn()
@@ -94,14 +93,14 @@ async def test_signed_thinking_goes_back_with_the_tool_result(monkeypatch: pytes
     ]
     sent: list[list[dict[str, Any]]] = []
 
-    def fake_completion(**kwargs: Any) -> Any:
-        sent.append(list(kwargs["messages"]))
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+        sent.append(list(messages))
         return rounds.pop(0)
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="evidence")
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     events = await collect_tool_turn()
@@ -120,14 +119,14 @@ async def test_a_tool_turn_without_thinking_sends_no_thinking_blocks(monkeypatch
     rounds = [iter([tool_chunk(0, "call_a", "web_search", '{"query": "x"}')]), iter([text_chunk("Answer")])]
     sent: list[list[dict[str, Any]]] = []
 
-    def fake_completion(**kwargs: Any) -> Any:
-        sent.append(list(kwargs["messages"]))
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
+        sent.append(list(messages))
         return rounds.pop(0)
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="evidence")
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     await collect_tool_turn()
@@ -139,7 +138,7 @@ async def test_a_tool_turn_without_thinking_sends_no_thinking_blocks(monkeypatch
 async def test_mindmap_tool_result_does_not_trigger_an_assistant_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """The rendered tool card is the complete mind map response."""
     rounds = [iter([tool_chunk(0, "call_mindmap", "mindmap", "{}")])]
-    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: rounds.pop(0))
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="```markmap\n# Topic\n```", summary="Mind map ready")
@@ -157,14 +156,14 @@ async def test_exactly_one_tool_call_per_turn(monkeypatch: pytest.MonkeyPatch) -
     """A model that keeps calling tools gets exactly one, then a round with no tools offered."""
     offered: list[Any] = []
 
-    def fake_completion(**kwargs: Any) -> Any:
+    def fake_stream(*_: Any, **kwargs: Any) -> Any:
         offered.append(kwargs.get("tools"))
         return iter([tool_chunk(0, f"call_{len(offered)}", "web_search", '{"query": "x"}')])
 
     async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
         return toolcalling.ToolOutcome(content="evidence")
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
     monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
 
     events = await collect_tool_turn()
@@ -184,7 +183,7 @@ async def test_tool_call_written_as_plain_text_is_recovered(monkeypatch: pytest.
         iter([text_chunk('{"name": "web_search", '), text_chunk('"arguments": {"query": "cheesecake"}}')]),
         iter([text_chunk("Here you go")]),
     ]
-    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: rounds.pop(0))
 
     async def fake_execute(name: str, args: dict[str, Any], _ctx: Any, **_kwargs: Any) -> toolcalling.ToolOutcome:
         assert (name, args) == ("web_search", {"query": "cheesecake"})
@@ -201,7 +200,7 @@ async def test_tool_call_written_as_plain_text_is_recovered(monkeypatch: pytest.
 @pytest.mark.asyncio
 async def test_held_json_that_is_not_a_tool_call_is_still_shown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Buffering JSON-looking text must not swallow an answer that genuinely is JSON."""
-    monkeypatch.setattr(litellm, "completion", lambda **_: iter([text_chunk('{"shape": "answer"}')]))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: iter([text_chunk('{"shape": "answer"}')]))
 
     assert await collect_tool_turn() == [("token", '{"shape": "answer"}')]
 
@@ -211,11 +210,11 @@ async def test_unknown_tool_names_are_never_offered(monkeypatch: pytest.MonkeyPa
     """The browser cannot widen the tool surface by naming something that is not registered."""
     offered: list[Any] = []
 
-    def fake_completion(**kwargs: Any) -> Any:
+    def fake_stream(*_: Any, **kwargs: Any) -> Any:
         offered.append(kwargs.get("tools"))
         return iter([text_chunk("hi")])
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(completions, "stream", fake_stream)
 
     await collect_tool_turn(enabled=["rm_rf", "deep_research"])
 
@@ -225,7 +224,7 @@ async def test_unknown_tool_names_are_never_offered(monkeypatch: pytest.MonkeyPa
 @pytest.mark.asyncio
 async def test_failed_tool_degrades_the_turn_instead_of_the_stream() -> None:
     """Argument validation and unknown names are contained by the dispatcher, not each tool."""
-    ctx = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions())
+    ctx = ToolContext(model=TEST_MODEL, opts=ToolOptions())
 
     outcome = await tools.BUILTIN_TOOLS.execute("web_search", {"query": " "}, ctx)
     assert outcome.error == "Missing argument: `query`."
@@ -258,12 +257,11 @@ async def test_a_tool_the_turn_did_not_enable_is_refused_without_running(monkeyp
         ]
     )
     rounds = [iter([tool_chunk(0, "call_a", "workspace_agent", "{}")]), iter([text_chunk("cannot do that")])]
-    monkeypatch.setattr(litellm, "completion", lambda **_: rounds.pop(0))
+    monkeypatch.setattr(completions, "stream", lambda *_, **__: rounds.pop(0))
 
     events = [
         event
         async for event in toolcalling.stream_tool_turn(
-            client=ClientStub(),
             model=TEST_MODEL,
             user_msg="run code",
             history=[],
@@ -284,7 +282,7 @@ async def test_a_tool_the_turn_did_not_enable_is_refused_without_running(monkeyp
 @pytest.mark.asyncio
 async def test_arguments_outside_the_declared_schema_are_refused() -> None:
     """Declared shapes are enforced by the dispatcher, so malformed calls degrade the turn."""
-    ctx = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions())
+    ctx = ToolContext(model=TEST_MODEL, opts=ToolOptions())
 
     outcome = await tools.BUILTIN_TOOLS.execute("web_search", {"query": "q", "site": "example.com"}, ctx)
     assert (outcome.error, outcome.summary) == ("Unknown argument: `site`.", "Rejected")

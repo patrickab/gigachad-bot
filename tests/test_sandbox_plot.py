@@ -1,28 +1,23 @@
 """sandbox_plot writes a script with the LLM, repairs it once, then hands the plot to the workspace agent."""
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from config import TEST_MODEL
-from lib import llm_resilience, tools
+from lib import completions, tools
 from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.sandbox_service import SandboxToolResult
 from lib.tool_context import ToolContext, ToolOptions
 from lib.toolcalling import ToolOutcome
-from tests.fakes import ClientStub, SandboxServiceStub
+from tests.fakes import SandboxServiceStub
 
 PLOT_REQUEST = {"chat_id": "chat-1", "tool_call_id": "call-1", "user_msg": "Plot the trend"}
 
 
-def _script_reply(script: str) -> SimpleNamespace:
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=script))])
-
-
 async def _plot(sandbox: SandboxServiceStub, **context: Any) -> ToolOutcome:
     """Run sandbox_plot through the dispatcher against *sandbox*."""
-    ctx = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions(), sandbox_service=sandbox, **context)
+    ctx = ToolContext(model=TEST_MODEL, opts=ToolOptions(), sandbox_service=sandbox, **context)
     return await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
 
@@ -30,7 +25,7 @@ async def _plot(sandbox: SandboxServiceStub, **context: Any) -> ToolOutcome:
 async def test_sandbox_plot_treats_an_unfenced_reply_as_the_whole_script(monkeypatch: pytest.MonkeyPatch) -> None:
     """A model that forgets the fence still plots, and its code still reaches the answer round."""
     sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", lambda *_a, **_k: _script_reply("print(fig.to_json())"))
+    monkeypatch.setattr(completions, "text", lambda *_a, **_k: "print(fig.to_json())")
 
     outcome = await _plot(sandbox, **PLOT_REQUEST)
 
@@ -44,10 +39,10 @@ async def test_sandbox_plot_repairs_fast_script_once(
 ) -> None:
     sandbox = SandboxServiceStub("unused")
     generation_calls: list[dict[str, Any]] = []
-    replies = iter([_script_reply("```python\nbroken script\n```"), _script_reply("repaired script")])
+    replies = iter(["```python\nbroken script\n```", "repaired script"])
 
-    def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
-        generation_calls.append(kwargs)
+    def reply(model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> str:
+        generation_calls.append({"model": model, "user_msg": messages[-1]["content"]})
         return next(replies)
 
     async def run_script(script: str, **_kwargs: Any) -> str:
@@ -56,7 +51,7 @@ async def test_sandbox_plot_repairs_fast_script_once(
             raise SandboxScriptError("repairable script failure")
         return '{"data": [{"type": "bar"}], "layout": {}}'
 
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", reply)
+    monkeypatch.setattr(completions, "text", reply)
     monkeypatch.setattr(sandbox, "run_script", run_script)
 
     outcome = await _plot(sandbox, **PLOT_REQUEST, small_model="provider/small-model")
@@ -79,11 +74,11 @@ async def test_sandbox_plot_generation_exception_hands_off_without_repair(
     sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}}')
     generation_calls: list[dict[str, Any]] = []
 
-    def unavailable(*_args: Any, **kwargs: Any) -> RuntimeError:
-        generation_calls.append(kwargs)
-        return RuntimeError("provider unavailable")
+    def unavailable(model: str, _messages: list[dict[str, Any]], **_kwargs: Any) -> str:
+        generation_calls.append({"model": model})
+        raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", unavailable)
+    monkeypatch.setattr(completions, "text", unavailable)
 
     outcome = await _plot(sandbox, **PLOT_REQUEST, small_model="provider/small-model")
 
@@ -98,7 +93,7 @@ async def test_sandbox_plot_generation_exception_hands_off_without_repair(
 @pytest.mark.asyncio
 async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}}', script_stdout=None)
-    monkeypatch.setattr(llm_resilience, "api_query_resilient", lambda *_args, **_kwargs: _script_reply("print(fig.to_json())"))
+    monkeypatch.setattr(completions, "text", lambda *_args, **_kwargs: "print(fig.to_json())")
 
     outcome = await _plot(sandbox, **PLOT_REQUEST)
 

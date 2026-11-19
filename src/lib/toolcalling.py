@@ -7,14 +7,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from dataclasses import asdict, dataclass, field
 import json
 import time
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import Any, TypedDict
 from uuid import uuid4
 
+from lib import completions
 from lib.async_utils import aiter_in_thread
 from lib.llm_json import extract_json_from_llm
-
-if TYPE_CHECKING:
-    from llm_baseclient.client import LLMClient
 
 __all__ = [
     "Source",
@@ -288,26 +286,10 @@ def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> ToolCall | Non
 
 
 def _start_stream(
-    client: LLMClient,
-    model: str,
-    messages: list[dict[str, Any]],
-    specs: list[dict[str, Any]] | None,
-    kwargs: dict[str, Any],
+    model: str, messages: list[dict[str, Any]], specs: list[dict[str, Any]] | None, kwargs: dict[str, Any]
 ) -> Iterator[Any]:
-    """Use LiteLLM directly to retain tool deltas and the client's routing."""
-    import litellm  # loaded already: the client imports it
-
-    model_id, api_base, custom_provider = client._resolve_routing(model)  # noqa: SLF001
-    return litellm.completion(
-        model=model_id,
-        messages=messages,
-        stream=True,
-        api_base=api_base,
-        custom_llm_provider=custom_provider,
-        stream_options={"include_usage": True},
-        **({"tools": specs, "tool_choice": "auto"} if specs else {}),
-        **kwargs,
-    )
+    """Open the round's raw chunk stream, so tool deltas and signed thinking blocks survive."""
+    return completions.stream(model, messages, tools=specs, **kwargs)
 
 
 @dataclass
@@ -320,7 +302,6 @@ class _Round:
 
 async def _run_round(
     *,
-    client: LLMClient,
     model: str,
     messages: list[dict[str, Any]],
     specs: list[dict[str, Any]] | None,
@@ -329,7 +310,7 @@ async def _run_round(
     out: _Round,
 ) -> AsyncIterator[tuple[str, Any]]:
     """Stream one completion, yielding `token` events and filling *out* with text, call and usage."""
-    stream = await asyncio.to_thread(_start_stream, client, model, messages, specs, kwargs)
+    stream = await asyncio.to_thread(_start_stream, model, messages, specs, kwargs)
     pending: dict[int, dict[str, Any]] = {}
     in_reasoning = False
     # Buffer leading text only when tools are offered, to detect text-mode calls before streaming.
@@ -389,7 +370,6 @@ async def _run_round(
 
 async def stream_tool_turn[ContextT](
     *,
-    client: LLMClient,
     model: str,
     user_msg: str,
     history: list[dict[str, Any]],
@@ -404,16 +384,10 @@ async def stream_tool_turn[ContextT](
     """Offer tools once, dispatch at most one call, then force an answer."""
     specs = catalog.specs(enabled)
     prompt = "\n\n".join(filter(None, [system_prompt, guidance])) if specs else system_prompt
-    messages = client._construct_message_payload(  # noqa: SLF001
-        user_msg=user_msg,
-        user_msg_history=history,
-        system_prompt=prompt,
-        img=img,
-    )
+    messages = completions.build_messages(user_msg, history, prompt, img)
 
     first = _Round()
     async for event in _run_round(
-        client=client,
         model=model,
         messages=messages,
         specs=specs or None,
@@ -452,7 +426,6 @@ async def stream_tool_turn[ContextT](
 
             answer = _Round()
             async for event in _run_round(
-                client=client,
                 model=model,
                 messages=messages,
                 specs=None,

@@ -1,6 +1,5 @@
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -16,8 +15,8 @@ def store(data_store) -> MemoryStore:
     return MemoryStore(data_store)
 
 
-def extract(store: MemoryStore, llm: object, messages: list[dict[str, str]]):
-    return asyncio.run(MemoryExtractor(store, llm, "test").extract(messages, chat_id="c1"))
+def extract(store: MemoryStore, llm: "ScriptedLLM", messages: list[dict[str, str]]):
+    return asyncio.run(MemoryExtractor(store, "test", complete=llm).extract(messages, chat_id="c1"))
 
 
 class ScriptedLLM:
@@ -27,10 +26,9 @@ class ScriptedLLM:
         self.payloads = list(payloads)
         self.prompts: list[str] = []
 
-    def api_query(self, **kwargs: object) -> object:
-        self.prompts.append(str(kwargs["user_msg"]))
-        content = json.dumps(self.payloads.pop(0))
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+    def __call__(self, _model: str, messages: list[dict[str, str]], **_kwargs: object) -> str:
+        self.prompts.append(messages[-1]["content"])
+        return json.dumps(self.payloads.pop(0))
 
 
 def seed(store: MemoryStore) -> None:

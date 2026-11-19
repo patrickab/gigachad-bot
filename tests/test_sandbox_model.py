@@ -13,11 +13,12 @@ from tests.fakes import MemoryAssetStore, MemoryDataStore
     ("stored", "gateway_id"),
     [
         ("litellm_proxy/anthropic/claude-haiku-5-5", "anthropic/claude-haiku-5-5"),
-        ("gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash"),
+        ("gemini/gemini-3.5-flash", "google/gemini-3.5-flash"),
+        ("ollama/gemma3:4b", "ollama/gemma3:4b"),
     ],
 )
 async def test_sandbox_runs_the_stored_default_as_a_gateway_model_id(monkeypatch, stored, gateway_id):
-    """A Pi pick loses its LiteLLM prefix, any other stored id reaches Pi unchanged."""
+    """The stored default reaches the sandbox's Pi as its gateway id, like every backend completion."""
     runner = FakeSandboxRunner()
     monkeypatch.setattr(deps, "_sandbox_runner", runner)
     service = deps.get_sandbox_service(

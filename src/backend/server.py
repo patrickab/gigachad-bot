@@ -30,7 +30,6 @@ from lib.c4_service import C4ServiceUnavailable
 from lib.data_store import StorageConflictError
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
-from backend.routes.deps import get_client, shutdown_client
 from backend.routes.deploy import router as deploy_router
 from backend.routes.jupyter import router as jupyter_router
 from backend.routes.neovim import router as neovim_router
@@ -82,13 +81,6 @@ def widen_default_executor() -> None:
     )
 
 
-def _warm_client() -> None:
-    try:
-        get_client()
-    except Exception:
-        log.exception("Could not create the LLM client, the first model call retries")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
@@ -98,8 +90,6 @@ async def lifespan(app: FastAPI):
     # prefix where pi-host's gateway lives, which is how Pi's logins
     # (including the Anthropic subscription) reach chat.
     pi_models.configure_litellm_proxy()
-    # LLMClient imports LiteLLM (~1.5 s, most of the backend's import time): load it beside serving, not before.
-    asyncio.get_running_loop().run_in_executor(None, _warm_client)
     # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
     asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())
@@ -109,7 +99,6 @@ async def lifespan(app: FastAPI):
     await extract_queue.start()
     await get_change_broker().start(database_url())
     yield
-    shutdown_client()
     kill_all_mineru_servers()
     await jupyter_service.aclose()
     if stopped := stop_owned():  # what Neovim sessions left running: language servers, programs they ran

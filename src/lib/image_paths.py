@@ -8,13 +8,12 @@ from typing import TYPE_CHECKING
 from agent_sandbox import PromptImage
 
 from lib.asset_store import Asset, AssetStore
+from lib.completions import downscale_img
 from lib.data_store import StorageNotFoundError
 from lib.storage_namespace import chat_upload
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-    from llm_baseclient.client import LLMClient
 
 _DEFAULT_MAX_TOKENS = 2048
 
@@ -39,7 +38,6 @@ def resolve_sandbox_prompt_images(chat_id: str, slug: str | None, filenames: lis
 
 
 def resolve_chat_image_paths(
-    client: LLMClient,
     chat_id: str,
     slug: str | None,
     filenames: list[str],
@@ -49,7 +47,7 @@ def resolve_chat_image_paths(
 ) -> list[bytes | str]:
     """Load chat upload images, optionally downscaled to *max_tokens*. Missing files are skipped."""
     return [
-        client.downscale_img(asset.content, max_tokens=max_tokens) if downscale else asset.content
+        downscale_img(asset.content, max_tokens=max_tokens) if downscale else asset.content
         for asset in _chat_uploads(assets, chat_id, slug, filenames)
         if asset.content is not None
     ]

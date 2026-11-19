@@ -11,8 +11,8 @@ import re
 import tomllib
 from typing import Any
 
+from lib import completions
 from lib.agent_sandbox_adapter import SandboxScriptError
-from lib.llm_resilience import completion_text
 from lib.sandbox_service import SANDBOX_PLOT_SCOPE, SandboxService
 from lib.tool_context import ToolContext
 from lib.toolcalling import ToolOutcome
@@ -122,22 +122,14 @@ def _plot_script(text: str) -> str:
 def _generate_plot(context: ToolContext) -> str:
     """Ask the chat model for the plot script, guided by the styling prompt."""
     images = [image.content for image in context.prompt_images]
-    return _plot_script(
-        completion_text(
-            context.client,
-            model=context.model,
-            user_msg=context.user_msg,
-            system_prompt=_FAST_PLOT_SYSTEM,
-            user_msg_history=list(context.history),
-            img=images or None,
-        )
-    )
+    messages = completions.build_messages(context.user_msg, list(context.history), _FAST_PLOT_SYSTEM, images or None)
+    return _plot_script(completions.text(context.model, messages))
 
 
 def _repair_plot_script(context: ToolContext, script: str, error: str) -> str:
     """Ask for a corrected script, given the broken one and what the sandbox reported."""
     request = f"# Script\n{script}\n\n# Error\n{error}"
-    return _plot_script(completion_text(context.client, model=context.model, user_msg=request, system_prompt=_REPAIR_SYSTEM))
+    return _plot_script(completions.text(context.model, completions.build_messages(request, system_prompt=_REPAIR_SYSTEM)))
 
 
 def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | None:

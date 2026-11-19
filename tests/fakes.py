@@ -222,28 +222,6 @@ def native_manifest(
     )
 
 
-class ClientStub:
-    """Only the two client seams the tool loop borrows: routing and payload construction."""
-
-    def _resolve_routing(self, model: str) -> tuple[str, None, None]:
-        return model, None, None
-
-    def _construct_message_payload(
-        self,
-        user_msg: str | None = None,
-        user_msg_history: list[dict[str, Any]] | None = None,
-        system_prompt: str | None = None,
-        img: Any = None,  # noqa: ARG002 - mirrors the client signature
-    ) -> list[dict[str, Any]]:
-        messages: list[dict[str, Any]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.extend(user_msg_history or [])
-        if user_msg:
-            messages.append({"role": "user", "content": user_msg})
-        return messages
-
-
 def text_chunk(text: str) -> SimpleNamespace:
     """A streamed provider chunk carrying answer text."""
     return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text, tool_calls=None))], usage=None)
@@ -261,8 +239,8 @@ def usage_chunk(total: int) -> SimpleNamespace:
 
 
 async def collect_tool_turn(**overrides: Any) -> list[tuple[str, Any]]:
-    """Run one ``stream_chat_with_tools`` turn against ``ClientStub`` and return its events."""
-    context_fields: dict[str, Any] = {"client": ClientStub(), "model": TEST_MODEL, "user_msg": "who won?", "opts": ToolOptions()}
+    """Run one ``stream_chat_with_tools`` turn (with ``completions.stream`` faked by the caller) and return its events."""
+    context_fields: dict[str, Any] = {"model": TEST_MODEL, "user_msg": "who won?", "opts": ToolOptions()}
     turn_kwargs: dict[str, Any] = {"system_prompt": "be terse", "enabled": ["web_search"]}
     field_names = {field.name for field in dataclasses.fields(ToolContext)}
     for name, value in overrides.items():

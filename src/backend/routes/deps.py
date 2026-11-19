@@ -1,10 +1,8 @@
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 import hashlib
-import threading
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
@@ -35,24 +33,7 @@ from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
 
-if TYPE_CHECKING:
-    from llm_baseclient.client import LLMClient
-
 ExtractionPublisher = Callable[[str, str, str], None]
-
-_client: "LLMClient | None" = None
-_client_lock = threading.Lock()
-
-
-def get_client() -> "LLMClient":
-    """The process-wide client. Its import pulls in LiteLLM (~1.5 s), so it loads here, not when the server starts."""
-    global _client
-    with _client_lock:
-        if _client is None:
-            from llm_baseclient.client import LLMClient
-
-            _client = LLMClient()
-    return _client
 
 
 def get_user_scope(identity: RequestIdentity = Depends(get_request_identity)) -> UserScope:
@@ -111,8 +92,8 @@ def get_sandbox_service(
         asset_store=assets,
         runner=get_sandbox_runner(),
         runtime_state=_sandbox_runtime,
-        # The sandbox's Pi reaches the gateway directly: a Pi pick is stored as `litellm_proxy/<provider>/<id>`.
-        model=defaults["sandbox_model"].removeprefix(f"{pi_models.LITELLM_ID}/"),
+        # The sandbox's Pi reaches the gateway directly, so it runs the stored selector's gateway id.
+        model=pi_models.gateway_model_id(defaults["sandbox_model"]),
         profile="gigachad",
         slot_prefix=slot_prefix,
     )
@@ -189,22 +170,3 @@ def get_prompt_store(
         seed_prompts(docs)
         _seeded_prompt_users.add(scope.user_id)
     return PromptStore(docs)
-
-
-def shutdown_client() -> None:
-    global _client
-    with _client_lock:
-        if _client is not None:
-            _client.kill_inference_engines()
-            _client = None
-
-
-@contextmanager
-def request_client() -> Iterator["LLMClient"]:
-    """Yield the shared client with its history reset, since it is one process-wide instance."""
-    c = get_client()
-    c.reset_history()
-    try:
-        yield c
-    finally:
-        c.reset_history()
