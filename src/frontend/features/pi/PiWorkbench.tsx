@@ -8,7 +8,8 @@ import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { fetchPiRepositories, fetchPiSessions, openPiSession, type PiRepository, type PiResume, type PiSessionInfo } from "@/lib/backend/api"
 import { fuzzyScore } from "@/lib/fuzzy"
 import { cn } from "@/lib/utils"
-import { piOpenError, PiSessionView } from "./PiTab"
+import { NEW_SESSION_OPTIONS, piOpenError, PiSessionView } from "./PiTab"
+import { PiSessionControlsBar } from "./PiTopBar"
 
 const REPO_PARAM = "repo"
 const SESSION_PARAM = "session"
@@ -129,7 +130,7 @@ export function PiWorkbench() {
   const open = useCallback(async (repo: string, resume: PiResume) => {
     setError(null)
     try {
-      const session = await openPiSession(repo, resume)
+      const session = await openPiSession(repo, resume, resume === null ? NEW_SESSION_OPTIONS : {})
       setUrlParams({ [SESSION_PARAM]: session.sessionId })
       // A fresh `opening` remounts the view, so reopening an exited session attaches again
       setActive((current) => ({ sessionId: session.sessionId, opening: (current?.opening ?? 0) + 1 }))
@@ -186,12 +187,14 @@ export function PiWorkbench() {
               key={`${active.sessionId}:${active.opening}`}
               sessionId={active.sessionId}
               cwd={repository.path}
-              renderHeader={({ tone, sessionName, model }) => (
+              repo={repository.name}
+              onBranch={(forkOf) => open(repository.name, { forkOf })}
+              renderHeader={({ tone, sessionName, controls }) => (
                 <header className="flex h-11 shrink-0 items-center gap-2 border-b border-divider/50 px-4 text-sm">
                   <StatusDot tone={tone} />
                   <span className="font-medium text-ink">{repository.name}</span>
                   {sessionName && <span className="truncate text-ink-muted">{sessionName}</span>}
-                  <span className="ml-auto truncate font-mono text-xs text-ink-faint">{model}</span>
+                  <div className="ml-auto"><PiSessionControlsBar controls={controls} /></div>
                   <FilePanelToggle />
                 </header>
               )}

@@ -3,14 +3,18 @@
  *
  * - Consumes host frames `{type, sessionId, streamId, sequence, ...}` and routes each to the subscribers of its session
  * - Provides `subscribePiSession`: the first subscriber of a session attaches it, the last detaches it
- * - Reconnects with backoff while anything is subscribed; per session a subscriber's `onReopen` decides how to catch up (resync or attach), else it re-attaches
+ * - Provides `observePiSocket`: frames of every attached session and host frames without `sessionId` (`sessions_changed`), for the session store
+ * - Reconnects with backoff while anything is subscribed or held; per session a subscriber's `onReopen` decides how to catch up (resync or attach), else it re-attaches
  * - No ack timeouts: liveness never depends on how fast the host answers (M18)
- * - Closes shortly after the last session leaves, so a remount (React strict mode, a tab switch) keeps the socket
+ * - Closes shortly after the last session and hold leave, so a remount (React strict mode, a tab switch) keeps the socket
  */
 import { piSocketUrl } from "@/lib/backend/urls"
 
 /** A host frame: `attached`, `resync`, `replay_start`, `pi`, `replay_end`, `ui_closed`, `lock_held`, `exit` or `error`. */
 export type HostFrame = { type: string; sessionId: string; [field: string]: unknown }
+
+/** A host frame about no single session, e.g. `{type: "sessions_changed", sessionPaths}`. */
+export type HostEvent = { type: string; [field: string]: unknown }
 
 export type SocketStatus = { kind: "connecting" } | { kind: "open" } | { kind: "closed"; reason: string }
 
@@ -21,16 +25,35 @@ export interface SessionSubscriber {
   onReopen?: () => void
 }
 
+/** Sees the socket's traffic without attaching anything. */
+export interface SocketObserver {
+  /** A frame of a session this page has attached, after its subscribers saw it. */
+  onFrame?: (frame: HostFrame) => void
+  /** A host frame without `sessionId`. */
+  onHostEvent?: (event: HostEvent) => void
+  /** The page's last subscriber of `sessionId` left, the session is detached. */
+  onDetach?: (sessionId: string) => void
+  /** The socket (re)opened, frames sent while it was down are lost. */
+  onOpen?: () => void
+}
+
 const RETRY_MIN_MS = 500
 const RETRY_MAX_MS = 10_000
 const IDLE_CLOSE_MS = 2_000
 
 const subscribers = new Map<string, Set<SessionSubscriber>>()
+const observers = new Set<SocketObserver>()
+/** Observers that keep the socket open with no session attached. */
+let holds = 0
 let socket: WebSocket | null = null
 let status: SocketStatus = { kind: "closed", reason: "Not connected" }
 let retryMs = RETRY_MIN_MS
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let idleTimer: ReturnType<typeof setTimeout> | undefined
+
+function idle(): boolean {
+  return subscribers.size === 0 && holds === 0
+}
 
 function setStatus(next: SocketStatus) {
   status = next
@@ -56,15 +79,22 @@ function connect() {
       if (owner) owner.onReopen!()
       else sendRaw({ type: "attach", sessionId })
     }
+    for (const observer of observers) observer.onOpen?.()
   }
   opened.onmessage = (message) => {
-    const frame = JSON.parse(String(message.data)) as HostFrame
+    const frame = JSON.parse(String(message.data)) as HostEvent
+    if (typeof frame.sessionId !== "string") {
+      for (const observer of observers) observer.onHostEvent?.(frame)
+      return
+    }
     const group = subscribers.get(frame.sessionId)
-    if (group) for (const subscriber of group) subscriber.onFrame(frame)
+    if (!group) return
+    for (const subscriber of group) subscriber.onFrame(frame as HostFrame)
+    for (const observer of observers) observer.onFrame?.(frame as HostFrame)
   }
   opened.onclose = (event) => {
     socket = null
-    if (subscribers.size === 0) return setStatus({ kind: "closed", reason: event.reason || "Disconnected" })
+    if (idle()) return setStatus({ kind: "closed", reason: event.reason || "Disconnected" })
     setStatus({ kind: "connecting" })
     retryTimer = setTimeout(() => {
       retryTimer = undefined
@@ -78,7 +108,7 @@ function closeWhenIdle() {
   clearTimeout(idleTimer)
   idleTimer = setTimeout(() => {
     idleTimer = undefined
-    if (subscribers.size > 0) return
+    if (!idle()) return
     clearTimeout(retryTimer)
     retryTimer = undefined
     const closing = socket
@@ -111,7 +141,28 @@ export function subscribePiSession(sessionId: string, subscriber: SessionSubscri
     if (current.size > 0) return
     subscribers.delete(sessionId)
     sendRaw({ type: "detach", sessionId })
-    if (subscribers.size === 0) closeWhenIdle()
+    for (const observer of observers) observer.onDetach?.(sessionId)
+    if (idle()) closeWhenIdle()
+  }
+}
+
+/** Watch the socket's traffic. With `hold` the socket also stays connected while nothing is attached, so host events keep arriving. Returns the unobserve. */
+export function observePiSocket(observer: SocketObserver, { hold = false }: { hold?: boolean } = {}): () => void {
+  observers.add(observer)
+  if (hold) {
+    holds += 1
+    clearTimeout(idleTimer)
+    idleTimer = undefined
+    connect()
+  }
+  let observing = true
+  return () => {
+    if (!observing) return
+    observing = false
+    observers.delete(observer)
+    if (!hold) return
+    holds -= 1
+    if (idle()) closeWhenIdle()
   }
 }
 

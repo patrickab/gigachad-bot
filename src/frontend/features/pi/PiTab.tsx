@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
-import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
+import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
-import { ApiError, fetchPiSessions, openPiSession } from "@/lib/backend/api"
+import { ApiError, fetchPiSessions, openPiSession, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, PiView } from "@/lib/domain/types"
-import { imageOf, PiComposer } from "./PiComposer"
+import { imageOf, PiComposer, type PiSubmit } from "./PiComposer"
+import { PiTopBar, type PiSessionHeader } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
-import type { ImageContent } from "./types"
 import { usePiSession } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
@@ -18,18 +18,14 @@ export interface PiLaunch {
   attachments: Attachment[]
 }
 
-/** What a session view's header shows. */
-export interface PiSessionHeader {
-  tone: StatusTone
-  sessionName: string | undefined
-  /** `provider/model · thinking`, null before the session reports its model. */
-  model: string | null
+/** Where a branch starts: the session file and the last entry it keeps (D11). */
+export interface PiFork {
+  sessionPath: string
+  entryId: string
 }
 
-interface FirstMessage {
-  message: string
-  images: ImageContent[]
-}
+/** A new session starts on Pi's default model at thinking `medium` (D10). */
+export const NEW_SESSION_OPTIONS: PiSessionOptions = { thinking: "medium" }
 
 const EMPTY_QUEUE = { steering: [], followUp: [] }
 
@@ -41,38 +37,70 @@ export function piOpenError(reason: unknown): string {
 /**
  * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs and the `/pi` page.
  *
- * - File links resolve against `cwd` and open in the file panel
- * - `firstMessage` is sent once the session attaches, then reported through `onFirstMessageSent`
+ * - File links resolve against `cwd` and open in the file panel, `@` completes files of `repo`
+ * - `firstSubmit` runs once the session attaches, then reported through `onFirstSubmitted`
+ * - Each settled turn branches through `onBranch` (D11); a failed branch shows as a notice
  */
-export function PiSessionView({ sessionId, cwd, renderHeader, firstMessage, onFirstMessageSent }: {
+export function PiSessionView({ sessionId, cwd, repo, renderHeader, firstSubmit, onFirstSubmitted, onBranch }: {
   sessionId: string
   cwd: string
+  repo: string
   renderHeader: (header: PiSessionHeader) => ReactNode
-  firstMessage?: FirstMessage | null
-  onFirstMessageSent?: () => void
+  firstSubmit?: PiSubmit | null
+  onFirstSubmitted?: () => void
+  onBranch?: (fork: PiFork) => Promise<void>
 }) {
   const session = usePiSession(sessionId)
-  const { state, status, transcript, send } = session
+  const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
   const openFile = useOpenFile()
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
-  const model = state?.model ? `${state.model.provider}/${state.model.id}${state.thinkingLevel ? ` · ${state.thinkingLevel}` : ""}` : null
+
+  const submit = useCallback((request: PiSubmit) => {
+    const { action } = request
+    if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
+    else if (action.kind === "compact") void compact(action.instructions)
+    else void send(action.text, request.images, request.mode)
+  }, [runBash, compact, send])
 
   const firstSent = useRef(false)
   useEffect(() => {
-    if (!firstMessage || firstSent.current || status.kind !== "ready") return
+    if (!firstSubmit || firstSent.current || status.kind !== "ready") return
     firstSent.current = true
-    void send(firstMessage.message, firstMessage.images)
-    onFirstMessageSent?.()
-  }, [firstMessage, status.kind, send, onFirstMessageSent])
+    submit(firstSubmit)
+    onFirstSubmitted?.()
+  }, [firstSubmit, status.kind, submit, onFirstSubmitted])
+
+  const sessionFile = state?.sessionFile
+  const branch = useMemo(() => {
+    if (!onBranch || !sessionFile) return undefined
+    return (entryId: string) => {
+      onBranch({ sessionPath: sessionFile, entryId }).catch((reason: unknown) => notify(piOpenError(reason), "error"))
+    }
+  }, [onBranch, sessionFile, notify])
+
+  const header: PiSessionHeader = {
+    tone,
+    sessionName: state?.sessionName,
+    controls: {
+      model: state?.model ?? null,
+      models: session.models,
+      thinkingLevel: state?.thinkingLevel ?? null,
+      thinkingLevels: session.thinkingLevels,
+      stats: session.stats,
+      onModel: (model) => void setModel(model),
+      onThinking: (level) => void setThinking(level),
+    },
+  }
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {renderHeader({ tone, sessionName: state?.sessionName, model })}
+      {renderHeader(header)}
       {status.kind === "closed" && <p role="alert" className="border-b border-divider/50 px-4 py-2 text-xs text-danger">{status.reason}</p>}
-      <PiTranscript transcript={transcript} fileLinks={fileLinks} />
+      <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} />
       <PiComposer
         sessionKey={sessionId}
+        repo={repo}
         running={transcript.running}
         disabled={status.kind !== "ready"}
         commands={session.commands}
@@ -81,7 +109,7 @@ export function PiSessionView({ sessionId, cwd, renderHeader, firstMessage, onFi
         notices={session.notices}
         statusLines={session.statusLines}
         editorText={session.editorText}
-        onSend={(message, images) => void send(message, images)}
+        onSubmit={submit}
         onAbort={session.abort}
         onAnswerDialog={session.answerDialog}
       />
@@ -89,23 +117,12 @@ export function PiSessionView({ sessionId, cwd, renderHeader, firstMessage, onFi
   )
 }
 
-/** The tab's top-bar content: live dot, repo, session name and model. */
-function TopBarContent({ repo, header }: { repo: string; header: PiSessionHeader | null }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-2 text-sm">
-      {header && <StatusDot tone={header.tone} />}
-      <span className="font-medium text-ink">{repo}</span>
-      {header?.sessionName && <span className="truncate text-ink-muted">{header.sessionName}</span>}
-      {header?.model && <span className="truncate font-mono text-xs text-ink-faint">{header.model}</span>}
-    </div>
-  )
-}
-
 /**
  * A Pi tab: the session `view` names in its repo, with its top bar rendered into `topBar` (the tab's top bar slot).
  *
- * - A tab without a session shows an empty composer, its first send creates the session and reports it through `onViewChange`
+ * - A tab without a session shows an empty composer, its first send creates the session (`NEW_SESSION_OPTIONS`) and reports it through `onViewChange`
  * - A tab with a session resumes it (spawns its Pi process when none runs)
+ * - A turn's branch action forks the session into a new one that opens in this tab
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  */
 export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null, onLaunched }: {
@@ -117,7 +134,7 @@ export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null,
   onLaunched?: () => void
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
-  const [firstMessage, setFirstMessage] = useState<FirstMessage | null>(null)
+  const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { sessionId, repo } = view
@@ -138,12 +155,12 @@ export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null,
     }
   }, [sessionId, repo, opened?.sessionId])
 
-  const start = useCallback(async (message: string, images: ImageContent[]) => {
+  const start = useCallback(async (submit: PiSubmit) => {
     setError(null)
     setStarting(true)
     try {
-      const session = await openPiSession(repo, null)
-      setFirstMessage({ message, images })
+      const session = await openPiSession(repo, null, NEW_SESSION_OPTIONS)
+      setFirstSubmit(submit)
       setOpened({ sessionId: session.sessionId, cwd: session.cwd })
       onViewChange({ repo, sessionId: session.sessionId })
     } catch (reason) {
@@ -153,15 +170,24 @@ export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null,
     }
   }, [repo, onViewChange])
 
+  const branch = useCallback(async (forkOf: PiFork) => {
+    const session = await openPiSession(repo, { forkOf })
+    setFirstSubmit(null)
+    setOpened({ sessionId: session.sessionId, cwd: session.cwd })
+    onViewChange({ repo, sessionId: session.sessionId })
+  }, [repo, onViewChange])
+
   const launched = useRef(false)
   useEffect(() => {
     if (!launch || sessionId || launched.current) return
     launched.current = true
     const images = launch.attachments.filter((attachment) => attachment.mime.startsWith("image/")).map(imageOf)
-    void Promise.all(images).then((converted) => start(launch.text, converted)).finally(() => onLaunched?.())
+    void Promise.all(images)
+      .then((converted) => start({ action: { kind: "prompt", text: launch.text }, images: converted, mode: "steer" }))
+      .finally(() => onLaunched?.())
   }, [launch, sessionId, start, onLaunched])
 
-  const clearFirstMessage = useCallback(() => setFirstMessage(null), [])
+  const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
   const inTopBar = (content: ReactNode) => topBar ? createPortal(content, topBar) : null
   const shown = opened && opened.sessionId === sessionId ? opened : null
 
@@ -171,22 +197,25 @@ export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null,
         key={shown.sessionId}
         sessionId={shown.sessionId}
         cwd={shown.cwd}
-        renderHeader={(header) => inTopBar(<TopBarContent repo={repo} header={header} />)}
-        firstMessage={firstMessage}
-        onFirstMessageSent={clearFirstMessage}
+        repo={repo}
+        renderHeader={(header) => inTopBar(<PiTopBar repo={repo} header={header} />)}
+        firstSubmit={firstSubmit}
+        onFirstSubmitted={clearFirstSubmit}
+        onBranch={branch}
       />
     )
   }
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {inTopBar(<TopBarContent repo={repo} header={null} />)}
+      {inTopBar(<PiTopBar repo={repo} header={null} />)}
       <div className="flex flex-1 items-center justify-center">
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       </div>
       {!sessionId && (
         <PiComposer
           sessionKey={`new:${tabId}`}
+          repo={repo}
           running={false}
           disabled={starting}
           commands={[]}
@@ -195,7 +224,7 @@ export function PiTab({ view, tabId, onViewChange, topBar = null, launch = null,
           notices={[]}
           statusLines={{}}
           editorText={null}
-          onSend={(message, images) => void start(message, images)}
+          onSubmit={(submit) => void start(submit)}
           onAbort={async () => []}
           onAnswerDialog={() => {}}
         />

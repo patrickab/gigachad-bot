@@ -9,7 +9,7 @@ import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
-import { textOf, toolRunsOf, turnsOf, type Transcript, type Turn } from "./transcript"
+import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
 
 const MAX_LABEL_LENGTH = 80

@@ -1,4 +1,5 @@
 // Ported from kahme247/ompweb lib/patch.ts (MIT, Copyright (c) 2026 agegr).
+import { parsePatchFiles } from "@/lib/diff"
 
 export type SplitDiffCellType = "context" | "removed" | "added" | "empty"
 
@@ -47,49 +48,19 @@ class SplitRowBuilder {
 
 const EMPTY_CELL: SplitDiffCell = { lineNo: null, text: "", type: "empty" }
 
-/** Split view of a unified patch (`--- a`, `+++ b`, `@@ -1,2 +1,3 @@`), null when the text is no unified patch. */
+/** Split view of a unified patch (`--- a`, `+++ b`, `@@ -1,2 +1,3 @@`) parsed by `lib/diff.ts`, null when the text is no unified patch. */
 export function parseUnifiedPatch(text: string): SplitDiffFile[] | null {
-  const builders: SplitRowBuilder[] = []
-  let pendingOldPath: string | undefined
-  let oldLineNo = 0
-  let newLineNo = 0
-
-  for (const line of text.split(/\r?\n/)) {
-    let current = builders.at(-1)
-    if (line.startsWith("--- ")) {
-      current?.flush()
-      pendingOldPath = cleanPatchPath(line.slice(4))
-      continue
+  const files = parsePatchFiles(text).map(({ oldPath, newPath, lines }) => {
+    const builder = new SplitRowBuilder({ oldPath, newPath, rows: [] })
+    for (const line of lines) {
+      if (line.kind === "hunk" || line.kind === "note") builder.hunk(line.text)
+      else if (line.kind === "context") builder.context(line.oldNumber!, line.newNumber!, line.text)
+      else if (line.kind === "removed") builder.remove(line.oldNumber!, line.text)
+      else builder.add(line.newNumber!, line.text)
     }
-    if (line.startsWith("+++ ")) {
-      current?.flush()
-      builders.push(new SplitRowBuilder({ oldPath: pendingOldPath, newPath: cleanPatchPath(line.slice(4)), rows: [] }))
-      continue
-    }
-    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-    if (hunk) {
-      if (!current) {
-        current = new SplitRowBuilder({ rows: [] })
-        builders.push(current)
-      }
-      oldLineNo = Number(hunk[1])
-      newLineNo = Number(hunk[2])
-      current.hunk(line)
-      continue
-    }
-    if (!current) continue
-
-    const prefix = line[0]
-    const content = line.slice(1)
-    if (line.startsWith("\\ ")) current.hunk(line)
-    else if (prefix === " ") current.context(oldLineNo++, newLineNo++, content)
-    else if (prefix === "-") current.remove(oldLineNo++, content)
-    else if (prefix === "+") current.add(newLineNo++, content)
-    else if (line !== "") current.hunk(line)
-  }
-  builders.at(-1)?.flush()
-
-  const files = builders.map((builder) => builder.file).filter((file) => file.rows.some((row) => row.type === "line"))
+    builder.flush()
+    return builder.file
+  }).filter((file) => file.rows.some((row) => row.type === "line"))
   return files.length > 0 ? files : null
 }
 
@@ -125,9 +96,4 @@ export function parsePiDisplayDiff(text: string): SplitDiffFile[] | null {
   }
   builder.flush()
   return builder.file.rows.some((row) => row.type === "line") ? [builder.file] : null
-}
-
-/** File path of a `---`/`+++` header without its trailing timestamp. */
-function cleanPatchPath(path: string): string {
-  return path.split("\t")[0].trim()
 }

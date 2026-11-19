@@ -168,3 +168,44 @@ describe("optimistic prompt", () => {
     expect(transcriptReducer(replaced, { kind: "prompt", prompt: null }).optimistic).toBeNull()
   })
 })
+
+describe("entry edits", () => {
+  const edit = (id: string, parentId: string, targetId: string, replacement: unknown): SessionEntry => ({ type: "context_edit", id, parentId, timestamp: "2026-01-01T00:00:05.000Z", targetId, replacement })
+  const label = (id: string, parentId: string, targetId: string, text: string | undefined): SessionEntry => ({ type: "label", id, parentId, timestamp: "2026-01-01T00:00:06.000Z", targetId, label: text })
+  const base = [messageEntry("a", null, prompt), messageEntry("b", "a", reply)]
+
+  it("applies context_edit and label entries of a snapshot to their target instead of showing them", () => {
+    const edited = snapshotOf([...base, edit("e1", "b", "b", "Shorter"), edit("e2", "e1", "a", null), label("l1", "e2", "b", "checkpoint")], false)
+    expect(edited.messages.map((message) => message.role)).toEqual(["user", "assistant"])
+    expect(edited.entryIds).toEqual(["a", "b"])
+    expect((edited.messages[1] as AssistantMessage).content).toEqual([{ type: "text", text: "Shorter" }])
+    expect(edited.messages[0]).toEqual(prompt)
+    expect(edited.marks).toEqual({ a: { context: "omitted" }, b: { context: "replaced", label: "checkpoint" } })
+  })
+
+  it("applies edits that arrive via a resync append, the latest one winning", () => {
+    const snapshot = snapshotOf(base, false)
+    const appended = transcriptReducer(snapshot, {
+      kind: "resync",
+      resync: { mode: "append", entries: [edit("e1", "b", "a", "Fix it"), messageEntry("c", "e1", followUp), edit("e2", "c", "a", null), label("l1", "e2", "a", "start")], leafId: "l1" },
+    })
+    expect(shownMessages(appended)).toEqual([{ ...prompt, content: "Fix it" }, reply, followUp])
+    expect(appended.entryIds).toEqual(["a", "b", "c"])
+    expect(appended.marks).toEqual({ a: { context: "omitted", label: "start" } })
+
+    const cleared = transcriptReducer(appended, { kind: "resync", resync: { mode: "append", entries: [label("l2", "l1", "a", undefined)], leafId: "l2" } })
+    expect(cleared.marks).toEqual({ a: { context: "omitted" } })
+  })
+})
+
+describe("events batch", () => {
+  it("applies buffered records in order like one event each", () => {
+    const started = events(snapshotOf([messageEntry("a", null, prompt)], true), [{ type: "message_start", message: { ...reply, content: [] } }])
+    const records = [
+      { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Do" } },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ne" } },
+    ]
+    expect(transcriptReducer(started, { kind: "events", events: records })).toEqual(events(started, records))
+  })
+})
