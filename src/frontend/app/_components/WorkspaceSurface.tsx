@@ -210,7 +210,10 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         left: <TopBarTransparent>
           <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
         </TopBarTransparent>,
-        center: isPdfDocument ? <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot> : undefined,
+        // Shown on hover or keyboard focus, pinned while an ink tool is selected (`data-ink-tool`)
+        center: isPdfDocument ? <div className="flex opacity-0 transition-opacity duration-200 hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-ink-tool]]:opacity-100">
+          <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>
+        </div> : undefined,
         right: <>
           <TopBarTransparent>
             <ThemeToggle />

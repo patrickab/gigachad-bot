@@ -236,7 +236,7 @@ const PdfInk = memo(function PdfInk({ canvasKey, scroller, pen, clipToPages, onP
 
   return (
     <InTopBar name="pdf">
-      <div className="flex items-center gap-1">
+      <div data-ink-tool={tool ?? undefined} className="flex items-center gap-1">
         <InkTools ink={ink} />
         {SEPARATOR}
         <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
