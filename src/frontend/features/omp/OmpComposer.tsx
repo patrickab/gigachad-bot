@@ -123,10 +123,12 @@ function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle |
   }), [onComposerEvent, view, inputRef])
 }
 
-/** Text for the draft of a composer, `id` tells one request from the next. */
+/** Text and files for the draft of a composer, `id` tells one request from the next. */
 export interface ComposerInsertion {
   id: number
   text: string
+  /** Attached like pasted files, e.g. a canvas screenshot. */
+  files?: File[]
 }
 
 /** Append `insertion` to the draft behind `inputRef` once the composer is enabled, focus it, then report it through `onInserted`. */
@@ -136,7 +138,12 @@ function useComposerInsertion(insertion: ComposerInsertion | null, enabled: bool
   useEffect(() => {
     if (!insertion || !enabled || insertedIdRef.current === insertion.id) return
     insertedIdRef.current = insertion.id
-    inputRef.current?.updateText((draft) => (draft ? `${draft}\n\n${insertion.text}` : insertion.text))
+    const input = inputRef.current
+    if (insertion.text) input?.updateText((draft) => (draft ? `${draft}\n\n${insertion.text}` : insertion.text))
+    if (insertion.files?.length) {
+      input?.addFiles(insertion.files)
+      input?.focus()
+    }
     reportInserted()
   }, [insertion, enabled, inputRef])
 }

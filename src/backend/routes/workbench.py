@@ -80,7 +80,7 @@ class StoredImage(BaseModel):
 
 
 class SessionLink(BaseModel):
-    """Make `session_id` the active omp session of the absolute file `path`, None starts a new one."""
+    """Make `session_id` the active omp session of the absolute file or canvas key `path`, None starts a new one."""
 
     path: str
     session_id: str | None
@@ -105,11 +105,20 @@ def _linked_session(link: Link) -> LinkedSession:
     return LinkedSession(session_id=link.active, session_ids=list(link.sessions), moved=list(link.moved))
 
 
-def _absolute(path: str) -> str:
-    """*path*, 400 unless it is absolute."""
-    if not PurePosixPath(path).is_absolute():
-        raise HTTPException(status_code=400, detail="Path must be absolute")
+def _link_key(path: str) -> str:
+    """*path*, 400 unless it is absolute or a stored canvas key (`_canvas_key`)."""
+    if not PurePosixPath(path).is_absolute() and _canvas_key(path) is None:
+        raise HTTPException(status_code=400, detail="Path must be absolute or a canvas key")
     return path
+
+
+def _canvas_key(path: str) -> str | None:
+    """*path* as a stored `.canvas` key, None for anything else. Its chat is linked by the key, which renames and moves rewrite."""
+    try:
+        key = validate_key(path)
+    except InvalidStorageKey:
+        return None
+    return key if PurePosixPath(key).suffix == ".canvas" else None
 
 
 def _kind(name: str) -> Kind:
@@ -157,13 +166,21 @@ def post_prepare(
 
     - A mounted LaTeX file opens its omp session in its project folder, given the LaTeX prompt there (`mounted_latex_session`). Otherwise a session starts in its kind's directory
     - A stored PDF is never moved, its library copy on disk is read where it is
+    - A stored canvas stays stored and answers its key, its sessions see it through screenshots
     - Notes stay stored and open in the document editor, so their keys answer 400
     - A workbench folder the file roots cannot reach answers 403 and nothing moves
     """
     if PurePosixPath(body.path).is_absolute():
         resolved = resolve_allowed(body.path, roots)
+        if resolved.suffix == ".canvas":
+            return _prepared(resolved, "canvas")
         kind = _kind(resolved.name)
         return _prepared(resolved, kind, _mounted_latex_session(resolved, kind, roots))
+    canvas = _canvas_key(body.path)
+    if canvas is not None:
+        if not docs.is_file(canvas):
+            raise HTTPException(status_code=404, detail="Canvas not found")
+        return _prepared(canvas, "canvas")
     with http_errors((InvalidStorageKey, 400, None)):
         key = validate_key(body.path)
     if under(key, NOTE):
@@ -300,10 +317,10 @@ def get_session(
 @router.put("/session")
 def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
     """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
-    return _linked_session(SessionLinks(docs).activate(_absolute(body.path), body.session_id))
+    return _linked_session(SessionLinks(docs).activate(_link_key(body.path), body.session_id))
 
 
 @router.post("/session/informed")
 def post_session_informed(body: SessionNotice, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
     """The session `session_id` knows where the file `path` is now, so its messages stop naming it."""
-    return _linked_session(SessionLinks(docs).inform(_absolute(body.path), body.session_id))
+    return _linked_session(SessionLinks(docs).inform(_link_key(body.path), body.session_id))

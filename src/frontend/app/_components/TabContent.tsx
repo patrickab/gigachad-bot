@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type RefCallback } from "react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -36,6 +36,23 @@ interface TabContentProps {
   focus: ChatFocus
 }
 
+/**
+ * Keep `--under-left` and `--under-right` on the tab's main area: the px between it and the tab's edges, the left sidebar's and the file panel's share with their gutters.
+ * A surface running under the sidebars (`runsUnderSidebars`) extends its body by them, the cards float over it.
+ */
+function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
+  if (typeof ResizeObserver === "undefined") return
+  const tab = main.parentElement!
+  const update = () => {
+    main.style.setProperty("--under-left", `${main.offsetLeft}px`)
+    main.style.setProperty("--under-right", `${tab.clientWidth - main.offsetLeft - main.offsetWidth}px`)
+  }
+  const observer = new ResizeObserver(update)
+  observer.observe(main)
+  observer.observe(tab)
+  return () => observer.disconnect()
+}
+
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
 export function TabContent(props: TabContentProps) {
   return <TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider>
@@ -46,7 +63,16 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const { tab, isActive, setModeLabel } = useTab()
   const { projectSlug, config } = tab
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
-  const contentAreaRef = useContentAreaRef()
+  const registerContentArea = useContentAreaRef()
+  const contentAreaRef = useCallback<RefCallback<HTMLElement>>((main) => {
+    if (!main) return
+    const unregister = registerContentArea?.(main)
+    const stopMeasuring = measureSidebarInsets(main)
+    return () => {
+      unregister?.()
+      stopMeasuring?.()
+    }
+  }, [registerContentArea])
   const peeked = useIsPeeked()
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const openPromptEditor = useCallback(() => setPromptEditorOpen(true), [])

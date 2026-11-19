@@ -523,6 +523,25 @@ def test_sessions_of_a_moved_file_name_it_again_until_each_was_told(client, docs
     assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/b.md": {"active": "s1", "sessions": ["s1", "s2"]}}
 
 
+def test_a_stored_canvas_prepares_in_place_and_links_its_sessions_by_key(client, root, docs):
+    key = "project/thesis/document/board.canvas"
+    docs.write_bytes(key, b"{}")
+
+    prepared = client.post("/api/workbench/prepare", json={"path": key}).json()
+    assert prepared == {"path": key, "cwd": str(root / "canvas"), "kind": "canvas"}
+    assert client.put("/api/workbench/session", json={"path": key, "session_id": "s1"}).json()["session_id"] == "s1"
+    assert client.get("/api/workbench/session", params={"path": key}).json()["session_id"] == "s1"
+    assert client.post("/api/workbench/prepare", json={"path": "project/thesis/document/gone.canvas"}).status_code == 404
+    assert docs.read_bytes(key)[0] == b"{}"
+
+
+def test_a_canvas_file_on_disk_prepares_in_place(client, root, vault):
+    board = vault / "board.canvas"
+    board.write_text("{}", encoding="utf-8")
+
+    assert client.post("/api/workbench/prepare", json={"path": str(board)}).json() == {"path": str(board), "cwd": str(root / "canvas"), "kind": "canvas"}
+
+
 @pytest.mark.parametrize(("method", "url", "request_args"), [
     ("post", "/api/workbench/prepare", {"json": {"path": "project/thesis/document/paper.tex"}}),
     ("post", "/api/workbench/create", {"json": {"slug": "thesis", "name": "paper.tex"}}),

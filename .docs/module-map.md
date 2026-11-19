@@ -230,7 +230,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file or LaTeX project folder, menu, New session (`fileLead.ts`: `File:`/`Project:` leads)
 |       |   |   |-- SessionPicker.tsx Top-bar session picker: running, recent and older omp sessions from the shared overview
 |       |   |   |-- WorkspacePicker.tsx Composer project selector of an empty chat: fuzzy picker over file mounts and omp workspaces, a pick makes the first message start an omp session
-|       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF), prepares it first
+|       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF, canvas), prepares it first
 |       |   |-- workbench/            Editor | rendered file | omp drawer primitive
 |       |   |   |-- Workbench.tsx     Neovim, quoting, status slot and editor notes on `WorkbenchFrame`, kinds supply `renderPane`
 |       |   |   |-- WorkbenchFrame.tsx `WorkbenchFrame`: the one layout of `Workbench` and `NotebookWorkbench`, `EditorNote`
@@ -340,7 +340,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               `-- package.json      Package-local dependencies and distribution contract
 |-- templates/                        Shipped sources read through `config.TEMPLATES` (bundled in frozen builds)
 |   |-- prompts/                      User-selectable seed prompts (`_order`, `_blocks/` fragments, e.g. `tutor.md`)
-|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md`, `config.yml` and `mounted.yml` (mounted LaTeX projects) (source of truth)
+|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md`, `canvas.md`, `config.yml` and `mounted.yml` (mounted LaTeX projects) (source of truth)
 |   `-- latex/                        LaTeX template sets, rules in `templates/latex/AGENTS.md`
 |       |-- render.py                 Primitives -> `example.tex`/`example.pdf` -> preview PNGs
 |       |-- presentation/             Beamer set: theme `.sty`, `skeleton.tex`, `STYLE.md`, `primitives/<group>/`, generated example and previews

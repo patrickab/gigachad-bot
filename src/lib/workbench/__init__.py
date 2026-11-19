@@ -5,6 +5,7 @@
 - A mounted LaTeX project folder gets the same `.omp/` (`mounted_latex_session`), with a config that keeps its repository's `AGENTS.md`
 - `<root>/<kind>/<slug>/<stem>/<stem>.<ext>` is a document of project `slug`
 - PDFs are only read, never moved: `pdf` sessions run in `<root>/pdf` and read the PDF where it is
+- Canvases stay stored: `canvas` sessions run in `<root>/canvas` and see a canvas through the screenshots sent to them
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from lib.naming import segment
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-Kind = Literal["latex", "markdown", "pdf"]
+Kind = Literal["latex", "markdown", "pdf", "canvas"]
 KINDS: tuple[Kind, ...] = get_args(Kind)
 OMP_DIRECTORY = ".omp"
 TEMPLATE_DIRECTORY = "templates"

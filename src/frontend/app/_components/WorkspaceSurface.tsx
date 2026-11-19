@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ComponentProps, type ReactNode } from "react"
+import { useCallback, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
@@ -12,7 +12,7 @@ import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { FilePanelToggle } from "@/features/editor/FilePanel"
 import { PdfAssistant } from "@/features/editor/pdf/PdfAssistant"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
-import { LazyCanvasWorkspace } from "@/features/editor/canvas/LazyCanvas"
+import { CanvasCaptureContext, LazyCanvasWorkspace } from "@/features/editor/canvas/LazyCanvas"
 import type { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { LazyArchitectureWindow } from "@/features/editor/architecture/LazyArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
@@ -23,7 +23,8 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerLaunch, type ShellCommands } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerInsertion, type ComposerLaunch, type ShellCommands } from "@/features/omp/OmpComposer"
+import { canvasLead } from "@/features/omp/fileLead"
 import { OmpFileChat } from "@/features/omp/OmpFileChat"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
@@ -73,10 +74,15 @@ interface Surface {
   right: ReactNode
   /** Scrolling surfaces run on under the floating TopBar. The rest start below it. */
   runsUnderTopBar: boolean
+  /** Endless surfaces (the canvas) run on under the floating sidebar cards and their gutters, `--under-left`/`--under-right` from `TabContent`. */
+  runsUnderSidebars?: boolean
   /** Pills one level above the page, for busy content (canvas, PDF pages) */
   raised?: boolean
   body: ReactNode
 }
+
+/** Width of a canvas's chat panel, the PDF chat's. */
+const CANVAS_CHAT_WIDTH_PX = 320
 
 /**
  * The tab's workbench item once prepared: LaTeX or Markdown by the file's kind, mounted on its disk path.
@@ -147,6 +153,15 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     </>,
   }
   const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands: ompShellCommands, modelProps }
+  // A stored or mounted canvas has an omp chat, a screenshot opens it and lands in its draft. The scratch canvas has none
+  const [canvasChatOpen, setCanvasChatOpen] = useState(false)
+  const [canvasInsertion, setCanvasInsertion] = useState<ComposerInsertion | null>(null)
+  const captureCount = useRef(0)
+  const attachCapture = useCallback((png: File) => {
+    setCanvasChatOpen(true)
+    setCanvasInsertion({ id: ++captureCount.current, text: "", files: [png] })
+  }, [])
+  const canvasChatPath = hostAccess && canvas.view.kind === "canvas" ? canvas.view.selection?.path ?? null : null
 
   const surfaces: Record<AppSurface, () => Surface> = {
     chat: () => ({
@@ -177,20 +192,36 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           <TopBarSlot name="view">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
           <ThemeToggle />
         </TopBarPill>
-        {filePanelToggle}
+        {canvasChatPath
+          ? !canvasChatOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setCanvasChatOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>
+          : filePanelToggle}
       </>,
       runsUnderTopBar: canvas.view.kind !== "architecture",
+      runsUnderSidebars: canvas.view.kind !== "architecture",
       raised: true,
       body: canvas.view.kind === "architecture"
         ? <LazyArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
-        : <LazyCanvasWorkspace
-          selected={canvas.view.selection}
-          slug={projectSlug}
-          onCloseEditor={canvas.closeCanvas}
-          onCreated={canvas.openCreatedCanvas}
-          onModeLabel={setModeLabel}
-          editorModel={config.selectedModel}
-        />,
+        : <CanvasCaptureContext.Provider value={canvasChatPath ? attachCapture : null}>
+          <LazyCanvasWorkspace
+            selected={canvas.view.selection}
+            slug={projectSlug}
+            onCloseEditor={canvas.closeCanvas}
+            onCreated={canvas.openCreatedCanvas}
+            onModeLabel={setModeLabel}
+            editorModel={config.selectedModel}
+          />
+          {canvasChatPath && canvasChatOpen && (
+            <OmpFileChat
+              path={canvasChatPath}
+              width={CANVAS_CHAT_WIDTH_PX}
+              onClose={() => setCanvasChatOpen(false)}
+              shellCommands={ompShellCommands}
+              lead={canvasLead(canvasChatPath)}
+              insertion={canvasInsertion}
+              onInserted={() => setCanvasInsertion(null)}
+            />
+          )}
+        </CanvasCaptureContext.Provider>,
     }),
     document: () => {
       const diffItem = itemOf(tab, "diff")
@@ -337,7 +368,12 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       right={surface.right}
       raised={surface.raised}
     />
-    <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
+    <div
+      data-workspace-surface
+      // Isolated so its own z-indices stay under the left sidebar card (z-10)
+      className={`absolute inset-x-0 bottom-0 ${surface.runsUnderSidebars ? "isolate" : ""} ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}
+      style={surface.runsUnderSidebars ? { left: "calc(-1 * var(--under-left, 0px))", right: "calc(-1 * var(--under-right, 0px))" } : undefined}
+    >
       {surface.body}
     </div>
   </>

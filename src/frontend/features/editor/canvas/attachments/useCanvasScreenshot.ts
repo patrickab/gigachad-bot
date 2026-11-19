@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useRef, type RefObject } from "react"
+import { useCallback, useContext, useRef, type RefObject } from "react"
 import { renderPageToPng, type CanvasEmbedRect } from "@/lib/canvasExport"
 import type { CanvasDocument } from "@/lib/domain/canvasDocument"
 import { imageFrameEmbeds } from "@/lib/domain/canvasRender"
+import { CanvasCaptureContext } from "../LazyCanvas"
 
 const SCREENSHOT_MIN = 4 // canvas units — smaller drags are accidents
 
@@ -13,9 +14,10 @@ interface CanvasScreenshotOptions {
   screenToCanvas: (clientX: number, clientY: number) => [number, number]
 }
 
-/** Rasterizes a canvas-space rectangle and copies it to the clipboard as PNG; only the latest capture writes. */
+/** Rasterizes a canvas-space rectangle, hands it to `CanvasCaptureContext` and copies it to the clipboard as PNG; only the latest capture goes out. */
 export function useCanvasScreenshot({ liveRef, containerRef, screenToCanvas }: CanvasScreenshotOptions) {
   const screenshotSequence = useRef(0)
+  const onCapture = useContext(CanvasCaptureContext)
 
   return useCallback(async ([x0, y0]: [number, number], [x1, y1]: [number, number]) => {
     const x = Math.min(x0, x1)
@@ -36,11 +38,15 @@ export function useCanvasScreenshot({ liveRef, containerRef, screenToCanvas }: C
       const [right, bottom] = screenToCanvas(rect.right, rect.bottom)
       return [{ image, x: left, y: top, width: right - left, aspect: (bottom - top) / (right - left) }]
     })
+    let png: File
     try {
       const pngBytes = await renderPageToPng(strokes, x, y, w, h, images, texts, pdfPages)
-      if (sequence !== screenshotSequence.current) return
-      const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+      png = new File([pngBytes.buffer as ArrayBuffer], `canvas-${Date.now()}.png`, { type: "image/png" })
+    } catch { return }
+    if (sequence !== screenshotSequence.current) return
+    onCapture?.(png)
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })])
     } catch { /* clipboard write can fail without permission — silently drop */ }
-  }, [liveRef, containerRef, screenToCanvas])
+  }, [liveRef, containerRef, screenToCanvas, onCapture])
 }
