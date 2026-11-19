@@ -6,7 +6,7 @@ import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
 import type { NeovimCommand } from "@/features/editor/neovimProtocol"
-import { fileLead, projectLead } from "@/features/omp/fileLead"
+import { fileLead, projectLead } from "./fileLead"
 import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { useFollowBuffers } from "./useFollowBuffers"
@@ -50,8 +50,6 @@ interface WorkbenchProject {
 export interface WorkbenchProps extends WorkbenchChatProps {
   /** Absolute disk path of the shown file. The first path starts Neovim, a later one switches its buffer, so one workbench can walk the files of a project. */
   path: string
-  /** The directory a new chat session starts in. */
-  cwd: string
   /** The project every file of the workbench belongs to: its folder's chat is shared by them all. Without one the chat belongs to the shown file. */
   project?: WorkbenchProject
   /** Neovim shows another file than `path` (`:bnext`), `path` should follow. Also asks to go back to the shown file when another one could not open. */
@@ -74,19 +72,19 @@ export interface WorkbenchProps extends WorkbenchChatProps {
 }
 
 /**
- * One file, or the files of one LaTeX project, as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the omp chat in a drawer on the right.
+ * One file, or the files of one LaTeX project, as an Overleaf-like workspace: Neovim on the left, the rendered file in the middle, the Pi chat in a drawer on the right.
  *
- * - Every open file follows its file on disk, whoever writes it (omp, another agent, a terminal, another device): a change is read and handed to Neovim, the backend merges it into unsaved edits
+ * - Every open file follows its file on disk, whoever writes it (the chat, another agent, a terminal, another device): a change is read and handed to Neovim, the backend merges it into unsaved edits
  * - Visual-mode `<leader>a` in Neovim quotes the selected lines into the chat draft, opening the drawer if it is closed
  * - Normal-mode `<leader>v` in a `.tex` buffer goes to `onForwardSearch` with its file and cursor line
- * - The chat's session is linked to the project folder, else to the file. A new one starts in `cwd` and its first message names the project (`Project: <folder>, root: <root>`) or the file (`File: <path>`)
+ * - The chat's session is linked to the project folder, else to the file. The backend picks its folder, its first message names the project (`Project: <folder>, root: <root>`) or the file (`File: <path>`)
  * - A pasted image is stored in `imgs/` next to the shown file and pasted as its reference, Ctrl+Shift+V fills an `example-image` placeholder on the cursor line with it
- * - The top bar's agent controls and status render into its `workbenchAgent` and `workbenchStatus` slots, `center` into its `center` slot while Neovim is enabled
+ * - The top bar's status renders into its `workbenchStatus` slot, `center` into its `center` slot while Neovim is enabled
  * - One notice in the status says why the latest thing beside the editor did not work, the owner's and the editor's alike
  */
-export function Workbench({ path, cwd, project, onPathChange, onClose, renderPane, status, center, notices, onSaved, quoteLanguage, onForwardSearch, ...chatProps }: WorkbenchProps) {
+export function Workbench({ path, project, onPathChange, onClose, renderPane, status, center, notices, onSaved, quoteLanguage, onForwardSearch, ...chatProps }: WorkbenchProps) {
   const neovim = useNeovimSetting()
-  const chat = useWorkbenchChat(project?.folder ?? path, cwd, project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd), chatProps)
+  const chat = useWorkbenchChat(project?.folder ?? path, (cwd) => (project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd)), chatProps)
   const [view, setView, show] = useWorkbenchView()
   const { notice, report } = notices
 

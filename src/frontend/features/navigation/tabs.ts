@@ -83,13 +83,25 @@ export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: strin
 /** Open tabs saved across a reload of this browser tab. */
 export interface SavedTabs { tabs: Tab[]; activeId: string }
 
-/** The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed. */
+/** `item` as saved by an older build: a workbench or notebook item held its chat as an omp view, which no Pi chat can open, so it is dropped. */
+function savedItem(item: WorkspaceItem | null): WorkspaceItem | null {
+  if (!item || item.kind === "omp" || !("omp" in item)) return item
+  const kept = { ...item }
+  delete kept.omp
+  return kept
+}
+
+/**
+ * The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed.
+ *
+ * A non-`omp` item drops the omp chat it was saved with.
+ */
 export function parseSavedTabs(raw: string | null): SavedTabs | null {
   if (!raw) return null
   try {
     const saved = JSON.parse(raw) as Partial<SavedTabs>
     if (!Array.isArray(saved.tabs) || saved.tabs.length === 0) return null
-    const tabs = saved.tabs.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config } }))
+    const tabs = saved.tabs.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: savedItem(tab.workspaceItem) }))
     return { tabs, activeId: tabs.some((tab) => tab.id === saved.activeId) ? saved.activeId! : tabs[0].id }
   } catch {
     return null

@@ -130,11 +130,11 @@ describe("texProjectTab", () => {
 
 describe("texBufferShown", () => {
   it("moves the item to the file and keeps its session, chat and folder", () => {
-    const tab = { ...tabWith({ kind: "workbench", path: "/repo/paper/main.tex", projectSlug: "proj", texFolder: "/repo/paper", omp: { kind: "new", cwd: "/data" } }), appMode: "chat" as const }
+    const tab = { ...tabWith({ kind: "workbench", path: "/repo/paper/main.tex", projectSlug: "proj", texFolder: "/repo/paper", chat: { sessionId: "p1" } }), appMode: "chat" as const }
     const shown = texBufferShown(tab, "/repo/paper/refs.bib")
     expect(shown.appMode).toBe("workbench")
     expect(shown.workspaceItem).toEqual({
-      kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: "proj", texFolder: "/repo/paper", omp: { kind: "new", cwd: "/data" }, sessionKey: "/repo/paper/main.tex",
+      kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: "proj", texFolder: "/repo/paper", chat: { sessionId: "p1" }, sessionKey: "/repo/paper/main.tex",
     })
     expect(texBufferShown(shown, "/repo/paper/other.tex").workspaceItem?.sessionKey).toBe("/repo/paper/main.tex")
   })
@@ -193,6 +193,16 @@ describe("parseSavedTabs", () => {
     const pi = { ...nextTab(), ...showingItem({ kind: "pi", path: "app", projectSlug: null, pi: { sessionId: "s1", repo: "app" } }) }
     const omp = { ...nextTab(), ...showingItem({ kind: "omp", path: "/git/app", projectSlug: null, omp: { kind: "session", sessionId: "o1" } }) }
     expect(parseSavedTabs(JSON.stringify({ tabs: [pi, omp], activeId: pi.id }))).toEqual({ tabs: [pi, omp], activeId: pi.id })
+  })
+
+  it("drops the omp chat old builds saved on workbench and notebook items, keeps their Pi chat", () => {
+    const workbench = { ...nextTab(), ...showingItem({ kind: "workbench", path: "/notes/a.md", projectSlug: null, chat: { sessionId: "p1" } }) }
+    const notebook = { ...nextTab(), ...showingItem({ kind: "document", path: "/nb/a.ipynb", projectSlug: null }) }
+    const legacy = [
+      { ...workbench, workspaceItem: { ...workbench.workspaceItem, omp: { kind: "session", sessionId: "o1" } } },
+      { ...notebook, workspaceItem: { ...notebook.workspaceItem, omp: { kind: "new", cwd: "/nb" } } },
+    ]
+    expect(parseSavedTabs(JSON.stringify({ tabs: legacy, activeId: workbench.id }))).toEqual({ tabs: [workbench, notebook], activeId: workbench.id })
   })
 })
 

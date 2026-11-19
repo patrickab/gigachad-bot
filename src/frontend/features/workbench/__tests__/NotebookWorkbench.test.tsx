@@ -6,15 +6,13 @@ import type { NeovimCommand, NeovimEventHandlers } from "@/features/editor/neovi
 import { FakeNotebook } from "@/features/notebook/__tests__/fakeNotebook"
 import type { NotebookTextStore } from "@/features/notebook/notebookTextStore"
 import { NOTEBOOK_TEXT_DELAY_MS } from "@/features/notebook/notebookTextStore"
-import type { ComposerInsertion } from "@/features/omp/OmpComposer"
-import type { FileChat } from "@/features/omp/useFileChat"
+import type { OpenedWorkbenchChat } from "@/lib/backend/api"
+import { openedChat } from "./chatFixtures"
 
-type Sessions = { active: string | null; sessionIds: string[]; moved: string[] }
 const api = vi.hoisted(() => ({
-  loadFileSessions: vi.fn<(path: string) => Promise<Sessions>>(),
-  saveFileSession: vi.fn(),
-  informFileSession: vi.fn(),
-  fetchNotebookDirectory: vi.fn<(path: string) => Promise<string>>(),
+  openWorkbenchChat: vi.fn<(request: { path: string; sessionId?: string }) => Promise<OpenedWorkbenchChat>>(),
+  markWorkbenchChatInformed: vi.fn(),
+  ApiError: class extends Error { status = 0 },
 }))
 interface NeovimOptions { askKeymap?: boolean; on?: NeovimEventHandlers }
 const neovim = vi.hoisted(() => ({
@@ -52,12 +50,8 @@ vi.mock("@/features/notebook/NotebookDocument", () => ({
     <FakeNotebookEditor key={editor.generation} path={editor.path} textStore={textStore} />
   ),
 }))
-vi.mock("@/features/omp/OmpChatPanel", () => ({
-  OmpChatPanel: ({ chat, insertion }: { chat: FileChat; insertion?: ComposerInsertion | null }) => <>
-    <p>chat {JSON.stringify(chat.view)} {chat.lead}</p>
-    {insertion && <pre data-testid="draft">{insertion.text}</pre>}
-  </>,
-}))
+// vi.mock is hoisted above the static imports, so the factory loads the stand-in itself
+vi.mock("../DocumentChat", async () => ({ DocumentChat: (await import("./chatFixtures")).FakeDocumentChat }))
 
 import { NotebookWorkbench } from "../NotebookWorkbench"
 
@@ -73,8 +67,7 @@ const notebookOf = (source: string, extension?: string) => new FakeNotebook({
 })
 
 beforeEach(() => {
-  api.fetchNotebookDirectory.mockResolvedValue(MOUNT)
-  api.loadFileSessions.mockResolvedValue({ active: null, sessionIds: [], moved: [] })
+  api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s1", cwd: MOUNT, kind: "notebook" }))
   neovim.enabled = true
   notebook.model = null
 })
@@ -90,43 +83,32 @@ const workbenchOf = (drawerOpen: boolean, onDrawerOpenChange = vi.fn(), path = P
   <NotebookWorkbench
     path={path}
     tabId="tab"
-    ompView={undefined}
-    onViewChange={vi.fn()}
+    chatSessionId={undefined}
+    onChatSessionChange={vi.fn()}
     drawerOpen={drawerOpen}
     onDrawerOpenChange={onDrawerOpenChange}
     shellCommands={{} as never}
-    modelProps={{} as never}
   />
 )
 
 describe("NotebookWorkbench chat", () => {
-  it("links the chat to the notebook: a new session starts in the mount root holding it, so relative links resolve there, and names the file relative to it", async () => {
+  it("opens the notebook's Pi chat and names the notebook relative to the folder the backend runs it in (where its kernel runs)", async () => {
     render(workbenchOf(true))
     expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
-    expect(await screen.findByText(`chat ${JSON.stringify({ kind: "new", cwd: MOUNT })} File: notebooks/analysis.ipynb`)).toBeTruthy()
-    expect(api.fetchNotebookDirectory).toHaveBeenCalledWith(PATH, expect.any(AbortSignal))
-    expect(api.loadFileSessions).toHaveBeenCalledWith(PATH)
+    expect(await screen.findByText(`chat ${PATH} s1 File: notebooks/analysis.ipynb`)).toBeTruthy()
+    expect(api.openWorkbenchChat).toHaveBeenCalledWith({ path: PATH, sessionId: undefined })
   })
 
-  it("starts a notebook outside every mount in its folder, the directory the backend answers", async () => {
-    api.fetchNotebookDirectory.mockResolvedValue("/home/me/project/notebooks")
+  it("names a notebook outside every mount relative to its folder", async () => {
+    api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s1", cwd: "/home/me/project/notebooks", kind: "notebook" }))
     render(workbenchOf(true))
-    expect(await screen.findByText(`chat ${JSON.stringify({ kind: "new", cwd: "/home/me/project/notebooks" })} File: analysis.ipynb`)).toBeTruthy()
-  })
-
-  it("offers a retry when the directory cannot be found", async () => {
-    api.fetchNotebookDirectory.mockRejectedValueOnce(new Error("offline"))
-    render(workbenchOf(true))
-    const retry = await screen.findByRole("button", { name: /retry/i })
-    act(() => retry.click())
-    expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
+    expect(await screen.findByText(`chat ${PATH} s1 File: analysis.ipynb`)).toBeTruthy()
   })
 
   it("shows no chat while the drawer is closed", async () => {
-    api.loadFileSessions.mockResolvedValue({ active: "linked", sessionIds: ["linked"], moved: [] })
     render(workbenchOf(false))
     expect(await screen.findByText(`notebook ${PATH}`)).toBeTruthy()
-    await vi.waitFor(() => expect(api.loadFileSessions).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.openWorkbenchChat).toHaveBeenCalled())
     expect(screen.queryByText(/^chat /)).toBeNull()
   })
 

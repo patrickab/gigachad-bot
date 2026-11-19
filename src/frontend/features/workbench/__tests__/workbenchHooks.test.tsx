@@ -54,7 +54,7 @@ describe("usePreparedWorkbench", () => {
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith(disk))
 
     rerender({ path: disk })
-    expect(result.current.prepared).toEqual({ path: disk, cwd: CWD })
+    expect(result.current.prepared).toEqual({ path: disk })
     expect(api.prepareWorkbench).toHaveBeenCalledTimes(1)
   })
 
@@ -93,7 +93,7 @@ describe("usePreparedWorkbench", () => {
     api.prepareWorkbench.mockResolvedValueOnce({ path, cwd: CWD })
     act(() => result.current.retry())
     expect(result.current.error).toBeNull()
-    await waitFor(() => expect(result.current.prepared?.cwd).toBe(CWD))
+    await waitFor(() => expect(result.current.prepared?.path).toBe(path))
   })
 
   it("drops an earlier failure when the failed path opens again", async () => {
@@ -125,7 +125,7 @@ describe("usePreparedWorkbench", () => {
     await waitFor(() => expect(result.current.prepared?.path).toBe(opened))
 
     rerender({ path: renamed, sessionKey: opened })
-    expect(result.current.prepared).toEqual({ path: renamed, cwd: CWD })
+    expect(result.current.prepared).toEqual({ path: renamed })
     expect(result.current.error).toBeNull()
     expect(api.prepareWorkbench).toHaveBeenCalledTimes(1)
   })
@@ -139,7 +139,7 @@ describe("usePreparedWorkbench", () => {
     await waitFor(() => expect(result.current.prepared?.path).toBe(restored))
 
     rerender({ path: next })
-    expect(result.current.prepared).toEqual({ path: next, cwd: CWD })
+    expect(result.current.prepared).toEqual({ path: next })
     expect(api.prepareWorkbench).toHaveBeenCalledTimes(1)
   })
 })

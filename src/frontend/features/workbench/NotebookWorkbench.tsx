@@ -1,15 +1,13 @@
 "use client"
 
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react"
-import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, NeovimStopped, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { NotebookDocument, useEditorPath } from "@/features/notebook/NotebookDocument"
 import { createNotebookTextStore } from "@/features/notebook/notebookTextStore"
-import { fileLead } from "@/features/omp/fileLead"
-import { fetchNotebookDirectory } from "@/lib/backend/api"
 import { baseName, extOf } from "@/lib/paths"
-import { cn, errorMessage } from "@/lib/utils"
+import { cn } from "@/lib/utils"
+import { fileLead } from "./fileLead"
 import { EDITOR_PAGE, NOTEBOOK_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
 import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
@@ -25,36 +23,16 @@ function quoteLanguage(path: string): string {
 type NotebookWorkbenchProps = WorkbenchChatProps & { path: string; tabId: string }
 
 /**
- * A notebook (`.ipynb`) shown by the tab `tabId`, with the workbench's omp chat drawer.
+ * A notebook (`.ipynb`) shown by the tab `tabId`, with the workbench's Pi chat drawer.
  *
  * - With Neovim on, a buffer holds the notebook as percent text (`<notebook>.ipynb<ext>`, never on disk). The notebook stays the source of truth: `:w` applies the text, every change of the notebook reaches the buffer
  * - `:q` leaves a "Start Neovim" button that opens a fresh buffer of the notebook as it is then
- * - The chat starts where the notebook's kernel runs (the mount root holding it, else its folder), so relative links resolve there
+ * - The chat runs where the notebook's kernel runs (the mount root holding it, else its folder, picked by the backend), so relative links resolve there
  * - Visual-mode `<leader>a` quotes the selected lines into the chat draft
  */
-export function NotebookWorkbench(props: NotebookWorkbenchProps) {
-  const { path } = props
-  const [cwd, setCwd] = useState<string | null>(null)
-  const [failure, setFailure] = useState<{ path: string; message: string } | null>(null)
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchNotebookDirectory(path, controller.signal).then(
-      (directory) => { setFailure(null); setCwd(directory) },
-      (cause: unknown) => { if (!controller.signal.aborted) setFailure({ path, message: errorMessage(cause, "Could not find the notebook's folder") }) },
-    )
-    return () => controller.abort()
-  }, [path, attempt])
-
-  if (failure?.path === path && cwd === null) return <LoadFailure message={failure.message} onRetry={() => { setFailure(null); setAttempt((count) => count + 1) }} />
-  if (cwd === null) return <LoadingPlaceholder />
-  return <PreparedNotebookWorkbench {...props} cwd={cwd} />
-}
-
-function PreparedNotebookWorkbench({ path, tabId, cwd, ...chatProps }: NotebookWorkbenchProps & { cwd: string }) {
+export function NotebookWorkbench({ path, tabId, ...chatProps }: NotebookWorkbenchProps) {
   const neovim = useNeovimSetting()
-  const chat = useWorkbenchChat(path, cwd, fileLead(path, cwd), chatProps)
+  const chat = useWorkbenchChat(path, (cwd) => fileLead(path, cwd), chatProps)
   const editor = useEditorPath(path)
   const [view, setView] = useWorkbenchView()
   const sessionKey = `${tabId}:${editor.generation}`

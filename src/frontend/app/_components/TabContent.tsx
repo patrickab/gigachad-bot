@@ -107,7 +107,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const canvas = useCanvasView()
   const {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems, onBranch,
+    filePicker, docs, persistence, memory, menuItems, runMenuCommand, shellCommands, turns, attachmentActions, attachMenuItems, onBranch,
   } = useTabChat({ focus, onOpenChat, onOpenItem })
   const { models } = chat
   const { standaloneFile } = filePicker
@@ -174,7 +174,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           totalUsage={chat.totalUsage}
           chatColumn={chatColumn}
           chatBody={chatBody}
-          ompShellCommands={ompShellCommands}
+          shellCommands={shellCommands}
           launch={launch}
           onLaunched={() => setLaunch(null)}
           onOpenItem={onOpenItem}

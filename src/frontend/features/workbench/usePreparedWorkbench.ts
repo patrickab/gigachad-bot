@@ -34,7 +34,7 @@ interface Prepared extends PreparedWorkbench {
 /**
  * Get the workbench item at `path` ready before it mounts: a stored document moves to disk, its new path goes to `onMoved`.
  *
- * - `prepared` is null until the backend answers, then holds the disk path and the chat's directory
+ * - `prepared` is null until the backend answers, then holds the disk path
  * - The path `onMoved` hands back counts as prepared, so the item's new path does not prepare again
  * - A renamed file stays prepared: its item keeps the path it was opened under as `sessionKey`, and `prepared.path` is its current path
  * - Another file of the same session (`sessionKey`, a LaTeX project's buffer switch) stays prepared too, whatever path the session was prepared under
@@ -46,7 +46,7 @@ export function usePreparedWorkbench(path: string, onMoved: (path: string) => vo
   const [requestedPath, setRequestedPath] = useState(path)
   const [attempt, setAttempt] = useState(0)
   const session = sessionKey ?? path
-  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey || prepared.session === session) ? { path, cwd: prepared.cwd } : null
+  const current = prepared !== null && (prepared.path === path || prepared.path === sessionKey || prepared.session === session) ? { path } : null
   const ready = current !== null
   const reportMoved = useEffectEvent(onMoved)
 

@@ -80,7 +80,7 @@ function DocumentStatus({ pdfText }: { pdfText: PdfMarkdown }) {
  * Wrap a PDF viewer with an LLM assistant grounded in the PDF's MinerU Markdown.
  *
  * - `chatOpen` shows the chat in the tab's file panel, closing it calls `onChatOpenChange(false)`. Its history lives as long as this component
- * - `renderChat` replaces that local chat with the owner's, e.g. an omp session panel, given the panel width and close action
+ * - `renderChat` replaces that local chat with the owner's, e.g. the PDF's Pi chat, given the panel width and close action
  * - Selecting text opens a one-shot question card, closed by Escape or any click outside it
  */
 export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderChat, children }: {

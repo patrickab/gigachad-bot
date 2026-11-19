@@ -65,7 +65,7 @@ export default defineConfig([
           crossFeature("workbench", "editor"),
           crossFeature("workbench", "navigation"),
           crossFeature("workbench", "notebook"),
-          crossFeature("workbench", "omp"),
+          crossFeature("workbench", "pi"),
           crossFeature("omp", "chat"),
           crossFeature("omp", "editor"),
           crossFeature("omp", "settings"),

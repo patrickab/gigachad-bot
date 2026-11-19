@@ -41,7 +41,7 @@ function MarkdownPage({ path, layout, text, loadError, onNavigate }: WorkbenchPa
 }
 
 /**
- * One `.md` file in the workbench: Neovim, its rendered preview and the omp chat drawer.
+ * One `.md` file in the workbench: Neovim, its rendered preview and the Pi chat drawer.
  *
  * - The preview renders the synced text, so it follows every save and every agent edit
  * - Mermaid and markmap documents fill the page height

@@ -49,7 +49,6 @@ function TestWorkbench(props: WorkbenchTestProps) {
   const notices = useWorkbenchNotice()
   return <Workbench {...{
     path: "/home/me/talk/main.tex",
-    cwd: "/home/me/talk",
     quoteLanguage: "latex",
     renderPane: () => null,
     notices,

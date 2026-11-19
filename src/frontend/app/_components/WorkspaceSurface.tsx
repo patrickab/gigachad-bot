@@ -23,19 +23,20 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
-import { canvasLead } from "@/features/omp/fileLead"
-import { OmpFileChat } from "@/features/omp/OmpFileChat"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
+import { canvasLead } from "@/features/workbench/fileLead"
+import { FileChat } from "@/features/workbench/FileChat"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
-import { PiTab, type PiLaunch } from "@/features/pi/PiTab"
+import { PiTab, type PiLaunch, type PiShellCommands } from "@/features/pi/PiTab"
+import type { PiInsertion } from "@/features/pi/PiComposer"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
-import type { OmpView, Usage } from "@/lib/domain/types"
+import type { Usage } from "@/lib/domain/types"
 import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
 import { isNotebookPath } from "@/lib/paths"
@@ -58,8 +59,8 @@ interface WorkspaceSurfaceProps {
   chatColumn: HTMLDivElement | null
   /** The chat, shown in chat mode and whenever another mode has no item to show. */
   chatBody: ReactNode
-  /** The tab's slash commands an omp composer offers (`/memorize`). */
-  ompShellCommands: ShellCommands
+  /** The tab's slash commands a Pi composer offers (`/memorize`). */
+  shellCommands: PiShellCommands
   /** First message of a Pi session started from the chat, sent by the Pi tab once its session is ready. */
   launch: PiLaunch | null
   onLaunched: () => void
@@ -95,15 +96,14 @@ const CANVAS_CHAT_WIDTH_PX = 320
  * - A LaTeX item's path may change under the same `sessionKey` too: another file of its project is a buffer switch in the same editor, the item keeps its `texFolder`
  * - A LaTeX item learns its project folder (`texFolder`) from the file's project, so the sidebar can route clicks on the project's files to this tab
  */
-function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
+function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands }: {
   item: WorkspaceItem
   onItemChange: (item: WorkspaceItem) => void
   onModeLabel: (label: string) => void
   drawerOpen: boolean
   onDrawerOpenChange: (open: boolean) => void
   onClose: () => void
-  shellCommands: ShellCommands
-  modelProps: ModelProps
+  shellCommands: PiShellCommands
 }) {
   const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => onItemChange({ ...item, path }), item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
@@ -111,15 +111,13 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
   const sessionKey = item.sessionKey ?? prepared.path
   const props = {
     path: prepared.path,
-    cwd: prepared.cwd,
-    ompView: item.omp,
-    onViewChange: (omp: OmpView) => onItemChange({ ...item, omp }),
+    chatSessionId: item.chat?.sessionId,
+    onChatSessionChange: (sessionId: string) => onItemChange({ ...item, chat: { sessionId } }),
     onPathChange: (path: string) => onItemChange({ ...item, path, sessionKey }),
     drawerOpen,
     onDrawerOpenChange,
     onClose,
     shellCommands,
-    modelProps,
   }
   const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
   return workbenchKindOf(prepared.path) === "latex"
@@ -128,18 +126,18 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, ompShellCommands, launch, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, shellCommands, launch, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
-  // omp needs host access, other logins keep the PDF's local assistant
+  // The workbench's Pi chats need host access, other logins keep the PDF's local assistant
   const hostAccess = useHostAccess()
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const piTopBar = useTopBarSlot("workbenchAgent")
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
-  // The workbench's bar, a notebook's too: the surface renders its controls into the agent, status and center slots, the chat drawer opens at the right end
+  // The workbench's bar, a notebook's too: the surface renders its controls into the status and center slots, the chat drawer opens at the right end
   const workbenchBar = {
-    left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+    left: null,
     center: <>
       <TopBarSlot name="workbenchStatus">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
       <TopBarSlot name="center">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
@@ -154,10 +152,10 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
     </>,
   }
-  const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands: ompShellCommands, modelProps }
-  // A stored or mounted canvas has an omp chat, a screenshot opens it and lands in its draft. The scratch canvas has none
+  const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands }
+  // A stored or mounted canvas has a Pi chat, a screenshot opens it and lands in its draft. The scratch canvas has none
   const [canvasChatOpen, setCanvasChatOpen] = useState(false)
-  const [canvasInsertion, setCanvasInsertion] = useState<ComposerInsertion | null>(null)
+  const [canvasInsertion, setCanvasInsertion] = useState<PiInsertion | null>(null)
   const captureCount = useRef(0)
   const attachCapture = useCallback((png: File) => {
     setCanvasChatOpen(true)
@@ -213,12 +211,12 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
             editorModel={config.selectedModel}
           />
           {canvasChatPath && canvasChatOpen && (
-            <OmpFileChat
+            <FileChat
               path={canvasChatPath}
               width={CANVAS_CHAT_WIDTH_PX}
               onClose={() => setCanvasChatOpen(false)}
-              shellCommands={ompShellCommands}
-              lead={canvasLead(canvasChatPath)}
+              shellCommands={shellCommands}
+              lead={() => canvasLead(canvasChatPath)}
               insertion={canvasInsertion}
               onInserted={() => setCanvasInsertion(null)}
             />
@@ -235,8 +233,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         body: <NotebookWorkbench
           path={documentItem.path}
           tabId={tab.id}
-          ompView={documentItem.omp}
-          onViewChange={(omp) => setWorkspaceItem({ ...documentItem, omp })}
+          chatSessionId={documentItem.chat?.sessionId}
+          onChatSessionChange={(sessionId) => setWorkspaceItem({ ...documentItem, chat: { sessionId } })}
           {...workbenchChatProps}
         />,
       }
@@ -271,7 +269,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               chatOpen={pdfChatOpen}
               onChatOpenChange={setPdfChatOpen}
               renderChat={hostAccess ? ({ width, onClose }) => (
-                <OmpFileChat path={documentItem.path} width={width} onClose={onClose} shellCommands={ompShellCommands} />
+                <FileChat path={documentItem.path} width={width} onClose={onClose} shellCommands={shellCommands} />
               ) : undefined}
             >
               <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} />
@@ -311,7 +309,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           {filePanelToggle}
         </>,
         runsUnderTopBar: !!ompView && ompView.kind !== "settings",
-        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
+        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={shellCommands} /> : chatBody,
       }
     },
     pi: () => {
@@ -323,7 +321,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         runsUnderTopBar: false,
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} shellCommands={ompShellCommands} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
           </div>
         ) : chatBody,
       }

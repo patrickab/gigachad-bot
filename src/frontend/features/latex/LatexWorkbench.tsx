@@ -29,7 +29,7 @@ type LatexWorkbenchProps = ProjectWorkbenchProps & {
 const NO_ROOT = "No root document"
 
 /**
- * The LaTeX project of the shown file in the workbench: Neovim over its files, the built PDF and the omp chat drawer.
+ * The LaTeX project of the shown file in the workbench: Neovim over its files, the built PDF and the Pi chat drawer.
  *
  * - The project (folder, root) is read from the shown file, a new `path` under the same workbench is a buffer switch and reads it again
  * - The chat belongs to the project folder, so every file of the project shares it

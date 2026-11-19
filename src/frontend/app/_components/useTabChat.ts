@@ -12,10 +12,9 @@ import { useChatTurns } from "@/features/chat/useChatTurns"
 import { useFilePicker } from "@/features/chat/useFilePicker"
 import { useMemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
 import type { MemorizeSource } from "@/features/memory/useMemorizeFlow"
-import type { ShellCommands } from "@/features/omp/OmpComposer"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
 import { useSlashCommands } from "@/features/navigation/useSlashCommands"
-import { piSessionHistory } from "@/features/pi/PiTab"
+import { piSessionHistory, type PiShellCommands } from "@/features/pi/PiTab"
 import { fetchOmpSessionHistory, loadChatHistory } from "@/lib/backend/api"
 import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
@@ -75,7 +74,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
     openFilePicker: filePicker.openFilePicker,
     memorize: memory.memorize,
   })
-  const ompShellCommands = useMemo<ShellCommands>(() => ({ names: menuItems.map((item) => item.command.slice(1)), run: runSlashCommand }), [menuItems, runSlashCommand])
+  const shellCommands = useMemo<PiShellCommands>(() => ({ names: menuItems.map((item) => item.command.slice(1)), run: runSlashCommand }), [menuItems, runSlashCommand])
   const turns = useChatTurns({
     chat,
     chatId,
@@ -189,7 +188,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
 
   return {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems,
+    filePicker, docs, persistence, memory, menuItems, runMenuCommand, shellCommands, turns, attachmentActions, attachMenuItems,
     onBranch: tab.historyFile ? handleBranch : undefined,
   }
 }
