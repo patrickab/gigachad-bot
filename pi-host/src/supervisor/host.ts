@@ -2,13 +2,13 @@
  * The supervisor behind `createSupervisor()`: live session registry, `POST /sessions`, `/ws` multiplexing, eviction,
  * and the `sessions_changed` broadcast (M25).
  *
- * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, session watcher), Catalog's
- *   `sessionInfo`
+ * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, fork, session watcher), Catalog's
+ *   `sessionInfo` and `copyPrivateState`
  * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18)
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
-import { sessionInfo, type SessionInfo } from "../catalog/index.ts";
+import { copyPrivateState, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
 import { PROFILES, type Host, type Profile, type SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
@@ -16,7 +16,8 @@ import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
 import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
 
-type Resume = null | "continue" | { sessionPath: string };
+type ForkOf = { sessionPath: string; entryId: string };
+type Resume = null | "continue" | { sessionPath: string } | { forkOf: ForkOf };
 type StartRequest = {
   cwd: string;
   profile: Profile;
@@ -49,7 +50,13 @@ async function parseStartRequest(body: unknown, host: Host): Promise<StartReques
     resume === null ||
     resume === undefined ||
     resume === "continue" ||
-    (isRecord(resume) && typeof resume.sessionPath === "string" && isAbsolute(resume.sessionPath));
+    (isRecord(resume) && typeof resume.sessionPath === "string" && isAbsolute(resume.sessionPath)) ||
+    (isRecord(resume) &&
+      isRecord(resume.forkOf) &&
+      typeof resume.forkOf.sessionPath === "string" &&
+      isAbsolute(resume.forkOf.sessionPath) &&
+      typeof resume.forkOf.entryId === "string" &&
+      resume.forkOf.entryId !== "");
   if (!validResume) return fail(400, "invalid_resume");
   if (model !== undefined && !(isRecord(model) && typeof model.provider === "string" && typeof model.id === "string")) {
     return fail(400, "invalid_model");
@@ -180,12 +187,20 @@ export class SupervisorHost implements Supervisor {
     };
   }
 
-  /** Resolve the session file to resume, then return its live child or spawn one. */
+  /** Resolve the session file to resume (writing it first for a fork), then return its live child or spawn one. */
   private async start(request: StartRequest): Promise<StartOutcome> {
     let meta: SessionMeta | undefined;
     let cwd = request.cwd;
     if (request.resume === "continue") {
       meta = (await this.host.listSessions(cwd, false))[0];
+    } else if (request.resume && "forkOf" in request.resume) {
+      const { forkOf } = request.resume;
+      const forked = await this.host.forkSession(forkOf);
+      if (!forked.ok) return fail(404, forked.error);
+      await copyPrivateState(this.host, forkOf.sessionPath, forked.path);
+      meta = await this.host.sessionMeta(forked.path);
+      if (!meta) return fail(404, "not_found");
+      cwd = meta.cwd;
     } else if (request.resume) {
       meta = await this.host.sessionMeta(request.resume.sessionPath);
       if (!meta) return fail(404, "not_found");

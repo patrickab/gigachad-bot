@@ -2,6 +2,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "bun";
 import type {
+  ForkRequest,
+  ForkResult,
   Host,
   LockResult,
   MoveResult,
@@ -110,6 +112,16 @@ class FakeHost implements Host {
     const path = sessionPath.replace(from, to);
     this.sessions.delete(sessionPath);
     this.sessions.set(path, { ...meta, sessionPath: path, realPath: path, archived: toArchive });
+    return { ok: true, path };
+  }
+
+  async forkSession(request: ForkRequest): Promise<ForkResult> {
+    const source = this.sessions.get(request.sessionPath);
+    if (!source) return { ok: false, error: "not_found" };
+    if (request.entryId !== "e1") return { ok: false, error: "no_entry" };
+    const path = `${LIVE_ROOT}/project/fork.jsonl`;
+    const sessionId = "01a1f3fe-0000-7000-8000-00000000000c";
+    this.sessions.set(path, { ...source, sessionId, sessionPath: path, realPath: path, parentSession: request.sessionPath });
     return { ok: true, path };
   }
 
@@ -258,4 +270,32 @@ test("listing without a cwd, search and the sessions_changed broadcast go throug
   const frames = (await Promise.all(received)).map((event) => JSON.parse(String((event as MessageEvent).data)));
   expect(frames).toEqual([0, 1].map(() => ({ type: "sessions_changed", sessionPaths: [otherPath] })));
   for (const socket of sockets) socket.close();
+});
+
+test("a fork is written by the Host, gets the source's private data and runs under a lock on the new file", async () => {
+  const sourcePath = `${LIVE_ROOT}/project/2026-11-19_source.jsonl`;
+  host.sessions.set(sourcePath, {
+    sessionId: "01a1f3fe-0000-7000-8000-00000000000d",
+    sessionPath: sourcePath,
+    realPath: sourcePath,
+    cwd: CWD,
+    createdAt: "2026-11-19T12:00:00.000Z",
+    modifiedAt: "2026-11-19T12:05:00.000Z",
+    firstMessage: "fork me",
+    messageCount: 2,
+    archived: false,
+  });
+  host.states.set(sourcePath, { revision: 3, pinned: true, data: { draft: "x" } });
+  const fork = (entryId: string) =>
+    api("/sessions", { method: "POST", body: JSON.stringify({ cwd: CWD, profile: "coding", resume: { forkOf: { sessionPath: sourcePath, entryId } } }) });
+
+  expect(await fork("nope")).toEqual({ status: 404, body: { error: "no_entry" } });
+  const started = await fork("e1");
+  const forkPath = `${LIVE_ROOT}/project/fork.jsonl`;
+  expect(started.status).toBe(200);
+  expect(started.body.session).toMatchObject({ sessionPath: forkPath, parentSession: sourcePath, machine: "box-1" });
+  expect(host.spawned.at(-1)).toEqual({ profile: "coding", cwd: CWD, piArgs: ["--mode", "rpc", "--session", forkPath] });
+  expect([...host.locks.values()]).toContain(forkPath);
+  expect(host.states.get(forkPath)).toEqual({ revision: 0, pinned: false, data: { draft: "x" } });
+  expect(host.states.get(sourcePath)).toEqual({ revision: 3, pinned: true, data: { draft: "x" } });
 });

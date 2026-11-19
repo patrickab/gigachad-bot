@@ -155,6 +155,19 @@ def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositor
     }
 
 
+def test_open_session_passes_a_fork_through(monkeypatch, repositories):
+    host = _serve(monkeypatch, {"POST /sessions": (200, {"session": {**SESSION, "parentSession": "/s/source.jsonl"}})})
+    fork_of = {"sessionPath": "/s/source.jsonl", "entryId": "a1b2c3d4"}
+
+    response = _client().post("/api/pi/sessions", json={"repo": "app", "resume": {"forkOf": fork_of}})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["session"]["parentSession"] == "/s/source.jsonl"
+    assert json.loads(host.requests[0].content) == {"cwd": str(repositories / "app"), "profile": "coding", "resume": {"forkOf": fork_of}}
+    invalid = {"repo": "app", "resume": {"forkOf": {"sessionPath": "/s/source.jsonl"}}}
+    assert _client().post("/api/pi/sessions", json=invalid).status_code == 422
+
+
 def test_unknown_repositories_are_refused_before_pi_host(monkeypatch, repositories):
     host = _serve(monkeypatch, {})
 

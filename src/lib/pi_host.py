@@ -97,7 +97,18 @@ class ResumeFromFile(ContractModel):
     session_path: str
 
 
-Resume = Literal["continue"] | ResumeFromFile | None
+class ForkPoint(ContractModel):
+    session_path: str
+    entry_id: str
+
+
+class ResumeFork(ContractModel):
+    """A new session with the branch of *session_path* from the root to *entry_id* (inclusive); the leaf clones."""
+
+    fork_of: ForkPoint
+
+
+Resume = Literal["continue"] | ResumeFromFile | ResumeFork | None
 
 
 class SessionState(ContractModel):
@@ -221,11 +232,12 @@ async def list_sessions(cwd: str | None, *, archived: bool) -> list[SessionInfo]
 async def open_session(
     cwd: str, resume: Resume, *, model: ModelChoice | None = None, thinking: str | None = None
 ) -> SessionInfo:
-    """Spawn a coding session in *cwd*, or return the live one. A session file held elsewhere answers 409 `locked`."""
+    """Spawn a coding session in *cwd*, or return the live one; a fork writes its file first. A session file held
+    elsewhere answers 409 `locked`, an unknown fork source or entry 404."""
     body: dict[str, object] = {
         "cwd": cwd,
         "profile": "coding",
-        "resume": resume.model_dump(by_alias=True) if isinstance(resume, ResumeFromFile) else resume,
+        "resume": resume.model_dump(by_alias=True) if isinstance(resume, ContractModel) else resume,
     }
     if model is not None:
         body["model"] = model.model_dump(by_alias=True)

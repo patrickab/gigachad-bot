@@ -12,6 +12,7 @@
  * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd or across all cwds, header and entry
  *   metadata, lookup by id
  * - `moveSession`: archive or restore a session file and its sidecar
+ * - `forkSession`: write a new session file holding one branch of another (D11, Pi's fork and clone)
  * - `readState` / `writeState`: the private state sidecar (M19, M20)
  * - `listFiles`: `@` completion candidates of a cwd (M7)
  * - `searchSessions`: full-text search over live session transcripts (M24)
@@ -64,6 +65,12 @@ export type PrivateState = { revision: number; pinned: boolean; data: Record<str
 
 export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
 
+/** The entry a fork ends at (inclusive) in a source session file; the source's leaf makes a clone. */
+export type ForkRequest = { sessionPath: string; entryId: string };
+
+/** Path of the new session file, or why there is none (`not_found`: no source session, `no_entry`: no such entry). */
+export type ForkResult = { ok: true; path: string } | { ok: false; error: "not_found" | "no_entry" };
+
 /** One session matching a search: where the best hit sits and the text around it. */
 export type SearchMatch = {
   sessionPath: string;
@@ -89,6 +96,11 @@ export interface Host {
   findSession(sessionId: string): Promise<string | undefined>;
   /** Move between the live and archive roots under the session's lock. */
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
+  /**
+   * New session in the live root of the source's cwd: new id, `parentSession` = source path, the entries from the
+   * root to `entryId`. The source file stays unchanged.
+   */
+  forkSession(request: ForkRequest): Promise<ForkResult>;
   /** Defaults when there is no sidecar; other read errors throw. */
   readState(sessionPath: string): Promise<PrivateState>;
   writeState(sessionPath: string, state: PrivateState): Promise<void>;

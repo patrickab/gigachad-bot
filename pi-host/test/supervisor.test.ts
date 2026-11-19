@@ -453,6 +453,89 @@ test("archive during a spawn is refused and the resumed child keeps its file", a
   }
 });
 
+describe("fork", () => {
+  const cwd = workdir("fork");
+  const labelEntry = (id: string, parentId: string, targetId: string, label: string) => ({
+    type: "label",
+    id,
+    parentId,
+    timestamp: "2026-11-19T10:00:01.000Z",
+    targetId,
+    label,
+  });
+  // u1 -> a1 -> l1 (labels u1) -> u3 -> a3 -> l2 (labels a3) is abandoned; u1 -> a1 -> l1 -> u2 -> a2 is the leaf.
+  const { sessionId: sourceId, sessionPath: source } = writeSessionFile(cwd, [
+    messageEntry("u1", null, "user", "first"),
+    messageEntry("a1", "u1", "assistant", "one"),
+    labelEntry("l1", "a1", "u1", "start"),
+    messageEntry("u3", "l1", "user", "abandoned"),
+    messageEntry("a3", "u3", "assistant", "three"),
+    labelEntry("l2", "a3", "a3", "dead end"),
+    messageEntry("u2", "l1", "user", "second"),
+    messageEntry("a2", "u2", "assistant", "two"),
+  ]);
+  const sourceText = readFileSync(source, "utf8");
+  writeFileSync(`${source}.gigachad.json`, JSON.stringify({ revision: 4, pinned: true, data: { draft: "keep" } }));
+
+  async function fork(entryId: string): Promise<{ session: any; lines: any[] }> {
+    const response = await startSession({ cwd, resume: { forkOf: { sessionPath: source, entryId } } });
+    expect(response.status).toBe(200);
+    const { session } = await response.json();
+    const lines = readFileSync(session.sessionPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    return { session, lines };
+  }
+
+  test("a fork mid-branch keeps the root..entry path and its labels, copies private state, holds the new file", async () => {
+    const { session, lines } = await fork("u2");
+    const [header, ...entries] = lines;
+    expect(header).toMatchObject({ type: "session", version: 3, id: session.sessionId, cwd, parentSession: source });
+    expect(session).toMatchObject({ cwd, parentSession: source, messageCount: 3, live: { running: false } });
+    expect(session.sessionPath).toBe(join(source, "..", `${header.timestamp.replace(/[:.]/g, "-")}_${header.id}.jsonl`));
+    expect(entries.map((entry) => [entry.id, entry.parentId])).toEqual([
+      ["u1", null],
+      ["a1", "u1"],
+      ["u2", "a1"],
+      [entries[3].id, "u2"],
+    ]);
+    expect(entries[3]).toMatchObject({ type: "label", targetId: "u1", label: "start", timestamp: "2026-11-19T10:00:01.000Z" });
+
+    expect(readFileSync(source, "utf8")).toBe(sourceText);
+    expect(JSON.parse(readFileSync(`${session.sessionPath}.gigachad.json`, "utf8"))).toEqual({
+      revision: 0,
+      pinned: false,
+      data: { draft: "keep" },
+    });
+    const contender = Bun.spawnSync(["flock", "--nonblock", "--conflict-exit-code", "75", session.sessionPath, "true"]);
+    expect(contender.exitCode).toBe(75);
+
+    const reader = await client();
+    await reader.attach(session.sessionId);
+    const { resync } = await reader.resync(session.sessionId, null);
+    expect(resync.entries.filter((entry: any) => entry.type === "message").map((entry: any) => entry.id)).toEqual(["u1", "a1", "u2"]);
+  });
+
+  test("forking at the leaf clones the active branch", async () => {
+    const { session, lines } = await fork("a2");
+    expect(lines[0]).toMatchObject({ id: session.sessionId, parentSession: source });
+    expect(session.sessionId).not.toBe(sourceId);
+    expect(lines.slice(1).map((entry) => entry.id).slice(0, 4)).toEqual(["u1", "a1", "u2", "a2"]);
+    expect(lines.slice(1).filter((entry) => entry.type === "label")).toEqual([
+      expect.objectContaining({ parentId: "a2", targetId: "u1", label: "start" }),
+    ]);
+    expect(readFileSync(source, "utf8")).toBe(sourceText);
+  });
+
+  test("an unknown source or entry gives 404, an invalid fork 400", async () => {
+    const missing = await startSession({ cwd, resume: { forkOf: { sessionPath: join(cwd, "none.jsonl"), entryId: "u1" } } });
+    expect([missing.status, await missing.json()]).toEqual([404, { error: "not_found" }]);
+    const noEntry = await startSession({ cwd, resume: { forkOf: { sessionPath: source, entryId: "zz" } } });
+    expect([noEntry.status, await noEntry.json()]).toEqual([404, { error: "no_entry" }]);
+    for (const forkOf of [{ sessionPath: "relative.jsonl", entryId: "u1" }, { sessionPath: source, entryId: "" }, { sessionPath: source }]) {
+      expect((await startSession({ cwd, resume: { forkOf } })).status).toBe(400);
+    }
+  });
+});
+
 test("a child's exit is handled while a descendant still holds its stdout and stderr", async () => {
   const { session } = await (await startSession({ cwd: workdir("orphan") })).json();
   const driver = await client();

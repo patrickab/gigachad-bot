@@ -9,9 +9,21 @@
  * contract.
  */
 import { stat } from "node:fs/promises";
-import type { Host, LockResult, MoveResult, PiChild, PrivateState, SearchMatch, SessionMeta, SpawnRequest } from "../index.ts";
+import type {
+  ForkRequest,
+  ForkResult,
+  Host,
+  LockResult,
+  MoveResult,
+  PiChild,
+  PrivateState,
+  SearchMatch,
+  SessionMeta,
+  SpawnRequest,
+} from "../index.ts";
 import { childEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
+import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { searchSessions } from "./search.ts";
 import { findSession, listSessions, moveSession, sessionMeta } from "./sessions.ts";
@@ -90,6 +102,10 @@ export class LocalHost implements Host {
 
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult> {
     return moveSession(sessionPath, toArchive);
+  }
+
+  forkSession(request: ForkRequest): Promise<ForkResult> {
+    return forkSession(request);
   }
 
   readState(sessionPath: string): Promise<PrivateState> {
