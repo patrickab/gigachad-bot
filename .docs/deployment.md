@@ -99,8 +99,6 @@ cd "$PROD" && uv sync --python 3.12 --locked --no-dev
   install breaks the chat-ui pack (`tsc` from `src/frontend/node_modules`) and makes
   the backend's reloader restart. Started separately, run `run-frontend.sh` to
   completion of its install before the sidecars.
-- `run.sh` also packs `@gigachad/chat-ui` once for omp-web and LearnHarness and exports
-  `GIGACHAD_CHAT_UI_TARBALL`, which `pack_chat_ui` (`deploy/lib.sh`) prefers over packing.
 - Retain the seven-day release cooldown (`exclude-newer`, `.npmrc`'s
   `min-release-age`) and disabled npm install scripts (`ignore-scripts`). Review
   required scripts before explicitly running them. Neither cooldown nor automated
@@ -186,7 +184,7 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
   user, like `$ENV` and `~/.secrets`. That path is the one `src/lib/host_access.py`
   and the LearnHarness sandbox hide. pi-host's session-file lock (M1) keeps one
   writer per session across both: a session live in one answers `409 locked` in the other.
-- Like omp-web, the pi-host unit has no `NoNewPrivileges`, `PrivateTmp` or
+- The pi-host unit has no `NoNewPrivileges`, `PrivateTmp` or
   `UMask`: it runs the user's Pi agents.
 - `redeploy.sh` restarts pi-host before the backend, only when `pi-host/` changed
   (code, the Pi pin, the lockfile), the installed `pi --version` differs from the
@@ -195,7 +193,8 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
   unpinned ones after `PI_HOST_IDLE_MINUTES`, 15, pinned ones stay) and prints the
   restart command instead (M4). An installed `pi` other than the pin stops the
   redeploy before any restart, the running pi-host keeps serving.
-  The installer stops, disables and removes the retired `gigachad-bot-omp.service`.
+  The installer stops, disables and removes the retired `gigachad-bot-omp.service`, and the omp-web units once
+  no omp session runs (see "Retire omp-web").
 - The backend starts the stateless LikeC4 service, points `C4_SERVICE_URL` at it,
   and stops it on exit. Each start uses `npm ci` against its lockfile. If unavailable,
   architecture routes return 503, other features remain available.
@@ -206,7 +205,6 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 | LikeC4 | `127.0.0.1:8011` | `127.0.0.1:8012` |
 | PostgreSQL | `gigachad-dev` container/volume | `gigachad-prod` container/volume |
 | pi-host (Pi sessions, completion gateway, usage) | `127.0.0.1:8300` (`run.sh`) | `127.0.0.1:8301`, same token file and `~/.pi/agent` |
-| omp-web / its gate | `127.0.0.1:30177` / - | Same omp-web, gate `127.0.0.1:30179` (Serve `:8443`) |
 | LearnHarness / LiteLLM proxy / gate | `127.0.0.1:30181` / `127.0.0.1:30183` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
 | Factory engine / preview gate | `127.0.0.1:8090` / `127.0.0.1:30185` | Same defaults, one instance per machine, gate behind Serve `:8445` |
 
@@ -240,126 +238,35 @@ cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
   profiles, `uv sync` replaces them. Put custom profiles in a directory named by
   `AGENT_SANDBOX_PROFILE_PATH`, searched before bundled profiles. Doctor must pass.
 
-### Provision omp-web (omp tabs)
+### Retire omp-web (once per host)
 
-- Use unmodified upstream [kahme247/ompweb](https://github.com/kahme247/ompweb).
-  gigachad-bot's side is the overlay `ompweb-overlay/` in this repository.
-- Put `omp` on `PATH`.
+Pi tabs replaced the omp tabs: the omp-web units, their runner and the Tailnet gate are gone from the
+repository. On a host that still runs them, after the redeploy that removed them:
 
-```bash
-git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
-```
+1. Reinstall the units. `install-systemd-service.sh` stops, disables and removes
+   `gigachad-bot-omp-web-gate.service`, `gigachad-bot-omp-web.service` and `gigachad-bot-omp-web-host.service`
+   only when no omp session runs (omp-web's `runningSessionIds`, else the processes the host daemon runs besides
+   itself). Otherwise it keeps them and says how many sessions run: rerun it once they are idle.
 
-- Serve upstream `main`. Production's ref is `PRODUCTION_OMP_WEB_REF` in
-  `deploy/lib.sh`, `origin/main`, not the env file. `redeploy.sh` fetches it,
-  the clone above needs no other remote.
+   ```bash
+   "$PROD/deploy/install-systemd-service.sh"
+   systemctl --user list-unit-files 'gigachad-bot-omp-web*'   # expect none
+   ```
 
-- Run `"$PROD/deploy/install-systemd-service.sh"` once after adding a unit (e.g.
-  `gigachad-bot-omp-web-host.service`), `redeploy.sh` then starts it.
+2. Turn off Tailscale Serve on `:8443`, which pointed at the removed gate:
 
-- `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
-  applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
-  `@gigachad/chat-ui` into it. The source checkout stays untouched.
-- omp-web runs its own omp build (`ompweb-omp`). A source checkout never downloads it, so `run-omp-web.sh` builds
-  `runner/release/ompweb-omp-<os>-<arch>` with upstream's scripts whenever the served `runner/` tree changes (about a
-  minute, needs GitHub). Without it omp-web answers "Model list is temporarily unavailable" and starts no session.
-- `redeploy.sh` restarts `gigachad-bot-omp-web-host.service` with a new served commit: a daemon of the old checkout
-  stays linked (`needs-upgrade` in `/api/hosts`) but runs nothing.
-- Packing compiles with `src/frontend`'s TypeScript and types, so production
-  needs `src/frontend/node_modules`. `redeploy.sh` installs it (`npm ci
-  --ignore-scripts`) when missing or when the lockfile changed.
-- Before serving a local ref branch (development's `main`), `run-omp-web.sh`
-  fetches `origin` and, when the branch lacks `origin/main`, moves a copy onto it
-  in a temporary worktree (a fast-forward for `main`, a rebase for a topic
-  branch), runs the overlay checks (`tsc`, overlay node tests) and moves the
-  branch (and its clean worktree) there. Local only, never pushed. A conflict,
-  failed check, dirty branch worktree or offline start keeps the branch and
-  prints one `omp-web auto-update:` line why; the start goes on. A
-  remote-tracking ref (production's `origin/main`) is served as fetched.
-  Details: `.docs/integration-ompweb.md`, "Automatic upstream update".
-- Install/build initially and rebuild on source changes (`npm run build`, Bun, seconds).
-- Restart after updates: an existing listener is reused, its update applies at
-  its next start.
+   ```bash
+   tailscale serve --https=8443 off
+   tailscale serve status   # expect :443, :8444 and :8445 only
+   ```
 
-| Variable | Default / purpose |
-| --- | --- |
-| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb_original`, upstream checkout |
-| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb-upstream`, served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `main` (local branch, auto-updated); production uses `PRODUCTION_OMP_WEB_REF` in `deploy/lib.sh`, `origin/main`. A remote-tracking ref is fetched by `redeploy.sh` |
-| `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` |
-| `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
-| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177`, upstream for backend/gate |
-| `GIGACHAD_OMP_WEB_FRAME_URL` | Defaults to upstream URL, use the gate's HTTPS URL in production |
-| `GIGACHAD_OMP_WEB_GATE_PORT` | `30179`, loopback identity gate |
-| `GIGACHAD_OMP_WEB_AUTH` | Optional trusted upstream auth header |
-| `GIGACHAD_OMP_WEB` | `1`, set `0` to skip development startup |
-| `GIGACHAD_AUTO_UPDATE` | `1`, set `0` to serve the ref as is (no fetch, no rebase) |
-| `GIGACHAD_OMP_WEB_HOST` | `1`, set `0` to not start the `ompweb host` daemon from `run-omp-web.sh` (development: log `<GIGACHAD_OMP_WEB_DIR>.host.log`, production units set it, their own unit runs the daemon) |
+3. Remove the `GIGACHAD_OMP_WEB_*` lines from `$ENV`, nothing reads them.
+4. Optional cleanup: `~/.local/share/gigachad-bot/ompweb-upstream*` (served worktree, daemon log and lock) and
+   `~/git/ompweb_original`. Old omp sessions stay in `~/.omp/agent/sessions`, reachable through the `omp` CLI.
 
-#### Production: units and the Tailnet gate
-
-```text
-private Serve :8443 -> identity gate 127.0.0.1:30179 -> omp-web 127.0.0.1:30177
-```
-
-- Treat OMP as host-user command execution. Never publish omp-web directly.
-- Require host capability in `src/backend/omp_web_gate.py` before forwarding.
-- Do not rely on omp-web's `SameSite=Lax` password cookie for a cross-site iframe.
-- Configure allowed frame origins. Missing origins produce a blank frame.
-
-Add to `$ENV`:
-
-```dotenv
-GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
-```
-
-```bash
-"$PROD/deploy/install-systemd-service.sh"
-systemctl --user start gigachad-bot-omp-web.service gigachad-bot-omp-web-host.service gigachad-bot-omp-web-gate.service
-"$PROD/deploy/tailscale-serve.sh" 30179 8443
-systemctl --user restart gigachad-bot.service
-```
-
-- Run the units through `deploy/run-production-omp-web.sh` with `server`, `host` or `gate`.
-- The host daemon (`ompweb host`, `gigachad-bot-omp-web-host.service`) runs from the checkout the server serves
-  (`GIGACHAD_OMP_WEB_DIR`, the controlled `GIGACHAD_OMP_WEB_REF`), never from an npm install or the upstream default.
-  The server unit sets `GIGACHAD_OMP_WEB_HOST=0` so the unit owns the daemon.
-- Keep normal `/tmp`, sudo, and file modes available to agents. The server
-  deliberately lacks sandboxing flags.
-- Refuse non-host logins at the gate.
-- Find login names with `tailscale status --json`, field `User.*.LoginName`.
-
-#### Update omp-web
-
-- Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`,
-  the embed UI in `ompweb-overlay/`. Both ship with the gigachad-bot commit, so
-  `redeploy.sh` restarts omp-web when they or the served ref change.
-- Production serves upstream `main` as fetched: `redeploy.sh` fetches `origin`,
-  the launcher never moves it. Run the overlay checks against `origin/main`
-  before a redeploy (`.docs/integration-ompweb.md`, "Private overlay check checkout").
-- `redeploy.sh` exits with an error instead of serving a broken omp-web:
-  - before the restart, when `seams.patch` does not apply to the new commit
-    (checked in a throwaway index, the old omp-web keeps serving)
-  - right after it, when the unit fails to start (systemd restarted it once), printing its log.
-    omp-web is down until a fixed overlay or upstream commit is redeployed, runs survive in the daemon.
-- The protocol is unversioned: a stale omp-web silently drops messages it does
-  not know until restarted.
-
-Manual update:
-
-1. Prefer an idle omp-web (`curl -s http://127.0.0.1:30177/api/sessions`, empty
-   `runningSessionIds`). Runs survive a server restart (`gigachad-bot-omp-web-host.service`
-   holds them), never restart the host unit during one.
-2. Run the overlay checks against `origin/main` and commit gigachad-bot, whose overlay the restart applies.
-3. Run `redeploy.sh` (or restart `gigachad-bot-omp-web.service`) and verify
-   `curl -sf http://127.0.0.1:30177/login`.
-4. Reload the frontend.
-5. Smoke session loading, history, turn rendering, and tab switching. Test prompt
-   sending, Stop, model/thinking controls, and completion only in an explicitly
-   approved disposable session, never an existing conversation.
-
-**Known limitation:** after a fresh frame load, a session created by the first tab
-uses omp-web's last folder rather than that tab's folder. Later tabs are unaffected.
+Development: `run.sh` no longer starts omp-web. An instance an earlier `run.sh` started on `127.0.0.1:30177` ends
+with that run, its `ompweb host` daemon loop (started with `setsid`) keeps running until stopped by hand once its
+omp sessions are idle: `pkill -f 'omp-web.js host'`.
 
 ### Provision learn mode (LearnHarness)
 
@@ -412,8 +319,8 @@ tailscale serve status
 
 - Expect persistent private HTTPS from the helper:
   `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
-- The frame gates get their own HTTPS ports with the same helper: omp-web
-  `30179 8443`, LearnHarness `30182 8444`, factory previews `30185 8445` (see their sections). Serve accepts any
+- The frame gates get their own HTTPS ports with the same helper: LearnHarness
+  `30182 8444`, factory previews `30185 8445` (see their sections). Serve accepts any
   HTTPS port, only Funnel is limited to 443, 8443 and 10000.
 - Verify from another permitted Tailnet device. Never add a public fallback:
 
@@ -447,8 +354,7 @@ curl --fail --show-error https://<tailnet-hostname>/api/config
 ```
 
 - Fail closed on missing grants or unsupported Serve flags.
-- Check `/api/config`: `omp_web_url` and `learnharness_url` are set for granted
-  logins, `null` otherwise.
+- Check `/api/config`: `learnharness_url` is set for granted logins, `null` otherwise.
 
 ## 3. Configure the Vercel frontend
 
@@ -556,6 +462,10 @@ Keep the private hostname and loopback port stable:
    start from the restored lockfile. A revision from before pi-host runs the OMP
    model source instead: reinstall that revision's units with its
    `deploy/install-systemd-service.sh` and disable `gigachad-bot-pi-host.service`.
+7. A revision from before the omp-web removal serves the omp tabs through omp-web again: reinstall that revision's
+   units with its `deploy/install-systemd-service.sh`, start `gigachad-bot-omp-web.service`,
+   `gigachad-bot-omp-web-host.service` and `gigachad-bot-omp-web-gate.service`, and restore Serve with its
+   `deploy/tailscale-serve.sh 30179 8443`.
 
 Schema steps stay applied after a code rollback. Older code runs against them
 unchanged: step 0013 only deleted superseded `changes` rows (replay output is

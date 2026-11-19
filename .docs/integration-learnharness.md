@@ -1,6 +1,6 @@
 # LearnHarness integration (learn mode)
 
-Everything about learn mode: why it exists, the decisions behind it, how it is built, the rules for changing it, operations, and what a future agent needs to know. Read this file only when working on learn mode. Sibling for the omp tabs, whose pattern learn mode follows: `.docs/integration-ompweb.md`. Planning history (PRD, tickets, contracts, slice reports, reviews, upstream proposal drafts): `~/git/gigachad-bot/.wayfinder/learnharness-integration/` (gitignored, local only).
+Everything about learn mode: why it exists, the decisions behind it, how it is built, the rules for changing it, operations, and what a future agent needs to know. Read this file only when working on learn mode. Planning history (PRD, tickets, contracts, slice reports, reviews, upstream proposal drafts): `~/git/gigachad-bot/.wayfinder/learnharness-integration/` (gitignored, local only).
 
 ## Goal
 
@@ -12,9 +12,9 @@ Everything about learn mode: why it exists, the decisions behind it, how it is b
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | LearnHarness runs **unmodified** as a sidecar at a pinned ref, plus a private overlay copied in as `custom/` and a seam patch of a few lines, like omp-web ([ADR 0001](adr/0001-learnharness-as-unmodified-sidecar.md)) | A fork would turn every upstream change into maintenance |
+| D1 | LearnHarness runs **unmodified** as a sidecar at a pinned ref, plus a private overlay copied in as `custom/` and a seam patch of a few lines, the pattern the retired omp-web integration used ([ADR 0001](adr/0001-learnharness-as-unmodified-sidecar.md)) | A fork would turn every upstream change into maintenance |
 | D2 | gigachad-bot is AGPL-3.0-only, plus a section 7 permission for MinerU (`LICENSE`, `LICENSE-EXCEPTION`, [ADR 0002](adr/0002-agpl-3-0-only.md)) | License-clean overlay and upstream contributions; MinerU >= 3.1 adds a usage threshold AGPL does not allow |
-| D3 | **Hide and drive** (the omp-web way): gigachad's model selector, sidebar and look drive LearnHarness's hidden UI through upstream's own writes, events and dialogs | Maximum UI customization without reimplementing LearnHarness logic |
+| D3 | **Hide and drive**: gigachad's model selector, sidebar and look drive LearnHarness's hidden UI through upstream's own writes, events and dialogs | Maximum UI customization without reimplementing LearnHarness logic |
 | D4 | **LearnHarness's own composer, docks and stats bar stay** (restyled). A shell composer was built and then dropped | It coupled to an untyped upstream quirk (sync ref read on send), needed a restore rule, insets CSS on unlabeled dock markup, modal dimming and key forwarding: about 900 lines for little gain |
 | D5 | **gigachad's model selector stays** (model drive), LearnHarness's model pills are hidden but mounted, the session model is frozen (read-only) | The user picks from gigachad's catalog in gigachad's UI; one session is taught by one model |
 | D6 | **LearnHarness's sidebar and title bar are hidden**: the session title is the tab name, learn sessions are a category in gigachad's sidebar, and every feature they offered has a shell path (feature table below) | User decision. Cost: every new upstream feature in those surfaces needs a shell path, the inventory guard fails until it has one |
@@ -388,7 +388,7 @@ GIGACHAD_LEARNHARNESS_FRAME_URL=https://<tailnet-hostname>:8444
 - `GIGACHAD_LEARNHARNESS_FRAME_URL`: the gate's HTTPS origin, the backend gives it
   to host logins in `/api/config` (`learnharness_url`).
 - `GIGACHAD_LEARNHARNESS_FRAME_ANCESTORS` defaults to `GIGACHAD_CORS_ORIGINS` in
-  production, like omp-web. It becomes LearnHarness's CSP `frame-ancestors` and
+  production. It becomes LearnHarness's CSP `frame-ancestors` and
   the origins its bridge trusts, baked into the build: changing it rebuilds.
 
 | Variable | Default / purpose |
@@ -430,7 +430,7 @@ systemctl --user restart gigachad-bot.service
   its own and answers requests from any origin. The gate forwards only logins
   granted `gigachad.local/cap/host`, and refuses writes to LearnHarness's
   provider keys, custom endpoint and subscriptions.
-- One instance per machine, like omp-web. Development's `run.sh` reuses the
+- One instance per machine. Development's `run.sh` reuses the
   production LearnHarness and proxy on the default ports, with the same data.
   If a development instance already holds `30181` when the unit starts, the
   launcher reuses it and the unit exits as inactive: stop the development one

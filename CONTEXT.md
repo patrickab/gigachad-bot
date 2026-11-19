@@ -25,7 +25,7 @@ A session with a local model through gigachad's own chat engine.
 _Avoid_: chat (as the umbrella term)
 
 **Code session**:
-A session with an OMP coding agent.
+A session with a Pi coding agent.
 _Avoid_: OMP session, omp tab
 
 **Learn session**:

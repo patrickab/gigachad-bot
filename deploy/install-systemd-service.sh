@@ -20,7 +20,6 @@ if [[ ! -x $backend ]]; then
 fi
 require_runner backend "${worktree}/run-backend.sh"
 require_runner pi-host "${script_dir}/run-production-pi-host.sh"
-require_runner omp-web "${script_dir}/run-production-omp-web.sh"
 require_runner factory "${worktree}/run-factory.sh"
 require_runner "preview gate" "${worktree}/run-preview-gate.sh"
 require_runner "learn mode" "${script_dir}/run-production-learnharness.sh"
@@ -29,9 +28,6 @@ require_runner "LearnHarness backup" "${script_dir}/backup-learnharness.sh"
 readonly units=(
     gigachad-bot.service
     gigachad-bot-pi-host.service
-    gigachad-bot-omp-web.service
-    gigachad-bot-omp-web-host.service
-    gigachad-bot-omp-web-gate.service
     gigachad-bot-factory.service
     gigachad-bot-preview-gate.service
     gigachad-bot-litellm-proxy.service
@@ -40,8 +36,46 @@ readonly units=(
 )
 # Started by its timer, not enabled itself.
 readonly timer_units=(gigachad-bot-learnharness-backup.service gigachad-bot-learnharness-backup.timer)
-# Units an earlier version installed: the OMP model source (its runner is gone, pi-host replaced it).
-readonly retired_units=(gigachad-bot-omp.service)
+# Units an earlier version installed: the OMP model source (its runner is gone, pi-host replaced it) and omp-web with its
+# host daemon and Tailnet gate (Pi replaced the omp tabs, their runner is gone too).
+retired_units=(gigachad-bot-omp.service)
+readonly omp_web_units=(gigachad-bot-omp-web-gate.service gigachad-bot-omp-web.service gigachad-bot-omp-web-host.service)
+readonly omp_web_host_unit=gigachad-bot-omp-web-host.service
+
+# omp sessions running a turn, stopping the host daemon would end them: omp-web's own running list, else (omp-web down)
+# the processes the daemon runs besides itself.
+running_omp_sessions() {
+    local answer main cgroup pid count=0
+    answer="$(curl -sf --max-time 5 http://127.0.0.1:30177/api/sessions 2>/dev/null \
+        | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("runningSessionIds", [])))' 2>/dev/null || true)"
+    if [[ -n $answer ]]; then
+        printf '%s\n' "$answer"
+        return
+    fi
+    main="$(systemctl --user show -p MainPID --value "$omp_web_host_unit" 2>/dev/null || true)"
+    cgroup="$(systemctl --user show -p ControlGroup --value "$omp_web_host_unit" 2>/dev/null || true)"
+    if [[ -n $cgroup && -r /sys/fs/cgroup$cgroup/cgroup.procs ]]; then
+        while read -r pid; do
+            if [[ $pid != "$main" ]]; then
+                count=$((count + 1))
+            fi
+        done <"/sys/fs/cgroup$cgroup/cgroup.procs"
+    fi
+    printf '%s\n' "$count"
+}
+
+for unit in "${omp_web_units[@]}"; do
+    if [[ -e "${unit_dir}/${unit}" ]]; then
+        running="$(running_omp_sessions)"
+        if [[ $running == 0 ]]; then
+            retired_units+=("${omp_web_units[@]}")
+        else
+            printf 'omp-web kept: %s omp session(s) running, run this script again when they are idle to remove its units\n' \
+                "$running" >&2
+        fi
+        break
+    fi
+done
 for unit in "${retired_units[@]}"; do
     if [[ -e "${unit_dir}/${unit}" ]]; then
         systemctl --user disable --now "$unit" || true

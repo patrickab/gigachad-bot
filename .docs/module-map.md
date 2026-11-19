@@ -37,7 +37,6 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- identity.py               Request identity and host-access capability
 |   |   |-- websocket_origin.py       `is_trusted_origin`, `is_allowed_websocket`, `require_trusted_request`: origin and host-access gates of WebSockets and changing requests
 |   |   |-- sync.py                   PostgreSQL notification broker
-|   |   |-- omp_web_gate.py           Identity-checking omp-web frame proxy
 |   |   |-- learnharness_gate.py      Identity-checking LearnHarness frame proxy, refuses its credential routes
 |   |   |-- jupyter_service.py        Jupyter service: the one process (Unix socket) holding the Jupyter Server, its token and kernel map for all workers
 |   |   |-- preview_gate.py           Identity-checking proxy to every factory preview, picked by the port in the path
@@ -71,7 +70,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files, SyncTeX search and slide gaps, template sets and primitive previews
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
-|   |       |-- omp.py                omp-web API boundary
+|   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, the session WebSocket relay to pi-host (host access)
 |   |       |-- factory.py            Agent factory API boundary
 |   |       |-- deploy.py             Host-gated production redeploy trigger
 |   |       `-- upstream.py           Host-access dependency and adapter error mapping
@@ -127,15 +126,14 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- agent_sandbox_adapter.py  Native sandbox runner adapter
 |   |   |-- fake_sandbox_runner.py    Docker-free runner (selected by env in `routes/deps.py`)
 |   |   |-- sandbox_plot.py           Plot generation
-|   |   |-- omp_source.py             OMP auth-gateway model integration
-|   |   |-- omp_web.py                omp-web URL/response-contract owner
+|   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token
+|   |   |-- pi_models.py              Pi model catalog for local chats (pi-host gateway through LiteLLM `litellm_proxy/`)
 |   |   |-- factory.py                External factory engine adapter
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- llm_resilience.py         One retry for stale LiteLLM parameter rejections, `completion_text`
-|   |   |-- omp_cli.py                `run_omp`: one runner for the `omp` CLI
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
-|   |   |-- provider_usage.py         OMP subscription usage reader/cache
+|   |   |-- provider_usage.py         Pi subscription usage reader/cache (pi-host `/usage`)
 |   |   |-- neovim_session.py         Neovim PTY/process lifecycle, buffers per session, `base` tracking and merges, one typed backing per document (`_PrivateCopy`, `_NotebookText`)
 |   |   |-- pty_process.py            `PtyProcess` (child on a PTY, output queue, resize, foreground check, hangup on close) and the PTY helpers Neovim shares
 |   |   |-- file_watch.py             `FileWatcher`: `watchfiles` over files (via parent folder) and folders, own threads, no build output, `.git`, `node_modules` or editor scratch
@@ -224,17 +222,20 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- TabManager.tsx    Tab state provider, live preview of a background tab scaled into the picker card; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabPicker.tsx (tab picker, opened by Space)
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
-|       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
-|       |   |   |-- OmpProvider.tsx
-|       |   |   |-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
-|       |   |   |-- OmpChatPanel.tsx, useFileChat.ts, ChatSessionMenu.tsx File chat sidebar primitive: sessions per file or LaTeX project folder, menu, New session (`fileLead.ts`: `File:`/`Project:` leads)
-|       |   |   |-- SessionPicker.tsx Top-bar session picker: running, recent and older omp sessions from the shared overview
-|       |   |   |-- WorkspacePicker.tsx Composer project selector of an empty chat: fuzzy picker over file mounts and omp workspaces, a pick makes the first message start an omp session
-|       |   |   `-- OmpFileChat.tsx   File chat for owners that only view the file (PDF, canvas), prepares it first
-|       |   |-- workbench/            Editor | rendered file | omp drawer primitive
+|       |   |-- pi/                   Pi sessions rendered natively, the only frontend code that knows Pi's protocol
+|       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar, shell commands (`/memorize`)
+|       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
+|       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
+|       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
+|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): running, recent and older sessions, full-text search
+|       |   |   |-- PiWorkspacePicker.tsx Composer project selector of an empty chat, a pick makes the first message start a Pi session
+|       |   |   `-- tools/            Tool-call rows (ported from omp-web, MIT)
+|       |   |-- workbench/            Editor | rendered file | Pi chat drawer primitive
 |       |   |   |-- Workbench.tsx     Neovim, quoting, status slot and editor notes on `WorkbenchFrame`, kinds supply `renderPane`
 |       |   |   |-- WorkbenchFrame.tsx `WorkbenchFrame`: the one layout of `Workbench` and `NotebookWorkbench`, `EditorNote`
-|       |   |   |-- WorkbenchChat.tsx `useWorkbenchChat` and `WorkbenchChat`: the omp chat drawer shared by `Workbench` and `NotebookWorkbench`
+|       |   |   |-- WorkbenchChat.tsx `useWorkbenchChat` and `WorkbenchChat`: the Pi chat drawer shared by `Workbench` and `NotebookWorkbench`
+|       |   |   |-- DocumentChat.tsx, useDocumentChat.ts, fileLead.ts Pi `document` session chat per file or LaTeX project folder, session menu, New session (`File:`/`Project:` leads)
+|       |   |   |-- FileChat.tsx      File chat for owners that only view the file (PDF, canvas), prepares it first
 |       |   |   |-- pages.ts           `EDITOR_PAGE`/`PREVIEW_PAGE`: the panel classes of the Neovim panel and the preview page, shared with `NotebookWorkbench` and the notebook's markdown cells
 |       |   |   |-- WorkbenchSplit.tsx Editor/split/preview view and switch, shared page box (`usePaneLayout`, `PANE_TOP_PX`)
 |       |   |   |-- usePreparedWorkbench.ts, useFollowBuffers.ts Prepare once per path, every open file follows disk changes into Neovim
@@ -300,7 +301,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- useEventListener.ts, useEscapeLayer.ts, useOutsidePress.ts
 |       |   |-- useFollowFiles.ts     Follow absolute files and folders on disk, `onChange(path)`
 |       |   |-- useResource.ts        `useResource`, `useResourceState`, `useResourceFamily`: subscribe to a shared resource, first read as a startup read
-|       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the shared omp/learn frame over a tab's slot, previewed tab first
+|       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the learn frame over a tab's slot, previewed tab first
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
 |       |   |-- backend/              HTTP, URL, runtime API base and stream clients
@@ -315,7 +316,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- syncStream.ts         Change feed: `subscribeToChanges(listener, { ownDevice })`, `syncCursorReady`
 |       |   |-- resource.ts           `createResource`, `resourceFamily`: one cached value and one request for every tab, `set`/`invalidate`/`refresh` restart a running read, `revalidateStale`
 |       |   |-- domain/               Browser domain types and pure document/graph logic
-|       |   |   |-- types.ts              Chat core, models, omp
+|       |   |   |-- types.ts              Chat core, models, Pi
 |       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts    `files.ts` holds `isNewFileIn`, a folder entry of a project lists `children`
 |       |   |   |-- jupyter.ts            Kernelspec list and running kernel shapes of `/api/jupyter/*`
 |       |   |   |-- workbench.ts, latex.ts    Workbench kinds, notes guard, rename path rewrite, LaTeX build result and tex project
@@ -328,13 +329,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
-|           `-- chat-ui/              Independently packaged local/OMP chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, click hints, palette, protocol
+|           `-- chat-ui/              Independently packaged local/learn chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, click hints, palette, learn protocol
 |               |-- src/
 |               |   |-- index.ts      Public rendering exports
 |               |   |-- Turn.tsx      Shared turn rendering
 |               |   |-- MarkdownRenderer.tsx
-|               |   |-- protocol.ts   Iframe message protocol, unversioned
-|               |   |-- hints.ts/.css Vimium-style `f` click hints, one session across shell and frame (`features/omp/clickHints.ts`, overlay `embed/hints.ts`)
+|               |   |-- learn-protocol.ts LearnHarness iframe message protocol
+|               |   |-- hints.ts/.css Vimium-style `f` click hints, installed app-wide by `AppShell`
 |               |   `-- palette.css   Canonical role palette
 |               |-- pack.mjs          Build/pack/sync tooling
 |               `-- package.json      Package-local dependencies and distribution contract
@@ -352,18 +353,16 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |-- shell.py                       Run repository shell scripts against fake commands
 |   |-- test_postgres_mode_end_to_end.py
 |   |-- test_data_store_conformance.py
-|   |-- test_file_roots.py
-|   `-- test_omp_web.py
+|   `-- test_file_roots.py
 |-- scripts/
 |   |-- setup-postgres.sh              PostgreSQL setup helper
 |   `-- build-tauri-linux.sh           Desktop sidecar/AppImage build (expects absent `src/frontend/src-tauri/`)
-|-- redeploy.sh                       Production rebase/restart, also for omp-web and its gate
+|-- redeploy.sh                       Production rebase/restart of pi-host, backend, learn mode and the preview gate
 |-- run.sh                            Development launcher composition
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
 |-- run-frontend.sh                   Frontend launch/setup
-|-- run-omp.sh                        OMP auth gateway launcher
-|-- run-omp-web.sh                    External omp-web worktree launcher
-|-- ompweb-overlay/                   Private omp-web overlay (embed, bridge, composer, theme), see AGENTS.md
+|-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
+|-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md`
 |-- run-learnharness.sh               LearnHarness sidecar launcher
 |-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
 |-- run-litellm-proxy.sh              LiteLLM proxy, learn mode's model endpoint
@@ -372,10 +371,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- factory.yaml                      Factory hooks, test gate and preview configuration
 `-- deploy/                           Production units and service/ingress helpers
     |-- gigachad-bot.service
-    |-- gigachad-bot-omp.service, gigachad-bot-omp-web.service, gigachad-bot-omp-web-host.service, gigachad-bot-omp-web-gate.service
+    |-- gigachad-bot-pi-host.service
     |-- gigachad-bot-learnharness*.service/.timer, gigachad-bot-litellm-proxy.service  Learn mode units, see `.docs/integration-learnharness.md`
     |-- gigachad-bot-factory.service
-    |-- run-production-*.sh           Production runners of omp, omp-web and LearnHarness
+    |-- run-production-*.sh           Production runners of pi-host and LearnHarness
     |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile)
     |-- install-systemd-service.sh
     |-- load-env.sh                   Literal runtime configuration loader
@@ -388,11 +387,11 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 
 - Compose features in `src/frontend/app/_components/`; do not make a feature import the app shell.
 - Put feature behavior under its owner in `features/`. Import another feature only through permitted public files at the feature root or one sub-feature level; concept-folder internals are not a general cross-feature API.
-- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation`, `notebook -> navigation/workbench`, `factory -> editor`, `navigation -> factory/learn/memory/omp`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/notebook/omp`, and `omp -> chat/editor/settings`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature except `notebook` (`NotebookWorkbench`). Add shared domain logic below the features rather than bypassing the boundary.
+- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation`, `notebook -> navigation/workbench`, `factory -> editor`, `navigation -> factory/learn/memory/pi`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/notebook/pi`, and `pi -> chat/editor`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature except `notebook` (`NotebookWorkbench`). Add shared domain logic below the features rather than bypassing the boundary.
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
-- Keep all iframe URLs, bridge knowledge and message-protocol imports in `features/omp/`. The canonical protocol lives in `packages/chat-ui/src/protocol.ts`; other shell modules may consume the shared rendering package but not that protocol directly.
-- Keep `packages/chat-ui/` independently distributable: no `@/` app imports and no undeclared reliance on the shell's dependencies. `pack.mjs` packs it for `run-omp-web.sh`, which installs it into the served omp-web for `ompweb-overlay/`; do not vendor omp-web code here.
+- Keep all Pi protocol knowledge in `features/pi/`, and the learn frame's iframe URL and message protocol (`packages/chat-ui/src/learn-protocol.ts`) in `features/learn/`.
+- Keep `packages/chat-ui/` independently distributable: no `@/` app imports and no undeclared reliance on the shell's dependencies. `pack.mjs` packs it for `run-learnharness.sh`, which installs it into the served LearnHarness for `learnharness-overlay/`.
 
 ### Backend and separate services
 
@@ -401,8 +400,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Use `data_store.py` / `postgres_data_store.py` for app-owned text (`json_docs.py` for JSON values) and `asset_store.py` for bytes; use domain stores for chat/project/memory operations. Keep logical namespaces and key builders in `storage_namespace.py`. Postgres stores take a `changes.UserScope` and record change-log rows through it. `lib/canvas_store.py` is the explicit transactional canvas authority, not a generic document-store helper.
 - Route mounted-file work through `lib/file_roots.py` (listing in `file_walk.py`, host-access policy in `host_access.py`, wiki links in `wiki_links.py`); use `git_diff.py` and `git_worktree.py` for git operations, both over `git.py` (`GitError`, `git_text`, `git_ok`; `WorktreeError` is a `GitError`). Keep host paths distinct from database keys and client URLs.
 - Split architecture changes by ownership: `architecture_workspace.py` reads/commits sources; `architecture_service.py` runs validated writes and the commit-conflict retry; `c4_service.py` calls the service; `src/c4/` parses, lays out and edits source in memory; `features/editor/architecture/` handles browser interaction. The C4 service does not own persistence.
-- Keep omp-web contract knowledge in `lib/omp_web.py`, factory contracts in `lib/factory.py`, and shared request/validation plumbing (`request_json`, `UpstreamClient`) in `lib/upstream.py`. Their route adapters map failures; `backend/omp_web_gate.py` is an identity proxy, not another upstream API adapter.
-- Treat omp-web, the Agents-in-a-box factory engine, and native sandbox implementation as external dependencies. This repository owns their integration surfaces, not their internal task/session/execution engines.
+- Keep pi-host contract knowledge in `lib/pi_host.py`, factory contracts in `lib/factory.py`, and shared request/validation plumbing (`request_json`, `UpstreamClient`) in `lib/upstream.py`. Their route adapters map failures; `backend/learnharness_gate.py` and `backend/preview_gate.py` are identity proxies, not upstream API adapters.
+- Treat Pi, the Agents-in-a-box factory engine, and native sandbox implementation as external dependencies. This repository owns their integration surfaces (pi-host included), not their internal task/session/execution engines.
 - Keep sandbox execution and persistence distinct: `sandbox_service.py` stages workspace state, `routes/histories.py` checkpoints it after a successful chat save, and `sandbox_store.py` records durable manifests/runs. See [architecture](architecture.md#sandbox-checkpoint-boundary).
 - Add a new numbered SQL migration under `db/schema/` for schema changes; `lib/db_schema.py` records checksums, so applied migration files are not editable history.
 
@@ -438,16 +437,16 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | LaTeX build, tex projects or PDF pane | `src/lib/latex.py`, `routes/latex.py`, `features/latex/` | `file_walk.py` (build output), `routes/workbench.py` (promote, images), `components/content/PdfViewer.tsx` (`pageBox`, layered swap under one `documentKey`); `tests/test_latex.py`, latex `__tests__/`, `PdfViewer.swap.test.tsx` |
 | SyncTeX, presentation templates, slides or present mode | `src/lib/synctex.py`, `tex_source.py`, `latex_templates.py`, `templates/latex/`, `features/latex/useSynctex.ts`, `AddSlide.tsx`, `features/latex/present/` | `templates/latex/AGENTS.md` (re-render after every change), `components/content/pdf/pdfText.ts`, `routes/workbench.py` (create from a set, image references), `neovim_rpc.py` (slide/image insertion); `tests/test_synctex.py`, `tests/test_tex_source.py`, `tests/test_latex_templates.py`, present `__tests__/` |
 | Jupyter notebooks (editor, kernels, proxy, file sync) | `src/lib/jupyter.py`, `src/backend/routes/jupyter.py`, `src/frontend/features/notebook/` | `src/backend/reverse_proxy.py`, `websocket_origin.py` (`require_trusted_request`), rename/delete hooks in `routes/documents.py`, `lib/domain/jupyter.ts`, `hooks/useRootFileDocument.ts`, `lib/backend/fileEvents.ts` (`announceFileClosed`), `next.config.mjs`, `AGENTS.md` "Jupyter notebooks"; Neovim on the notebook: `features/workbench/NotebookWorkbench.tsx`, `WorkbenchFrame.tsx`, `features/notebook/notebookText.ts`, `notebookTextStore.ts`, `NeovimEditor.tsx`, `routes/neovim.py`, `tests/test_neovim.py`; `tests/test_jupyter.py`, notebook and workbench `__tests__/` |
-| File chat sidebar (omp sessions per file or LaTeX project folder) | `src/frontend/features/omp/OmpChatPanel.tsx`, `useFileChat.ts`, `fileLead.ts`, `ChatSessionMenu.tsx`, `OmpFileChat.tsx` | `routes/workbench.py` session links, `features/editor/FilePanel.tsx`; omp `__tests__/useFileChat.test.tsx`, `tests/test_workbench.py` |
+| File chat sidebar (Pi sessions per file or LaTeX project folder) | `src/frontend/features/workbench/DocumentChat.tsx`, `useDocumentChat.ts`, `fileLead.ts`, `FileChat.tsx` | `routes/workbench.py` (`POST /api/workbench/chat`), `lib/workbench/links.py`, `features/editor/FilePanel.tsx`; workbench `__tests__/DocumentChat.test.tsx`, `tests/test_workbench_chat.py` |
 | Learn mode | `src/lib/learnharness.py`, `src/lib/learnharness_config.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `run-litellm-proxy.sh` |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
-| Provider usage or OMP model gateway | `src/lib/provider_usage.py`, `omp_source.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `run-omp.sh`; `tests/test_provider_usage.py`, `tests/test_omp_source.py` |
-| OMP sessions, embed composer or shared protocol | `src/lib/omp_web.py`, `src/backend/routes/omp.py`, `src/frontend/features/omp/` | `packages/chat-ui/src/protocol.ts`, `AGENTS.md` integration rules; `tests/test_omp_web.py`, omp `__tests__/` |
+| Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
+| Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
 | Factory tasks, review submission or preview UI | `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/frontend/features/editor/diff/review.ts`, `app/_components/deepLink.ts`, `factory.yaml`; `tests/test_factory.py`, factory/diff `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
-| Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `omp_web_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_omp_web_gate.py` |
+| Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |
 | Storage schema, change streams or API transport | `db/schema/`, `src/lib/db_schema.py`, `postgres_data_store.py`, `asset_store.py`; `src/backend/sync.py` | `routes/sync.py`, `src/frontend/lib/backend/`; `tests/test_data_store_conformance.py`, `tests/test_sync.py`, `tests/test_postgres_mode_end_to_end.py` |
 | Reusable interaction or content rendering | `src/frontend/components/ui/`, `components/content/`, `hooks/`, `packages/chat-ui/` | Colocated `__tests__/`; preserve feature-independent imports and package distribution boundaries |

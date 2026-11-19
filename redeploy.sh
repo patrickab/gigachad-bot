@@ -9,12 +9,6 @@
 # running a turn (M4, `running` in pi-host's /health; idle and pinned sessions resume after it).
 # A pi whose version differs from the pin stops the redeploy before any restart.
 #
-# Then omp-web (omp tabs): restarts gigachad-bot-omp-web.service when the upstream ref
-# it serves (GIGACHAD_OMP_WEB_REF, default origin/main, fetched here) moved, origin/main
-# moved past a local ref branch (the launcher moves it on start), or ompweb-overlay/ or the
-# chat-ui package changed, never while an omp session runs, and restarts its Tailnet gate. The unit's
-# run-omp-web.sh resets the served worktree to the ref and applies the overlay on start.
-#
 # Then learn mode, unless a learn session is busy: restarts the LiteLLM proxy (its start
 # regenerates learn mode's model list from the catalog), restarts LearnHarness when the
 # commit its launcher would serve moved (the newest release tag passing the overlay
@@ -30,13 +24,6 @@ port=8002
 
 pi_host_unit=gigachad-bot-pi-host.service
 pi_host_url=http://127.0.0.1:8301
-
-omp_web_unit=gigachad-bot-omp-web.service
-omp_web_host_unit=gigachad-bot-omp-web-host.service
-omp_web_gate_unit=gigachad-bot-omp-web-gate.service
-omp_web_remote=https://github.com/kahme247/ompweb.git
-omp_web_url=http://127.0.0.1:30177
-omp_web_gate_url=http://127.0.0.1:30179
 
 proxy_unit=gigachad-bot-litellm-proxy.service
 learn_unit=gigachad-bot-learnharness.service
@@ -70,22 +57,9 @@ backend_up() {
     systemctl --user is-active --quiet "$unit" && curl -s -o /dev/null "http://127.0.0.1:$port/"
 }
 
-omp_web_up() {
-    systemctl --user is-active --quiet "$omp_web_unit" && curl -sf -o /dev/null "$omp_web_url/login"
-}
-
-# The gate answers 403 to a request without Tailscale login, that is the healthy answer.
-omp_web_gate_up() {
-    systemctl --user is-active --quiet "$omp_web_gate_unit" && [[ $(curl -s -o /dev/null -w '%{http_code}' "$omp_web_gate_url/") == 403 ]]
-}
-
 # A setting from the production env file the units read, else the launcher's default.
 prod_setting() {
     (source "$prod/deploy/load-env.sh" && printf '%s' "${!1:-$2}")
-}
-
-running_omp_sessions() {
-    curl -sf "$omp_web_url/api/sessions" | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("runningSessionIds", [])))'
 }
 
 proxy_up() {
@@ -157,7 +131,7 @@ uv sync --python 3.12 --no-dev
 if [[ ! -d src/c4/node_modules ]] || ! git diff --quiet "$old" "$new" -- src/c4/package-lock.json; then
     npm ci --prefix src/c4 --no-audit --no-fund
 fi
-# run-omp-web.sh packs @gigachad/chat-ui with src/frontend's tsc and types. Scripts stay off, only tsc runs.
+# run-learnharness.sh packs @gigachad/chat-ui with src/frontend's tsc and types. Scripts stay off, only tsc runs.
 if [[ ! -d src/frontend/node_modules ]] || ! git diff --quiet "$old" "$new" -- src/frontend/package-lock.json; then
     npm ci --prefix src/frontend --ignore-scripts --no-audit --no-fund
 fi
@@ -210,102 +184,6 @@ if ! wait_until 30 1 backend_up; then
     exit 1
 fi
 printf "%s is up on 127.0.0.1:%s at %s\n" "$unit" "$port" "$(git rev-parse --short HEAD)"
-
-# omp-web
-if ! systemctl --user cat "$omp_web_unit" "$omp_web_host_unit" "$omp_web_gate_unit" >/dev/null 2>&1; then
-    printf "omp-web units are not installed: run %s/deploy/install-systemd-service.sh\n" "$prod" >&2
-    exit 1
-fi
-omp_web_repo="$(prod_setting GIGACHAD_OMP_WEB_REPO "$HOME/git/ompweb_original")"
-omp_web_dir="$(prod_setting GIGACHAD_OMP_WEB_DIR "$HOME/.local/share/gigachad-bot/ompweb-upstream")"
-omp_web_ref="$(prod_setting GIGACHAD_OMP_WEB_REF "$PRODUCTION_OMP_WEB_REF")"
-if [[ ! -d $omp_web_repo/.git ]]; then
-    printf "No omp-web checkout at %s: git clone %s %s\n" "$omp_web_repo" "$omp_web_remote" "$omp_web_repo" >&2
-    exit 1
-fi
-if git -C "$omp_web_repo" rev-parse --verify --quiet "refs/remotes/$omp_web_ref" >/dev/null; then
-    git -C "$omp_web_repo" fetch "${omp_web_ref%%/*}"
-fi
-omp_web_new="$(git -C "$omp_web_repo" rev-parse "$omp_web_ref^{commit}")"
-omp_web_old="$(git -C "$omp_web_dir" rev-parse HEAD 2>/dev/null || true)"
-
-# Whether the overlay's seams apply to commit $1, checked in a throwaway index: nothing is checked out or stopped.
-seams_apply() {
-    local index
-    index="$(mktemp)"
-    GIT_INDEX_FILE="$index" git -C "$omp_web_repo" read-tree "$1" \
-        && GIT_INDEX_FILE="$index" git -C "$omp_web_repo" apply --cached --check "$prod/ompweb-overlay/seams.patch"
-    local status=$?
-    rm -f "$index"
-    return $status
-}
-
-# Up, or exit as soon as the unit failed once (systemd counts its automatic restarts, a manual restart resets the count).
-omp_web_started() {
-    omp_web_up && return 0
-    if (( $(systemctl --user show -p NRestarts --value "$omp_web_unit") > 0 )); then
-        journalctl --user -u "$omp_web_unit" -n 30 --no-pager -o cat >&2 || true
-        printf "%s failed to start at %s, see the log above\n" "$omp_web_unit" "$omp_web_ref" >&2
-        exit 1
-    fi
-    return 1
-}
-
-# With a local branch as the ref, a new origin/main alone also restarts: run-omp-web.sh moves the branch onto it on start.
-# Not when its auto-update already failed for this branch and origin/main (the stamp's key starts with both), nor offline.
-omp_web_behind=false
-if [[ $(prod_setting GIGACHAD_AUTO_UPDATE 1) != 0 ]] \
-    && git -C "$omp_web_repo" show-ref --verify --quiet "refs/heads/$omp_web_ref" \
-    && GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$omp_web_repo" fetch --quiet origin </dev/null 2>/dev/null \
-    && omp_web_main="$(git -C "$omp_web_repo" rev-parse --verify --quiet refs/remotes/origin/main)" \
-    && ! git -C "$omp_web_repo" merge-base --is-ancestor "$omp_web_main" "$omp_web_new"; then
-    omp_web_failed_key="$(head -n1 "$omp_web_dir.auto-update-failed" 2>/dev/null || true)"
-    if [[ $omp_web_failed_key != "$omp_web_new $omp_web_main "* ]]; then
-        omp_web_behind=true
-    fi
-fi
-
-if [[ $omp_web_old != "$omp_web_new" ]] || $omp_web_behind || ! git diff --quiet "$old" "$new" -- ompweb-overlay src/frontend/packages/chat-ui || ! omp_web_up; then
-    running="$(running_omp_sessions 2>/dev/null || echo 0)"
-    if [[ $running != 0 ]]; then
-        printf "omp-web not restarted: %s omp session(s) running, run systemctl --user restart %s when they are idle\n" \
-            "$running" "$omp_web_unit" >&2
-    else
-        if ! seams_apply "$omp_web_new"; then
-            printf "omp-web not restarted: ompweb-overlay/seams.patch does not apply to %s (%s), it keeps serving %s\n" \
-                "$omp_web_ref" "${omp_web_new:0:7}" "${omp_web_old:0:7}" >&2
-            exit 1
-        fi
-        if [[ -n $omp_web_old && $omp_web_old != "$omp_web_new" ]]; then
-            git -C "$omp_web_repo" --no-pager log --oneline "$omp_web_old..$omp_web_new" || true
-        fi
-        printf "Restarting %s at %s\n" "$omp_web_unit" "$omp_web_ref"
-        systemctl --user restart "$omp_web_unit"
-        if ! wait_until 600 1 omp_web_started; then
-            systemctl --user --no-pager status "$omp_web_unit" >&2 || true
-            printf "%s did not come up within 10 min\n" "$omp_web_unit" >&2
-            exit 1
-        fi
-        # A daemon of the old checkout stays linked but cannot run the new server's sessions. None is running here.
-        if [[ $omp_web_old != "$omp_web_new" ]]; then
-            systemctl --user restart "$omp_web_host_unit"
-        fi
-    fi
-fi
-printf "%s is up on %s at %s\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)"
-
-# The daemon outlives the server restarts above (the new server adopts its runs), it is restarted only with a new served
-# commit. Starting is a no-op when active.
-systemctl --user start "$omp_web_host_unit"
-printf "%s is running (from %s)\n" "$omp_web_host_unit" "$omp_web_dir"
-
-systemctl --user restart "$omp_web_gate_unit"
-if ! wait_until 30 1 omp_web_gate_up; then
-    systemctl --user --no-pager status "$omp_web_gate_unit" >&2 || true
-    printf "%s did not come up within 30s\n" "$omp_web_gate_unit" >&2
-    exit 1
-fi
-printf "%s is up on %s\n" "$omp_web_gate_unit" "$omp_web_gate_url"
 
 # Learn mode
 if ! systemctl --user cat "$proxy_unit" "$learn_unit" "$learn_gate_unit" gigachad-bot-learnharness-backup.timer >/dev/null 2>&1; then

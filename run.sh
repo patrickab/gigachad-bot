@@ -47,7 +47,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
-# Install sandbox-only Python packages into the shared venv before OMP starts. The
+# Install sandbox-only Python packages into the shared venv before the services start. The
 # scripts started below skip their own sync, which would race this one.
 sync_python_deps --extra sandbox-plot
 export GIGACHAD_DEPS_SYNCED=1
@@ -65,7 +65,7 @@ if [[ "${GIGACHAD_PI_HOST:-1}" != "0" ]]; then
     service_pids+=($!)
 fi
 
-# Opt out with GIGACHAD_LEARNHARNESS=0. Serves learn mode (LearnHarness, started below with omp-web) and the
+# Opt out with GIGACHAD_LEARNHARNESS=0. Serves learn mode (LearnHarness, started below) and the
 # LiteLLM proxy its models go through, each reusing an instance already on its port.
 if [[ "${GIGACHAD_LEARNHARNESS:-1}" != "0" ]]; then
     "$root_dir/run-litellm-proxy.sh" &
@@ -86,25 +86,6 @@ backend_pid=$!
 
 "$root_dir/run-frontend.sh" &
 frontend_pid=$!
-
-# omp-web and LearnHarness both install the same @gigachad/chat-ui tarball: pack it once, while the services above
-# start. Without it (a failed pack) each launcher packs its own and reports the failure.
-if [[ "${GIGACHAD_OMP_WEB:-1}" != "0" || "${GIGACHAD_LEARNHARNESS:-1}" != "0" ]]; then
-    chat_ui_dir="$(mktemp -d)"
-    if GIGACHAD_CHAT_UI_TARBALL="$(PATH="$root_dir/.venv/bin:$PATH" pack_chat_ui "$chat_ui_dir")"; then
-        export GIGACHAD_CHAT_UI_TARBALL
-    else
-        unset GIGACHAD_CHAT_UI_TARBALL
-        printf 'warning: packing @gigachad/chat-ui failed, omp-web and LearnHarness pack it themselves\n' >&2
-    fi
-fi
-
-# Opt out with GIGACHAD_OMP_WEB=0. Serves the omp tabs' chat and settings
-# (omp-web), reusing an instance already on its port.
-if [[ "${GIGACHAD_OMP_WEB:-1}" != "0" ]]; then
-    "$root_dir/run-omp-web.sh" &
-    service_pids+=($!)
-fi
 
 # LearnHarness runs as a sandboxed systemd user unit: the TERM cleanup sends its
 # launcher stops the unit it started (a reused instance is left alone).

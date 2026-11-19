@@ -50,7 +50,6 @@ from backend.routes.file_attach import router as file_attach_router
 from backend.routes.file_git import router as file_git_router
 from backend.routes.factory import router as factory_router
 from backend.routes.ocr import router as ocr_router
-from backend.routes.omp import router as omp_router
 from backend.routes.pi import router as pi_router
 from backend.routes.learn import router as learn_router
 from backend.routes.projects import router as projects_router
@@ -193,7 +192,6 @@ app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
-app.include_router(omp_router)
 app.include_router(pi_router)
 app.include_router(learn_router)
 app.include_router(factory_router)

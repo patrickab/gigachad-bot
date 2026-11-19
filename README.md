@@ -7,10 +7,10 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 ## What you can do
 
 - **Choose your models**: connect cloud and local providers through [LiteLLM](https://github.com/BerriAI/litellm).
-- **Watch subscription limits**: the sidebar shows how much of each [OMP](https://github.com/can1357/oh-my-pi) login's 5h, 7d and monthly limits you have used.
+- **Watch subscription limits**: the sidebar shows how much of your [Pi](https://github.com/earendil-works/pi) login's 5h, 7d and monthly limits you have used.
 - **Review changes**: open the git diff of any mounted file directory from the sidebar.
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.
-- **Code with omp agents**: open omp-web sessions in tabs. The **Code** section holds one row per directory, a file mount or any other directory omp sessions ran in, with its **Worktrees**, **Sessions** and files. A new session starts in that directory, not omp-web's last workspace.
+- **Code with Pi agents**: open Pi sessions in tabs. The **Code** section holds one row per repository or file mount, with its **Worktrees**, **Sessions** and files. A new session starts in that directory.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
 - **Rename projects**: use the project's Rename action. The slug follows the name, and stored chats, documents, memory, architecture, attachments and the links between them move with it. A name whose slug another project already uses is rejected. Open tabs follow the project and reload its content. Linked disk folders keep their original names. Deep links and URLs copied outside the app are not redirected.
 - **Archive projects**: hover a project row to archive it without deleting its content. Hover **Projects** and open the archive icon for an anchored popover of all projects, then select **Restore** to return an archived project to the active sidebar.
@@ -46,9 +46,7 @@ The launcher installs dependencies, including Node.js, and starts the developmen
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
 
-`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup clones upstream `kahme247/ompweb` into `~/git/ompweb_original`. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path and `GIGACHAD_OMP_WEB_REF` for the served ref (default `main`, the checkout's local branch). Each start moves that branch onto upstream `main` once the overlay checks pass (a fast-forward for `main`, a local rebase for a topic branch, `GIGACHAD_AUTO_UPDATE=0` opts out), nothing else in the checkout changes.
-
-The first start builds it in a separate worktree with this repository's overlay (`ompweb-overlay/`), which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
+`./run.sh` also starts pi-host on `127.0.0.1:8300`, which runs the Pi sessions of the code tabs and workbench chats. It needs `pi` on `PATH` at the version `pi-host/package.json` pins. Set `GIGACHAD_PI_HOST=0` to skip it. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
 
 `./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires sandbox runtime setup. Find the runbook in the [repository documentation index](AGENTS.md#documentation).
 

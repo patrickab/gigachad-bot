@@ -1,4 +1,4 @@
-"""Shared HTTP plumbing of the server-to-server adapters (omp-web, the factory engine, the Jupyter Server).
+"""Shared HTTP plumbing of the server-to-server adapters (LearnHarness, the factory engine, C4, the Jupyter Server).
 
 - Each adapter owns its URL, headers and contract models, this module owns the request, the error mapping and the validation
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through

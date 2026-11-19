@@ -1,7 +1,7 @@
-"""Reverse-proxy plumbing shared by the Tailnet gates (omp-web, LearnHarness, factory previews) and the Jupyter proxy route.
+"""Reverse-proxy plumbing shared by the Tailnet gates (LearnHarness, factory previews) and the Jupyter proxy route.
 
 - `streaming_response` relays an upstream answer unbuffered, hop-by-hop fields dropped (`lib.upstream.forwardable_headers`)
-- `forward` is the whole request path of the omp-web and LearnHarness gates, standalone Starlette apps whose
+- `forward` is the whole request path of the LearnHarness gate, a standalone Starlette app whose
   `app.state.client` has the upstream as `base_url`. `METHODS` is the gates' route methods, `LOGIN_HEADER` the login
   Tailscale Serve vouches for, `is_tailnet_host` their identity check
 - `relay_websocket` joins a browser WebSocket to an upstream one the caller opened

@@ -244,7 +244,7 @@ class PostgresKeyRelocator:
         """Point every reference to `old` at `new`, then rekey the stored document `old` to `new`, or delete it for a disk path `new`.
 
         - References: project file lists, chat attachments, canvases and their mutation log, app links in notes,
-          and the paths a JSON document uses as object keys (the omp sessions of workbench files)
+          and the paths a JSON document uses as object keys (the chat links of workbench files)
         - A disk path `new` makes `old` a mounted file everywhere, so it is read from disk from then on
         - A disk path `old` has no row to rekey, it is renamed on disk by the caller and only its references and change events move
         - Renaming within one directory records where `old` went (`moved_to`), so devices showing it follow

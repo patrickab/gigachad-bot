@@ -1,9 +1,5 @@
 # Shared helpers for the launcher scripts. Source it, do not run it.
 
-# The omp-web ref production serves: upstream main as redeploy.sh last fetched it (run-omp-web.sh never moves a
-# remote-tracking ref).
-PRODUCTION_OMP_WEB_REF=origin/main
-
 # Succeeds when host:port accepts a TCP connection.
 port_open() {
     local host="${1%%:*}" port="${1##*:}"
@@ -36,7 +32,7 @@ sync_python_deps() {
 }
 
 # Runs `npm ci` for src/frontend, which deletes and rewrites its node_modules. run.sh does it once up front and
-# exports GIGACHAD_FRONTEND_DEPS_INSTALLED=1: the sidecars' chat-ui pack (tsc from that node_modules) and the
+# exports GIGACHAD_FRONTEND_DEPS_INSTALLED=1: LearnHarness's chat-ui pack (tsc from that node_modules) and the
 # backend's reloader would otherwise run into the rewrite.
 install_frontend_deps() {
     if [[ -n "${GIGACHAD_FRONTEND_DEPS_INSTALLED:-}" ]]; then
@@ -45,14 +41,8 @@ install_frontend_deps() {
     uv --directory "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" run --no-sync gigachad-install
 }
 
-
-# Prints the @gigachad/chat-ui tarball path. run.sh packs it once for both sidecars and exports
-# GIGACHAD_CHAT_UI_TARBALL, otherwise it is packed into directory $1 (node >= 24 on PATH).
+# Packs @gigachad/chat-ui into directory $1 and prints the tarball path (node >= 24 on PATH).
 pack_chat_ui() {
-    if [[ -f "${GIGACHAD_CHAT_UI_TARBALL:-}" ]]; then
-        printf '%s\n' "$GIGACHAD_CHAT_UI_TARBALL"
-        return 0
-    fi
     (cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../src/frontend" && node packages/chat-ui/pack.mjs --out "$1")
 }
 

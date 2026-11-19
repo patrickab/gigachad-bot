@@ -6,7 +6,7 @@ import sys
 # ponytail: one shared workspace for now; user-specific roots can come later.
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
-# File-first workbench documents (Markdown, LaTeX) and the omp session directory of each kind, `lib.workbench`.
+# File-first workbench documents (Markdown, LaTeX) and the Pi session directory of each kind, `lib.workbench`.
 WORKBENCH = REMOTE_ROOT / "workbench"
 # Shipped prompt and template sources (`templates/`), bundled beside the code in a frozen build.
 TEMPLATES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])) / "templates"
