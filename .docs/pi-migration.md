@@ -56,6 +56,10 @@ src/frontend/features/pi/   the only frontend code that knows Pi's protocol
 | D11 | Branching works like chat branching: each turn's branch action forks into a new session (Pi `fork` at that prompt, or `clone` at the end) that opens in the tab |
 | D12 | Factory agent definitions move from `.omp/agents/` to `.factory/agents/` |
 | D13 | Only Anthropic (subscription) and API-key providers. No Codex |
+| D14 | K10: the `omp_model` setting is renamed `sandbox_model`, stored defaults migrate on load |
+| D15 | No GitHub tool port. Agents use `gh` through bash |
+| D16 | P7 serves only providers Pi knows. A model on a provider Pi cannot serve fails at send with a clear error. Ollama runs through a Pi custom provider generated from `ollama list`, the app no longer autostarts `ollama serve` |
+| D17 | Sandboxed Pi (AiB one-shot runs and the `sandboxed` profile) gets a gateway-only token, accepted only on `/v1/*`, never the full pi-host token |
 
 ## Gateway details
 
