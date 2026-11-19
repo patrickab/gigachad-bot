@@ -23,15 +23,16 @@ import { LatexWorkbench } from "@/features/latex/LatexWorkbench"
 import { MarkdownWorkbench } from "@/features/workbench/MarkdownWorkbench"
 import { NotebookWorkbench } from "@/features/workbench/NotebookWorkbench"
 import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerInsertion, type ComposerLaunch, type ShellCommands } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ComposerInsertion, type ShellCommands } from "@/features/omp/OmpComposer"
 import { canvasLead } from "@/features/omp/fileLead"
 import { OmpFileChat } from "@/features/omp/OmpFileChat"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
+import { PiTab, type PiLaunch } from "@/features/pi/PiTab"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { SessionPicker } from "@/features/omp/SessionPicker"
-import { TopBarSlot } from "@/features/navigation/TopBarSlots"
+import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import type { OmpView, Usage } from "@/lib/domain/types"
@@ -57,11 +58,11 @@ interface WorkspaceSurfaceProps {
   chatColumn: HTMLDivElement | null
   /** The chat, shown in chat mode and whenever another mode has no item to show. */
   chatBody: ReactNode
-  /** The tab's slash commands an omp tab's composer offers (`/memorize`). */
+  /** The tab's slash commands an omp composer offers (`/memorize`). */
   ompShellCommands: ShellCommands
-  /** First message of an omp session started from the chat, sent by the new-session composer of the omp tab. */
-  ompLaunch: ComposerLaunch | null
-  onOmpLaunched: () => void
+  /** First message of a Pi session started from the chat, sent by the Pi tab once its session is ready. */
+  launch: PiLaunch | null
+  onLaunched: () => void
   /** Opens a session picked in the top bar's "Agents" picker. */
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
 }
@@ -127,13 +128,14 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, ompShellCommands, ompLaunch, onOmpLaunched, onOpenItem }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, ompShellCommands, launch, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // omp needs host access, other logins keep the PDF's local assistant
   const hostAccess = useHostAccess()
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
+  const piTopBar = useTopBarSlot("workbenchAgent")
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
   // The workbench's bar, a notebook's too: the surface renders its controls into the agent, status and center slots, the chat drawer opens at the right end
   const workbenchBar = {
@@ -309,7 +311,21 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           {filePanelToggle}
         </>,
         runsUnderTopBar: !!ompView && ompView.kind !== "settings",
-        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} launch={ompLaunch} onLaunched={onOmpLaunched} /> : chatBody,
+        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
+      }
+    },
+    pi: () => {
+      const piItem = itemOf(tab, "pi")
+      return {
+        // The Pi tab renders its top bar into this slot
+        left: <TopBarSlot name="workbenchAgent">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+        right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
+        runsUnderTopBar: false,
+        body: piItem?.pi ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <PiTab view={piItem.pi} tabId={tab.id} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} />
+          </div>
+        ) : chatBody,
       }
     },
     workbench: () => {

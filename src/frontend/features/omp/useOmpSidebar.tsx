@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Archive, Bot, RotateCcw } from "lucide-react"
-import { useTab } from "@/contexts/TabContext"
+import { newPiItem, useTab } from "@/contexts/TabContext"
 import type { WorkspaceItem } from "@/contexts/TabContext"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { ApiError, archiveOmpSession, fetchOmpArchive, restoreOmpSession } from "@/lib/backend/api"
@@ -102,7 +102,7 @@ export function useOmpSidebar({ onOpen, workspaceActions }: {
       label: "Sessions",
       icon: Bot,
       type: "folder",
-      create: { label: `New session in ${name}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: directory }, directory, projectSlug), true) },
+      create: { label: `New session in ${name}`, onClick: () => onOpen?.(newPiItem(directory, projectSlug), true) },
       childLimit: SESSION_LIMIT,
       children: sessionForest(directorySessions).map((node) => sessionItem(node, directory, projectSlug)),
     }

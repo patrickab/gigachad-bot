@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { WorkspaceItem } from "@/contexts/TabContext"
-import { nextTab, parseSavedTabs, relocatedTab, renamedTab, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
+import { newPiItem, showingItem, type WorkspaceItem } from "@/contexts/TabContext"
+import { nextTab, parseSavedTabs, relocatedTab, renamedTab, tabLabel, tabLocation, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
@@ -166,5 +166,22 @@ describe("parseSavedTabs", () => {
 
   it("rejects missing, empty and malformed saves", () => {
     for (const raw of [null, "", "{", "{}", JSON.stringify({ tabs: [] })]) expect(parseSavedTabs(raw)).toBeNull()
+  })
+
+  it("keeps saved Pi and omp tabs", () => {
+    const pi = { ...nextTab(), ...showingItem({ kind: "pi", path: "app", projectSlug: null, pi: { sessionId: "s1", repo: "app" } }) }
+    const omp = { ...nextTab(), ...showingItem({ kind: "omp", path: "/git/app", projectSlug: null, omp: { kind: "session", sessionId: "o1" } }) }
+    expect(parseSavedTabs(JSON.stringify({ tabs: [pi, omp], activeId: pi.id }))).toEqual({ tabs: [pi, omp], activeId: pi.id })
+  })
+})
+
+describe("Pi tabs", () => {
+  it("start without a session in the checkout's repo and show under code", () => {
+    const item = newPiItem("/home/me/git/app/", "proj")
+    expect(item).toEqual({ kind: "pi", path: "app", projectSlug: "proj", pi: { sessionId: null, repo: "app" } })
+    const tab = { ...nextTab(), ...showingItem(item) }
+    expect(tab.appMode).toBe("pi")
+    expect(tabLocation(tab, () => undefined)).toEqual({ category: "code", file: "app" })
+    expect(tabLabel(tab, undefined, () => undefined)).toBe("app")
   })
 })

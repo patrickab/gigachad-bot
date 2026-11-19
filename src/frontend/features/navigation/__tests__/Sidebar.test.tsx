@@ -758,7 +758,7 @@ describe("Project navigation", () => {
       expect(code.getByRole("button", { name: "fork running" })).toBeVisible()
 
       fireEvent.click(section.getByRole("button", { name: "New session in proj" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "new", cwd: "/git/proj" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: null, repo: "proj" } }, true)
     } finally {
       omp.overview = null
       api.fileRootTree.mockImplementation(listTree!)
@@ -792,7 +792,7 @@ describe("Project navigation", () => {
       fireEvent.click(section.getByRole("button", { name: "Open omp settings" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
       fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "new", cwd: "/git/tool" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: null, repo: "tool" } }, true)
       fireEvent.click(tool.getByRole("button", { name: "tooling" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "session", sessionId: "tooling" } })
 

@@ -14,10 +14,9 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
-import { useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { newPiItem, useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import type { Attachment } from "@/lib/domain/types"
-import type { ComposerLaunch } from "@/features/omp/OmpComposer"
-import { ompItem } from "@/features/omp/useOmpSidebar"
+import type { PiLaunch } from "@/features/pi/PiTab"
 import { WorkspacePicker } from "@/features/omp/WorkspacePicker"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
@@ -86,19 +85,19 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
 
-  // A folder picked in an empty chat makes its first message start an omp session there, the omp tab's composer sends it.
+  // A folder picked in an empty chat makes its first message start a Pi session there, the Pi tab sends it once the session is ready.
   // The picker shows only in an empty chat, so a folder left over from one never redirects another chat's message
   const [folder, setFolder] = useState<string | null>(null)
-  const [ompLaunch, setOmpLaunch] = useState<ComposerLaunch | null>(null)
+  const [launch, setLaunch] = useState<PiLaunch | null>(null)
   const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
   const handleSend = (text: string, attachments: Attachment[]) => {
     if (folder === null || !isEmptyChat) {
       turns.handleSend(text, attachments)
       return
     }
-    setOmpLaunch({ text, attachments })
+    setLaunch({ text, attachments })
     setFolder(null)
-    onOpenItem(ompItem({ kind: "new", cwd: folder }, folder, projectSlug))
+    onOpenItem(newPiItem(folder, projectSlug))
   }
 
   const chatBody = (
@@ -148,8 +147,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           chatColumn={chatColumn}
           chatBody={chatBody}
           ompShellCommands={ompShellCommands}
-          ompLaunch={ompLaunch}
-          onOmpLaunched={() => setOmpLaunch(null)}
+          launch={launch}
+          onLaunched={() => setLaunch(null)}
           onOpenItem={onOpenItem}
         />
         {isActive && standaloneFile && (

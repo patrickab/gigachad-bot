@@ -139,6 +139,9 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "omp") {
     return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
   }
+  if (tab.appMode === "pi") {
+    return { category: "code", file: tab.name ?? tab.title ?? tab.workspaceItem?.pi?.repo ?? "Pi" }
+  }
   if (tab.appMode === "workbench") {
     const kind = tab.workspaceItem ? workbenchKindOf(tab.workspaceItem.path) : null
     return { category: kind ?? "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File") }
@@ -167,6 +170,7 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
     if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
+    if (tab.appMode === "pi") return tab.name ?? tab.title ?? tab.workspaceItem.pi?.repo ?? "Pi"
     if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
     if (tab.appMode === "workbench") return tab.name ?? baseName(tab.workspaceItem.path)
     if (tab.appMode === "factory") return tab.name ?? "Factory"

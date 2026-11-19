@@ -3,14 +3,14 @@
 import { createContext, useContext } from "react"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import type { TabConfig } from "@/contexts/SettingsContext"
-import type { LearnView, OmpView } from "@/lib/domain/types"
+import type { LearnView, OmpView, PiView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document" | "omp" | "workbench" | "factory" | "learn"
+export type AppSurface = "chat" | "canvas" | "document" | "omp" | "pi" | "workbench" | "factory" | "learn"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "workbench" | "factory" | "learn"
-  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
+  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "pi" | "workbench" | "factory" | "learn"
+  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `pi` item its repo name, a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
   path: string
   projectSlug: string | null
   rootFile?: boolean
@@ -20,6 +20,8 @@ export interface WorkspaceItem {
   texFolder?: string
   /** What an `omp` item shows in omp-web's frame, and the chat session of a `workbench` item or a notebook `document` item. */
   omp?: OmpView
+  /** What a `pi` item shows: its repo and session. */
+  pi?: PiView
   /** What a `learn` item shows in LearnHarness's frame. */
   learn?: LearnView
 }
@@ -27,10 +29,17 @@ export interface WorkspaceItem {
 /** Surface that shows `item`. */
 function surfaceOf(item: WorkspaceItem): AppSurface {
   if (item.kind === "omp") return "omp"
+  if (item.kind === "pi") return "pi"
   if (item.kind === "workbench") return "workbench"
   if (item.kind === "factory") return "factory"
   if (item.kind === "learn") return "learn"
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
+}
+
+/** A new Pi session item in the checkout at `directory`: its repo is the folder name, as pi-host knows checkouts directly under `~/git`. */
+export function newPiItem(directory: string, projectSlug: string | null): WorkspaceItem {
+  const repo = directory.replace(/\/+$/, "").split("/").pop() ?? ""
+  return { kind: "pi", path: repo, projectSlug, pi: { sessionId: null, repo } }
 }
 
 export interface Tab {

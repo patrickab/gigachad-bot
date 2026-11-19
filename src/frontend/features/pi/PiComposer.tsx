@@ -42,7 +42,8 @@ function dialogPicker(dialog: ExtensionDialog | undefined, answer: PiComposerPro
   }
 }
 
-async function imageOf(attachment: Attachment): Promise<{ type: "image"; data: string; mimeType: string }> {
+/** `attachment` (an image) as a Pi image block. */
+export async function imageOf(attachment: Attachment): Promise<{ type: "image"; data: string; mimeType: string }> {
   const blob = await (await fetch(attachment.url)).blob()
   const reader = new FileReader()
   const { promise, resolve, reject } = Promise.withResolvers<string>()

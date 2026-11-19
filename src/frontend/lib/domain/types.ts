@@ -343,6 +343,12 @@ export type OmpView =
   | { kind: "new"; cwd: string }
   | { kind: "settings" }
 
+/** What a Pi tab shows: a session in `repo` (a checkout name under `~/git`, as `/api/pi/repos` lists it), `sessionId` null until its first message creates one. */
+export interface PiView {
+  sessionId: string | null
+  repo: string
+}
+
 /** What a learn tab shows in LearnHarness's shared frame. */
 export type LearnView =
   | { kind: "home" }

@@ -18,6 +18,7 @@ import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
 import { LearnProvider } from "@/features/learn/LearnProvider"
+import { PiSessionsProvider } from "@/features/pi/sessionStore"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
@@ -150,15 +151,17 @@ export function AppShell() {
         <SidebarProvider>
           <MemoryViewerProvider>
             <OmpProvider>
-              <LearnProvider onOpenItem={handleOpenItem}>
-                <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-                  <EnabledToolsProvider>
-                    <FilePanelProvider>
-                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
-                    </FilePanelProvider>
-                  </EnabledToolsProvider>
-                </TabManager>
-              </LearnProvider>
+              <PiSessionsProvider>
+                <LearnProvider onOpenItem={handleOpenItem}>
+                  <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                    <EnabledToolsProvider>
+                      <FilePanelProvider>
+                        <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                      </FilePanelProvider>
+                    </EnabledToolsProvider>
+                  </TabManager>
+                </LearnProvider>
+              </PiSessionsProvider>
             </OmpProvider>
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />

@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { FolderGit2, Plus } from "lucide-react"
-import type { FileLinks } from "@/components/content/LaTeXMarkdown"
-import { FilePanelProvider, FilePanelSlot, FilePanelToggle, useOpenFile } from "@/features/editor/FilePanel"
+import { FilePanelProvider, FilePanelSlot, FilePanelToggle } from "@/features/editor/FilePanel"
 import { SidePanel, SidePanelScroll } from "@/components/ui/SidePanel"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
-import { ApiError, fetchPiRepositories, fetchPiSessions, openPiSession, type PiRepository, type PiResume, type PiSessionInfo } from "@/lib/backend/api"
+import { fetchPiRepositories, fetchPiSessions, openPiSession, type PiRepository, type PiResume, type PiSessionInfo } from "@/lib/backend/api"
 import { fuzzyScore } from "@/lib/fuzzy"
 import { cn } from "@/lib/utils"
-import { PiComposer } from "./PiComposer"
-import { PiTranscript } from "./PiTranscript"
-import { usePiSession } from "./usePiSession"
+import { piOpenError, PiSessionView } from "./PiTab"
 
 const REPO_PARAM = "repo"
 const SESSION_PARAM = "session"
@@ -112,42 +109,6 @@ function RepositorySidebar({ repositories, selected, sessions, activeId, onSelec
   )
 }
 
-function PiSessionView({ repository, sessionId }: { repository: PiRepository; sessionId: string }) {
-  const session = usePiSession(sessionId)
-  const { state, status, transcript } = session
-  const model = state?.model ? `${state.model.provider}/${state.model.id}` : null
-  const openFile = useOpenFile()
-  const fileLinks = useMemo<FileLinks>(() => ({ base: repository.path, open: openFile }), [repository.path, openFile])
-
-  return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-divider/50 px-4 text-sm">
-        <StatusDot tone={status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"} />
-        <span className="font-medium text-ink">{repository.name}</span>
-        {state?.sessionName && <span className="truncate text-ink-muted">{state.sessionName}</span>}
-        <span className="ml-auto truncate font-mono text-xs text-ink-faint">{model}{state?.thinkingLevel ? ` · ${state.thinkingLevel}` : ""}</span>
-        <FilePanelToggle />
-      </header>
-      {status.kind === "closed" && <p role="alert" className="border-b border-divider/50 px-4 py-2 text-xs text-danger">{status.reason}</p>}
-      <PiTranscript transcript={transcript} fileLinks={fileLinks} />
-      <PiComposer
-        sessionKey={sessionId}
-        running={transcript.running}
-        disabled={status.kind !== "ready"}
-        commands={session.commands}
-        dialog={session.dialogs[0]}
-        queue={transcript.queue}
-        notices={session.notices}
-        statusLines={session.statusLines}
-        editorText={session.editorText}
-        onSend={(message, images) => void session.send(message, images)}
-        onAbort={session.abort}
-        onAnswerDialog={session.answerDialog}
-      />
-    </section>
-  )
-}
-
 /**
  * Prototype: Pi agent sessions in any repository under `~/git`, served by pi-host and rendered with gigachad's chat UI.
  *
@@ -174,7 +135,7 @@ export function PiWorkbench() {
       setActive((current) => ({ sessionId: session.sessionId, opening: (current?.opening ?? 0) + 1 }))
       setSessions(await fetchPiSessions(repo))
     } catch (reason) {
-      setError(reason instanceof ApiError && reason.status === 409 ? "Another Pi process holds this session" : String(reason))
+      setError(piOpenError(reason))
     }
   }, [])
 
@@ -221,7 +182,20 @@ export function PiWorkbench() {
       <FilePanelProvider>
         <div className="flex min-w-0 flex-1">
           {repository && active && !error ? (
-            <PiSessionView key={`${active.sessionId}:${active.opening}`} repository={repository} sessionId={active.sessionId} />
+            <PiSessionView
+              key={`${active.sessionId}:${active.opening}`}
+              sessionId={active.sessionId}
+              cwd={repository.path}
+              renderHeader={({ tone, sessionName, model }) => (
+                <header className="flex h-11 shrink-0 items-center gap-2 border-b border-divider/50 px-4 text-sm">
+                  <StatusDot tone={tone} />
+                  <span className="font-medium text-ink">{repository.name}</span>
+                  {sessionName && <span className="truncate text-ink-muted">{sessionName}</span>}
+                  <span className="ml-auto truncate font-mono text-xs text-ink-faint">{model}</span>
+                  <FilePanelToggle />
+                </header>
+              )}
+            />
           ) : (
             <p role={error ? "alert" : undefined} className={cn("m-auto text-sm", error ? "text-danger" : "text-ink-faint")}>
               {error ?? (selected ? "" : "Pick a repository")}
