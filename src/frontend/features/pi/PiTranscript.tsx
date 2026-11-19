@@ -169,7 +169,8 @@ function PiTurn({ prompt, pieces, runs, live, expanded, onToggle, fileLinks }: {
 
 /** Every turn as a gigachad Q&A card, the newest expanded, older ones collapsed until opened. Follows the end while the reader is there. File links open through `fileLinks`. */
 export function PiTranscript({ transcript, fileLinks }: { transcript: Transcript; fileLinks: FileLinks }) {
-  const turns = turnsOf(transcript.messages)
+  const messages = shownMessages(transcript)
+  const turns = turnsOf(messages)
   const runs = toolRunsOf(transcript)
   const [toggled, setToggled] = useState<Record<number, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -191,13 +192,13 @@ export function PiTranscript({ transcript, fileLinks }: { transcript: Transcript
         {turns.length === 0 && <p className="py-16 text-center text-sm text-ink-faint">New session</p>}
         {turns.map((turn, index) => {
           const newest = index === turns.length - 1
-          const live = newest && (transcript.running || transcript.streaming !== null)
+          const live = newest && (transcript.running || transcript.streaming !== null || transcript.optimistic !== null)
           const expanded = live || (toggled[turn.start] ?? newest)
           return (
             <PiTurn
               key={turn.start}
-              prompt={transcript.messages[turn.start]}
-              pieces={answerPieces(transcript.messages, turn, newest ? transcript.streaming : null)}
+              prompt={messages[turn.start]}
+              pieces={answerPieces(messages, turn, newest ? transcript.streaming : null)}
               runs={runs}
               live={live}
               expanded={expanded}

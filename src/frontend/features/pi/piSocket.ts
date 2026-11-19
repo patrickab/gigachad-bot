@@ -1,14 +1,15 @@
 /**
  * The page's one WebSocket to pi-host (`WS /api/pi/ws`), shared by every open Pi session (M18).
  *
- * - Consumes host frames `{type, sessionId, ...}` and routes each to the subscribers of its session
+ * - Consumes host frames `{type, sessionId, streamId, sequence, ...}` and routes each to the subscribers of its session
  * - Provides `subscribePiSession`: the first subscriber of a session attaches it, the last detaches it
- * - Reconnects with backoff while anything is subscribed and re-attaches every session, the host answers with a fresh `attached` and replay
+ * - Reconnects with backoff while anything is subscribed; per session a subscriber's `onReopen` decides how to catch up (resync or attach), else it re-attaches
+ * - No ack timeouts: liveness never depends on how fast the host answers (M18)
  * - Closes shortly after the last session leaves, so a remount (React strict mode, a tab switch) keeps the socket
  */
 import { piSocketUrl } from "@/lib/backend/urls"
 
-/** A host frame: `attached`, `replay_start`, `pi`, `replay_end`, `lock_held`, `exit` or `error`. */
+/** A host frame: `attached`, `resync`, `replay_start`, `pi`, `replay_end`, `ui_closed`, `lock_held`, `exit` or `error`. */
 export type HostFrame = { type: string; sessionId: string; [field: string]: unknown }
 
 export type SocketStatus = { kind: "connecting" } | { kind: "open" } | { kind: "closed"; reason: string }
@@ -16,6 +17,8 @@ export type SocketStatus = { kind: "connecting" } | { kind: "open" } | { kind: "
 export interface SessionSubscriber {
   onFrame: (frame: HostFrame) => void
   onStatus: (status: SocketStatus) => void
+  /** The socket (re)opened: send this session's catch-up frames. Without it the socket sends `attach`. */
+  onReopen?: () => void
 }
 
 const RETRY_MIN_MS = 500
@@ -48,7 +51,11 @@ function connect() {
   opened.onopen = () => {
     retryMs = RETRY_MIN_MS
     setStatus({ kind: "open" })
-    for (const sessionId of subscribers.keys()) sendRaw({ type: "attach", sessionId })
+    for (const [sessionId, group] of subscribers) {
+      const owner = [...group].find((subscriber) => subscriber.onReopen)
+      if (owner) owner.onReopen!()
+      else sendRaw({ type: "attach", sessionId })
+    }
   }
   opened.onmessage = (message) => {
     const frame = JSON.parse(String(message.data)) as HostFrame
@@ -111,4 +118,9 @@ export function subscribePiSession(sessionId: string, subscriber: SessionSubscri
 /** Forward one raw Pi RPC command to the session. False while the socket is down. */
 export function sendPiCommand(sessionId: string, command: Record<string, unknown>): boolean {
   return sendRaw({ type: "command", sessionId, command })
+}
+
+/** Send a session frame (`resync`, `attach`, `detach`). False while the socket is down. */
+export function sendPiFrame(frame: HostFrame): boolean {
+  return sendRaw(frame)
 }

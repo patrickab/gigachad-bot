@@ -1,8 +1,17 @@
-import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, ToolResultMessage, ToolRun } from "./types"
+import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, ToolResultMessage, ToolRun, UserMessage } from "./types"
 
-/** What the transcript shows: committed messages, the streaming reply and live tool state. */
+/**
+ * What the transcript shows: confirmed messages (persisted entries), then live ones not yet confirmed, the streaming reply and live tool state.
+ *
+ * Live messages (`unconfirmed`, `optimistic`, `streaming`) are rendered after the confirmed ones and dropped once a snapshot or resync brings their entry (M2).
+ */
 export interface Transcript {
+  /** The active branch's persisted messages, from `attached` and `resync`. */
   messages: AgentMessage[]
+  /** Messages a live `message_end` reported whose entry no resync has brought yet. */
+  unconfirmed: AgentMessage[]
+  /** The prompt this tab sent, shown until Pi reports it. */
+  optimistic: UserMessage | null
   /** The assistant message being streamed, null between replies. */
   streaming: AssistantMessage | null
   /** Tool calls executing or finished in this connection, by tool call id. Older ones derive from `toolResult` messages. */
@@ -12,7 +21,7 @@ export interface Transcript {
   queue: { steering: string[]; followUp: string[] }
 }
 
-export const EMPTY_TRANSCRIPT: Transcript = { messages: [], streaming: null, runs: {}, running: false, queue: { steering: [], followUp: [] } }
+export const EMPTY_TRANSCRIPT: Transcript = { messages: [], unconfirmed: [], optimistic: null, streaming: null, runs: {}, running: false, queue: { steering: [], followUp: [] } }
 
 type PiEvent = { type: string; [field: string]: unknown }
 
@@ -56,12 +65,7 @@ export function messagesOfEntries({ entries, leafId }: SessionEntries): AgentMes
   return branch.reverse().flatMap((branchEntry) => entryMessage(branchEntry) ?? [])
 }
 
-/** A fresh transcript from an `attached` snapshot: persisted messages, run state and queue. Replayed records rebuild the rest. */
-export function transcriptOfSnapshot(entries: SessionEntries, running: boolean, queue: Transcript["queue"]): Transcript {
-  return { messages: messagesOfEntries(entries), streaming: null, runs: {}, running, queue }
-}
-
-/** Identity of a committed message: replay re-sends `message_end` for messages the snapshot already holds. */
+/** Identity of a message across live events and persisted entries: `role:timestamp[:toolCallId]`. */
 function messageKey(message: AgentMessage): string {
   return `${message.role}:${message.timestamp}:${message.role === "toolResult" ? (message as ToolResultMessage).toolCallId : ""}`
 }
@@ -71,6 +75,68 @@ function hasMessage(messages: AgentMessage[], message: AgentMessage): boolean {
   for (let index = messages.length - 1; index >= 0; index--) if (messageKey(messages[index]) === key) return true
   return false
 }
+
+function promptsWithText(messages: AgentMessage[], text: string): number {
+  return messages.filter((message) => message.role === "user" && textOf(message.content) === text).length
+}
+
+/** Replace the confirmed messages, dropping the live messages they now hold. The optimistic prompt goes once a new prompt with its text is confirmed. */
+function withConfirmed(transcript: Transcript, messages: AgentMessage[]): Transcript {
+  const unconfirmed = transcript.unconfirmed.filter((message) => !hasMessage(messages, message))
+  const pending = transcript.optimistic
+  const pendingText = pending && textOf(pending.content)
+  const confirmed = pendingText !== null && promptsWithText(messages, pendingText) > promptsWithText(transcript.messages, pendingText)
+  return { ...transcript, messages, unconfirmed, optimistic: confirmed ? null : pending }
+}
+
+/** A host `resync` answer: `append` = entries after the cursor on the current branch, `replace` = the whole current branch. */
+export interface ResyncEntries {
+  mode: "append" | "replace"
+  entries: SessionEntry[]
+  leafId: string | null
+}
+
+export type TranscriptAction =
+  /** One Pi stdout record, live or replayed. */
+  | { kind: "event"; event: PiEvent }
+  /** An `attached` snapshot: replayed records rebuild the streaming reply and tool runs. */
+  | { kind: "snapshot"; entries: SessionEntries; running: boolean; queue: Transcript["queue"] }
+  /** A `resync` answer: live state stays for the replay that follows. `running` and `queue` from its `state` and `ui` when sent. */
+  | { kind: "resync"; resync: ResyncEntries; running?: boolean; queue?: Transcript["queue"] }
+  /** The prompt this tab sent, or null when Pi refused it. */
+  | { kind: "prompt"; prompt: UserMessage | null }
+  /** A new `streamId`: the live state belongs to a stream that is gone. */
+  | { kind: "stream_changed" }
+  /** A replay re-sends the current reply from its `message_start`. */
+  | { kind: "replay_start" }
+
+/** The transcript after one action from the session hook. */
+export function transcriptReducer(transcript: Transcript, action: TranscriptAction): Transcript {
+  switch (action.kind) {
+    case "event": return reduceTranscript(transcript, action.event)
+    case "snapshot": {
+      const confirmed = withConfirmed(transcript, messagesOfEntries(action.entries))
+      return { ...confirmed, unconfirmed: [], streaming: null, runs: {}, running: action.running, queue: action.queue }
+    }
+    case "resync": {
+      const { mode, entries, leafId } = action.resync
+      const messages = mode === "append"
+        ? [...transcript.messages, ...entries.flatMap((entry) => entryMessage(entry) ?? [])]
+        : messagesOfEntries({ entries, leafId })
+      return { ...withConfirmed(transcript, messages), running: action.running ?? transcript.running, queue: action.queue ?? transcript.queue }
+    }
+    case "prompt": return { ...transcript, optimistic: action.prompt }
+    case "stream_changed": return { ...transcript, unconfirmed: [], optimistic: null, streaming: null, runs: {} }
+    case "replay_start": return { ...transcript, streaming: null }
+  }
+}
+
+/** Confirmed messages, then the live ones, then the optimistic prompt: what the transcript renders. */
+export function shownMessages(transcript: Transcript): AgentMessage[] {
+  const live = transcript.optimistic ? [...transcript.unconfirmed, transcript.optimistic] : transcript.unconfirmed
+  return live.length > 0 ? [...transcript.messages, ...live] : transcript.messages
+}
+
 
 interface AssistantMessageEvent {
   type: string
@@ -120,10 +186,12 @@ export function reduceTranscript(transcript: Transcript, event: PiEvent): Transc
       return { ...transcript, streaming: applyStreamUpdate(transcript.streaming, event.assistantMessageEvent as AssistantMessageEvent) }
     }
     case "message_end": {
+      // No durable entry id yet: the message waits in `unconfirmed` until a resync brings its entry (M2)
       const message = event.message as AgentMessage
       const streaming = message.role === "assistant" ? null : transcript.streaming
-      if (hasMessage(transcript.messages, message)) return { ...transcript, streaming }
-      return { ...transcript, messages: [...transcript.messages, message], streaming }
+      const optimistic = message.role === "user" ? null : transcript.optimistic
+      if (hasMessage(transcript.messages, message) || hasMessage(transcript.unconfirmed, message)) return { ...transcript, streaming, optimistic }
+      return { ...transcript, unconfirmed: [...transcript.unconfirmed, message], streaming, optimistic }
     }
     case "tool_execution_start":
       return { ...transcript, runs: { ...transcript.runs, [event.toolCallId as string]: { running: true, isError: false } } }
@@ -145,7 +213,7 @@ export function reduceTranscript(transcript: Transcript, event: PiEvent): Transc
 /** Tool state by call id: committed `toolResult` messages, overridden by this connection's live runs (which carry durations). */
 export function toolRunsOf(transcript: Transcript): Record<string, ToolRun> {
   const runs: Record<string, ToolRun> = {}
-  for (const message of transcript.messages) {
+  for (const message of shownMessages(transcript)) {
     if (message.role !== "toolResult") continue
     const result = message as ToolResultMessage
     runs[result.toolCallId] = { running: false, isError: result.isError, result: { content: result.content, details: result.details } }

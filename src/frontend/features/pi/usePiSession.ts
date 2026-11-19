@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import { sendPiCommand, subscribePiSession, type HostFrame } from "./piSocket"
-import { EMPTY_TRANSCRIPT, reduceTranscript, transcriptOfSnapshot, type SessionEntries, type Transcript } from "./transcript"
-import type { ExtensionDialog, ImageContent, PiCommand, PiState } from "./types"
+import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "./piSocket"
+import { SessionResync } from "./resync"
+import { EMPTY_TRANSCRIPT, transcriptReducer, type ResyncEntries, type SessionEntries, type Transcript } from "./transcript"
+import type { ExtensionDialog, ImageContent, PiCommand, PiState, UserMessage } from "./types"
 
 export type ConnectionStatus = { kind: "connecting" } | { kind: "ready" } | { kind: "closed"; reason: string }
 
@@ -18,15 +19,6 @@ interface AttachedUi {
   dialogs: PiRecord[]
   statuses: Record<string, string>
   queue: Queue
-}
-
-type TranscriptAction =
-  | { kind: "event"; event: PiRecord }
-  | { kind: "snapshot"; entries: SessionEntries; running: boolean; queue: Queue }
-
-function transcriptReducer(transcript: Transcript, action: TranscriptAction): Transcript {
-  if (action.kind === "snapshot") return transcriptOfSnapshot(action.entries, action.running, action.queue)
-  return reduceTranscript(transcript, action.event)
 }
 
 const NOTICE_LIFETIME_MS = 6_000
@@ -49,8 +41,9 @@ function entriesOf(data: unknown): SessionEntries {
  * One Pi session on the page's shared pi-host socket (`piSocket.ts`), the whole RPC protocol in the browser.
  *
  * - Attaches `sessionId` on mount: `attached` sets state, transcript (entries), dialogs, statuses and queue, the replay and live `pi` records fold into it
- * - A reconnect re-attaches and rebuilds everything from the new snapshot
- * - `send` starts a run, or steers the running one (Pi delivers it after the current tool calls)
+ * - Catches up with a guarded `resync` (`resync.ts`, M2, M22) on reconnect, tab visible, `online`, `agent_settled`, compaction and every live `message_end`, whose message gets its entry from the resync
+ * - A new `streamId` drops the live state (streaming reply, live messages, optimistic prompt) and resyncs from scratch
+ * - `send` starts a run (shown as an optimistic prompt until Pi reports it), or steers the running one (Pi delivers it after the current tool calls)
  * - `abort` takes the queued messages back (returned for the draft) before stopping, like Pi's Esc
  * - Extension dialogs queue until answered, `notify` shows briefly, `setStatus` keeps a line per key
  */
@@ -83,18 +76,11 @@ export function usePiSession(sessionId: string) {
   useEffect(() => {
     const pending = pendingRef.current
     let replaying = false
+    const sync = new SessionResync(sessionId, sendPiFrame)
 
     const failPending = () => {
       for (const resolve of pending.values()) resolve({ success: false, error: "Disconnected" })
       pending.clear()
-    }
-
-    const reloadEntries = async () => {
-      const [entriesResponse, stateResponse] = await Promise.all([command("get_entries"), command("get_state")])
-      if (!entriesResponse.success || !stateResponse.success) return
-      const piState = stateResponse.data as PiState
-      setState(piState)
-      dispatch({ kind: "snapshot", entries: entriesOf(entriesResponse.data), running: piState.isStreaming, queue: EMPTY_QUEUE })
     }
 
     const handleExtensionRequest = (record: PiRecord) => {
@@ -128,30 +114,50 @@ export function usePiSession(sessionId: string) {
         if (record.type === "extension_ui_request") return handleExtensionRequest(record)
         if (record.type === "extension_error") return notify(`${String(record.extensionPath)}: ${String(record.error)}`, "error")
         if (record.type === "auto_retry_start") notify(`Retrying (${String(record.attempt)}/${String(record.maxAttempts)}): ${String(record.errorMessage)}`, "warning")
-        if (record.type === "compaction_end") void reloadEntries()
+        // A live message_end has no durable entry id: the resync brings it (M2)
+        if (record.type === "message_end") sync.request("message_end")
+        if (record.type === "agent_settled" || record.type === "compaction_end") sync.request()
       }
       if (record.type === "session_info_changed") setState((current) => current && { ...current, sessionName: record.name as string | undefined })
       if (record.type === "thinking_level_changed") setState((current) => current && { ...current, thinkingLevel: record.level as string })
       dispatch({ kind: "event", event: record })
     }
 
+    const applyUi = (ui: AttachedUi) => {
+      setDialogs(ui.dialogs.filter(isDialogRequest) as unknown as ExtensionDialog[])
+      setStatusLines(ui.statuses)
+    }
+
     const handleFrame = (frame: HostFrame) => {
+      const { streamChanged, apply } = sync.receive(frame)
+      if (streamChanged) dispatch({ kind: "stream_changed" })
+      if (!apply) return
       switch (frame.type) {
         case "attached": {
           const piState = frame.state as PiState
           const ui = frame.ui as AttachedUi
           setState(piState)
           dispatch({ kind: "snapshot", entries: entriesOf(frame.entries), running: piState.isStreaming, queue: ui.queue ?? EMPTY_QUEUE })
-          setDialogs(ui.dialogs.filter(isDialogRequest) as unknown as ExtensionDialog[])
-          setStatusLines(ui.statuses)
+          applyUi(ui)
           setStatus({ kind: "ready" })
           void command("get_commands").then((response) => {
             if (response.success) setCommands((response.data as { commands: PiCommand[] }).commands)
           })
           return
         }
+        case "resync": {
+          // pi-host adds `state` and `ui` like `attached`; tolerated missing
+          const piState = frame.state as PiState | undefined
+          const ui = frame.ui as AttachedUi | undefined
+          const resync = { mode: frame.mode, entries: frame.entries, leafId: frame.leafId } as ResyncEntries
+          if (piState) setState(piState)
+          if (ui) applyUi(ui)
+          dispatch({ kind: "resync", resync, running: piState?.isStreaming, queue: ui?.queue })
+          setStatus((current) => current.kind === "closed" ? current : { kind: "ready" })
+          return
+        }
         case "ui_closed": return setDialogs((current) => current.filter((dialog) => dialog.id !== frame.id))
-        case "replay_start": replaying = true; return
+        case "replay_start": replaying = true; return dispatch({ kind: "replay_start" })
         case "replay_end": replaying = false; return
         case "pi": return handleRecord(frame.record as PiRecord)
         case "lock_held": return setStatus({ kind: "closed", reason: "Another Pi process holds this session" })
@@ -160,26 +166,44 @@ export function usePiSession(sessionId: string) {
       }
     }
 
+    const catchUpWhenVisible = () => {
+      if (document.visibilityState === "visible") sync.request()
+    }
+    const catchUp = () => sync.request()
+    document.addEventListener("visibilitychange", catchUpWhenVisible)
+    window.addEventListener("online", catchUp)
+
     const unsubscribe = subscribePiSession(sessionId, {
       onFrame: handleFrame,
       onStatus: (socketStatus) => {
         if (socketStatus.kind === "open") return
         failPending()
         replaying = false
+        sync.disconnected()
         setStatus((current) => current.kind === "closed" ? current : socketStatus.kind === "connecting" ? { kind: "connecting" } : socketStatus)
       },
+      onReopen: () => sync.reconnected(),
     })
     return () => {
+      document.removeEventListener("visibilitychange", catchUpWhenVisible)
+      window.removeEventListener("online", catchUp)
       unsubscribe()
       failPending()
     }
   }, [sessionId, command, notify])
 
-  /** Start a run, or steer the running one. Failures become a notice. */
+  /** Start a run, or steer the running one. A new run's prompt shows optimistically until Pi reports it. Failures become a notice. */
   const send = useCallback(async (message: string, images: ImageContent[]) => {
-    const fields = { message, ...(images.length > 0 ? { images } : {}), ...(transcript.running ? { streamingBehavior: "steer" } : {}) }
+    const steering = transcript.running
+    const fields = { message, ...(images.length > 0 ? { images } : {}), ...(steering ? { streamingBehavior: "steer" } : {}) }
+    if (!steering) {
+      const prompt: UserMessage = { role: "user", content: images.length > 0 ? [{ type: "text", text: message }, ...images] : message, timestamp: Date.now() }
+      dispatch({ kind: "prompt", prompt })
+    }
     const response = await command("prompt", fields)
-    if (!response.success) notify(response.error ?? "Prompt refused", "error")
+    if (response.success) return
+    if (!steering) dispatch({ kind: "prompt", prompt: null })
+    notify(response.error ?? "Prompt refused", "error")
   }, [command, notify, transcript.running])
 
   /** Stop the run. Resolves to the queued messages taken back, for the draft. */
