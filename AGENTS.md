@@ -21,6 +21,7 @@ via `run.sh`.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
 - `.docs/integration-ompweb.md`: omp-web integration runbook: worktrees, where a change belongs, overlay/upstream workflows, shared services and concurrent agent work.
 - `.docs/integration-learnharness.md`: everything about learn mode (LearnHarness): goal, decisions, architecture, rules, operations. Read it only when working on learn mode.
+- `.docs/pi-migration.md`: moving from OMP and omp-web to Pi (ADR 0003): pi-host, contracts, decisions, phases. Read it for any Pi, pi-host or omp-web removal work. Keep it current as phases land, delete it once its lasting parts are in `.docs/architecture.md`.
 - `templates/latex/AGENTS.md`: rules for the LaTeX presentation template sets (primitives, theme, re-rendering `example.tex`/`example.pdf` after every change). Read it before touching `templates/latex/`.
 
 ## UI hints
