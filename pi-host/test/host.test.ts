@@ -289,3 +289,54 @@ test("a fork is written by the Host, gets the source's private data and runs und
   expect(host.states.get(forkPath)).toEqual({ revision: 0, pinned: false, data: { draft: "x" } });
   expect(host.states.get(sourcePath)).toEqual({ revision: 3, pinned: true, data: { draft: "x" } });
 });
+
+test("a document fork carries the source's profile marker and refuses a coding start", async () => {
+  const sourcePath = `${LIVE_ROOT}/project/2026-11-19_document.jsonl`;
+  host.sessions.set(sourcePath, {
+    sessionId: "01a1f3fe-0000-7000-8000-00000000000e",
+    sessionPath: sourcePath,
+    realPath: sourcePath,
+    cwd: CWD,
+    createdAt: "2026-11-19T13:00:00.000Z",
+    modifiedAt: "2026-11-19T13:05:00.000Z",
+    firstMessage: "about the paper",
+    messageCount: 2,
+    archived: false,
+  });
+  host.states.set(sourcePath, { revision: 1, pinned: false, data: {}, profile: "document" });
+  // The previous test's fork child holds the fork path the fake Host always writes.
+  await api("/sessions/01a1f3fe-0000-7000-8000-00000000000c/close", { method: "POST" });
+  const fork = (profile: object) =>
+    api("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ cwd: CWD, ...profile, resume: { forkOf: { sessionPath: sourcePath, entryId: "e1" } } }),
+    });
+
+  expect(await fork({ profile: "coding" })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
+  const started = await fork({ profile: "document", systemPrompt: "Answer only with DOC" });
+  const forkPath = `${LIVE_ROOT}/project/fork.jsonl`;
+  expect(started.status).toBe(200);
+  expect(started.body.session).toMatchObject({ sessionPath: forkPath, profile: "document" });
+  expect(host.states.get(forkPath)).toEqual({ revision: 0, pinned: false, data: {}, profile: "document" });
+  expect(host.spawned.at(-1)).toEqual({
+    profile: "document",
+    cwd: CWD,
+    piArgs: [
+      "--mode",
+      "rpc",
+      "--tools",
+      "read,edit,write,grep,find,ls",
+      "--system-prompt",
+      "Answer only with DOC",
+      "--no-skills",
+      "--no-context-files",
+      "--no-extensions",
+      "--no-prompt-templates",
+      "--no-approve",
+      "--session",
+      forkPath,
+    ],
+  });
+  const listed = await api(`/sessions?cwd=${encodeURIComponent(CWD)}&profile=document`);
+  expect(listed.body.sessions.map((session: { sessionPath: string }) => session.sessionPath).sort()).toEqual([sourcePath, forkPath].sort());
+});

@@ -163,6 +163,7 @@ describe("session listing", () => {
       live: { running: true, waiting: false, attached: 1 },
       pinned: false,
       archived: false,
+      profile: "coding",
     });
     expect(json.sessions[1]).toMatchObject({ firstMessage: "first question", messageCount: 3, live: null });
     expect(json.sessions[1].parentSession).toBeUndefined();
@@ -324,13 +325,38 @@ describe("private state", () => {
     expect(results.map((result) => result.status).sort()).toEqual([200, 409, 409]);
   });
 
-  test("copyPrivateState copies data to a fork, unpinned", async () => {
+  test("copyPrivateState copies data and the profile marker to a fork, unpinned", async () => {
     const { oldPath, newPath } = await writeFixtures();
     await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
     await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { card: 1 } });
     await copyPrivateState(oldPath, newPath);
     expect((await call<StateBody>("GET", `/sessions/${NEW_ID}/state`)).json).toEqual({ revision: 0, data: { card: 1 } });
     expect(await isPinned(newPath)).toBe(false);
+
+    await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
+    await copyPrivateState(oldPath, newPath);
+    expect(JSON.parse(await readFile(`${newPath}.gigachad.json`, "utf8"))).toEqual({ revision: 0, pinned: false, data: {}, profile: "document" });
+  });
+
+  test("the profile marker shows in SessionInfo, filters the listing and survives state and pin writes", async () => {
+    const { oldPath } = await writeFixtures();
+    await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
+    await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft: "a" } });
+    await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
+    expect(JSON.parse(await readFile(`${oldPath}.gigachad.json`, "utf8"))).toMatchObject({ profile: "document", pinned: true });
+
+    const cwd = encodeURIComponent(projectDir);
+    const listed = async (query: string) => (await call("GET", `/sessions?cwd=${cwd}${query}`)).json.sessions;
+    expect((await listed("")).map((session) => [session.sessionId, session.profile])).toEqual([
+      [NEW_ID, "coding"],
+      [OLD_ID, "document"],
+    ]);
+    expect((await listed("&profile=document")).map((session) => session.sessionId)).toEqual([OLD_ID]);
+    expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID]);
+    expect((await call("GET", `/sessions?cwd=${cwd}&profile=sandboxed`)).json.error).toBe("invalid_profile");
+
+    await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "other" }));
+    expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID, OLD_ID]);
   });
 });
 

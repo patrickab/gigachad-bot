@@ -14,8 +14,9 @@
  * reproduces (entries, replay, UI state) are dropped, the rest (responses to its own commands, transient UI requests)
  * go out after the replay.
  */
-import type { PiChild, Profile } from "../host/index.ts";
+import type { PiChild } from "../host/index.ts";
 import type { SessionLock } from "./lock.ts";
+import type { ProfileSpec } from "./profiles.ts";
 
 /** Anything a frame can be sent to, a `ServerWebSocket` in production. */
 export interface FrameSink {
@@ -154,7 +155,8 @@ export class LiveSession {
   constructor(
     private readonly child: PiChild,
     readonly cwd: string,
-    readonly profile: Profile,
+    /** What the child was started with; a request for another profile or prompt gets `profile_mismatch`. */
+    readonly spec: ProfileSpec,
     private readonly lock: SessionLock | undefined,
     private readonly onExit: (session: LiveSession) => void,
   ) {

@@ -6,7 +6,7 @@
  */
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { PrivateState } from "../index.ts";
+import { PROFILES, type PrivateState, type Profile } from "../index.ts";
 
 /** Sidecar path of a session file. */
 function sidecarPath(sessionPath: string): string {
@@ -41,6 +41,7 @@ export async function readState(sessionPath: string): Promise<PrivateState> {
     revision: Number.isInteger(record.revision) ? (record.revision as number) : 0,
     pinned: record.pinned === true,
     data: isPlainObject(record.data) ? record.data : {},
+    ...(PROFILES.includes(record.profile as Profile) ? { profile: record.profile as Profile } : {}),
   };
 }
 

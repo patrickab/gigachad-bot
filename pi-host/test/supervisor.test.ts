@@ -724,7 +724,7 @@ describe("LiveSession against a scripted child", () => {
 
   test("attach asks for the state only after the entries snapshot", async () => {
     const scripted = scriptedChild();
-    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    const session = new LiveSession(scripted.child, "/", { profile: "coding" }, undefined, () => undefined);
     session.identify("scripted", join(root, "missing.jsonl"));
     const frames: Frame[] = [];
     session.attach({ send: (data) => frames.push(JSON.parse(data)) });
@@ -747,7 +747,7 @@ describe("LiveSession against a scripted child", () => {
 
   test("an attaching client keeps frames from before its snapshot point the snapshot does not carry", async () => {
     const scripted = scriptedChild();
-    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    const session = new LiveSession(scripted.child, "/", { profile: "coding" }, undefined, () => undefined);
     session.identify("scripted", join(root, "missing.jsonl"));
     const frames: Frame[] = [];
     const sink = { send: (data: string) => frames.push(JSON.parse(data)) };
@@ -781,7 +781,7 @@ describe("LiveSession against a scripted child", () => {
 
   test("a closing child refuses commands, is signalled once and exits although stderr stays open", async () => {
     const scripted = scriptedChild();
-    const session = new LiveSession(scripted.child, "/", "coding", undefined, () => undefined);
+    const session = new LiveSession(scripted.child, "/", { profile: "coding" }, undefined, () => undefined);
     session.terminate();
     session.terminate();
     expect(scripted.kills).toEqual(["SIGTERM"]);
@@ -798,4 +798,105 @@ test("first starts create one 0600 token exclusively and all agree on it", async
   expect(new Set(tokens).size).toBe(1);
   expect(readFileSync(path, "utf8").trim()).toBe(tokens[0]!);
   expect(statSync(path).mode & 0o777).toBe(0o600);
+});
+
+describe("profiles (G1, G5, G6)", () => {
+  const cwd = workdir("documents");
+  const DOC = { profile: "document", systemPrompt: "Answer only with the word DOC" };
+  const DOCUMENT_ARGV = [
+    "--mode",
+    "rpc",
+    "--tools",
+    "read,edit,write,grep,find,ls",
+    "--system-prompt",
+    "Answer only with the word DOC",
+    "--no-skills",
+    "--no-context-files",
+    "--no-extensions",
+    "--no-prompt-templates",
+    "--no-approve",
+  ];
+  let document: { sessionId: string; sessionPath: string };
+
+  async function settle(sessionId: string, message: string): Promise<void> {
+    const driver = await client();
+    await driver.attach(sessionId);
+    driver.command(sessionId, { type: "prompt", message });
+    await driver.pi((record) => record.type === "agent_settled");
+  }
+
+  async function refusal(body: object): Promise<{ status: number; body: unknown }> {
+    const response = await startSession({ cwd, ...body });
+    return { status: response.status, body: await response.json() };
+  }
+
+  test("a document session runs Pi with the G1 flags and the request's prompt, marked in its sidecar", async () => {
+    const response = await startSession({ cwd, ...DOC });
+    expect(response.status).toBe(200);
+    const { session } = await response.json();
+    expect(session).toMatchObject({ cwd, profile: "document" });
+    document = session;
+    const driver = await client();
+    expect((await driver.attach(document.sessionId)).attached.state.argv).toEqual(DOCUMENT_ARGV);
+    await settle(document.sessionId, "hello");
+    expect(JSON.parse(readFileSync(`${document.sessionPath}.gigachad.json`, "utf8"))).toMatchObject({ profile: "document" });
+  });
+
+  test("tools replace the default list; systemPrompt and tools are validated per profile", async () => {
+    const { session } = await (await startSession({ cwd, ...DOC, tools: ["read", "grep"] })).json();
+    const driver = await client();
+    expect((await driver.attach(session.sessionId)).attached.state.argv.slice(2, 4)).toEqual(["--tools", "read,grep"]);
+    await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
+
+    const invalidPrompt = { status: 400, body: { error: "invalid_system_prompt" } };
+    const invalidTools = { status: 400, body: { error: "invalid_tools" } };
+    expect(await refusal({ profile: "document" })).toEqual(invalidPrompt);
+    expect(await refusal({ profile: "document", systemPrompt: "  " })).toEqual(invalidPrompt);
+    expect(await refusal({ profile: "coding", systemPrompt: "x" })).toEqual(invalidPrompt);
+    expect(await refusal({ profile: "coding", tools: ["read"] })).toEqual(invalidTools);
+    for (const tools of [[], ["+bash"], ["read,bash"], "read"]) expect(await refusal({ ...DOC, tools })).toEqual(invalidTools);
+  });
+
+  test("resume by sessionId returns the live child unchanged for the same prompt, profile_mismatch otherwise", async () => {
+    const { sessionId } = document;
+    const again = await startSession({ cwd, ...DOC, resume: { sessionId } });
+    expect(again.status).toBe(200);
+    expect((await again.json()).session).toMatchObject({ sessionId, profile: "document", live: { running: false } });
+    for (const body of [{ ...DOC, systemPrompt: "Other" }, { ...DOC, tools: ["read"] }, { profile: "coding" }]) {
+      expect(await refusal({ ...body, resume: { sessionId } })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
+    }
+    expect(await refusal({ ...DOC, resume: { sessionId: "no-such-session" } })).toEqual({ status: 404, body: { error: "not_found" } });
+    expect((await refusal({ ...DOC, resume: { sessionId: "" } })).status).toBe(400);
+  });
+
+  test("a closed document session resumes by id with its prompt sent again, never as coding", async () => {
+    const { sessionId, sessionPath } = document;
+    await api(`/sessions/${sessionId}/close`, { method: "POST" });
+    expect(await refusal({ resume: { sessionId } })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
+    expect(await refusal({ resume: { sessionPath } })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
+    const resumed = await startSession({ cwd, ...DOC, resume: { sessionId } });
+    expect(resumed.status).toBe(200);
+    expect((await resumed.json()).session).toMatchObject({ sessionId, sessionPath, profile: "document" });
+    const driver = await client();
+    expect((await driver.attach(sessionId)).attached.state.argv).toEqual([...DOCUMENT_ARGV, "--session", sessionPath]);
+  });
+
+  test("continue and the profile filter keep coding and document sessions apart", async () => {
+    const coding = (await (await startSession({ cwd })).json()).session;
+    expect(coding.profile).toBe("coding");
+    await settle(coding.sessionId, "code");
+    await api(`/sessions/${coding.sessionId}/close`, { method: "POST" });
+    expect(existsSync(`${coding.sessionPath}.gigachad.json`)).toBe(false);
+
+    const continued = async (body: object) => (await (await startSession({ cwd, ...body, resume: "continue" })).json()).session;
+    expect((await continued({})).sessionId).toBe(coding.sessionId);
+    expect((await continued(DOC)).sessionId).toBe(document.sessionId);
+
+    const listed = async (profile: string) =>
+      (await (await api(`/sessions?cwd=${encodeURIComponent(cwd)}&profile=${profile}`)).json()).sessions.map(
+        (session: { sessionId: string }) => session.sessionId,
+      );
+    expect(await listed("document")).toEqual([document.sessionId]);
+    expect(await listed("coding")).toEqual([coding.sessionId]);
+  });
 });

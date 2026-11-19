@@ -23,8 +23,9 @@
  * `watchSessions` listener, a stream of plain `string[]` messages a transport carries as frames.
  */
 
-export type Profile = "coding";
-export const PROFILES: readonly Profile[] = ["coding"];
+/** `coding`: the user's Pi; `document`: the workbench chat's restricted Pi (D4, D9, `supervisor/profiles.ts`). */
+export type Profile = "coding" | "document";
+export const PROFILES: readonly Profile[] = ["coding", "document"];
 
 export type SpawnRequest = {
   profile: Profile;
@@ -61,7 +62,8 @@ export type SessionMeta = {
   archived: boolean;
 };
 
-export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown> };
+/** `profile` marks the profile a session was started with (G5); absent means `coding`. */
+export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile };
 
 export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
 

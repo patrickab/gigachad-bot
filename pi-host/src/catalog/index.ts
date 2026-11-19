@@ -2,18 +2,18 @@
  * Catalog HTTP routes: session listing, search, archive/restore, pin, private state and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
- * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned` and
- *   `copyPrivateState` for the supervisor
+ * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
+ *   `profileOf` and `markProfile` for the supervisor
  */
 import { isAbsolute, resolve } from "node:path";
-import type { Host } from "../host/index.ts";
+import { PROFILES, type Host, type Profile } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { rankFiles } from "./files.ts";
 import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 import { isPlainObject, updateState } from "./state.ts";
 
 export { listSessions, sessionInfo, type LiveStatus, type SessionInfo } from "./sessions.ts";
-export { copyPrivateState, isPinned } from "./state.ts";
+export { copyPrivateState, isPinned, markProfile, profileOf } from "./state.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
@@ -51,13 +51,15 @@ function limitParam(url: URL, fallback: number, max: number): number {
   return Number.isInteger(requested) ? Math.min(Math.max(requested, 1), max) : fallback;
 }
 
-/** `GET /sessions?cwd=&archived=0|1`, every cwd's sessions without `cwd`. */
+/** `GET /sessions?cwd=&archived=0|1&profile=`, every cwd's sessions without `cwd`, every profile's without `profile`. */
 async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Response> {
   const rawCwd = url.searchParams.get("cwd");
   const cwd = rawCwd === null ? null : await validCwd(host, rawCwd);
   if (cwd === undefined) return fail(400, "invalid_cwd");
+  const profile = url.searchParams.get("profile") ?? undefined;
+  if (profile !== undefined && !PROFILES.includes(profile as Profile)) return fail(400, "invalid_profile");
   const archived = url.searchParams.get("archived") === "1";
-  return Response.json({ sessions: await listSessions(host, cwd, archived, live) });
+  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined) });
 }
 
 /**

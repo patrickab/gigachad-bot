@@ -4,9 +4,9 @@
  * - Consumes: the Pi binary, pi-host's environment, Pi's session files and sidecars, git in a requested cwd
  * - Provides: `LocalHost`, the only place that spawns processes, touches or watches files or takes `flock`s
  *
- * Spawn strategies (plan D5): `coding` runs the Pi binary directly. A sandboxed profile later maps to a strategy
- * that runs `agent-sandbox pi-rpc --profile ... -- <pi args>`, which keeps the same stdio, stdin-EOF and SIGTERM
- * contract.
+ * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes only its
+ * arguments (`supervisor/profiles.ts`). A sandboxed profile later maps to a strategy that runs
+ * `agent-sandbox pi-rpc --profile ... -- <pi args>`, which keeps the same stdio, stdin-EOF and SIGTERM contract.
  */
 import { stat } from "node:fs/promises";
 import type {
@@ -55,7 +55,7 @@ export class LocalHost implements Host {
   }
 
   async spawn({ cwd, piArgs }: SpawnRequest): Promise<PiChild> {
-    // Every profile is `coding` today: the Pi binary directly.
+    // Every profile runs the Pi binary directly.
     return Bun.spawn([this.options.piBin, ...piArgs], {
       cwd,
       env: childEnv(this.options.extraChildEnv),

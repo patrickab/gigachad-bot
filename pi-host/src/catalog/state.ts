@@ -1,10 +1,11 @@
 /**
- * Private session state and pin (M19, M20, C6) over a Host's sidecar operations.
+ * Private session state, pin and profile marker (M19, M20, C6, G5) over a Host's sidecar operations.
  *
  * - Consumes: `Host.readState` / `Host.writeState`
- * - Provides: revisioned, per-session serialized `updateState`, `isPinned`, `copyPrivateState`, `isPlainObject`
+ * - Provides: revisioned, per-session serialized `updateState`, `isPinned`, `copyPrivateState`, `profileOf`,
+ *   `markProfile`, `isPlainObject`
  */
-import type { Host, PrivateState } from "../host/index.ts";
+import type { Host, PrivateState, Profile } from "../host/index.ts";
 
 const sidecarLocks = new Map<string, Promise<unknown>>();
 
@@ -39,9 +40,22 @@ export async function isPinned(host: Host, sessionPath: string): Promise<boolean
   return (await host.readState(sessionPath)).pinned;
 }
 
-/** Copy private data to a forked session; the fork starts unpinned at revision 0. */
+/** Copy private data and the profile marker to a forked session; the fork starts unpinned at revision 0. */
 export async function copyPrivateState(host: Host, fromPath: string, toPath: string): Promise<void> {
-  const { data } = await host.readState(fromPath);
-  if (Object.keys(data).length === 0) return;
-  await host.writeState(toPath, { revision: 0, pinned: false, data });
+  const { data, profile } = await host.readState(fromPath);
+  if (Object.keys(data).length === 0 && profile === undefined) return;
+  await host.writeState(toPath, { revision: 0, pinned: false, data, ...(profile ? { profile } : {}) });
+}
+
+/** The profile a session was started with (G5), `coding` without a marker. */
+export async function profileOf(host: Host, sessionPath: string): Promise<Profile> {
+  return (await host.readState(sessionPath)).profile ?? "coding";
+}
+
+/** Record the profile a session runs with; no sidecar is written for an unmarked `coding` session. */
+export async function markProfile(host: Host, sessionPath: string, profile: Profile): Promise<void> {
+  await updateState(host, sessionPath, (state) => ({
+    next: (state.profile ?? "coding") === profile ? undefined : { ...state, profile },
+    result: undefined,
+  }));
 }

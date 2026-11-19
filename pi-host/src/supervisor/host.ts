@@ -3,24 +3,25 @@
  * and the `sessions_changed` broadcast (M25).
  *
  * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, fork, session watcher), Catalog's
- *   `sessionInfo` and `copyPrivateState`
+ *   `sessionInfo`, `copyPrivateState` and the profile marker (G5), `profiles.ts` for each profile's Pi arguments
  * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18)
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
-import { copyPrivateState, sessionInfo, type SessionInfo } from "../catalog/index.ts";
+import { copyPrivateState, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
-import { PROFILES, type Host, type Profile, type SessionMeta } from "../host/index.ts";
+import type { Host, Profile, SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
+import { parseProfileSpec, profileArgs, sameProfile, type ProfileSpec } from "./profiles.ts";
 import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
-type Resume = null | "continue" | { sessionPath: string } | { forkOf: ForkOf };
+type Resume = null | "continue" | { sessionPath: string } | { sessionId: string } | { forkOf: ForkOf };
 type StartRequest = {
   cwd: string;
-  profile: Profile;
+  spec: ProfileSpec;
   resume: Resume;
   model?: { provider: string; id: string };
   thinking?: string;
@@ -41,16 +42,18 @@ function fail(status: number, error: string, extra: Record<string, unknown> = {}
 /** Validated `POST /sessions` body, or the failure to answer with. */
 async function parseStartRequest(body: unknown, host: Host): Promise<StartRequest | Failure> {
   if (!isRecord(body)) return fail(400, "invalid_body");
-  const { cwd, profile, resume, model, thinking } = body;
+  const { cwd, profile, systemPrompt, tools, resume, model, thinking } = body;
   if (typeof cwd !== "string" || !isAbsolute(cwd) || !(await host.isDirectory(cwd))) {
     return fail(400, "invalid_cwd");
   }
-  if (!PROFILES.includes(profile as Profile)) return fail(400, "invalid_profile");
+  const spec = parseProfileSpec({ profile, systemPrompt, tools });
+  if ("error" in spec) return fail(400, spec.error);
   const validResume =
     resume === null ||
     resume === undefined ||
     resume === "continue" ||
     (isRecord(resume) && typeof resume.sessionPath === "string" && isAbsolute(resume.sessionPath)) ||
+    (isRecord(resume) && typeof resume.sessionId === "string" && resume.sessionId !== "") ||
     (isRecord(resume) &&
       isRecord(resume.forkOf) &&
       typeof resume.forkOf.sessionPath === "string" &&
@@ -64,7 +67,7 @@ async function parseStartRequest(body: unknown, host: Host): Promise<StartReques
   if (thinking !== undefined && typeof thinking !== "string") return fail(400, "invalid_thinking");
   return {
     cwd: resolve(cwd),
-    profile: profile as Profile,
+    spec,
     resume: (resume ?? null) as Resume,
     model: model as StartRequest["model"],
     thinking: thinking as string | undefined,
@@ -193,41 +196,51 @@ export class SupervisorHost implements Supervisor {
       live: session.liveStatus(),
       pinned: false,
       archived: false,
+      profile: session.spec.profile,
     };
   }
 
-  /** Resolve the session file to resume (writing it first for a fork), then return its live child or spawn one. */
+  /**
+   * Resolve the session file to resume (writing it first for a fork), then return its live child or spawn one. A
+   * session started with another profile, or a live child with another system prompt or tools, is `profile_mismatch`.
+   */
   private async start(request: StartRequest): Promise<StartOutcome> {
+    const { resume, spec } = request;
     let meta: SessionMeta | undefined;
     let cwd = request.cwd;
-    if (request.resume === "continue") {
-      meta = (await this.host.listSessions(cwd, false))[0];
-    } else if (request.resume && "forkOf" in request.resume) {
-      const { forkOf } = request.resume;
+    if (resume === "continue") {
+      meta = await this.newestOf(cwd, spec.profile);
+    } else if (resume && "forkOf" in resume) {
+      const { forkOf } = resume;
+      if ((await profileOf(this.host, forkOf.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
       const forked = await this.host.forkSession(forkOf);
       if (!forked.ok) return fail(404, forked.error);
       await copyPrivateState(this.host, forkOf.sessionPath, forked.path);
       meta = await this.host.sessionMeta(forked.path);
       if (!meta) return fail(404, "not_found");
       cwd = meta.cwd;
-    } else if (request.resume) {
-      meta = await this.host.sessionMeta(request.resume.sessionPath);
+    } else if (resume) {
+      // A new session has no file before its first message, only its live child knows the id.
+      const liveById = "sessionId" in resume ? this.byId.get(resume.sessionId) : undefined;
+      if (liveById && !liveById.closing) return this.reuse(liveById, spec);
+      const sessionPath = "sessionId" in resume ? await this.host.findSession(resume.sessionId) : resume.sessionPath;
+      meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
       if (!meta) return fail(404, "not_found");
       if (meta.archived) return fail(409, "archived");
+      if ((await profileOf(this.host, meta.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
       cwd = meta.cwd;
     }
     if (!meta) return this.spawn(request, cwd, undefined);
     const sessionPath = meta.realPath;
 
     const live = this.byPath.get(sessionPath) ?? this.byPath.get(meta.sessionPath);
-    if (live && !live.closing) {
-      // The client's attach follows; an eviction tick in between must not take the child.
-      live.lastActivity = Date.now();
-      return { session: live };
-    }
+    if (live && !live.closing) return this.reuse(live, spec);
     if (live) await live.exited;
     const inFlight = this.starting.get(sessionPath);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      const outcome = await inFlight;
+      return "session" in outcome ? this.reuse(outcome.session, spec) : outcome;
+    }
     const started = this.spawn(request, cwd, sessionPath);
     this.starting.set(sessionPath, started);
     try {
@@ -235,6 +248,22 @@ export class SupervisorHost implements Supervisor {
     } finally {
       this.starting.delete(sessionPath);
     }
+  }
+
+  /** A live child for a request, unchanged, when it runs with the requested profile, prompt and tools. */
+  private reuse(live: LiveSession, spec: ProfileSpec): StartOutcome {
+    if (!sameProfile(live.spec, spec)) return fail(409, "profile_mismatch");
+    // The client's attach follows; an eviction tick in between must not take the child.
+    live.lastActivity = Date.now();
+    return { session: live };
+  }
+
+  /** Newest live-root session of `cwd` started with `profile` (`continue`). */
+  private async newestOf(cwd: string, profile: Profile): Promise<SessionMeta | undefined> {
+    for (const meta of await this.host.listSessions(cwd, false)) {
+      if ((await profileOf(this.host, meta.sessionPath)) === profile) return meta;
+    }
+    return undefined;
   }
 
   /** Lock (M1, before the child starts, which excludes a concurrent archive), spawn, identify, register. */
@@ -246,11 +275,11 @@ export class SupervisorHost implements Supervisor {
       if (taken === "missing") return fail(404, "not_found");
       if (taken === "busy") return fail(409, "locked");
     }
-    const piArgs = ["--mode", "rpc", ...(sessionPath ? ["--session", sessionPath] : [])];
+    const piArgs = ["--mode", "rpc", ...profileArgs(request.spec), ...(sessionPath ? ["--session", sessionPath] : [])];
     let session: LiveSession;
     try {
-      const child = await this.host.spawn({ profile: request.profile, cwd, piArgs });
-      session = new LiveSession(child, cwd, request.profile, lock, (exited) => this.forget(exited));
+      const child = await this.host.spawn({ profile: request.spec.profile, cwd, piArgs });
+      session = new LiveSession(child, cwd, request.spec, lock, (exited) => this.forget(exited));
     } catch (error) {
       lock.release();
       return fail(502, "spawn_failed", { message: String(error) });
@@ -273,6 +302,14 @@ export class SupervisorHost implements Supervisor {
         await session.close();
         return fail(400, error, { message: String(response.error ?? "rejected") });
       }
+    }
+
+    try {
+      // G5: before the session is listed, so a `document` session never shows as `coding`.
+      await markProfile(this.host, session.sessionPath, request.spec.profile);
+    } catch (error) {
+      await session.close();
+      return fail(502, "spawn_failed", { message: `profile marker: ${String(error)}` });
     }
 
     if (session.exitCode !== undefined) {

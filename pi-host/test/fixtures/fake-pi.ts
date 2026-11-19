@@ -6,7 +6,8 @@
  *   `abort`, `dialog` opens a select dialog, `status <key> [text]` sets or clears a status, `compact` appends a
  *   compaction entry, `goto <entryId>` moves the leaf there (a branch switch), `orphan` starts a `sleep` that
  *   inherits stdout and stderr and answers its pid, anything else echoes. `bash` streams `bash_execution_update`s.
- *   `get_entries` honours `since` like Pi. The session file is written lazily at the first assistant `message_end`
+ *   `get_entries` honours `since` like Pi. The session file is written lazily at the first assistant `message_end`.
+ *   `get_state` also answers `argv`, the arguments the fixture was started with, so tests can assert profile flags
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -112,7 +113,17 @@ function handle(command: Command): void {
     case "get_state":
       return respond(command, {
         success: true,
-        data: { model, thinkingLevel, isStreaming: streaming, isCompacting: false, sessionFile, sessionId, messageCount: entries.length, pendingMessageCount: 0 },
+        data: {
+          model,
+          thinkingLevel,
+          isStreaming: streaming,
+          isCompacting: false,
+          sessionFile,
+          sessionId,
+          messageCount: entries.length,
+          pendingMessageCount: 0,
+          argv: args,
+        },
       });
     case "get_entries": {
       if (command.since === undefined) return respond(command, { success: true, data: { entries, leafId } });
