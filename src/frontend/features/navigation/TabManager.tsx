@@ -231,11 +231,17 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     return tab.id
   }, [defaultConfig, tabs, activeTab, setActiveTab])
 
+  // Closing the last tab leaves a fresh chat, the start page
   const closeTab = useCallback((id: string) => {
-    if (tabs.length <= 1) return
+    if (tabs.length <= 1) {
+      const fresh = nextTab(defaultConfig)
+      setTabs([fresh])
+      setActiveTab(fresh.id)
+      return
+    }
     setTabs((prev) => prev.filter((t) => t.id !== id))
     if (id === activeTab) setActiveTab(tabAfterClosing(tabs, id))
-  }, [tabs, activeTab, setActiveTab])
+  }, [tabs, activeTab, setActiveTab, defaultConfig])
 
   const cycleTab = useCallback((delta: 1 | -1) => {
     setActiveTab((current) => {

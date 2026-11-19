@@ -1423,6 +1423,19 @@ describe("Tab picker", () => {
     expect(view.queryByRole("button", { name: /^Close / })).not.toBeInTheDocument()
   })
 
+  it("turns the last tab into a fresh chat on Alt+W", () => {
+    const manager = createRef<TabManagerHandle>()
+    render(<TabManager ref={manager}><TabPicker /></TabManager>)
+    act(() => manager.current!.showChat("proj/first.json"))
+    const [last] = manager.current!.getTabs()
+
+    fireEvent.keyDown(document, { key: "w", altKey: true })
+    const [fresh, ...rest] = manager.current!.getTabs()
+    expect(rest).toHaveLength(0)
+    expect(fresh.id).not.toBe(last.id)
+    expect(fresh.historyFile).toBeNull()
+  })
+
   it("keeps the Tab key in its search field from switching workspaces", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
