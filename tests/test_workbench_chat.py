@@ -11,7 +11,7 @@ from backend.routes.deps import get_asset_store, get_document_store, get_file_ro
 import config
 from lib import extract_queue, latex_templates, pi_host
 from lib.git import run_git
-from lib.storage_namespace import WORKBENCH_CHATS, WORKBENCH_SESSIONS
+from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench import prompts
 from tests.conftest import mounted_roots, request_identity, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, StoredAsset
@@ -196,7 +196,6 @@ def test_a_markdown_chat_opens_a_document_session_in_its_kind_directory_and_link
         {"cwd": str(root / "markdown"), "profile": "document", "resume": None, "systemPrompt": prompts.render("markdown")},
     ]
     assert _stored(docs, WORKBENCH_CHATS) == {str(file): {"active": "s1", "sessions": ["s1"]}}
-    assert not docs.exists(WORKBENCH_SESSIONS)
 
 
 def test_reopening_resumes_the_active_session_with_the_prompt_again(client, host, root):

@@ -583,13 +583,10 @@ def test_a_notebook_has_one_kernel_whichever_way_its_path_is_spelled(world):
     assert world.client.get(f"{SERVER}/api/kernels/{again['kernel_id']}").status_code == 404
 
 
-def test_a_notebook_in_a_mount_works_in_the_mount_root_and_others_in_their_folder(world):
+def test_the_kernel_of_a_notebook_in_a_mount_runs_in_the_mount_root(world):
     mount = world.home / "repo"
     nb = notebook(mount / "notebooks" / "a.ipynb")
-    loose = notebook(world.project / "loose" / "a.ipynb")
     with client_for(world.host, mount) as client:
-        assert client.get("/api/jupyter/directory", params={"path": str(nb)}).json() == {"path": str(mount)}
-        assert client.get("/api/jupyter/directory", params={"path": str(loose)}).json() == {"path": str(loose.parent)}
         kernel = client.post("/api/jupyter/kernel", json={"path": str(nb), "name": "python3"})
         assert kernel.status_code == 200, kernel.text
 

@@ -1,5 +1,4 @@
-"""The sessions linked to each workbench file or LaTeX project folder: one user's omp sessions in `workbench/sessions.json`,
-their Pi `document` sessions in `workbench/chats.json` (G4, the omp store is left as it is).
+"""The Pi `document` sessions linked to each workbench file or LaTeX project folder, one user's in `workbench/chats.json` (G4).
 
 Consumes the user's `DataStore`, read and written through `JsonDocs` against the revision read, and `FileRoots` to find
 the root file of a LaTeX project. Provides `Link`, `SessionLinks` and `owe_new_paths` for relocations.
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING
 from lib import latex
 from lib.data_store import DataStore, Revision, StorageNotFoundError
 from lib.json_docs import JsonDocs
-from lib.storage_namespace import WORKBENCH_LINK_KEYS, WORKBENCH_SESSIONS
+from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench import kind_of
 
 if TYPE_CHECKING:
@@ -47,20 +46,19 @@ class Link:
         return cls(active=active if isinstance(active, str) else None, sessions=sessions, moved=moved)
 
     def stored(self) -> dict[str, object]:
-        """The `sessions.json` value of this link, without an empty `moved`."""
+        """The stored value of this link, without an empty `moved`."""
         stored: dict[str, object] = {"active": self.active, "sessions": list(self.sessions)}
         return {**stored, "moved": list(self.moved)} if self.moved else stored
 
 
 class SessionLinks:
-    """One user's session links stored under *key* (omp by default, `WORKBENCH_CHATS` for Pi).
+    """One user's session links (`WORKBENCH_CHATS`).
 
     Every write expects the revision it read, so a concurrent change raises `StorageConflictError`.
     """
 
-    def __init__(self, docs: DataStore, key: str = WORKBENCH_SESSIONS) -> None:
+    def __init__(self, docs: DataStore) -> None:
         self._json = JsonDocs(docs)
-        self._key = key
 
     def of(self, path: str, roots: FileRoots) -> Link:
         """The link of the absolute file or LaTeX project folder *path*.
@@ -73,7 +71,7 @@ class SessionLinks:
             adopted = _adopted(links, path, roots)
             if adopted is not None:
                 merged, link = adopted
-                self._json.write(self._key, merged, expected=revision)
+                self._json.write(WORKBENCH_CHATS, merged, expected=revision)
                 return link
         return Link.parse(links.get(path))
 
@@ -101,17 +99,16 @@ class SessionLinks:
         return self._update(path, discarded)
 
     def forget_inside(self, folders: list[Path]) -> None:
-        """Remove the links of the *folders* and of the files inside them, from every link store (omp and Pi)."""
-        for store in WORKBENCH_LINK_KEYS:
-            links, revision = self._read(store)
-            kept = {key: link for key, link in links.items() if not any(Path(key).is_relative_to(folder) for folder in folders)}
-            if kept != links:
-                self._json.write(store, kept, expected=revision)
+        """Remove the links of the *folders* and of the files inside them."""
+        links, revision = self._read()
+        kept = {key: link for key, link in links.items() if not any(Path(key).is_relative_to(folder) for folder in folders)}
+        if kept != links:
+            self._json.write(WORKBENCH_CHATS, kept, expected=revision)
 
-    def _read(self, store: str | None = None) -> tuple[dict, Revision | None]:
-        """The links under *store* (this instance's key by default) and their revision, empty and unrevised when there are none."""
+    def _read(self) -> tuple[dict, Revision | None]:
+        """The links and their revision, empty and unrevised when there are none."""
         try:
-            links, revision = self._json.read_with_revision(store or self._key)
+            links, revision = self._json.read_with_revision(WORKBENCH_CHATS)
         except (StorageNotFoundError, ValueError):
             return {}, None
         return (links if isinstance(links, dict) else {}), revision
@@ -122,7 +119,7 @@ class SessionLinks:
         current = Link.parse(links.get(path))
         link = change(current)
         if link != current or not isinstance(links.get(path), dict):
-            self._json.write(self._key, {**links, path: link.stored()}, expected=revision)
+            self._json.write(WORKBENCH_CHATS, {**links, path: link.stored()}, expected=revision)
         return link
 
 

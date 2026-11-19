@@ -151,7 +151,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- tex_source.py             Plain-text TeX helpers: comment stripping, beamer frame bounds and new-frame insertion point, image placeholder fill
 |   |   |-- learnharness.py           LearnHarness URL/response-contract owner (sessions adapter)
 |   |   |-- learnharness_config.py    `python -m lib.learnharness_config`: LiteLLM proxy config, LearnHarness settings and auth binding, master key
-|   |   |-- workbench/                Workbench kinds, folders, omp prompt and template-set mirror, rename folder moves, `links.py` (sole owner of `workbench/sessions.json`)
+|   |   |-- workbench/                Workbench kinds, folders, rename folder moves, Pi chat prompts (`prompts.py`), `links.py` (sole owner of `workbench/chats.json`)
 |   |   `-- prompts/                  Internal, non-user-facing prompts
 |   |       `-- non_user_prompts.py
 |   |-- c4/                           Separate stateless TypeScript LikeC4 service
@@ -340,7 +340,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               `-- package.json      Package-local dependencies and distribution contract
 |-- templates/                        Shipped sources read through `config.TEMPLATES` (bundled in frozen builds)
 |   |-- prompts/                      User-selectable seed prompts (`_order`, `_blocks/` fragments, e.g. `tutor.md`)
-|   |-- omp/                          Workbench omp prompts `latex.md`, `markdown.md`, `pdf.md`, `canvas.md`, `config.yml` and `mounted.yml` (mounted LaTeX projects) (source of truth)
+|   |-- workbench/                    Workbench Pi chat prompts `latex.md`, `markdown.md`, `pdf.md`, `canvas.md`, `notebook.md` (source of truth, `lib/workbench/prompts.py`)
 |   `-- latex/                        LaTeX template sets, rules in `templates/latex/AGENTS.md`
 |       |-- render.py                 Primitives -> `example.tex`/`example.pdf` -> preview PNGs
 |       |-- presentation/             Beamer set: theme `.sty`, `skeleton.tex`, `STYLE.md`, `primitives/<group>/`, generated example and previews

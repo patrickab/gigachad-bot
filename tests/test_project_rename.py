@@ -15,7 +15,7 @@ from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import KeyReference, PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
-from lib.storage_namespace import WORKBENCH_LINK_KEYS, WORKBENCH_SESSIONS
+from lib.storage_namespace import WORKBENCH_CHATS
 from tests.conftest import create_user
 
 
@@ -37,8 +37,8 @@ def workbench_folders(root):
     return paper, plan
 
 
-@pytest.mark.parametrize("links", WORKBENCH_LINK_KEYS)
-def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root, links):
+def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root):
+    links = WORKBENCH_CHATS
     paper = f"{workbench_root}/latex/old/paper/paper.tex"
     moved = f"{workbench_root}/latex/new/paper/paper.tex"
     other = f"{workbench_root}/latex/older/a.tex"
@@ -266,7 +266,7 @@ def test_rename_moves_workbench_folders_and_rewrites_paths_into_them(stores, wor
     paper, plan = workbench_folders(workbench_root)
     projects.add_file("old", str(paper))
     projects.add_file("old", str(plan))
-    put(docs, WORKBENCH_SESSIONS, {str(paper): "s1", "/elsewhere.md": "s2"})
+    put(docs, WORKBENCH_CHATS, {str(paper): "s1", "/elsewhere.md": "s2"})
     put(docs, "project/old/document/board.canvas", {"attachments": [{"id": "a", "path": str(plan)}]})
 
     projects.update_project("old", "New")
@@ -275,7 +275,9 @@ def test_rename_moves_workbench_folders_and_rewrites_paths_into_them(stores, wor
     moved_plan = workbench_root / "markdown" / "new" / "plan" / "plan.md"
     assert moved_paper.is_file() and moved_plan.is_file() and not (workbench_root / "latex" / "old").exists()
     assert sorted(projects.list_files("new")) == sorted([str(moved_paper), str(moved_plan)])
-    assert get(docs, WORKBENCH_SESSIONS) == {str(moved_paper): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/elsewhere.md": "s2"}
+    assert get(docs, WORKBENCH_CHATS) == {
+        str(moved_paper): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/elsewhere.md": "s2",
+    }
     assert get(docs, "project/new/document/board.canvas")["attachments"][0]["path"] == str(moved_plan)
 
 
@@ -348,7 +350,7 @@ def test_relocating_a_disk_path_repoints_references_without_touching_rows_and_re
     projects.create_project("Old")
     old, new = "/mnt/docs/a.md", "/mnt/docs/b.md"
     projects.add_file("old", old)
-    put(docs, WORKBENCH_SESSIONS, {old: {"active": "s1", "sessions": ["s1"]}, "/mnt/docs/c.md": "s2"})
+    put(docs, WORKBENCH_CHATS, {old: {"active": "s1", "sessions": ["s1"]}, "/mnt/docs/c.md": "s2"})
     canvas = "note/board.canvas"
     put(docs, canvas, {"attachments": [{"id": "a", "path": old}]})
     mutation = uuid4()
@@ -360,7 +362,7 @@ def test_relocating_a_disk_path_repoints_references_without_touching_rows_and_re
     PostgresKeyRelocator(UserScope(postgres_pool, user)).relocate(old, new)
 
     assert projects.list_files("old") == [new]
-    assert get(docs, WORKBENCH_SESSIONS) == {new: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/mnt/docs/c.md": "s2"}
+    assert get(docs, WORKBENCH_CHATS) == {new: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/mnt/docs/c.md": "s2"}
     assert get(docs, canvas)["attachments"][0]["path"] == new
     with postgres_pool.connection() as conn:
         value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]
@@ -391,14 +393,14 @@ def test_rename_carries_folder_entries_and_the_sessions_keyed_by_them(stores, wo
     (folder / "refs.bib").write_text("@book{a}", encoding="utf-8")
     projects.add_file("old", str(folder))
     projects.set_file_name("old", str(folder), "Thesis")
-    put(docs, WORKBENCH_SESSIONS, {str(folder): {"active": "s1", "sessions": ["s1"]}, str(folder / "refs.bib"): "s2"})
+    put(docs, WORKBENCH_CHATS, {str(folder): {"active": "s1", "sessions": ["s1"]}, str(folder / "refs.bib"): "s2"})
 
     projects.update_project("old", "New")
 
     moved = workbench_root / "latex" / "new" / "paper"
     assert (moved / "paper.tex").is_file() and (moved / "refs.bib").is_file() and not folder.exists()
     assert projects.list_named_files("new") == [(str(moved), "Thesis")]
-    assert get(docs, WORKBENCH_SESSIONS) == {
+    assert get(docs, WORKBENCH_CHATS) == {
         str(moved): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]},
         str(moved / "refs.bib"): {"active": "s2", "sessions": ["s2"], "moved": ["s2"]},
     }

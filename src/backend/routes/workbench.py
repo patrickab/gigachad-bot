@@ -1,6 +1,5 @@
 """Workbench files on disk (`lib.workbench`) and the chat sessions of each, for logins with host access.
 
-- `/session*`: the omp sessions of a file (`workbench/sessions.json`), until the frontend moves to the Pi chats
 - `/chat*`: the Pi `document` sessions of a file (`workbench/chats.json`, G4), opened through `lib.pi_host` with the
   prompt of `lib.workbench.prompts` (G2). A PDF chat gets the path of the PDF's extracted text (G3)
 """
@@ -35,8 +34,8 @@ from lib.disk_files import DiskFiles
 from lib.document_service import DocumentNameConflict, DocumentNotFound, Relocate, under
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
-from lib.storage_namespace import MINERU, NOTE, PDFS, WORKBENCH_CHATS, library_markdown, library_pdf, pdf_stem
-from lib.workbench import Kind, document_folder, kind_directory, kind_of, mounted_latex_session, new_folder, suffix_of
+from lib.storage_namespace import MINERU, NOTE, PDFS, library_markdown, library_pdf, pdf_stem
+from lib.workbench import Kind, document_folder, kind_directory, kind_of, new_folder, suffix_of
 from lib.workbench.links import Link, SessionLinks
 from lib.workbench.prompts import ChatKind, render
 
@@ -55,10 +54,9 @@ class FilePath(BaseModel):
 
 
 class PreparedFile(BaseModel):
-    """The file on disk, the omp session cwd of its kind and the kind."""
+    """The file on disk and its kind."""
 
     path: str
-    cwd: str
     kind: Kind
 
 
@@ -88,13 +86,6 @@ class StoredImage(BaseModel):
     placeholder_path: str
     reference: str
     changed: list[str] = []
-
-
-class SessionLink(BaseModel):
-    """Make `session_id` the active omp session of the absolute file or canvas key `path`, None starts a new one."""
-
-    path: str
-    session_id: str | None
 
 
 class LinkedSession(BaseModel):
@@ -139,19 +130,8 @@ def _kind(name: str) -> Kind:
     return kind
 
 
-def _prepared(path: Path | str, kind: Kind, cwd: Path | None = None) -> PreparedFile:
-    return PreparedFile(path=str(path), cwd=str(cwd or kind_directory(config.WORKBENCH, kind)), kind=kind)
-
-
-def _mounted_latex_session(path: Path, kind: Kind, roots: FileRoots) -> Path | None:
-    """The project folder a mounted LaTeX file's session starts in (`mounted_latex_session`), None for other files."""
-    if kind != "latex":
-        return None
-    try:
-        mount = roots.root_of(str(path))
-    except ValueError:
-        return None
-    return mounted_latex_session(path, mount)
+def _prepared(path: Path | str, kind: Kind) -> PreparedFile:
+    return PreparedFile(path=str(path), kind=kind)
 
 
 def _pdf_on_disk(key: str, assets: AssetStore) -> Path:
@@ -175,7 +155,6 @@ def post_prepare(
 ) -> PreparedFile:
     """The disk file to open for `path`: an absolute file resolved in place, a stored project document moved into its workbench folder.
 
-    - A mounted LaTeX file opens its omp session in its project folder, given the LaTeX prompt there (`mounted_latex_session`). Otherwise a session starts in its kind's directory
     - A stored PDF is never moved, its library copy on disk is read where it is
     - A stored canvas stays stored and answers its key, its sessions see it through screenshots
     - Notes stay stored and open in the document editor, so their keys answer 400
@@ -186,7 +165,7 @@ def post_prepare(
         if resolved.suffix == ".canvas":
             return _prepared(resolved, "canvas")
         kind = _kind(resolved.name)
-        return _prepared(resolved, kind, _mounted_latex_session(resolved, kind, roots))
+        return _prepared(resolved, kind)
     canvas = _canvas_key(body.path)
     if canvas is not None:
         if not docs.is_file(canvas):
@@ -315,26 +294,6 @@ def _image_reference(kind: Kind, theme: latex_templates.TemplateSet | None, imag
         return f"![]({image})"
     themed = None if theme is None else theme.image_reference(image)
     return themed or rf"\includegraphics[width=\linewidth]{{{image}}}"
-
-
-@router.get("/session")
-def get_session(
-    path: str = Query(...), docs: DataStore = Depends(get_document_store), roots: FileRoots = Depends(get_file_roots),
-) -> LinkedSession:
-    """The omp sessions linked to the absolute file or LaTeX project folder `path` (`SessionLinks.of`)."""
-    return _linked_session(SessionLinks(docs).of(path, roots))
-
-
-@router.put("/session")
-def put_session(body: SessionLink, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
-    """Make `session_id` the active session of the absolute file `path`, keeping every earlier one. None starts a new session."""
-    return _linked_session(SessionLinks(docs).activate(_link_key(body.path), body.session_id))
-
-
-@router.post("/session/informed")
-def post_session_informed(body: SessionNotice, docs: DataStore = Depends(get_document_store)) -> LinkedSession:
-    """The session `session_id` knows where the file `path` is now, so its messages stop naming it."""
-    return _linked_session(SessionLinks(docs).inform(_link_key(body.path), body.session_id))
 
 
 class ChatTarget(BaseModel):
@@ -468,7 +427,7 @@ async def post_chat(
     """
     chat, prompt, pdf_text = await asyncio.to_thread(_prepare_chat, body.path, docs, roots, assets)
     key = chat.file
-    links = SessionLinks(docs, WORKBENCH_CHATS)
+    links = SessionLinks(docs)
     link = await asyncio.to_thread(links.of, key, roots)
     wanted = None if body.new else body.session_id or link.active
 
@@ -504,7 +463,7 @@ async def get_chats(
     path: str, docs: Annotated[DataStore, Depends(get_document_store)], roots: Annotated[FileRoots, Depends(get_file_roots)],
 ) -> ChatList:
     """The Pi sessions linked to the absolute file, LaTeX project folder or canvas key `path` (`SessionLinks.of`)."""
-    link = await asyncio.to_thread(SessionLinks(docs, WORKBENCH_CHATS).of, _link_key(path), roots)
+    link = await asyncio.to_thread(SessionLinks(docs).of, _link_key(path), roots)
     known = {session.session_id: session for session in await _pi(pi_host.list_sessions(None, archived=False))}
     return ChatList(link=_linked_session(link), sessions=[known[id_] for id_ in link.sessions if id_ in known])
 
@@ -512,4 +471,4 @@ async def get_chats(
 @router.post("/chat/informed")
 def post_chat_informed(body: SessionNotice, docs: Annotated[DataStore, Depends(get_document_store)]) -> LinkedSession:
     """The Pi session `session_id` knows where the file `path` is now, so its messages stop naming it."""
-    return _linked_session(SessionLinks(docs, WORKBENCH_CHATS).inform(_link_key(body.path), body.session_id))
+    return _linked_session(SessionLinks(docs).inform(_link_key(body.path), body.session_id))

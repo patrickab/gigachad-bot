@@ -60,8 +60,6 @@ from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
 from lib.postgres_pool import close_postgres_pool
 from lib.process_owner import reap_orphans, stop_owned
-from lib.workbench import mirror_omp
-import config
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
 
 log = logging.getLogger(__name__)
@@ -104,10 +102,6 @@ async def lifespan(app: FastAPI):
     asyncio.get_running_loop().run_in_executor(None, _warm_client)
     upgrade(database_url())
     reset_cancel()
-    try:
-        mirror_omp(config.WORKBENCH)
-    except OSError:
-        log.exception("Could not mirror the workbench omp prompts into %s", config.WORKBENCH)
     from lib import extract_queue
 
     await extract_queue.start()

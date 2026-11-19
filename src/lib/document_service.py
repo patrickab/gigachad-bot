@@ -230,7 +230,7 @@ def rename_on_disk(
 
     - Allowed where saving is: *roots* decides, and a project scope must reference the file
     - An existing file of that name raises DocumentNameConflict. The move is undone when the references cannot follow
-    - References: project file lists, `workbench/sessions.json`, chats, canvases and their mutation log, notes
+    - References: project file lists, `workbench/chats.json`, chats, canvases and their mutation log, notes
     - A `.tex` file leaves its build outputs behind, so they are discarded and the next build starts clean
     - Inside a tex project, its `.tex` and `.bib` files follow the new name (`latex_references`) and each is recorded as changed
       through *files*, one failing record leaves the others recorded. A failure there is logged and leaves the rename in place

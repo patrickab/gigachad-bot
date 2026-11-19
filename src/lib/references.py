@@ -10,7 +10,8 @@ Holders of references, read from `documents.meta` so no body is scanned per dele
 Derived data, deleted once unused: library PDFs `PDFs/<name>`, PDF annotation canvases `pdf-annotation/<sha256>.canvas`
 (their mutation log and share rows follow by foreign key) and project documents `project/<slug>/document/...`. MinerU
 output is never deleted. A workbench document folder `<WORKBENCH>/<kind>/<slug>/<folder>` is app-created, so releasing a
-path inside it deletes the whole folder and its `sessions.json` links once no project references anything inside it. An annotation canvas stays while any stored or referenced host PDF has its hash, or a host file
+path inside it deletes the whole folder and its chat links (`lib.workbench.links`) once no project references anything
+inside it. An annotation canvas stays while any stored or referenced host PDF has its hash, or a host file
 recorded in its meta `hosts` (opened with it from the file tree) still does. Host files are only hashed, never written.
 
 `python -m lib.references --dry-run` lists, per user, what earlier deletes left behind.

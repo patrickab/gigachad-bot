@@ -55,10 +55,6 @@ class StartKernelRequest(BaseModel):
     name: str
 
 
-class NotebookDirectory(BaseModel):
-    path: str
-
-
 def get_jupyter_host() -> RemoteJupyterHost:
     return jupyter_service.host()  # type: ignore[return-value]  # tests put an in-process JupyterHost in its place
 
@@ -75,15 +71,10 @@ def _allowed_notebook(roots: FileRoots, path: str) -> str:
 
 
 def _working_directory(roots: FileRoots, notebook: str) -> str:
-    """Where the notebook *notebook* works (kernel and chat): the mounted root holding it, so repo-relative paths resolve, else its folder."""
+    """Where the notebook's kernel runs: the mounted root holding it, so repo-relative paths resolve, else its folder."""
     with contextlib.suppress(ValueError):
         return str(roots.root_of(notebook))
     return str(Path(notebook).parent)
-
-
-@router.get("/directory", response_model=NotebookDirectory, dependencies=[_host_only, _trusted])
-async def notebook_directory(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> NotebookDirectory:
-    return NotebookDirectory(path=_working_directory(roots, _allowed_notebook(roots, path)))
 
 
 @router.get("/kernelspecs", response_model=KernelSpecList, dependencies=[_host_only, _trusted])

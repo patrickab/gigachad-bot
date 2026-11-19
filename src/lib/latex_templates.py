@@ -21,7 +21,7 @@ import config
 from lib.tex_source import plain_lines
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
 
 TEMPLATE_SETS = config.TEMPLATES / "latex"
 IMAGE_DIRECTORY = "imgs"
@@ -108,13 +108,6 @@ class TemplateSet:
         for name in self.files:
             shutil.copyfile(self.path / name, folder / name)
         (folder / IMAGE_DIRECTORY).mkdir()
-
-    def agent_files(self) -> Iterator[tuple[Path, Path]]:
-        """The `(relative, path)` of every file of the set an agent reads, all but `example.pdf` and `previews/`."""
-        for path in sorted(self.path.rglob("*")):
-            relative = path.relative_to(self.path)
-            if path.is_file() and relative != Path("example.pdf") and relative.parts[0] != "previews":
-                yield relative, path
 
     def _slides(self) -> tuple[list[LatexPrimitive], dict[str, Path]]:
         """The slides and each one's file by id, read again when the mtimes of the primitive files or their previews changed."""

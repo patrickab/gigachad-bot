@@ -1,6 +1,5 @@
 from datetime import datetime
 import json
-import os
 
 import pytest
 
@@ -19,10 +18,9 @@ from lib import latex, latex_templates, workbench
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 from lib.disk_files import DiskFiles
-from lib.git import run_git
 from lib.project_store import ProjectStore
-from lib.storage_namespace import WORKBENCH_SESSIONS
-from lib.workbench import prompts
+from lib.storage_namespace import WORKBENCH_CHATS
+from lib.workbench.links import Link, SessionLinks
 from tests.conftest import PRESENTATION_SOURCE, mounted_roots, request_identity, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope, StoredAsset
 
@@ -112,7 +110,7 @@ def test_a_stored_pdf_is_read_from_its_library_copy_on_disk_and_never_moved(root
     client = workbench_client(projects, docs, mounted_roots(vault, root), assets=assets)
 
     prepared = client.post("/api/workbench/prepare", json={"path": "PDFs/paper.pdf"}).json()
-    assert prepared == {"path": str(documents / "PDFs" / "paper.pdf"), "cwd": str(root / "pdf"), "kind": "pdf"}
+    assert prepared == {"path": str(documents / "PDFs" / "paper.pdf"), "kind": "pdf"}
     assert (documents / "PDFs" / "paper.pdf").read_bytes() == b"%PDF-1"
     assert "PDFs/paper.pdf" in assets.assets
 
@@ -126,39 +124,8 @@ def test_a_stored_pdf_is_read_from_its_library_copy_on_disk_and_never_moved(root
 def test_a_mounted_pdf_is_read_in_place_and_new_pdfs_are_refused(client, vault, root):
     pdf = vault / "slides.pdf"
     pdf.write_bytes(b"%PDF-1")
-    assert client.post("/api/workbench/prepare", json={"path": str(pdf)}).json() == {"path": str(pdf), "cwd": str(root / "pdf"), "kind": "pdf"}
+    assert client.post("/api/workbench/prepare", json={"path": str(pdf)}).json() == {"path": str(pdf), "kind": "pdf"}
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "x.pdf"}).status_code == 400
-
-
-def test_a_mounted_latex_project_gets_its_session_in_its_folder_with_the_latex_prompt_ignored_by_git(client, vault, template_sets):
-    run_git(vault, "init", "-q")
-    folder = vault / "report"
-    folder.mkdir()
-    tex = folder / "main.tex"
-    tex.write_text("\\documentclass{beamer}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
-
-    for _ in range(2):
-        assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json() == {"path": str(tex), "cwd": str(folder), "kind": "latex"}
-
-    omp = folder / ".omp"
-    assert (omp / "SYSTEM.md").read_text(encoding="utf-8") == prompts.render("latex")
-    assert (omp / "config.yml").read_bytes() == (config.TEMPLATES / "omp" / "mounted.yml").read_bytes()
-    assert (omp / "templates" / "demo" / "skeleton.tex").is_file()
-    assert (vault / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines().count("/report/.omp/") == 1
-    assert run_git(vault, "status", "--porcelain", "--untracked-files=all").stdout.strip() == "?? report/main.tex"
-
-
-def test_a_latex_project_at_a_mount_or_repository_top_keeps_the_workbench_session(client, vault, root):
-    tex = vault / "main.tex"
-    tex.write_text("\\documentclass{article}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
-    assert client.post("/api/workbench/prepare", json={"path": str(tex)}).json()["cwd"] == str(root / "latex")
-
-    repository = vault / "paper"
-    repository.mkdir()
-    run_git(repository, "init", "-q")
-    (repository / "main.tex").write_text(tex.read_text(encoding="utf-8"), encoding="utf-8")
-    assert client.post("/api/workbench/prepare", json={"path": str(repository / "main.tex")}).json()["cwd"] == str(root / "latex")
-    assert not (repository / ".omp").exists()
 
 
 @pytest.mark.parametrize(("path", "kind"), [("/x/B.TEX", "latex"), ("refs.bib", "latex"), ("n.md", "markdown"),
@@ -176,57 +143,6 @@ def test_documents_live_in_a_folder_per_kind_project_and_stem(tmp_path):
 def test_folder_segments_cannot_be_empty_nested_or_hidden(tmp_path, slug, stem):
     with pytest.raises(ValueError):
         workbench.document_folder(tmp_path, "latex", slug, stem)
-
-
-def test_mirror_overwrites_hand_edits_of_every_kind(tmp_path):
-    system = tmp_path / "latex" / ".omp" / "SYSTEM.md"
-    system.parent.mkdir(parents=True)
-    system.write_text("hand edit", encoding="utf-8")
-    workbench.mirror_omp(tmp_path)
-    assert "LaTeX" in system.read_text(encoding="utf-8")
-    assert "Markdown" in (tmp_path / "markdown" / ".omp" / "SYSTEM.md").read_text(encoding="utf-8")
-    for kind in workbench.KINDS:
-        assert "context-file:project:AGENTS.md" in (tmp_path / kind / ".omp" / "config.yml").read_text(encoding="utf-8")
-
-
-def test_mirror_leaves_unchanged_files_untouched(tmp_path):
-    workbench.mirror_omp(tmp_path)
-    mirrored = [tmp_path / kind / ".omp" / name for kind in workbench.KINDS for name in ("SYSTEM.md", "config.yml")]
-    for path in mirrored:
-        os.utime(path, ns=(1_000_000_000, 1_000_000_000))
-    workbench.mirror_omp(tmp_path)
-    assert [path.stat().st_mtime_ns for path in mirrored] == [1_000_000_000] * len(mirrored)
-
-
-def test_mirror_continues_past_a_failing_kind(tmp_path):
-    (tmp_path / "latex").mkdir()
-    (tmp_path / "latex" / ".omp").write_text("not a directory", encoding="utf-8")
-    workbench.mirror_omp(tmp_path)
-    assert "Markdown" in (tmp_path / "markdown" / ".omp" / "SYSTEM.md").read_text(encoding="utf-8")
-
-
-def test_mirror_copies_the_template_sets_without_their_example_pdf_and_previews_and_prunes_the_rest(tmp_path, template_sets):
-    mirror = tmp_path / "workbench" / "latex" / workbench.OMP_DIRECTORY / workbench.TEMPLATE_DIRECTORY
-    (mirror / "demo" / "primitives" / "old").mkdir(parents=True)
-    (mirror / "demo" / "primitives" / "old" / "01-gone.tex").write_text("stale", encoding="utf-8")
-    (mirror / "demo" / "STYLE.md").write_text("hand edit", encoding="utf-8")
-    (mirror / "removed").mkdir()
-    (mirror / "removed" / "skeleton.tex").write_text("stale", encoding="utf-8")
-
-    workbench.mirror_omp(tmp_path / "workbench")
-
-    def files(base):
-        return {path.relative_to(base): path.read_bytes() for path in base.rglob("*") if path.is_file()}
-
-    expected = {
-        path: content for path, content in files(template_sets).items()
-        if path.parts[0] in {"demo", "compact", "letter"} and path.name != "example.pdf" and path.parts[1] != "previews"
-    }
-    assert files(mirror) == expected
-    assert sorted(path.name for path in mirror.iterdir()) == ["compact", "demo", "letter"]
-    assert not (mirror / "demo" / "primitives" / "old").exists()
-
-
 
 
 def test_project_directories_lists_existing_ones_only(tmp_path):
@@ -260,7 +176,7 @@ def test_prepare_moves_a_stored_project_file_into_its_folder(client, root, docs,
     response = client.post("/api/workbench/prepare", json={"path": key})
 
     source = root / "latex" / "thesis" / "paper" / "paper.tex"
-    assert response.json() == {"path": str(source), "cwd": str(root / "latex"), "kind": "latex"}
+    assert response.json() == {"path": str(source), "kind": "latex"}
     assert source.read_bytes() == b"\\documentclass{article}"
     assert projects.list_files("thesis") == [str(source)]
     assert not docs.exists(key)
@@ -330,7 +246,7 @@ def test_prepare_leaves_an_absolute_file_in_place(client, root, vault):
 
     response = client.post("/api/workbench/prepare", json={"path": str(source)})
 
-    assert response.json() == {"path": str(source), "cwd": str(root / "markdown"), "kind": "markdown"}
+    assert response.json() == {"path": str(source), "kind": "markdown"}
     assert source.read_text(encoding="utf-8") == "# Repo"
 
 
@@ -481,73 +397,59 @@ def test_a_failed_create_keeps_the_folders_that_existed_before(client, root, pro
     assert [path.name for path in project.iterdir()] == ["other.tex"]
 
 
-def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(client, docs):
+def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(docs):
+    links = SessionLinks(docs)
     path = "/data/workbench/latex/thesis/paper/paper.tex"
 
-    def linked() -> dict:
-        return client.get("/api/workbench/session", params={"path": path}).json()
-
-    def link(session_id: str | None, file: str = path) -> dict:
-        return client.put("/api/workbench/session", json={"path": file, "session_id": session_id}).json()
-
-    assert linked() == {"session_id": None, "session_ids": [], "moved": []}
-    assert link("s1") == {"session_id": "s1", "session_ids": ["s1"], "moved": []}
-    link("other", "/other.md")
+    assert links.activate(path, "s1") == Link("s1", ("s1",))
+    links.activate("/other.md", "other")
 
     # Reset: a new session is active, the earlier one stays listed until the new one is linked
-    assert link(None) == {"session_id": None, "session_ids": ["s1"], "moved": []}
-    link("s2")
+    assert links.activate(path, None) == Link(None, ("s1",))
+    links.activate(path, "s2")
     # Picking an earlier session makes it active without reordering or duplicating it
-    assert link("s1") == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": []}
-    assert linked() == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": []}
-    assert client.get("/api/workbench/session", params={"path": "/other.md"}).json() == {"session_id": "other", "session_ids": ["other"], "moved": []}
-    assert client.put("/api/workbench/session", json={"path": "relative.md", "session_id": "s"}).status_code == 400
+    assert links.activate(path, "s1") == Link("s1", ("s1", "s2"))
+    assert stored_links(docs) == {
+        path: {"active": "s1", "sessions": ["s1", "s2"]}, "/other.md": {"active": "other", "sessions": ["other"]},
+    }
 
 
-def test_a_bare_session_id_stored_before_session_lists_reads_as_one_active_session(client, docs):
-    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps({"/a.md": "old"}).encode(), expected=None)
-    assert client.get("/api/workbench/session", params={"path": "/a.md"}).json() == {"session_id": "old", "session_ids": ["old"], "moved": []}
-    client.put("/api/workbench/session", json={"path": "/a.md", "session_id": "new"})
-    assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/a.md": {"active": "new", "sessions": ["old", "new"]}}
+def test_a_bare_session_id_stored_before_session_lists_reads_as_one_active_session(docs):
+    store_links(docs, {"/a.md": "old"})
+    assert SessionLinks(docs).activate("/a.md", "new") == Link("new", ("old", "new"))
+    assert stored_links(docs) == {"/a.md": {"active": "new", "sessions": ["old", "new"]}}
 
 
-def test_sessions_of_a_moved_file_name_it_again_until_each_was_told(client, docs):
-    links = {"/b.md": {"active": "s2", "sessions": ["s1", "s2"], "moved": ["s1", "s2"]}}
-    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode(), expected=None)
+def test_sessions_of_a_moved_file_name_it_again_until_each_was_told(docs):
+    store_links(docs, {"/b.md": {"active": "s2", "sessions": ["s1", "s2"], "moved": ["s1", "s2"]}})
+    links = SessionLinks(docs)
 
     # Switching sessions keeps what each still has to be told
-    assert client.put("/api/workbench/session", json={"path": "/b.md", "session_id": "s1"}).json()["moved"] == ["s1", "s2"]
-    told = client.post("/api/workbench/session/informed", json={"path": "/b.md", "session_id": "s1"}).json()
-
-    assert told == {"session_id": "s1", "session_ids": ["s1", "s2"], "moved": ["s2"]}
-    client.post("/api/workbench/session/informed", json={"path": "/b.md", "session_id": "s2"})
-    assert json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/b.md": {"active": "s1", "sessions": ["s1", "s2"]}}
+    assert links.activate("/b.md", "s1").moved == ("s1", "s2")
+    assert links.inform("/b.md", "s1") == Link("s1", ("s1", "s2"), ("s2",))
+    links.inform("/b.md", "s2")
+    assert stored_links(docs) == {"/b.md": {"active": "s1", "sessions": ["s1", "s2"]}}
 
 
-def test_a_stored_canvas_prepares_in_place_and_links_its_sessions_by_key(client, root, docs):
+def test_a_stored_canvas_prepares_in_place(client, docs):
     key = "project/thesis/document/board.canvas"
     docs.write_bytes(key, b"{}")
 
-    prepared = client.post("/api/workbench/prepare", json={"path": key}).json()
-    assert prepared == {"path": key, "cwd": str(root / "canvas"), "kind": "canvas"}
-    assert client.put("/api/workbench/session", json={"path": key, "session_id": "s1"}).json()["session_id"] == "s1"
-    assert client.get("/api/workbench/session", params={"path": key}).json()["session_id"] == "s1"
+    assert client.post("/api/workbench/prepare", json={"path": key}).json() == {"path": key, "kind": "canvas"}
     assert client.post("/api/workbench/prepare", json={"path": "project/thesis/document/gone.canvas"}).status_code == 404
     assert docs.read_bytes(key)[0] == b"{}"
 
 
-def test_a_canvas_file_on_disk_prepares_in_place(client, root, vault):
+def test_a_canvas_file_on_disk_prepares_in_place(client, vault):
     board = vault / "board.canvas"
     board.write_text("{}", encoding="utf-8")
 
-    assert client.post("/api/workbench/prepare", json={"path": str(board)}).json() == {"path": str(board), "cwd": str(root / "canvas"), "kind": "canvas"}
+    assert client.post("/api/workbench/prepare", json={"path": str(board)}).json() == {"path": str(board), "kind": "canvas"}
 
 
 @pytest.mark.parametrize(("method", "url", "request_args"), [
     ("post", "/api/workbench/prepare", {"json": {"path": "project/thesis/document/paper.tex"}}),
     ("post", "/api/workbench/create", {"json": {"slug": "thesis", "name": "paper.tex"}}),
-    ("get", "/api/workbench/session", {"params": {"path": "/a.md"}}),
-    ("put", "/api/workbench/session", {"json": {"path": "/a.md", "session_id": "s"}}),
 ])
 def test_logins_without_host_access_are_refused(root, vault, docs, projects, method, url, request_args):
     key = "project/thesis/document/paper.tex"
@@ -556,17 +458,17 @@ def test_logins_without_host_access_are_refused(root, vault, docs, projects, met
     client = workbench_client(projects, docs, mounted_roots(vault, root), host_access=False)
 
     assert getattr(client, method)(url, **request_args).status_code == 403
-    assert docs.read_bytes(key)[0] == b"stored" and not docs.exists(WORKBENCH_SESSIONS)
+    assert docs.read_bytes(key)[0] == b"stored"
     assert not root.exists()
 
 
-def test_supporting_latex_files_prepare_in_place_but_are_not_created(client, vault, root):
+def test_supporting_latex_files_prepare_in_place_but_are_not_created(client, vault):
     bibliography = vault / "refs.bib"
     bibliography.write_text("@book{a}", encoding="utf-8")
 
     prepared = client.post("/api/workbench/prepare", json={"path": str(bibliography)}).json()
 
-    assert prepared == {"path": str(bibliography), "cwd": str(root / "latex"), "kind": "latex"}
+    assert prepared == {"path": str(bibliography), "kind": "latex"}
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "refs.bib"}).status_code == 400
 
 
@@ -658,18 +560,19 @@ def tex_project(root):
 
 
 def store_links(docs, links):
-    docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode(), expected=None)
+    docs.write_bytes(WORKBENCH_CHATS, json.dumps(links).encode(), expected=None)
 
 
 def stored_links(docs):
-    return json.loads(docs.read_bytes(WORKBENCH_SESSIONS)[0])
+    return json.loads(docs.read_bytes(WORKBENCH_CHATS)[0])
 
 
-def session_of(client, path):
-    return client.get("/api/workbench/session", params={"path": str(path)}).json()
+def session_of(docs, roots, path):
+    link = SessionLinks(docs).of(str(path), roots)
+    return {"session_id": link.active, "session_ids": list(link.sessions), "moved": list(link.moved)}
 
 
-def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_one_once(client, root, docs):
+def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_one_once(root, vault, docs):
     folder = tex_project(root)
     store_links(docs, {
         str(folder / "sections" / "intro.tex"): {"active": "c2", "sessions": ["c1", "c2"], "moved": ["c1"]},
@@ -679,7 +582,7 @@ def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_
         str(folder / "notes.md"): "markdown stays",
     })
 
-    adopted = session_of(client, folder)
+    adopted = session_of(docs, mounted_roots(vault, root), folder)
 
     assert adopted == {"session_id": "p1", "session_ids": ["c1", "c2", "b1", "p1", "p2"], "moved": ["c1", "p2"]}
     assert stored_links(docs) == {
@@ -687,17 +590,17 @@ def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_
         str(folder / "notes.md"): "markdown stays",
         str(folder): {"active": "p1", "sessions": ["c1", "c2", "b1", "p1", "p2"], "moved": ["c1", "p2"]},
     }
-    assert session_of(client, folder) == adopted
+    assert session_of(docs, mounted_roots(vault, root), folder) == adopted
 
 
-def test_a_folder_without_its_root_among_the_links_takes_the_first_files_active_session(client, root, docs):
+def test_a_folder_without_its_root_among_the_links_takes_the_first_files_active_session(root, vault, docs):
     folder = tex_project(root)
     store_links(docs, {
         str(folder / "sections" / "intro.tex"): {"active": "c1", "sessions": ["c1"]},
         str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
     })
 
-    assert session_of(client, folder) == {"session_id": "c1", "session_ids": ["c1", "b1"], "moved": []}
+    assert session_of(docs, mounted_roots(vault, root), folder) == {"session_id": "c1", "session_ids": ["c1", "b1"], "moved": []}
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24

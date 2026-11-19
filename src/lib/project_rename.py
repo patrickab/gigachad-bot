@@ -19,7 +19,7 @@ from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.json_io import dump_json
 from lib.storage_namespace import (
-    ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX, WORKBENCH, WORKBENCH_LINK_KEYS,
+    ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX, WORKBENCH, WORKBENCH_CHATS,
 )
 from lib.workbench.links import owe_new_paths
 
@@ -120,7 +120,7 @@ def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value
     except ValueError:
         return content
     updated = value(data)
-    if key in WORKBENCH_LINK_KEYS:
+    if key == WORKBENCH_CHATS:
         updated = owe_new_paths(data, updated)
     return content if updated == data else dump_json(updated).encode()
 

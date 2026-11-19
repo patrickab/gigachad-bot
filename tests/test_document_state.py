@@ -27,7 +27,7 @@ from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.references import References
-from lib.storage_namespace import WORKBENCH_SESSIONS
+from lib.storage_namespace import WORKBENCH_CHATS
 from tests.conftest import create_user_and_device, mounted_roots
 
 pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
@@ -224,7 +224,7 @@ def test_renaming_a_mounted_file_renames_it_on_disk_and_repoints_every_reference
         alice.projects.add_file(slug, str(source))
     alice.projects.set_file_name(second, str(source), "Legacy.md")
     stored_links = {str(source): {"active": "s1", "sessions": ["s1"]}, "/elsewhere/notes.md": "s2"}
-    alice.docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(stored_links).encode())
+    alice.docs.write_bytes(WORKBENCH_CHATS, json.dumps(stored_links).encode())
     alice.docs.write_bytes("note/board.canvas", json.dumps({"attachments": [{"path": str(source)}]}).encode())
     alice.docs.write_bytes("note/links.md", f"[notes]({source})".encode())
     target = folder / "ideas.md"
@@ -235,7 +235,7 @@ def test_renaming_a_mounted_file_renames_it_on_disk_and_repoints_every_reference
     assert target.read_text(encoding="utf-8") == "hello" and not source.exists()
     assert alice.projects.list_named_files(first) == [(str(target), "ideas.md")]
     assert alice.projects.list_named_files(second) == [(str(target), "ideas.md")]
-    assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {
+    assert json.loads(alice.docs.read_bytes(WORKBENCH_CHATS)[0]) == {
         str(target): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, "/elsewhere/notes.md": "s2",
     }
     assert json.loads(alice.docs.read_bytes("note/board.canvas")[0]) == {"attachments": [{"path": str(target)}]}
@@ -458,7 +458,7 @@ def test_a_folder_entry_lists_its_tree_and_its_files_rename_like_mounted_ones(al
     mount, folder = folder_entry(tmp_path)
     slug = alice.projects.create_project("Thesis")["slug"]
     alice.projects.add_file(slug, str(folder))
-    alice.docs.write_bytes(WORKBENCH_SESSIONS, json.dumps({str(folder / "refs.bib"): "s1"}).encode())
+    alice.docs.write_bytes(WORKBENCH_CHATS, json.dumps({str(folder / "refs.bib"): "s1"}).encode())
 
     [entry] = list_project(alice, slug, mounted_roots(mount))
     renamed = rename(alice, str(folder / "refs.bib"), "", "literature.bib", mounted_roots(mount))
@@ -467,7 +467,7 @@ def test_a_folder_entry_lists_its_tree_and_its_files_rename_like_mounted_ones(al
     assert [child["name"] for child in entry.children] == ["main.tex", "refs.bib"]
     assert renamed.path == str(folder / "literature.bib") and (folder / "literature.bib").is_file()
     assert alice.projects.list_named_files(slug) == [(str(folder), "paper")]
-    assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {
+    assert json.loads(alice.docs.read_bytes(WORKBENCH_CHATS)[0]) == {
         str(folder / "literature.bib"): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]},
     }
 
@@ -517,13 +517,13 @@ def test_deleting_a_renamed_workbench_tex_removes_its_folder_and_chat_link(alice
     slug = alice.projects.create_project("Thesis")["slug"]
     renamed = workbench_document(alice, workbench, slug, "test2", "test.tex")
     links = {str(renamed): "s1", str(renamed.parent / "other.tex"): "s2", "/elsewhere/a.md": "s3"}
-    alice.docs.write_bytes(WORKBENCH_SESSIONS, json.dumps(links).encode())
+    alice.docs.write_bytes(WORKBENCH_CHATS, json.dumps(links).encode())
 
     remove(alice, slug, renamed)
 
     assert not renamed.parent.exists() and not renamed.parent.parent.exists() and (workbench / "latex").is_dir()
     assert alice.projects.list_files(slug) == []
-    assert json.loads(alice.docs.read_bytes(WORKBENCH_SESSIONS)[0]) == {"/elsewhere/a.md": "s3"}
+    assert json.loads(alice.docs.read_bytes(WORKBENCH_CHATS)[0]) == {"/elsewhere/a.md": "s3"}
 
 
 def test_deleting_a_promoted_folder_entry_removes_the_workbench_folder(alice, workbench):
