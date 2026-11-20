@@ -7,6 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
+    "ambient:fetch": "gh release download --repo patrickab/deepfocus-ambient --pattern night-ocean.webm --dir public/ambient --clobber",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri"

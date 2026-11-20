@@ -14,7 +14,7 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
-import { newPiItem, useIsPeeked, useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import type { Attachment } from "@/lib/domain/types"
 import type { PiLaunch } from "@/features/pi/PiTab"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
@@ -100,7 +100,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       stopMeasuring?.()
     }
   }, [registerContentArea])
-  const peeked = useIsPeeked()
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const openPromptEditor = useCallback(() => setPromptEditorOpen(true), [])
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
@@ -163,8 +162,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
         onOpenItem={onOpenItem}
         onEditPrompts={openPromptEditor}
       />
-      {/* Previewed in the tab picker, the paper comes from the card behind: a shared frame laid under this tab must show through */}
-      <main ref={contentAreaRef} className={`flex-1 min-w-0 flex flex-col relative ${peeked ? "" : "bg-paper"}`}>
+      {/* No paper of its own: the ocean backdrop, or a shared frame laid under this tab, shows through */}
+      <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative">
         <WorkspaceSurface
           sidebarToggle={sidebarCollapsed && <PanelToggleButton side="left" open={false} onClick={toggleSidebar} openLabel="Open sidebar" closeLabel="Close sidebar" />}
           canvas={canvas}

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 const MIN_WIDTH = 200
 const MAX_WIDTH = 600
 /** Space between the card and the window edge it is anchored to. */
-const GUTTER_PX = 12
+const GUTTER_PX = 20
 const EASE_S = 0.2
 
 type Side = "left" | "right"
@@ -104,7 +104,7 @@ export function SidePanel({ side, open, width, onWidthChange, minWidth = MIN_WID
       inert={!open}
       style={{ width: cardWidth, [side === "left" ? "marginLeft" : "marginRight"]: gutter }}
       // Fades with the width's easing, closed it casts no shadow
-      className={cn("relative my-3 flex shrink-0 overflow-hidden rounded-2xl bg-surface shadow-[var(--shadow-sm)] transition-opacity duration-200 ease-out",
+      className={cn("relative my-5 flex shrink-0 overflow-hidden rounded-2xl bg-surface shadow-[var(--shadow-sm)] transition-opacity duration-200 ease-out",
         !open && "opacity-0", side === "right" && "justify-end", className)}
     >
       <motion.div style={{ width: contentWidth }} className="flex min-h-0 shrink-0 flex-col">

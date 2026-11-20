@@ -32,6 +32,9 @@
       ],
       "@gigachad/chat-ui/*": [
         "./packages/chat-ui/src/*"
+      ],
+      "deepfocus-ambient": [
+        "./packages/deepfocus-ambient/src/index.ts"
       ]
     },
     "baseUrl": "."

@@ -113,6 +113,7 @@ print("" if sessions is None else sum(1 for session in sessions if session.get("
 old="$(git -C "$prod" rev-parse HEAD)"
 git -C "$prod" fetch origin master
 git -C "$prod" rebase origin/master
+git -C "$prod" submodule update --init
 new="$(git -C "$prod" rev-parse HEAD)"
 
 if [[ $old == "$new" ]]; then

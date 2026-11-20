@@ -26,6 +26,7 @@ import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
 import { onFileMove } from "@/lib/backend/fileEvents"
 import { watchDocumentLists } from "@/lib/backend/resources"
+import { AmbientBackdrop } from "@/features/ambient/AmbientBackdrop"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -170,6 +171,7 @@ export function AppShell() {
 
   return (
     <ContentAreaProvider>
+      <AmbientBackdrop />
       <BranchProvider onFileClick={handleOpenChat} onHistoriesMoved={handleHistoriesMoved}>
         <SidebarProvider>
           <MemoryViewerProvider>

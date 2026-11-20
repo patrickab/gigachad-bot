@@ -13,6 +13,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^deepfocus-ambient$/, replacement: path.resolve(__dirname, "packages/deepfocus-ambient/src/index.ts") },
       { find: /^@gigachad\/chat-ui$/, replacement: path.resolve(__dirname, "packages/chat-ui/src/index.ts") },
       { find: /^@gigachad\/chat-ui\//, replacement: `${path.resolve(__dirname, "packages/chat-ui/src")}/` },
       { find: /^@\//, replacement: `${path.resolve(__dirname)}/` },

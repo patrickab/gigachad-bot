@@ -38,6 +38,8 @@ install_frontend_deps() {
     if [[ -n "${GIGACHAD_FRONTEND_DEPS_INSTALLED:-}" ]]; then
         return 0
     fi
+    # The frontend imports the deepfocus-ambient submodule's source (src/frontend/packages/deepfocus-ambient)
+    git -C "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" submodule update --init
     uv --directory "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" run --no-sync gigachad-install
 }
 

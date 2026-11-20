@@ -1,4 +1,5 @@
-import { useRef, useState, type ReactNode, type RefObject } from "react"
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { anchorScene } from "deepfocus-ambient"
 import { useElementSize } from "@/hooks/useElementSize"
 
 /** Extra scroll padding below the last turn, on top of the floating composer's height. */
@@ -6,6 +7,10 @@ const BOTTOM_GAP_PX = 16
 /** An empty conversation centers the composer this far above the column's bottom, as a share of its height. Slightly below the middle. */
 const EMPTY_CENTER_FROM_BOTTOM = 0.45
 const EMPTY_GREETING = "What's on your mind?"
+/** Bottom padding inside the dock, under the composer box (`pb-6`). */
+const DOCK_PADDING_BOTTOM_PX = 24
+/** The backdrop's horizon lies this far below a lifted composer box, so the box floats just above the haze. */
+const HORIZON_BELOW_COMPOSER_PX = 30
 
 /** Where a conversation column's floating composer sits, from `useComposerDock`. */
 export interface ComposerDockLayout {
@@ -24,6 +29,7 @@ export interface ComposerDockLayout {
  *
  * - The turns scroll on under the composer, `paddingBottom` keeps the last one clear of it, also while the composer is hidden
  * - A conversation known to be `empty` lifts the composer to just below the column's middle, under the greeting. A loading one keeps it at the bottom
+ * - A lifted composer anchors the ambient backdrop's scene: the horizon just below its box, the light behind the box's middle
  */
 export function useComposerDock(empty: boolean): ComposerDockLayout {
   const columnRef = useRef<HTMLDivElement>(null)
@@ -34,8 +40,22 @@ export function useComposerDock(empty: boolean): ComposerDockLayout {
   if (inputAreaSize.height > 0 && inputAreaSize.height !== inputAreaHeight) setInputAreaHeight(inputAreaSize.height)
   const columnHeight = useElementSize(columnRef).height
   const lift = empty && columnHeight > 0 ? Math.max(0, columnHeight * EMPTY_CENTER_FROM_BOTTOM - inputAreaHeight / 2) : 0
+  const isLifted = lift > 0 && inputAreaHeight > 0
+  useEffect(() => {
+    if (!isLifted) return
+    return anchorScene(() => {
+      const column = columnRef.current?.getBoundingClientRect()
+      if (!column || column.height === 0) return null
+      const boxBottom = column.bottom - lift - DOCK_PADDING_BOTTOM_PX
+      return {
+        horizonY: boxBottom + HORIZON_BELOW_COMPOSER_PX,
+        lightX: column.left + column.width / 2,
+        lightY: boxBottom - (inputAreaHeight - DOCK_PADDING_BOTTOM_PX) / 2,
+      }
+    })
+  }, [isLifted, lift, inputAreaHeight])
   // The greeting waits for the measured, centered composer, so it never flashes at the bottom
-  return { columnRef, inputAreaRef, paddingBottom: inputAreaHeight + BOTTOM_GAP_PX, lift, showGreeting: lift > 0 && inputAreaHeight > 0 }
+  return { columnRef, inputAreaRef, paddingBottom: inputAreaHeight + BOTTOM_GAP_PX, lift, showGreeting: isLifted }
 }
 
 /** The composer `children` floating at the bottom of `dock`'s column, with the greeting above it while lifted. `animate` eases its move to the bottom (a first send). */
