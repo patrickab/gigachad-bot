@@ -26,7 +26,7 @@ function toRgb(cssColor: string): [number, number, number] {
 /**
  * The night ocean of `deepfocus-ambient` behind the whole app, in the theme's colors.
  *
- * - The sea's light is drawn in `--ink` on `--paper`: light on dark in the dark theme, and in the light theme the moon casts darkness
+ * - Drawn in `--ink` and `--paper`: by night in the dark theme, by day in the light theme (a white sun in haze over a darker sea)
  * - One fixed canvas under everything: it shows wherever the shell paints no surface of its own
  * - The scene follows the newest `anchorScene` on screen (an empty conversation's composer) and stays where that left it
  * - Reduced motion gets a still sea
