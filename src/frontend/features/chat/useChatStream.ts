@@ -3,6 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { createChatStream } from "@/lib/backend/api"
 import { deactivateSentImages } from "@/features/chat/attachments"
+import { createTokenPacer } from "@/lib/backend/tokenPacer"
 import {
   applyChatStreamEvent,
   createMessagePublisher,
@@ -68,6 +69,11 @@ export function useChatStream(): UseChatStreamReturn {
       setIsStreaming(true)
 
       const publish = createMessagePublisher(setMessages, assistantMsg)
+      // Answer text is paced, everything else lands as it arrives.
+      const pacer = createTokenPacer((text) => {
+        assistantMsg.content += text
+        publish()
+      })
       // Every exit from the loop below settles the tool cards still marked running.
       let unresolvedReason = "Stream ended before the tool returned"
       let completed = false
@@ -89,8 +95,14 @@ export function useChatStream(): UseChatStreamReturn {
           }
           if (decoded.kind === "done") {
             completed = true
+            await pacer.finish()
             break
           }
+          if (decoded.kind === "token") {
+            pacer.push(decoded.text)
+            continue
+          }
+          if (decoded.kind === "error") pacer.flush()
           applyChatStreamEvent(assistantMsg, decoded)
           publish()
           // An error event is the turn's last content: append it, then stop reading.
@@ -103,6 +115,7 @@ export function useChatStream(): UseChatStreamReturn {
         // Abort and transport failure are both swallowed: the turn keeps what it streamed.
         unresolvedReason = e instanceof Error && e.name === "AbortError" ? "Cancelled" : errorMessage(e, "Stream failed")
       } finally {
+        pacer.flush()
         settleRunningToolCalls(assistantMsg, unresolvedReason)
         publish()
         const current = messagesRef.current

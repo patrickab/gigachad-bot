@@ -1,0 +1,3 @@
+[submodule "src/frontend/packages/deepfocus-ambient"]
+	path = src/frontend/packages/deepfocus-ambient
+	url = ../deepfocus-ambient.git

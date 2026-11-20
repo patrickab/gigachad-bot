@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStream, type ChatStreamCompletion } from "@/features/chat/useChatStream"
 import type { ChatRequest, Message } from "@/lib/domain/types"
@@ -119,7 +119,7 @@ describe("useChatStream", () => {
     let finish!: () => void
     const firstToken = new Promise<void>((resolve) => { markFirstToken = resolve })
     const responseFinished = new Promise<void>((resolve) => { finish = resolve })
-    const now = vi.spyOn(performance, "now").mockReturnValue(0)
+    const now = vi.spyOn(performance, "now")
     createChatStream.mockReturnValue({
       abort: vi.fn(),
       async *[Symbol.asyncIterator]() {
@@ -138,7 +138,7 @@ describe("useChatStream", () => {
         send = result.current.send(request("Stream this"))
         await firstToken
       })
-      expect(result.current.messages.at(-1)).toEqual({ role: "assistant", content: "First" })
+      await waitFor(() => expect(result.current.messages.at(-1)).toEqual({ role: "assistant", content: "First" }))
 
       finish()
       await act(async () => { await send })
