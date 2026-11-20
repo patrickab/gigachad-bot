@@ -51,7 +51,9 @@ pi_host_settled() {
 }
 
 printf 'Starting pi-host on %s\n' "$bind"
-(cd -- "$pi_host_dir" && exec bun run src/server.ts) &
+# Plain `bun`, not `bun run`: that puts pi-host/node_modules/.bin first on PATH, so Pi sessions would start the npm
+# package's `pi` (cli.js) instead of the installed binary, and their shells would see pi-host's tools
+(cd -- "$pi_host_dir" && exec bun src/server.ts) &
 owned_pid=$!
 child_exited=false
 if ! wait_until 120 0.25 pi_host_settled; then
