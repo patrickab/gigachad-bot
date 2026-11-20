@@ -27,7 +27,7 @@ import { canvasLead } from "@/features/workbench/fileLead"
 import { FileChat } from "@/features/workbench/FileChat"
 import { PiTab, type PiLaunch, type PiShellCommands } from "@/features/pi/PiTab"
 import type { PiInsertion } from "@/features/pi/PiComposer"
-import { TokenCounter } from "@/features/chat/TokenCounter"
+import { ChatContextUsage } from "@/features/chat/ContextUsage"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
@@ -174,7 +174,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       </>,
       right: <>
         <TopBarPill>
-          <TokenCounter tokens={totalUsage.total_tokens} />
+          <ChatContextUsage usage={totalUsage} model={config.selectedModel} />
           <ThemeToggle />
         </TopBarPill>
         {filePanelToggle}

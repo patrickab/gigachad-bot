@@ -8,7 +8,7 @@
 
 import { createResource, refresh, resourceFamily, revalidateStale, type Resource } from "@/lib/resource"
 import {
-  ApiError, fetchModels, fetchPrompts, fetchProviderUsage, fetchReasoningLevels, fetchWorktrees, fileRootTree, fileRootsEnabled, listAllDocuments,
+  ApiError, fetchModels, fetchPiCatalog, fetchPrompts, fetchProviderUsage, fetchReasoningLevels, fetchWorktrees, fileRootTree, fileRootsEnabled, listAllDocuments,
   listNotes, listProjectDocuments, loadTemplateSets,
 } from "@/lib/backend/api"
 import { onFileChange, onFileMove, onFileRemoval } from "@/lib/backend/fileEvents"
@@ -22,6 +22,9 @@ import { isInside } from "@/lib/paths"
 // Reads call the client at load time, never at import, so tests mocking only part of the client can still import this module.
 
 export const modelsResource = createResource((signal) => fetchModels(signal))
+
+/** Models the Pi gateway serves, with each one's context window and thinking ladder. */
+export const piCatalogResource = createResource(() => fetchPiCatalog())
 
 /** Resolved system prompt per prompt slug. */
 export const promptsResource = createResource((signal) => fetchPrompts(signal))

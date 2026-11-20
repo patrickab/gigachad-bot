@@ -13,7 +13,7 @@ import type { ReactNode, Ref } from "react"
  * ...     <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
  * ...     <TopBarPill><ModelDropdown … /></TopBarPill>
  * ...   </>}
- * ...   right={<TopBarPill><TokenCounter … /></TopBarPill>}
+ * ...   right={<TopBarPill><ChatContextUsage … /></TopBarPill>}
  * ... />
  *
  * `center` sits in the middle of the bar between two equal side columns, so it stays centered and the left and right items

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
+import { compactTokens, ContextUsage } from "@/features/chat/ContextUsage"
 import { PiModelSelector, PiThinkingSelector } from "./PiModelSelector"
 import type { PiModel } from "./types"
 import type { PiSessionStats } from "./usePiSession"
@@ -23,10 +24,6 @@ export interface PiSessionHeader {
   tone: StatusTone
   sessionName: string | undefined
   controls: PiSessionControls
-}
-
-function compactTokens(tokens: number): string {
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens)
 }
 
 /** `30% · $0.45`: context window use (unknown right after a compaction) and the session's cost, null before Pi reports them (F3). */
@@ -71,18 +68,11 @@ export function PiTopBar({ header, controls }: { header: PiSessionHeader | null;
   )
 }
 
-/** The top bar's right end: context tokens and context use, `12.3k | 1%`, `?` for either right after a compaction. Nothing before Pi reports them (F3). */
+/** The top bar's right end: context tokens and context use (F3), the same readout as a chat's. Nothing before Pi reports them. */
 export function PiUsageBar({ stats }: { stats: PiSessionStats | null }) {
   const usage = stats?.contextUsage
   if (!usage) return null
-  const { tokens, percent } = usage
-  const tokensText = tokens === null ? "?" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(tokens)
-  const percentText = percent === null ? "?" : `${Math.round(percent)}%`
-  return (
-    <span aria-label={`Context ${tokensText} tokens, ${percentText} of ${compactTokens(usage.contextWindow)}`} className="shrink-0 whitespace-nowrap px-3 font-mono text-xs tabular-nums text-ink-faint">
-      {tokensText} | {percentText}
-    </span>
-  )
+  return <ContextUsage tokens={usage.tokens} percent={usage.percent} contextWindow={usage.contextWindow} />
 }
 
 /** The session's live dot and folder, at the composer's left like omp-web's working directory. */
