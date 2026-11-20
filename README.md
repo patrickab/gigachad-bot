@@ -6,7 +6,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 
 ## What you can do
 
-- **Choose your models**: connect cloud and local providers through [LiteLLM](https://github.com/BerriAI/litellm).
+- **Choose your models**: use the cloud providers your [Pi](https://github.com/earendil-works/pi) login and API keys give you, or local [Ollama](https://ollama.com) models.
 - **Watch subscription limits**: the sidebar shows how much of your [Pi](https://github.com/earendil-works/pi) login's 5h, 7d and monthly limits you have used.
 - **Review changes**: open the git diff of any mounted file directory from the sidebar.
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.

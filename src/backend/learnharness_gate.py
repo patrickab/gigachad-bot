@@ -4,7 +4,7 @@
   `HOST_CAPABILITY` pass, everyone else gets 403. `reverse_proxy.forward` does the proxying
 - A plain identity-checking proxy: keeps `Host`, marks the request HTTPS, streams both ways (LearnHarness streams its turns).
   No LearnHarness knowledge lives here, `lib/learnharness.py` owns that, except one policy: LearnHarness takes no provider
-  key, custom endpoint or subscription (models come from gigachad-bot through the LiteLLM proxy), so writes to those
+  key, custom endpoint or subscription (models come from gigachad-bot through pi-host's gateway), so writes to those
   routes are refused with 403. The overlay hides their UI, this keeps a hand-made request out too
 
 Run: `uvicorn backend.learnharness_gate:app --app-dir src --host 127.0.0.1 --port 30182`

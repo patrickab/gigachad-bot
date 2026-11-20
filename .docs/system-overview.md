@@ -36,8 +36,8 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Model chat, context, and projects
 
-- Select cloud/provider models through LiteLLM or local Ollama models. Configure model defaults and editable system prompts for the task; supported models expose reasoning controls.
-- Distinguish Pi models in local chat from Pi coding-session tabs. The former use pi-host's completion gateway through LiteLLM, the latter run Pi sessions through pi-host.
+- Select models from the providers Pi has a login or API key for, or local Ollama models. Configure model defaults and editable system prompts for the task; supported models expose reasoning controls.
+- Distinguish Pi models in local chat from Pi coding-session tabs. Every local-chat model, Ollama included, answers through pi-host's completion gateway, the tabs run Pi sessions through pi-host.
 - Stream replies, revisit saved histories, branch from a message, and merge branches back into a conversation.
 - Collapsed answers render their rich text when nearby or focused, reducing work in long chats. Hidden tabs wait until shown, and expanding a turn reveals its full answer.
 - Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent workflows and are separate.

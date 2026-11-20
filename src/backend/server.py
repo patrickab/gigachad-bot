@@ -8,15 +8,6 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import langchain_community.chat_models as _lccm
-
-# gpt_researcher imports `langchain_community.chat_models.litellm`, which the installed
-# langchain_community no longer ships, so write a shim re-exporting it from langchain_litellm.
-_lccm_dir = Path(_lccm.__file__).parent
-_litellm_shim = _lccm_dir / "litellm.py"
-if not _litellm_shim.exists():
-    _litellm_shim.write_text('from langchain_litellm import ChatLiteLLM\n\n__all__ = ["ChatLiteLLM"]\n')
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -42,7 +33,7 @@ from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib import jupyter_service, pi_models
+from lib import jupyter_service
 from lib import ollama_models
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
@@ -86,10 +77,6 @@ async def lifespan(app: FastAPI):
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
         log.warning("Stopped %d processes an earlier backend left running: %s", len(reaped), reaped)
     widen_default_executor()
-    # Must precede the first LiteLLM call: it teaches the `litellm_proxy/`
-    # prefix where pi-host's gateway lives, which is how Pi's logins
-    # (including the Anthropic subscription) reach chat.
-    pi_models.configure_litellm_proxy()
     # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
     asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())

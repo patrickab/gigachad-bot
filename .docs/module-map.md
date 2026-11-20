@@ -28,7 +28,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- 0007_model_reasoning_levels.sql
 |       |-- 0010_memory_topics.sql    Memory topics migration
 |       |-- 0014_change_moved_to.sql  `changes.moved_to` for renames
-|       `-- 0015_change_operation.sql `changes.operation` (`write`, `move`, `delete`)
+|       |-- 0015_change_operation.sql `changes.operation` (`write`, `move`, `delete`)
+|       `-- 0016_drop_model_reasoning_levels.sql Effort ladders come from the gateway, the cache table goes
 |-- src/
 |   |-- config.py                     Env-derived backend settings (imports nothing from lib)
 |   |-- backend/
@@ -95,7 +96,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- memory_extract.py         `MemoryExtractor`: LLM extraction proposals and regroup
 |   |   |-- memory_context.py         Memory injection into chat system prompts
 |   |   |-- model_provider_store.py   Provider catalog and model defaults
-|   |   |-- reasoning_levels.py       Reasoning-effort levels: live discovery, stored answers, send-time kwargs
+|   |   |-- reasoning_levels.py       Reasoning-effort levels from the gateway's `thinking_levels`, send-time kwargs
 |   |   |-- prompt_store.py           User prompt storage (read lazily) and seed/block loading
 |   |   |-- file_roots.py             Mounted-file roots, path safety, read/write/create, `ceiling_of` (root, else home for host access), tree
 |   |   |-- disk_files.py             `DiskFiles`: create/write/record files under the roots with their `document` change
@@ -120,17 +121,18 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- tools.py                  Application tool bindings
 |   |   |-- tool_context.py           Per-call tool context and browser tool options
 |   |   |-- web_search.py             Brave query planning and evidence retrieval
-|   |   |-- research.py               GPT-Researcher adapter
+|   |   |-- research.py               GPT-Researcher adapter (gateway chat models, Ollama embeddings)
 |   |   |-- sandbox_service.py        Workspace/output orchestration
 |   |   |-- sandbox_store.py          Durable sandbox metadata
 |   |   |-- agent_sandbox_adapter.py  Native sandbox runner adapter
 |   |   |-- fake_sandbox_runner.py    Docker-free runner (selected by env in `routes/deps.py`)
 |   |   |-- sandbox_plot.py           Plot generation
 |   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token
-|   |   |-- pi_models.py              Pi model catalog for local chats (pi-host gateway through LiteLLM `litellm_proxy/`)
+|   |   |-- pi_models.py              Pi model catalog for local chats, stored selector -> gateway id (`gateway_model_id`)
+|   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
+|   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
 |   |   |-- factory.py                External factory engine adapter
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
-|   |   |-- llm_resilience.py         One retry for stale LiteLLM parameter rejections, `completion_text`
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         Pi subscription usage reader/cache (pi-host `/usage`)
@@ -349,7 +351,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       `-- letter/                   KOMA-Script letter document set
 |-- tests/                            Python route/service/store/security regressions
 |   |-- conftest.py                    Shared fixtures, Postgres store helpers, `route_client`
-|   |-- fakes.py                       Shared in-memory stores, `RecordingScope`, sandbox and LLM client fakes
+|   |-- fakes.py                       Shared in-memory stores, `RecordingScope`, sandbox fakes, completion stream chunks
 |   |-- shell.py                       Run repository shell scripts against fake commands
 |   |-- test_postgres_mode_end_to_end.py
 |   |-- test_data_store_conformance.py

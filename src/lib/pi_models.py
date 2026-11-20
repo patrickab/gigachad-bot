@@ -2,18 +2,15 @@
 
 - Consumes pi-host's OpenAI-compatible gateway (`pi_host.gateway_url()`, bearer `pi_host.token()`): `/v1/models`
   lists Pi's providers (Anthropic subscription and API keys, D13) with each model's `thinking_levels`
-- Provides the LiteLLM routing of the `litellm_proxy/` prefix, the gateway catalog for the settings panel, and each
-  model's effort ladder for `reasoning_levels` and LearnHarness
+- Provides stored-selector -> gateway id translation, the gateway catalog for the settings panel, and each model's
+  effort ladder for `reasoning_levels` and LearnHarness
 
-A Pi model is an ordinary selector string on every call path, `litellm_proxy/anthropic/claude-opus-4-5`. LiteLLM
-resolves that prefix from `LITELLM_PROXY_API_BASE`/`_KEY`, so the override reaches gateway models only and every other
-provider keeps its own credentials.
+A Pi model is an ordinary selector string on every call path, `litellm_proxy/anthropic/claude-opus-4-5`, and every
+backend completion goes to the gateway under `gateway_model_id(selector)` (`lib/completions.py`).
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from typing import Any
 
 import httpx
@@ -21,11 +18,10 @@ import httpx
 from lib import pi_host
 from lib.ttl_cache import TtlCache
 
-log = logging.getLogger(__name__)
-
-# The LiteLLM provider prefix of a gateway model. Stored selectors carry it, so it never changes.
+# The provider prefix of a Pi model in stored selectors (a LiteLLM provider id until P7). Stored selectors carry it, so it
+# never changes.
 LITELLM_ID = "litellm_proxy"
-# Stored selectors keep LiteLLM's provider ids, the gateway names these providers differently.
+# Stored selectors keep their historical provider ids, the gateway names these providers differently.
 _GATEWAY_PROVIDER_ALIASES = {"gemini": "google"}
 
 
@@ -58,15 +54,6 @@ _thinking = TtlCache[dict[str, list[str]]](_CATALOG_TTL_SECONDS)
 
 class GatewayUnavailable(RuntimeError):
     """pi-host's gateway does not answer, has no token yet, or sent an unreadable model list."""
-
-
-def configure_litellm_proxy() -> None:
-    """Route the `litellm_proxy/` prefix at pi-host's gateway, keeping an operator's own wiring (setdefault)."""
-    os.environ.setdefault("LITELLM_PROXY_API_BASE", pi_host.gateway_url())
-    try:
-        os.environ.setdefault("LITELLM_PROXY_API_KEY", pi_host.token())
-    except pi_host.PiHostUnavailable as exc:
-        log.warning("Gateway models are unreachable until the backend restarts after pi-host: %s", exc)
 
 
 def provider_label(provider_id: str) -> str:

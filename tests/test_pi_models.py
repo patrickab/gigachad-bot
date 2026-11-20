@@ -1,11 +1,9 @@
-"""The Pi model source: catalog from pi-host's gateway, effort ladders and LiteLLM routing."""
-
-import os
+"""The Pi model source: catalog from pi-host's gateway and effort ladders."""
 
 import httpx
 import pytest
 
-from lib import pi_host, pi_models
+from lib import pi_models
 
 ENTRIES = [
     {
@@ -108,34 +106,3 @@ def test_thinking_registry_raises_where_thinking_levels_reads_unknown(tmp_path, 
         pi_models.thinking_registry()
     assert pi_models.thinking_levels("anthropic/claude-opus-4-5") is None
     assert pi_models.served_ladders() is None
-
-
-def test_configure_litellm_proxy_points_the_prefix_at_the_gateway(tmp_path, monkeypatch):
-    _start_pi_host(tmp_path)
-    monkeypatch.delenv("LITELLM_PROXY_API_BASE", raising=False)
-    monkeypatch.delenv("LITELLM_PROXY_API_KEY", raising=False)
-
-    pi_models.configure_litellm_proxy()
-
-    assert os.environ["LITELLM_PROXY_API_BASE"] == pi_host.gateway_url() == "http://127.0.0.1:8399/v1"
-    assert os.environ["LITELLM_PROXY_API_KEY"] == "host-token"
-
-
-def test_configure_litellm_proxy_without_a_token_leaves_the_key_unset(monkeypatch):
-    monkeypatch.delenv("LITELLM_PROXY_API_BASE", raising=False)
-    monkeypatch.delenv("LITELLM_PROXY_API_KEY", raising=False)
-
-    pi_models.configure_litellm_proxy()
-
-    assert "LITELLM_PROXY_API_KEY" not in os.environ
-
-
-def test_configure_litellm_proxy_keeps_an_operator_override(tmp_path, monkeypatch):
-    _start_pi_host(tmp_path)
-    monkeypatch.setenv("LITELLM_PROXY_API_BASE", "http://elsewhere/v1")
-    monkeypatch.setenv("LITELLM_PROXY_API_KEY", "operator-key")
-
-    pi_models.configure_litellm_proxy()
-
-    assert os.environ["LITELLM_PROXY_API_BASE"] == "http://elsewhere/v1"
-    assert os.environ["LITELLM_PROXY_API_KEY"] == "operator-key"
