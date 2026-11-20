@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { PiPanelBar, PiSessionControlsBar, PiTopBar, PiUsageBar, piModelOfSelector, statsText, type PiCatalogProps, type PiSessionControls } from "../PiTopBar"
+import { PiPanelBar, PiSessionControlsBar, PiTopBar, PiUsageBar, piGatewayId, piModelFor, statsText, type PiCatalogProps, type PiSessionControls } from "../PiTopBar"
 import type { PiModel } from "../types"
 
 vi.mock("@/lib/backend/api", () => ({ fetchPiCatalog: vi.fn(() => new Promise(() => {})) }))
@@ -135,12 +135,22 @@ describe("PiTopBar", () => {
   })
 })
 
-describe("piModelOfSelector", () => {
-  it("splits a selector's gateway id into Pi's provider and model id", () => {
-    expect(piModelOfSelector("litellm_proxy/anthropic/claude-opus-5")).toEqual({ provider: "anthropic", id: "claude-opus-5" })
-    expect(piModelOfSelector("openrouter/acme/model-x")).toEqual({ provider: "openrouter", id: "acme/model-x" })
-    expect(piModelOfSelector("gemini/gemini-3.5-flash")).toEqual({ provider: "google", id: "gemini-3.5-flash" })
-    expect(piModelOfSelector("bare")).toBeNull()
+describe("piModelFor", () => {
+  const models: PiModel[] = [
+    { provider: "anthropic", id: "claude-opus-5" },
+    { provider: "gateway", id: "anthropic/claude-opus-5" },
+    { provider: "gateway", id: "openrouter/acme/model-x" },
+    { provider: "gateway", id: "google/gemini-3.5-flash" },
+  ]
+  it("prefers the session's own provider, else Pi's gateway provider", () => {
+    expect(piModelFor(models, "litellm_proxy/anthropic/claude-opus-5")).toEqual({ provider: "anthropic", id: "claude-opus-5" })
+    expect(piModelFor(models, "openrouter/acme/model-x")).toEqual({ provider: "gateway", id: "openrouter/acme/model-x" })
+    expect(piModelFor(models, "gemini/gemini-3.5-flash")).toEqual({ provider: "gateway", id: "google/gemini-3.5-flash" })
+    expect(piModelFor(models, "openrouter/acme/gone")).toBeNull()
+  })
+  it("names a gateway model by its upstream id", () => {
+    expect(piGatewayId({ provider: "gateway", id: "openrouter/acme/model-x" })).toBe("openrouter/acme/model-x")
+    expect(piGatewayId({ provider: "anthropic", id: "claude-opus-5" })).toBe("anthropic/claude-opus-5")
   })
 })
 

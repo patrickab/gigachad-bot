@@ -72,7 +72,12 @@ export function sameProfile(a: ProfileSpec, b: ProfileSpec): boolean {
   return a.systemPrompt === b.systemPrompt && a.tools.join(",") === b.tools.join(",");
 }
 
-/** The model a child of `spec` selects for a requested `<provider>/<id>`: sandboxed children reach it as `gateway` (C2). */
-export function childModel(spec: ProfileSpec, model: ModelRef): ModelRef {
-  return spec.profile === "sandboxed" ? { provider: "gateway", id: `${model.provider}/${model.id}` } : model;
+/**
+ * The models a child of `spec` tries, in order, for a requested `<provider>/<id>`: sandboxed children reach it only as
+ * `gateway` (C2), local ones by its own provider when they have it, else through `gateway`.
+ */
+export function childModels(spec: ProfileSpec, model: ModelRef): ModelRef[] {
+  const viaGateway = { provider: "gateway", id: `${model.provider}/${model.id}` };
+  if (model.provider === "gateway") return [model];
+  return spec.profile === "sandboxed" ? [viaGateway] : [model, viaGateway];
 }

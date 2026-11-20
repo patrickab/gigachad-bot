@@ -8,10 +8,13 @@
  * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes its arguments
  * (`supervisor/profiles.ts`) and `coding` also loads the repo extensions (C6). `sandboxed` runs the same arguments
  * through `agent-sandbox pi-rpc` (`sandbox.ts`, C4, C5), which keeps the same stdio, stdin-EOF and SIGTERM contract.
+ * Both always load pi-host's `extensions/gateway-provider.ts` with the gateway URL and the gateway-only token in their
+ * environment: the provider `gateway` serves models of providers the child has no key for, keys stay in pi-host.
  */
 import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { loadToken } from "../../auth.ts";
 import type {
   ForkRequest,
   ForkResult,
@@ -24,7 +27,7 @@ import type {
   SessionMeta,
   SpawnRequest,
 } from "../index.ts";
-import { childEnv } from "./env.ts";
+import { childEnv, gatewayEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
 import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
@@ -71,6 +74,9 @@ async function extensionArgs(dir: string): Promise<string[]> {
     .flatMap((name) => ["-e", join(dir, name)]);
 }
 
+/** pi-host's own extension registering the provider `gateway` in local children. */
+export const GATEWAY_EXTENSION = resolve(import.meta.dir, "../../../extensions/gateway-provider.ts");
+
 export class LocalHost implements Host {
   readonly machine = "local";
   private readonly locks = new Map<string, FileLock>();
@@ -91,9 +97,10 @@ export class LocalHost implements Host {
   async spawn({ profile, cwd, piArgs }: SpawnRequest): Promise<PiChild> {
     if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs);
     const extensions = profile === "coding" ? await extensionArgs(this.options.extensionsDir) : [];
-    return Bun.spawn([this.options.piBin, ...piArgs, ...extensions], {
+    const gateway = gatewayEnv(this.options.gatewayPort, await loadToken(this.options.gatewayTokenPath));
+    return Bun.spawn([this.options.piBin, ...piArgs, "-e", GATEWAY_EXTENSION, ...extensions], {
       cwd,
-      env: childEnv(this.options.extraChildEnv),
+      env: { ...childEnv(this.options.extraChildEnv), ...gateway },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

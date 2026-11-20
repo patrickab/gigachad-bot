@@ -14,7 +14,7 @@ import type { Host, Profile, SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
-import { childModel, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
+import { childModels, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
 import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
@@ -303,17 +303,22 @@ export class SupervisorHost implements Supervisor {
     }
     session.identify(data.sessionId, sessionPath ?? resolve(data.sessionFile));
 
-    const settings: [string, Record<string, unknown>][] = [];
     if (request.model) {
-      const { provider, id } = childModel(request.spec, request.model);
-      settings.push(["model", { type: "set_model", provider, modelId: id }]);
-    }
-    if (request.thinking) settings.push(["thinking", { type: "set_thinking_level", level: request.thinking }]);
-    for (const [error, command] of settings) {
-      const response = await session.requestAsync(command);
+      let response: Record<string, unknown> = {};
+      for (const { provider, id } of childModels(request.spec, request.model)) {
+        response = await session.requestAsync({ type: "set_model", provider, modelId: id });
+        if (response.success === true) break;
+      }
       if (response.success !== true) {
         await session.close();
-        return fail(400, error, { message: String(response.error ?? "rejected") });
+        return fail(400, "model", { message: String(response.error ?? "rejected") });
+      }
+    }
+    if (request.thinking) {
+      const response = await session.requestAsync({ type: "set_thinking_level", level: request.thinking });
+      if (response.success !== true) {
+        await session.close();
+        return fail(400, "thinking", { message: String(response.error ?? "rejected") });
       }
     }
 

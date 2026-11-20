@@ -3,7 +3,7 @@
  * pi-host's own environment.
  *
  * - Consumes: pi-host's environment, extra names from `PI_HOST_CHILD_ENV`
- * - Provides: `childEnv`, `sandboxEnv`
+ * - Provides: `childEnv`, `gatewayEnv`, `sandboxEnv`
  */
 
 /** Exact variable names a child may inherit. Provider keys and backend secrets are not among them. */
@@ -47,6 +47,11 @@ export function childEnv(extraNames: string[], env: NodeJS.ProcessEnv = process.
   }
   result.PI_SKIP_VERSION_CHECK = "1";
   return result;
+}
+
+/** What a local child's `gateway-provider` extension reads: this pi-host's `/v1` and the gateway-only token (C1, D17). */
+export function gatewayEnv(gatewayPort: number, gatewayToken: string): Record<string, string> {
+  return { PI_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}/v1`, PI_GATEWAY_TOKEN: gatewayToken };
 }
 
 /** What `agent-sandbox pi-rpc` needs to run docker as this user (C4); the container sees none of it. */

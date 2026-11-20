@@ -28,16 +28,19 @@ export interface PiSessionControls extends PiModelControls {
 /** The app's model dropdown as chats get it: the user's catalog, its saves, Manage models and default models. */
 export type PiCatalogProps = Omit<ComponentProps<typeof ModelDropdown>, "selectedModel" | "onSelect" | "pickModels" | "chatColumn">
 
-/** Pi's `<provider>/<id>` of a model, how the gateway and the catalog's selectors (`gatewayModelId`) name it. */
+/**
+ * The gateway's `<provider>/<id>` of a Pi model, how the catalog's selectors (`gatewayModelId`) name it. A model of Pi's provider `gateway`
+ * (pi-host's gateway, for providers the session has no key for) is already named so: `gateway` + `openrouter/acme/x` is `openrouter/acme/x`.
+ */
 export function piGatewayId(model: PiModel): string {
-  return `${model.provider}/${model.id}`
+  return model.provider === "gateway" ? model.id : `${model.provider}/${model.id}`
 }
 
-/** The Pi model a catalog selector names (`openrouter/acme/x` -> provider `openrouter`, id `acme/x`), null for one without a provider. */
-export function piModelOfSelector(selector: string): PiModel | null {
+/** The model of `models` a catalog selector names, the session's own provider before `gateway`; null when the session offers none. */
+export function piModelFor(models: PiModel[], selector: string): PiModel | null {
   const gatewayId = gatewayModelId(selector)
-  const slash = gatewayId.indexOf("/")
-  return slash > 0 && slash < gatewayId.length - 1 ? { provider: gatewayId.slice(0, slash), id: gatewayId.slice(slash + 1) } : null
+  const matches = models.filter((model) => piGatewayId(model) === gatewayId)
+  return matches.find((model) => model.provider !== "gateway") ?? matches[0] ?? null
 }
 
 /** What a session view's header shows. */
@@ -92,8 +95,8 @@ export function PiTopBar({ header, controls, modelProps }: { header: PiSessionHe
   const shown = header?.controls ?? controls
   const current = shown?.model ? piGatewayId(shown.model) : ""
   const select = (selector: string) => {
-    const model = piModelOfSelector(selector)
-    if (model) shown?.onModel(model)
+    const model = shown && piModelFor(shown.models, selector)
+    if (model) shown.onModel(model)
   }
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm">

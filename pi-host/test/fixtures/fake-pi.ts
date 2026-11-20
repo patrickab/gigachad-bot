@@ -140,7 +140,10 @@ function handle(command: Command): void {
       return respond(command, { success: true, data: { output: "done", exitCode: 0 } });
     }
     case "set_model":
-      if (command.provider === "bad") return respond(command, { success: false, error: "Model not found: bad" });
+      // `bad` exists nowhere, `keyless` only through the `gateway` provider.
+      if (command.provider === "bad" || command.provider === "keyless" || String(command.modelId).startsWith("bad/")) {
+        return respond(command, { success: false, error: `Model not found: ${String(command.provider)}/${String(command.modelId)}` });
+      }
       model = { provider: String(command.provider), id: String(command.modelId) };
       return respond(command, { success: true, data: model });
     case "set_thinking_level":
