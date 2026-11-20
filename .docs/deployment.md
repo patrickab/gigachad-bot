@@ -86,10 +86,12 @@ cd "$PROD" && uv sync --python 3.12 --locked --no-dev
   `--upgrade` or `npm install --package-lock-only`, then retry installation once.
   Review and commit regenerated locks with manifests. Production never regenerates
   locks, other installation failures stop startup.
-- `run.sh` syncs Python once (with the `sandbox-plot` extra) and exports
-  `GIGACHAD_DEPS_SYNCED=1`, so `run-backend.sh`/`run-frontend.sh` skip their own
-  sync. `uv sync` is exact by default and removes extras it was not given, so a
-  standalone `uv sync --locked` drops `polars`. Run tests with `uv run --no-sync`.
+- `run.sh` syncs Python once and exports `GIGACHAD_DEPS_SYNCED=1`, so
+  `run-backend.sh`/`run-frontend.sh` skip their own sync, which would race it on the
+  shared venv. The default groups (`dev`, `ocr`, `sandbox-plot`) come with every
+  `uv sync` and `uv run`, so no sync drops `polars` (production's `--no-dev` drops
+  only `dev`). `pyproject.toml` requires uv 0.13 or newer (`required-version`): an
+  older uv refuses instead of rewriting `uv.lock` to an older revision.
 - Development npm installs (`install_deps.py`) run `npm ci` only when `package.json`,
   the lock or `.npmrc` changed since the last successful install (stamp in
   `node_modules/.gigachad-npm-inputs.sha256`), as `npm ci` rewrites `node_modules`

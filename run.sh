@@ -47,9 +47,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
-# Install sandbox-only Python packages into the shared venv before the services start. The
-# scripts started below skip their own sync, which would race this one.
-sync_python_deps --extra sandbox-plot
+# Sync the shared venv once before the services start. The scripts started below skip their
+# own sync, which would race this one.
+sync_python_deps
 export GIGACHAD_DEPS_SYNCED=1
 
 # `npm ci` rewrites src/frontend/node_modules: finish it before anything packs chat-ui with its tsc and before the

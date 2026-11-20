@@ -25,11 +25,11 @@ PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
 
 
 def sandbox_plot_dependencies() -> str:
-    """Read the packages installed by the sandbox-plot dependency extra."""
+    """Read the packages of the sandbox-plot dependency group."""
     pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
     with pyproject_path.open("rb") as pyproject:
-        project = tomllib.load(pyproject)["project"]
-    dependencies = project["optional-dependencies"]["sandbox-plot"]
+        groups = tomllib.load(pyproject)["dependency-groups"]
+    dependencies = groups["sandbox-plot"]
     # Strip version specifiers, extras, and URL pins to leave bare package names.
     return ", ".join(re.split(r"[\s<>=!~\[@]", dependency, maxsplit=1)[0] for dependency in dependencies)
 

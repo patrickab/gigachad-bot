@@ -12,8 +12,7 @@ source "$REPO_ROOT/deploy/lib.sh"
 source "$REPO_ROOT/deploy/load-env.sh"
 
 echo "Installing frontend deps"
-# Inexact like the `uv run` it replaces, so a standalone start keeps the sandbox-plot extra.
-sync_python_deps --inexact
+sync_python_deps
 install_frontend_deps
 
 echo "Starting frontend on http://127.0.0.1:2999"

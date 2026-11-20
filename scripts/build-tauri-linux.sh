@@ -61,8 +61,6 @@ uv run --with pyinstaller pyinstaller \
   --add-data "$root_dir/templates:templates" \
   --collect-all gpt_researcher \
   --collect-all langchain_community \
-  --collect-all langchain_litellm \
-  --collect-all litellm \
   --collect-all tiktoken_ext \
   --exclude-module torch \
   --exclude-module torchvision \

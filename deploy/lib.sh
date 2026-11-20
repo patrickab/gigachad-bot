@@ -20,7 +20,7 @@ wait_until() {
 
 # Repairs a stale development uv.lock, then runs `uv sync --locked` with the given options.
 # run.sh syncs once and exports GIGACHAD_DEPS_SYNCED=1, so the scripts it starts skip
-# their own sync: a parallel exact sync without the sandbox-plot extra would uninstall it.
+# their own sync, which would race it on the shared venv.
 sync_python_deps() {
     if [[ -n "${GIGACHAD_DEPS_SYNCED:-}" ]]; then
         return 0
