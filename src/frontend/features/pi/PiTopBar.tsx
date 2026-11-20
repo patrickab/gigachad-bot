@@ -71,22 +71,17 @@ export function PiTopBar({ header, controls }: { header: PiSessionHeader | null;
   )
 }
 
-/** The top bar's right end, as omp-web's: the context's `Tokens` over their count, then context use and cost. Nothing before Pi reports them (F3). */
+/** The top bar's right end: context tokens and context use, `12.3k | 1%`, `?` for either right after a compaction. Nothing before Pi reports them (F3). */
 export function PiUsageBar({ stats }: { stats: PiSessionStats | null }) {
-  if (!stats) return null
-  const tokens = stats.contextUsage?.tokens
+  const usage = stats?.contextUsage
+  if (!usage) return null
+  const { tokens, percent } = usage
+  const tokensText = tokens === null ? "?" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(tokens)
+  const percentText = percent === null ? "?" : `${Math.round(percent)}%`
   return (
-    <div className="flex items-center gap-1 px-2">
-      {stats.contextUsage && (
-        <div className="flex flex-col items-center px-1.5 leading-none">
-          <span className="text-xs font-medium text-ink-muted">Tokens</span>
-          <span className="mt-0.5 text-[10px] italic tabular-nums text-ink-faint">
-            {tokens === null || tokens === undefined ? "?" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k` : tokens}
-          </span>
-        </div>
-      )}
-      <StatsLine stats={stats} />
-    </div>
+    <span aria-label={`Context ${tokensText} tokens, ${percentText} of ${compactTokens(usage.contextWindow)}`} className="shrink-0 whitespace-nowrap px-3 font-mono text-xs tabular-nums text-ink-faint">
+      {tokensText} | {percentText}
+    </span>
   )
 }
 

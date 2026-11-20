@@ -80,7 +80,7 @@ describe("PiTranscript window", () => {
     expect(onBranch).toHaveBeenCalledWith("e1", "Prompt 1")
   })
 
-  it("collapses an older turn to its question and opens it like the newest, activity folded", () => {
+  it("previews an older turn's answer under its question with activity folded, as when opened", () => {
     const messages: AgentMessage[] = [
       { role: "user", content: "Run it", timestamp: 1 },
       { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 },
@@ -88,10 +88,11 @@ describe("PiTranscript window", () => {
       ...history(1).map((message) => ({ ...message, timestamp: message.timestamp + 10 })),
     ]
     render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.queryByText("Done")).toBeNull()
-    fireEvent.click(screen.getByText("Run it"))
     expect(screen.getByText("Done")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
+    fireEvent.click(screen.getByText("Run it"))
+    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
+    expect(screen.getAllByRole("button", { name: "Collapse question and answer" }).length).toBeGreaterThan(2)
   })
 })
 

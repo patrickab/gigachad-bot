@@ -2,9 +2,10 @@
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
-import { CopyAction, ForkAction, TurnCard, TurnHeader, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
+import { CopyAction, ForkAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
+import { CHAT_COLUMN_MAX_PX } from "@/features/chat/ChatContainer"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
@@ -255,10 +256,12 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   const answerText = pieces.flatMap((piece) => (piece.kind === "text" ? [piece.text] : [])).join("\n\n")
   const toggle = () => onToggle(turn.start, expanded)
 
+  // Collapsed like a regular chat's pair: the header over a preview of the answer, activity folded as when expanded (omp-web's preview)
   if (!expanded) {
     return (
       <TurnCard expanded={false}>
         <TurnHeader label={compaction ? "Compaction" : clip(text) || "(empty)"} icon={icon} onExpand={toggle} />
+        <TurnPreview tools={[]}>{pieces.length > 0 ? <Answer pieces={pieces} runs={runs} live={false} fileLinks={fileLinks} /> : null}</TurnPreview>
       </TurnCard>
     )
   }
@@ -296,7 +299,8 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
 
 /**
  * Every turn as a gigachad Q&A card like omp-web's: the question with Edit and its time, the answer with activity folded into "Process details", Read aloud and its time.
- * The newest is expanded, older ones collapse to their question until opened. File links open through `fileLinks`.
+ * The newest is expanded, older ones collapse to their question over a preview of the answer until opened, in the regular chat's column width.
+ * File links open through `fileLinks`.
  *
  * - Follows the end while the reader is there
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
@@ -368,7 +372,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: 
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
+      <div className="mx-auto flex w-full flex-col gap-3 py-6" style={{ maxWidth: CHAT_COLUMN_MAX_PX }}>
         {turns.length === 0 && <p className="py-16 text-center text-sm text-ink-faint">New session</p>}
         {start > 0 && (
           <button ref={earlierRef} type="button" onClick={showEarlier} className="self-center rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">

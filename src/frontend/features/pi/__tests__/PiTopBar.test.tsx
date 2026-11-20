@@ -66,11 +66,16 @@ describe("PiSessionControlsBar", () => {
 describe("PiUsageBar", () => {
   afterEach(cleanup)
 
-  it("shows the context's tokens over their count beside context use and cost, the top bar keeps only model and thinking", () => {
-    const stats = { cost: 0.16, contextUsage: { tokens: 10_640, contextWindow: 1_000_000, percent: 1.6 } }
-    render(<><PiTopBar header={{ tone: "ready", sessionName: undefined, controls: controls({ stats }) }} /><PiUsageBar stats={stats} /></>)
-    expect(screen.getByText("Tokens").nextSibling).toHaveTextContent("10.6k")
-    expect(screen.getAllByText("2% · $0.16")).toHaveLength(1)
+  it("shows context tokens and use on one line without cost, the top bar keeps only model and thinking", () => {
+    const stats = { cost: 0.16, contextUsage: { tokens: 12_340, contextWindow: 1_000_000, percent: 1.2 } }
+    const { container } = render(<><PiTopBar header={{ tone: "ready", sessionName: undefined, controls: controls({ stats }) }} /><PiUsageBar stats={stats} /></>)
+    expect(screen.getByLabelText("Context 12.3k tokens, 1% of 1000k")).toHaveTextContent("12.3k | 1%")
+    expect(container.textContent).not.toContain("$")
+  })
+
+  it("marks both unknown right after a compaction", () => {
+    render(<PiUsageBar stats={{ cost: 0, contextUsage: { tokens: null, contextWindow: 200_000, percent: null } }} />)
+    expect(screen.getByText("? | ?")).toBeTruthy()
   })
 })
 

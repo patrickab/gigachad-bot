@@ -15,8 +15,8 @@ import { useElementSize } from "@/hooks/useElementSize"
 import { pairMessages } from "@/lib/domain/pairs"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 
-/** Chat column cap. */
-const CHAT_COLUMN_MAX_PX = 960
+/** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
+export const CHAT_COLUMN_MAX_PX = 960
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
 /** An empty chat centers the composer this far above the column's bottom, as a share of its height. Slightly below the middle. */
