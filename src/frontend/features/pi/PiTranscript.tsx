@@ -1,8 +1,8 @@
 "use client"
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Brain, ChevronRight, FoldVertical, TerminalSquare } from "lucide-react"
-import { CopyAction, ForkAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface, type TurnPreviewTool } from "@gigachad/chat-ui"
+import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
+import { CopyAction, ForkAction, TurnCard, TurnHeader, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
@@ -172,6 +172,54 @@ function Answer({ pieces, runs, live, fileLinks }: { pieces: Piece[]; runs: Reco
   return <>{rendered}</>
 }
 
+/** `01:41 AM` today, `Nov 3 01:41 AM` before, as omp-web stamped its messages. */
+function formatTime(timestamp: number | undefined): string | null {
+  if (!timestamp) return null
+  const date = new Date(timestamp)
+  const now = new Date()
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  if (date.toDateString() === now.toDateString()) return time
+  const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined })
+  return `${day} ${time}`
+}
+
+const FOOTER_BUTTON = "flex h-6 items-center gap-1 rounded px-2 text-[11px] text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1"
+
+/** Speaks `text` with the browser's speech synthesis, a second press stops it. */
+function ReadAloud({ text }: { text: string }) {
+  const [speaking, setSpeaking] = useState(false)
+  useEffect(() => () => {
+    if (speaking) speechSynthesis.cancel()
+  }, [speaking])
+  if (typeof speechSynthesis === "undefined" || !text.trim()) return null
+  const toggle = () => {
+    speechSynthesis.cancel()
+    if (speaking) return setSpeaking(false)
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.onend = () => setSpeaking(false)
+    utterance.onerror = () => setSpeaking(false)
+    speechSynthesis.speak(utterance)
+    setSpeaking(true)
+  }
+  return (
+    <button type="button" onClick={toggle} aria-label={speaking ? "Stop reading" : "Read aloud"} className={FOOTER_BUTTON}>
+      {speaking ? <Square size={11} aria-hidden="true" /> : <Volume2 size={11} aria-hidden="true" />}
+      {speaking ? "Stop" : "Read"}
+    </button>
+  )
+}
+
+/** A message's footer row: its actions, then its time at the right edge. `end` keeps the actions beside the time, as under a question. */
+function MessageFooter({ time, end = false, children }: { time: string | null; end?: boolean; children?: ReactNode }) {
+  if (!time && !children) return null
+  return (
+    <div className={end ? "mt-1 flex flex-wrap items-center justify-end gap-1.5" : "mt-1 flex flex-wrap items-center gap-1.5"}>
+      <div className="flex items-center gap-0.5">{children}</div>
+      {time && <span className={end ? "text-[10px] text-ink-faint" : "ml-auto text-[10px] text-ink-faint"}>{time}</span>}
+    </div>
+  )
+}
+
 function clip(text: string): string {
   const firstLine = text.trim().split("\n")[0] ?? ""
   return firstLine.length <= MAX_LABEL_LENGTH ? firstLine : `${firstLine.slice(0, MAX_LABEL_LENGTH)}\u2026`
@@ -192,7 +240,8 @@ interface PiTurnProps {
   live: boolean
   expanded: boolean
   onToggle: (start: number, expanded: boolean) => void
-  onBranch?: (entryId: string) => void
+  /** Branch keeping `entryId`; `prompt` goes into the branch's composer (Edit). */
+  onBranch?: (entryId: string, prompt?: string) => void
   fileLinks: FileLinks
 }
 
@@ -207,18 +256,17 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   const toggle = () => onToggle(turn.start, expanded)
 
   if (!expanded) {
-    const tools: TurnPreviewTool[] = pieces.flatMap((piece) => (piece.kind === "tool" ? [{ key: piece.key, label: piece.call.name }] : []))
-    const lastText = pieces.findLast((piece) => piece.kind === "text")
     return (
       <TurnCard expanded={false}>
         <TurnHeader label={compaction ? "Compaction" : clip(text) || "(empty)"} icon={icon} onExpand={toggle} />
-        <TurnPreview tools={tools}>{lastText?.kind === "text" ? <LaTeXMarkdown content={lastText.text} compact /> : null}</TurnPreview>
       </TurnCard>
     )
   }
   // Branch from the turn's last persisted entry; a turn with none yet (live, optimistic) has no branch point
   const lastConfirmed = Math.min(turn.end, confirmed.count) - 1
   const branchFrom = !live && onBranch && lastConfirmed >= turn.start ? confirmed.entryIds[lastConfirmed] : undefined
+  // Edit branches from the entry before the prompt, with the prompt back in the composer
+  const editFrom = !live && !compaction && onBranch && turn.start > 0 && turn.start < confirmed.count ? confirmed.entryIds[turn.start - 1] : undefined
   const answerActions = live ? [] : [
     ...(answerText ? [<CopyAction key="copy" text={answerText} label="Copy answer as markdown" />] : []),
     ...(branchFrom ? [<ForkAction key="branch" label="Branch session from this point" onFork={() => onBranch!(branchFrom)} />] : []),
@@ -228,11 +276,17 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
       <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={live ? undefined : <CopyAction text={text} label="Copy question as markdown" />}>
         {promptMarks && <MarksLine marks={promptMarks} />}
         {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <p className="whitespace-pre-wrap text-sm leading-6">{text}</p>}
+        {!live && (
+          <MessageFooter time={formatTime(prompt.timestamp)} end>
+            {editFrom && <button type="button" onClick={() => onBranch!(editFrom, text)} className={FOOTER_BUTTON}><CornerUpLeft size={11} aria-hidden="true" />Edit</button>}
+          </MessageFooter>
+        )}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>
           <TurnRegion role="answer" tail={isActivity(pieces[pieces.length - 1]) ? "activity" : "text"} actions={answerActions.length > 0 ? answerActions : undefined}>
             <Answer pieces={pieces} runs={runs} live={live} fileLinks={fileLinks} />
+            {!live && <MessageFooter time={formatTime(messages[turn.end - 1]?.timestamp)}><ReadAloud text={answerText} /></MessageFooter>}
           </TurnRegion>
         </TurnSurface>
       )}
@@ -241,14 +295,16 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
 })
 
 /**
- * Every turn as a gigachad Q&A card, the newest expanded, older ones collapsed until opened. File links open through `fileLinks`.
+ * Every turn as a gigachad Q&A card like omp-web's: the question with Edit and its time, the answer with activity folded into "Process details", Read aloud and its time.
+ * The newest is expanded, older ones collapse to their question until opened. File links open through `fileLinks`.
  *
  * - Follows the end while the reader is there
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
  *   from the end the window's top stays put, so appended turns do not push the read ones out
- * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message
+ * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
+ *   and Edit, with the entry before the prompt and the prompt
  */
-export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: Transcript; fileLinks: FileLinks; onBranch?: (entryId: string) => void }) {
+export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: Transcript; fileLinks: FileLinks; onBranch?: (entryId: string, prompt?: string) => void }) {
   const { messages: confirmedMessages, unconfirmed, optimistic, entryIds, marks, streaming, running, runs: liveRuns } = transcript
   // Derived from the fields that change per message, not per streamed delta, so settled turns keep their props
   const messages = useMemo(() => shownMessages({ messages: confirmedMessages, unconfirmed, optimistic }), [confirmedMessages, unconfirmed, optimistic])

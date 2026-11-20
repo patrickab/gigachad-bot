@@ -72,6 +72,27 @@ describe("PiTranscript window", () => {
     fireEvent.click(screen.getByRole("button", { name: "Branch session from this point" }))
     expect(onBranch).toHaveBeenCalledWith("e3")
   })
+
+  it("edits a turn by branching before its prompt with the prompt", () => {
+    const onBranch = vi.fn()
+    render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={onBranch} />)
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    expect(onBranch).toHaveBeenCalledWith("e1", "Prompt 1")
+  })
+
+  it("collapses an older turn to its question and opens it like the newest, activity folded", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Run it", timestamp: 1 },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 },
+      { role: "assistant", content: [{ type: "text", text: "Done" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 3 },
+      ...history(1).map((message) => ({ ...message, timestamp: message.timestamp + 10 })),
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.queryByText("Done")).toBeNull()
+    fireEvent.click(screen.getByText("Run it"))
+    expect(screen.getByText("Done")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
+  })
 })
 
 describe("PiTranscript entry edits", () => {

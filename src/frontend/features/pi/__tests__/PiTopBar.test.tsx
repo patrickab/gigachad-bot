@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { PiPanelBar, PiSessionControlsBar, statsText, type PiSessionControls } from "../PiTopBar"
+import { PiPanelBar, PiSessionControlsBar, PiTopBar, PiUsageBar, statsText, type PiSessionControls } from "../PiTopBar"
 import type { PiModel } from "../types"
 
 const HAIKU: PiModel = { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }
@@ -60,6 +60,17 @@ describe("PiSessionControlsBar", () => {
     expect(screen.getByRole("button", { name: "Thinking: medium" }).parentElement?.parentElement).toHaveClass("shrink-0")
     expect(screen.getByLabelText("Cost $0.01")).toHaveClass("shrink-0")
     expect(screen.getByRole("button", { name: "New session" }).parentElement).toHaveClass("shrink-0")
+  })
+})
+
+describe("PiUsageBar", () => {
+  afterEach(cleanup)
+
+  it("shows the context's tokens over their count beside context use and cost, the top bar keeps only model and thinking", () => {
+    const stats = { cost: 0.16, contextUsage: { tokens: 10_640, contextWindow: 1_000_000, percent: 1.6 } }
+    render(<><PiTopBar header={{ tone: "ready", sessionName: undefined, controls: controls({ stats }) }} /><PiUsageBar stats={stats} /></>)
+    expect(screen.getByText("Tokens").nextSibling).toHaveTextContent("10.6k")
+    expect(screen.getAllByText("2% · $0.16")).toHaveLength(1)
   })
 })
 

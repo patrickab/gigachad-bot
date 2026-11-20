@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useEffectEvent, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { X } from "lucide-react"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import type { DraftPicker } from "@/features/chat/composer/CompletionMenu"
@@ -105,6 +105,8 @@ interface PiComposerProps {
   editorText: { text: string } | null
   insertion?: PiInsertion | null
   onInserted?: () => void
+  /** Controls of the action row after the "+" menu, e.g. the session's folder. */
+  leading?: ReactNode
   onSubmit: (submit: PiSubmit) => void
   onAbort: () => Promise<string[]>
   onAnswerDialog: (id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => void
@@ -121,7 +123,7 @@ interface PiComposerProps {
  * - A pasted, dropped or attached video is stored in the session folder's `.pi/pastes/` and mentioned as `@<path>`,
  *   `pi-extensions/video-paste.ts` turns the mention into a frame grid
  */
-export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
+export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, leading, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
   const inputRef = useRef<ChatInputHandle>(null)
   const draftKey = `pi:${sessionKey}`
   const chips = useComposerChips(draftKey)
@@ -210,6 +212,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
         complete={textDialog ? undefined : complete}
         picker={picker}
         onVideo={(video) => void pasteVideo(video)}
+        leading={leading}
       />
     </div>
   )

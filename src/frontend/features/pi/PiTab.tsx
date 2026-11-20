@@ -8,7 +8,7 @@ import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
-import { PiTopBar, type PiSessionControls, type PiSessionHeader } from "./PiTopBar"
+import { PiRepoLabel, PiTopBar, PiUsageBar, type PiSessionControls, type PiSessionHeader } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { refreshPiSessions } from "./sessionStore"
 import { textOf } from "./transcript"
@@ -137,16 +137,18 @@ export function withLead(text: string, lead: string | undefined): string {
  * - `firstSubmit` runs once the session attaches, then reported through `onFirstSubmitted`
  * - `insertion` goes into the composer once it is enabled (a quote, a canvas screenshot), `onInserted` follows
  * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
- * - Each settled turn branches through `onBranch` (D11); a failed branch shows as a notice
+ * - Each settled turn branches through `onBranch` (D11), Edit with its prompt for the branch's composer; a failed branch shows as a notice
+ * - `composerLeading` renders the composer's controls after its "+" menu from the header
  */
-export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent }: {
   sessionId: string
   cwd: string
   files: PiFileScope
   renderHeader: (header: PiSessionHeader) => ReactNode
+  composerLeading?: (header: PiSessionHeader) => ReactNode
   firstSubmit?: PiSubmit | null
   onFirstSubmitted?: () => void
-  onBranch?: (fork: PiFork) => Promise<void>
+  onBranch?: (fork: PiFork, prompt?: string) => Promise<void>
   shellCommands?: PiShellCommands
   insertion?: PiInsertion | null
   onInserted?: () => void
@@ -200,8 +202,8 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit
   const sessionFile = state?.sessionFile
   const branch = useMemo(() => {
     if (!onBranch || !sessionFile) return undefined
-    return (entryId: string) => {
-      onBranch({ sessionPath: sessionFile, entryId }).catch((reason: unknown) => notify(piOpenError(reason), "error"))
+    return (entryId: string, prompt?: string) => {
+      onBranch({ sessionPath: sessionFile, entryId }, prompt).catch((reason: unknown) => notify(piOpenError(reason), "error"))
     }
   }, [onBranch, sessionFile, notify])
 
@@ -237,6 +239,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit
         editorText={session.editorText}
         insertion={insertion}
         onInserted={onInserted}
+        leading={composerLeading?.(header)}
         onSubmit={(request) => void submit(request)}
         onAbort={session.abort}
         onAnswerDialog={session.answerDialog}
@@ -246,25 +249,28 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, firstSubmit
 }
 
 /**
- * A Pi tab: the session `view` names in its repo, with its top bar rendered into `topBar` (the tab's top bar slot).
+ * A Pi tab: the session `view` names in its repo, with its top bar rendered into `topBar` (the tab's top bar slot) and its usage into `usageBar` (the slot at its right end).
  *
  * - A tab without a session shows an empty composer and the model and thinking level to start on (Pi's default model at `medium`, from `/api/models/pi`),
  *   its first send creates the session and reports it through `onViewChange`. Its draft is kept per repo
  * - A tab with a session resumes it (spawns its Pi process when none runs), an archived one is restored first
  * - `shellCommands` (`/memorize`) share the composer's `/` menu, the shell runs them instead of sending them
- * - A turn's branch action forks the session into a new one that opens in this tab
+ * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
+ * - The repo and live dot sit in the composer's action row
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  */
-export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaunched, shellCommands }: {
+export function PiTab({ view, onViewChange, topBar = null, usageBar = null, launch = null, onLaunched, shellCommands }: {
   view: PiView
   onViewChange: (view: PiView) => void
   topBar?: HTMLElement | null
+  usageBar?: HTMLElement | null
   launch?: PiLaunch | null
   onLaunched?: () => void
   shellCommands?: PiShellCommands
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
   const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
+  const [insertion, setInsertion] = useState<PiInsertion | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { sessionId, repo } = view
@@ -303,9 +309,10 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
     }
   }, [repo, onViewChange, shellCommands, chosenModel, chosenThinking])
 
-  const branch = useCallback(async (forkOf: PiFork) => {
+  const branch = useCallback(async (forkOf: PiFork, prompt?: string) => {
     const session = await openPiSession(repo, { forkOf })
     setFirstSubmit(null)
+    setInsertion(prompt ? { id: Date.now(), text: prompt } : null)
     setOpened({ sessionId: session.sessionId, cwd: session.cwd })
     onViewChange({ repo, sessionId: session.sessionId })
   }, [repo, onViewChange])
@@ -321,8 +328,10 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
   }, [launch, sessionId, start, onLaunched])
 
   const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
+  const clearInsertion = useCallback(() => setInsertion(null), [])
   const newCommands = useComposerCommands(NO_COMMANDS, shellCommands)
   const inTopBar = (content: ReactNode) => topBar ? createPortal(content, topBar) : null
+  const inUsageBar = (content: ReactNode) => usageBar ? createPortal(content, usageBar) : null
   const shown = opened && opened.sessionId === sessionId ? opened : null
 
   if (shown) {
@@ -332,11 +341,14 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
         sessionId={shown.sessionId}
         cwd={shown.cwd}
         files={{ repo }}
-        renderHeader={(header) => inTopBar(<PiTopBar repo={repo} header={header} />)}
+        renderHeader={(header) => <>{inTopBar(<PiTopBar header={header} />)}{inUsageBar(<PiUsageBar stats={header.controls.stats} />)}</>}
+        composerLeading={(header) => <PiRepoLabel repo={repo} tone={header.tone} />}
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
         onBranch={branch}
         shellCommands={shellCommands}
+        insertion={insertion}
+        onInserted={clearInsertion}
       />
     )
   }
@@ -353,7 +365,7 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {inTopBar(<PiTopBar repo={repo} header={null} controls={sessionId ? undefined : newControls} />)}
+      {inTopBar(<PiTopBar header={null} controls={sessionId ? undefined : newControls} />)}
       <div className="flex flex-1 items-center justify-center">
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       </div>
@@ -369,6 +381,7 @@ export function PiTab({ view, onViewChange, topBar = null, launch = null, onLaun
           notices={[]}
           statusLines={{}}
           editorText={null}
+          leading={<PiRepoLabel repo={repo} />}
           onSubmit={(submit) => void start(submit)}
           onAbort={async () => []}
           onAnswerDialog={() => {}}

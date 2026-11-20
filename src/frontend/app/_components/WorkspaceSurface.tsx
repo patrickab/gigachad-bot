@@ -131,6 +131,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
   const piTopBar = useTopBarSlot("workbenchAgent")
+  const piUsageBar = useTopBarSlot("workbenchStatus")
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
   // The workbench's bar, a notebook's too: the surface renders its controls into the status and center slots, the chat drawer opens at the right end
   const workbenchBar = {
@@ -288,13 +289,13 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     pi: () => {
       const piItem = itemOf(tab, "pi")
       return {
-        // The Pi tab renders its top bar into this slot. The pill takes clicks, the bar around it lets them through
+        // The Pi tab renders its top bar into the left slot and its usage into the right one. The pills take clicks, the bar around them lets them through
         left: <TopBarSlot name="workbenchAgent">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
-        right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
+        right: <><TopBarSlot name="workbenchStatus">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} usageBar={piUsageBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
           </div>
         ) : chatBody,
       }
