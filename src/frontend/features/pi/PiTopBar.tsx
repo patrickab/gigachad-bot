@@ -1,11 +1,12 @@
 "use client"
 
 import type { ComponentProps, ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
-import { compactTokens, ContextUsage } from "@/features/chat/ContextUsage"
+import { ContextUsage } from "@/features/chat/ContextUsage"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
+import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { catalogOffering, gatewayModelId, selectorIdOf } from "@/lib/models"
-import { PiModelSelector, PiThinkingSelector } from "./PiModelSelector"
 import type { PiModel } from "./types"
 import type { PiSessionStats } from "./usePiSession"
 
@@ -48,107 +49,98 @@ export interface PiSessionHeader {
   tone: StatusTone
   sessionName: string | undefined
   controls: PiSessionControls
+  /** The transcript's turn column, which the model dropdown's name makes way for like a chat's. */
+  column: HTMLElement | null
 }
 
-/** `30% · $0.45`: context window use (unknown right after a compaction) and the session's cost, null before Pi reports them (F3). */
-export function statsText(stats: PiSessionStats | null): { text: string; label: string } | null {
-  if (!stats) return null
-  const cost = `$${stats.cost.toFixed(2)}`
-  const usage = stats.contextUsage
-  if (!usage) return { text: cost, label: `Cost ${cost}` }
-  const percent = usage.percent === null ? "?" : `${Math.round(usage.percent)}%`
-  const tokens = usage.tokens === null ? "unknown" : compactTokens(usage.tokens)
-  return { text: `${percent} · ${cost}`, label: `Context ${tokens} of ${compactTokens(usage.contextWindow)} tokens, cost ${cost}` }
-}
-
-function StatsLine({ stats }: { stats: PiSessionStats | null }) {
-  const shown = statsText(stats)
-  return shown && <span aria-label={shown.label} className="shrink-0 whitespace-nowrap px-1.5 font-mono text-xs tabular-nums text-ink-faint">{shown.text}</span>
-}
-
-function ThinkingControl({ controls }: { controls: PiModelControls }) {
-  return controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
-    <div className="shrink-0">
-      <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
-    </div>
-  )
-}
-
-/** Model and thinking selectors, then the usage line, for a side panel's session header. `compact` shortens the model name. */
-export function PiSessionControlsBar({ controls, compact = false }: { controls: PiSessionControls; compact?: boolean }) {
-  return (
-    <div className={compact ? "flex min-w-0 items-center gap-1" : "flex shrink-0 items-center gap-1"}>
-      {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
-      <ThinkingControl controls={controls} />
-      <StatsLine stats={controls.stats} />
-    </div>
-  )
+/** The session's thinking level: the chats' reasoning selector over the model's ladder. Nothing for a model without reasoning (`["off"]`). */
+export function PiThinkingSelector({ controls }: { controls: PiModelControls }) {
+  const levels = controls.thinkingLevel && controls.thinkingLevels.length > 1 ? controls.thinkingLevels : []
+  return <ReasoningSelector levels={levels} reasoningEffort={controls.thinkingLevel ?? ""} onReasoningChange={controls.onThinking} placement="below" />
 }
 
 /**
- * A Pi tab's top bar: session name, then the session's model and thinking once it runs, or `controls` (what a new session starts on) before.
+ * The session's model: the app's dropdown over the user's catalog (`modelProps`), as a chat's.
  *
- * The model is the app's dropdown over the user's catalog (`modelProps`): it offers the catalog models Pi offers the session, shows the session's
- * model by its catalog selector, and opens Manage models and default models like a chat's. Hidden until Pi names its models.
+ * It offers the catalog models Pi offers the session, shows the session's model by its catalog selector, and opens Manage models and default
+ * models like a chat's. Its name collapses where it would cover `chatColumn`. Nothing until Pi names its models.
  */
-export function PiTopBar({ header, controls, modelProps }: { header: PiSessionHeader | null; controls?: PiModelControls; modelProps: PiCatalogProps }) {
-  const shown = header?.controls ?? controls
-  const current = shown?.model ? piGatewayId(shown.model) : ""
+export function PiModelDropdown({ controls, modelProps, chatColumn }: { controls: PiModelControls; modelProps: PiCatalogProps; chatColumn?: HTMLElement | null }) {
+  if (controls.models.length === 0) return null
+  const current = controls.model ? piGatewayId(controls.model) : ""
   const select = (selector: string) => {
-    const model = shown && piModelFor(shown.models, selector)
-    if (model) shown.onModel(model)
+    const model = piModelFor(controls.models, selector)
+    if (model) controls.onModel(model)
   }
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm">
-      {header?.sessionName && <span className="truncate text-ink-muted">{header.sessionName}</span>}
-      {shown && (
-        <div className="flex shrink-0 items-center gap-1">
-          {shown.models.length > 0 && (
-            <ModelDropdown
-              {...modelProps}
-              pickModels={(catalog) => catalogOffering(catalog, new Set(shown.models.map(piGatewayId)))}
-              selectedModel={current && modelProps.models ? selectorIdOf(modelProps.models, current) : current}
-              onSelect={select}
-            />
-          )}
-          <ThinkingControl controls={shown} />
-        </div>
-      )}
-    </div>
+    <ModelDropdown
+      {...modelProps}
+      pickModels={(catalog) => catalogOffering(catalog, new Set(controls.models.map(piGatewayId)))}
+      selectedModel={current && modelProps.models ? selectorIdOf(modelProps.models, current) : current}
+      onSelect={select}
+      chatColumn={chatColumn}
+    />
   )
 }
 
-/** The top bar's right end: context tokens and context use (F3), the same readout as a chat's. Nothing before Pi reports them. */
-export function PiUsageBar({ stats }: { stats: PiSessionStats | null }) {
+/** The context readout: context tokens and context use (F3), the same as a chat's. Nothing before Pi reports them. */
+export function PiUsage({ stats }: { stats: PiSessionStats | null }) {
   const usage = stats?.contextUsage
   if (!usage) return null
   return <ContextUsage tokens={usage.tokens} percent={usage.percent} contextWindow={usage.contextWindow} />
 }
 
-/** The session's live dot and folder, at the composer's left like omp-web's working directory. */
+/** The tab top bar's places a Pi tab fills, where a chat's bar has its reasoning selector, model dropdown and context readout. */
+export interface PiTopBarSlots {
+  thinking: HTMLElement | null
+  model: HTMLElement | null
+  usage: HTMLElement | null
+}
+
+/**
+ * A Pi tab's controls in the tab's top bar, placed like a chat's: thinking, then the model and the session name, the context readout at the right.
+ *
+ * They show the running session's (`header`), or before it runs `controls`, what a new session starts on.
+ */
+export function PiTopBar({ slots, header, controls, modelProps }: { slots: PiTopBarSlots; header: PiSessionHeader | null; controls?: PiModelControls; modelProps: PiCatalogProps }) {
+  const shown = header?.controls ?? controls
+  return <>
+    {slots.thinking && shown && createPortal(<PiThinkingSelector controls={shown} />, slots.thinking)}
+    {slots.model && createPortal(<>
+      {shown && <PiModelDropdown controls={shown} modelProps={modelProps} chatColumn={header?.column} />}
+      {header?.sessionName && <span className="ml-2 truncate text-sm text-ink-muted">{header.sessionName}</span>}
+    </>, slots.model)}
+    {slots.usage && header && createPortal(<PiUsage stats={header.controls.stats} />, slots.usage)}
+  </>
+}
+
+/** The session's live dot and folder at the composer's left, where an empty chat shows the project it starts a session in. */
 export function PiRepoLabel({ repo, tone }: { repo: string; tone?: StatusTone }) {
   return (
-    <span className="flex min-w-0 items-center gap-2 px-1.5 text-xs">
+    <span className="flex h-8 min-w-0 items-center gap-1.5 px-2 text-xs text-ink">
       {tone && <StatusDot tone={tone} />}
-      <span className="truncate font-medium text-ink-muted">{repo}</span>
+      <span className="truncate">{repo}</span>
     </span>
   )
 }
 
 /**
- * The compact header of a session in a side panel (a workbench chat): live dot and session name, then model, thinking, context and cost, then `actions`.
+ * The header of a session in a side panel (a workbench chat), ordered like a chat's top bar: live dot, thinking, model and session name, then
+ * the context readout and `actions`.
  *
  * Before the session runs it shows `controls` (what a new session starts on) instead.
  */
-export function PiPanelBar({ header, controls, actions }: { header: PiSessionHeader | null; controls?: PiSessionControls; actions?: ReactNode }) {
+export function PiPanelBar({ header, controls, modelProps, actions }: { header: PiSessionHeader | null; controls?: PiModelControls; modelProps: PiCatalogProps; actions?: ReactNode }) {
   const shown = header?.controls ?? controls
   return (
-    <div className="flex h-8 min-w-0 flex-1 items-center gap-1.5 px-2 text-xs">
-      {header && <StatusDot tone={header.tone} />}
-      {header?.sessionName && <span className="min-w-0 truncate text-ink-muted">{header.sessionName}</span>}
-      <div className="ml-auto flex min-w-0 items-center gap-1">
-        {shown && <PiSessionControlsBar controls={shown} compact />}
-        {actions && <div className="flex shrink-0 items-center">{actions}</div>}
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      {header && <span className="flex shrink-0 px-1"><StatusDot tone={header.tone} /></span>}
+      {shown && <PiThinkingSelector controls={shown} />}
+      {shown && <PiModelDropdown controls={shown} modelProps={modelProps} />}
+      {header?.sessionName && <span className="min-w-0 truncate text-xs text-ink-muted">{header.sessionName}</span>}
+      <div className="ml-auto flex shrink-0 items-center">
+        <PiUsage stats={header?.controls.stats ?? null} />
+        {actions}
       </div>
     </div>
   )

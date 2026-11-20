@@ -178,8 +178,9 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
   const statuses = Object.entries(statusLines)
 
   return (
-    <div className="shrink-0 px-4 pb-4" onKeyDownCapture={handleKeyDownCapture} onKeyDown={() => { followUpRef.current = false }}>
-      <div className="mx-auto mb-2 flex w-full max-w-2xl flex-col gap-1 text-xs">
+    <div onKeyDownCapture={handleKeyDownCapture} onKeyDown={() => { followUpRef.current = false }}>
+      {/* Floats over the transcript with the composer, so it masks the turns beneath */}
+      <div className="mx-auto mb-2 flex w-full max-w-2xl flex-col gap-1 rounded-xl bg-paper px-3 py-1.5 text-xs empty:hidden">
         <ErrorText>{pasteError}</ErrorText>
         {notices.map((notice) => (
           <p key={notice.id} role="status" className={notice.tone === "error" ? "text-danger" : notice.tone === "warning" ? "text-warning" : "text-ink-muted"}>{notice.text}</p>

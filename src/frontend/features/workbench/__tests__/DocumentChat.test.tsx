@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState, type ReactNode } from "react"
 import type { PiInsertion } from "@/features/pi/PiComposer"
-import type { PiSessionHeader } from "@/features/pi/PiTopBar"
+import type { PiCatalogProps, PiSessionHeader } from "@/features/pi/PiTopBar"
 import type { OpenedWorkbenchChat, PiSessionInfo, WorkbenchChatLink } from "@/lib/backend/api"
 import { openedChat } from "./chatFixtures"
 
@@ -21,6 +21,9 @@ vi.mock("@/features/editor/FilePanel", () => ({
 }))
 vi.mock("@/features/pi/PiTopBar", () => ({ PiPanelBar: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div> }))
 
+/** The chats' catalog: the mocked panel bar never reads it. */
+const MODEL_PROPS = {} as PiCatalogProps
+
 /** The header a running session reports: Haiku at thinking `low`. */
 const HEADER: PiSessionHeader = {
   tone: "ready",
@@ -34,6 +37,7 @@ const HEADER: PiSessionHeader = {
     onModel: () => {},
     onThinking: () => {},
   },
+  column: null,
 }
 
 vi.mock("@/features/pi/PiTab", () => ({
@@ -76,7 +80,7 @@ function Harness({ chatKey, lead, sessionId, onSessionChange = () => {}, quoted 
     setItemSession(next)
     onSessionChange(next)
   }
-  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen, onDrawerOpenChange: setDrawerOpen, shellCommands: { names: [], run: async () => false } }
+  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen, onDrawerOpenChange: setDrawerOpen, shellCommands: { names: [], run: async () => false }, modelProps: MODEL_PROPS }
   const state = useWorkbenchChat(chatKey, lead, props)
   return <>
     <button type="button" onClick={() => state.quote(quoted)}>quote</button>
@@ -205,7 +209,7 @@ describe("PDF chat", () => {
     api.openWorkbenchChat
       .mockResolvedValueOnce(openedChat({ id: "p1", cwd: PDF_CWD, kind: "pdf", pdfText: { state: "pending" } }))
       .mockReturnValueOnce(promise)
-    render(<FileChat path={PDF} width={320} onClose={() => {}} />)
+    render(<FileChat path={PDF} width={320} onClose={() => {}} modelProps={MODEL_PROPS} />)
     expect(await screen.findByText("Extracting the PDF text…")).toBeTruthy()
     expect(screen.queryByText(/^session/)).toBeNull()
     expect(api.prepareWorkbench).toHaveBeenCalledWith(PDF)
@@ -218,7 +222,7 @@ describe("PDF chat", () => {
 
   it("shows a session that already knows the PDF even while its text is extracted again", async () => {
     api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "p2", cwd: PDF_CWD, kind: "pdf", messageCount: 3, pdfText: { state: "pending" } }))
-    render(<FileChat path={PDF} width={320} onClose={() => {}} />)
+    render(<FileChat path={PDF} width={320} onClose={() => {}} modelProps={MODEL_PROPS} />)
     expect(await screen.findByText(/session p2/)).toBeTruthy()
     expect(leadShown()).toBe("none")
   })
@@ -230,7 +234,7 @@ describe("Canvas chat", () => {
   it("opens the canvas key's chat, names the canvas and takes a screenshot into the draft", async () => {
     api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "c1", cwd: "/work/canvas", kind: "canvas" }))
     const png = new File(["png"], "shot.png", { type: "image/png" })
-    render(<FileChat path={CANVAS} width={320} onClose={() => {}} lead={() => canvasLead(CANVAS)} insertion={{ id: 1, text: "", files: [png] }} />)
+    render(<FileChat path={CANVAS} width={320} onClose={() => {}} modelProps={MODEL_PROPS} lead={() => canvasLead(CANVAS)} insertion={{ id: 1, text: "", files: [png] }} />)
     expect(await screen.findByText(/session c1/)).toBeTruthy()
     expect(api.openWorkbenchChat).toHaveBeenCalledWith({ path: CANVAS, sessionId: undefined })
     expect(leadShown()).toBe("Canvas: board.canvas")

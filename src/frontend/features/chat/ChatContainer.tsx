@@ -5,23 +5,18 @@ import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
-import { ChevronsLeftRight, ChevronsRightLeft, GitFork } from "lucide-react"
+import { GitFork } from "lucide-react"
 import { ChatPair } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
 import { usePairExpansion } from "@/features/chat/usePairExpansion"
 import { usePairFocus } from "@/features/chat/usePairFocus"
 import { useStickToBottom } from "@/features/chat/useStickToBottom"
-import { useElementSize } from "@/hooks/useElementSize"
 import { pairMessages } from "@/lib/domain/pairs"
-import { InTopBar } from "@/features/navigation/TopBarSlots"
+import { ComposerDock, useComposerDock } from "./ComposerDock"
+import { WideModeToggle } from "./WideModeToggle"
 
 /** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
 export const CHAT_COLUMN_MAX_PX = 960
-/** Extra scroll padding below the last pair, on top of the floating input height. */
-const BOTTOM_GAP_PX = 16
-/** An empty chat centers the composer this far above the column's bottom, as a share of its height. Slightly below the middle. */
-const EMPTY_CENTER_FROM_BOTTOM = 0.45
-const EMPTY_GREETING = "What's on your mind?"
 
 /** Asks the chat to expand and scroll to one question; a new `key` re-fires the request for the same index. */
 export interface ChatFocus {
@@ -92,8 +87,6 @@ export function ChatContainer({
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const columnRef = useRef<HTMLDivElement>(null)
-  const inputAreaRef = useRef<HTMLDivElement>(null)
   const [isWideMode, setIsWideMode] = useState(false)
   // The chat whose first message was sent here: only that move to the bottom animates, a loading history jumps
   const [launchedChatId, setLaunchedChatId] = useState<string | null>(null)
@@ -105,17 +98,8 @@ export function ChatContainer({
   const { isExpanded, toggle: togglePair } = usePairExpansion({ pairs, focus, messageCount: messages.length, scrollContainerRef })
   const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
 
-  // Preserve composer spacing while hidden so returning tabs do not jump.
-  const inputAreaSize = useElementSize(inputAreaRef)
-  const [inputAreaHeight, setInputAreaHeight] = useState(0)
-  if (inputAreaSize.height > 0 && inputAreaSize.height !== inputAreaHeight) setInputAreaHeight(inputAreaSize.height)
-  const columnHeight = useElementSize(columnRef).height
-
-  // A chat known to be empty lifts the composer from the bottom to just below the column's middle. A loading one keeps it at the bottom
-  const isEmpty = messages.length === 0 && !historyLoading
-  const emptyLift = isEmpty && columnHeight > 0 ? Math.max(0, columnHeight * EMPTY_CENTER_FROM_BOTTOM - inputAreaHeight / 2) : 0
-  // The greeting waits for the measured, centered composer, so it never flashes at the bottom
-  const showGreeting = emptyLift > 0 && inputAreaHeight > 0
+  // A chat known to be empty lifts the composer to just below the column's middle. A loading one keeps it at the bottom
+  const dock = useComposerDock(messages.length === 0 && !historyLoading)
 
   // Neovim starts from the text it is given, so a text preview waits for the fresh file. PDFs and images open at once and update.
   const onPreviewOpen = attachmentActions?.onPreviewOpen
@@ -147,12 +131,12 @@ export function ChatContainer({
 
   return (
     <div className="absolute inset-0 flex">
-      <div ref={columnRef} className="flex-1 min-w-0 flex flex-col relative">
+      <div ref={dock.columnRef} className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
           tabIndex={-1}
           className="flex-1 overflow-y-auto text-ink outline-none"
-          style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
+          style={{ paddingBottom: dock.paddingBottom }}
         >
           <div ref={onChatColumnChange} className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
             <AnimatePresence>
@@ -189,45 +173,24 @@ export function ChatContainer({
           <div ref={bottomRef} />
           </div>
         </div>
-        <div
-          ref={inputAreaRef}
-          className={`absolute bottom-0 left-0 right-0 z-10 pointer-events-none ${launchedChatId === chatId ? "transition-transform duration-200 ease-out motion-reduce:transition-none" : ""}`}
-          style={{ transform: `translateY(${-emptyLift}px)` }}
-        >
-          <p
-            aria-hidden={!showGreeting}
-            className={`absolute inset-x-0 bottom-full mb-5 text-center text-lg text-ink-subtle transition-opacity duration-200 ease-out motion-reduce:transition-none ${showGreeting ? "opacity-100" : "opacity-0"}`}
-          >
-            {EMPTY_GREETING}
-          </p>
-          <div className="relative px-4 pb-6 pointer-events-auto">
-            <ChatInput
-              ref={chatInputRef}
-              chatId={chatId}
-              draftKey={draftKey}
-              onSend={handleSend}
-              disabled={isStreaming || extracting}
-              extracting={extracting}
-              isStreaming={isStreaming}
-              onCancel={onCancel}
-              slug={slug}
-              context={context}
-              attachMenuItems={attachMenuItems}
-              leading={composerLeading}
-              hint={composerNotice ? () => composerNotice : undefined}
-            />
-          </div>
-        </div>
-        <InTopBar name="wideToggle">
-          <button
-            type="button"
-            onClick={toggleWideMode}
-            aria-label={isWideMode ? "Exit wide mode" : "Enter wide mode"}
-            className="rounded-lg p-1.5 text-ink-subtle opacity-0 transition-opacity duration-200 hover:text-ink hover:opacity-100 focus-visible:opacity-100"
-          >
-            {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
-          </button>
-        </InTopBar>
+        <ComposerDock dock={dock} animate={launchedChatId === chatId}>
+          <ChatInput
+            ref={chatInputRef}
+            chatId={chatId}
+            draftKey={draftKey}
+            onSend={handleSend}
+            disabled={isStreaming || extracting}
+            extracting={extracting}
+            isStreaming={isStreaming}
+            onCancel={onCancel}
+            slug={slug}
+            context={context}
+            attachMenuItems={attachMenuItems}
+            leading={composerLeading}
+            hint={composerNotice ? () => composerNotice : undefined}
+          />
+        </ComposerDock>
+        <WideModeToggle wide={isWideMode} onToggle={toggleWideMode} />
       </div>
       <AttachmentPreview
         attachment={previewAttachment}

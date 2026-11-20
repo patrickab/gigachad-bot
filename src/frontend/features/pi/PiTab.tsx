@@ -1,19 +1,20 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
+import { ErrorText } from "@/components/ui/ErrorText"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
+import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
-import { piGatewayId, PiRepoLabel, PiTopBar, PiUsageBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader } from "./PiTopBar"
+import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { refreshPiSessions } from "./sessionStore"
 import { textOf } from "./transcript"
 import type { AgentMessage, PiCommand, PiModel } from "./types"
-import { usePiSession } from "./usePiSession"
+import { usePiSession, type Notice } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
 export interface PiLaunch {
@@ -32,6 +33,8 @@ const NEW_SESSION_OPTIONS: PiSessionOptions = { thinking: "medium" }
 
 const EMPTY_QUEUE = { steering: [], followUp: [] }
 const NO_COMMANDS: PiCommand[] = []
+const NO_NOTICES: Notice[] = []
+const NO_SLOTS: PiTopBarSlots = { thinking: null, model: null, usage: null }
 
 /** The message an open in `repo` that failed shows. */
 function piOpenError(reason: unknown, repo?: string): string {
@@ -130,12 +133,14 @@ export function withLead(text: string, lead: string | undefined): string {
 /**
  * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs, the `/pi` page and workbench chats.
  *
+ * - Laid out like a chat: the composer floats over the transcript's column, a session without turns lifts it under the greeting
  * - The owner opens the session: a coding tab through `/api/pi/sessions`, a workbench chat through `/api/workbench/chat`
  * - File links resolve against `cwd` and open in the file panel, `@` completes the files of `files` (a repo, or a chat's folder)
  * - `firstSubmit` runs once the session attaches, then reported through `onFirstSubmitted`
  * - `insertion` goes into the composer once it is enabled (a quote, a canvas screenshot), `onInserted` follows
  * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
  * - Each settled turn branches through `onBranch` (D11), Edit with its prompt for the branch's composer; a failed branch shows as a notice
+ * - A closed session's reason shows with the composer's notices
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
  */
 export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent }: {
@@ -158,8 +163,13 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
+  const [column, setColumn] = useState<HTMLDivElement | null>(null)
 
   const { messages } = transcript
+  // Known to be empty only once attached: a connecting session keeps the composer at the bottom, like a chat whose history loads
+  const empty = status.kind === "ready" && !firstSubmit && messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
+  const dock = useComposerDock(empty)
+  const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
   useEffect(() => {
     openTranscripts.set(sessionId, messages)
     return () => {
@@ -217,54 +227,56 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
       onModel: (model) => void setModel(model),
       onThinking: (level) => void setThinking(level),
     },
+    column,
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section ref={dock.columnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      {status.kind === "closed" && <p role="alert" className="border-b border-divider/50 px-4 py-2 text-xs text-danger">{status.reason}</p>}
-      <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} />
-      <PiComposer
-        sessionKey={sessionId}
-        files={files}
-        running={transcript.running}
-        disabled={status.kind !== "ready"}
-        commands={commands}
-        dialog={session.dialogs[0]}
-        queue={transcript.queue}
-        notices={session.notices}
-        statusLines={session.statusLines}
-        editorText={session.editorText}
-        insertion={insertion}
-        onInserted={onInserted}
-        leading={composerLeading?.(header)}
-        onSubmit={(request) => void submit(request)}
-        onAbort={session.abort}
-        onAnswerDialog={session.answerDialog}
-      />
+      <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
+      <ComposerDock dock={dock}>
+        <PiComposer
+          sessionKey={sessionId}
+          files={files}
+          running={transcript.running}
+          disabled={status.kind !== "ready"}
+          commands={commands}
+          dialog={session.dialogs[0]}
+          queue={transcript.queue}
+          notices={notices}
+          statusLines={session.statusLines}
+          editorText={session.editorText}
+          insertion={insertion}
+          onInserted={onInserted}
+          leading={composerLeading?.(header)}
+          onSubmit={(request) => void submit(request)}
+          onAbort={session.abort}
+          onAnswerDialog={session.answerDialog}
+        />
+      </ComposerDock>
     </section>
   )
 }
 
 /**
- * A Pi tab: the session `view` names in its repo, with its top bar rendered into `topBar` (the tab's top bar slot) and its usage into `usageBar` (the slot at its right end).
+ * A Pi tab: the session `view` names in its repo, laid out like a chat, with its controls in the tab's top bar `slots` where a chat has its own.
  *
- * - A tab without a session shows an empty composer and the model and thinking level to start on (Pi's default model at `medium`, the models from
- *   `/api/models/pi`), its first send creates the session and reports it through `onViewChange`. Its draft is kept per repo
+ * - A tab without a session shows the chat's empty state (greeting over the lifted composer) and the model and thinking level to start on
+ *   (Pi's default model at `medium`, the models from `/api/models/pi`), its first send creates the session and reports it through
+ *   `onViewChange`. Its draft is kept per repo, a failed start shows with the composer's notices
  * - The top bar picks the model from the user's catalog (`modelProps`, the chats' dropdown with Manage models) among those Pi offers, the thinking
  *   level from the model's ladder
  * - A tab with a session resumes it (spawns its Pi process when none runs), an archived one is restored first
  * - `shellCommands` (`/memorize`) share the composer's `/` menu, the shell runs them instead of sending them
  * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
- * - The repo and live dot sit in the composer's action row
+ * - The repo and live dot sit in the composer's action row, where an empty chat picks its project
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  */
-export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar = null, launch = null, onLaunched, shellCommands }: {
+export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched, shellCommands }: {
   view: PiView
   onViewChange: (view: PiView) => void
   modelProps: PiCatalogProps
-  topBar?: HTMLElement | null
-  usageBar?: HTMLElement | null
+  slots?: PiTopBarSlots
   launch?: PiLaunch | null
   onLaunched?: () => void
   shellCommands?: PiShellCommands
@@ -331,9 +343,8 @@ export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar 
   const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
   const clearInsertion = useCallback(() => setInsertion(null), [])
   const newCommands = useComposerCommands(NO_COMMANDS, shellCommands)
-  const inTopBar = (content: ReactNode) => topBar ? createPortal(content, topBar) : null
-  const inUsageBar = (content: ReactNode) => usageBar ? createPortal(content, usageBar) : null
   const shown = opened && opened.sessionId === sessionId ? opened : null
+  const dock = useComposerDock(!sessionId)
 
   if (shown) {
     return (
@@ -342,7 +353,7 @@ export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar 
         sessionId={shown.sessionId}
         cwd={shown.cwd}
         files={{ repo }}
-        renderHeader={(header) => <>{inTopBar(<PiTopBar header={header} modelProps={modelProps} />)}{inUsageBar(<PiUsageBar stats={header.controls.stats} />)}</>}
+        renderHeader={(header) => <PiTopBar slots={slots} header={header} modelProps={modelProps} />}
         composerLeading={(header) => <PiRepoLabel repo={repo} tone={header.tone} />}
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
@@ -363,13 +374,19 @@ export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar 
     onThinking: (thinking) => setChoice((current) => ({ ...current, thinking })),
   }
 
+  if (sessionId) {
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
+        <PiTopBar slots={slots} header={null} modelProps={modelProps} />
+        <ErrorText className="text-sm">{error}</ErrorText>
+      </section>
+    )
+  }
+
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {inTopBar(<PiTopBar header={null} controls={sessionId ? undefined : newControls} modelProps={modelProps} />)}
-      <div className="flex flex-1 items-center justify-center">
-        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-      </div>
-      {!sessionId && (
+    <section ref={dock.columnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <PiTopBar slots={slots} header={null} controls={newControls} modelProps={modelProps} />
+      <ComposerDock dock={dock}>
         <PiComposer
           sessionKey={`new:${repo}`}
           files={{ repo }}
@@ -378,7 +395,7 @@ export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar 
           commands={newCommands}
           dialog={undefined}
           queue={EMPTY_QUEUE}
-          notices={[]}
+          notices={error ? [{ id: "start", text: error, tone: "error" }] : NO_NOTICES}
           statusLines={{}}
           editorText={null}
           leading={<PiRepoLabel repo={repo} />}
@@ -386,7 +403,7 @@ export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar 
           onAbort={async () => []}
           onAnswerDialog={() => {}}
         />
-      )}
+      </ComposerDock>
     </section>
   )
 }

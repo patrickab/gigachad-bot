@@ -2,10 +2,11 @@
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
-import { CopyAction, ForkAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
+import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { CHAT_COLUMN_MAX_PX } from "@/features/chat/ChatContainer"
+import { WideModeToggle } from "@/features/chat/WideModeToggle"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
@@ -173,26 +174,12 @@ function Answer({ pieces, runs, live, fileLinks }: { pieces: Piece[]; runs: Reco
   return <>{rendered}</>
 }
 
-/** `01:41 AM` today, `Nov 3 01:41 AM` before, as omp-web stamped its messages. */
-function formatTime(timestamp: number | undefined): string | null {
-  if (!timestamp) return null
-  const date = new Date(timestamp)
-  const now = new Date()
-  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-  if (date.toDateString() === now.toDateString()) return time
-  const day = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined })
-  return `${day} ${time}`
-}
-
-const FOOTER_BUTTON = "flex h-6 items-center gap-1 rounded px-2 text-[11px] text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1"
-
-/** Speaks `text` with the browser's speech synthesis, a second press stops it. */
-function ReadAloud({ text }: { text: string }) {
+/** Speaks `text` with the browser's speech synthesis, a second press stops it. A Pi-only answer action, beside the chat's copy and branch. */
+function ReadAloudAction({ text }: { text: string }) {
   const [speaking, setSpeaking] = useState(false)
   useEffect(() => () => {
     if (speaking) speechSynthesis.cancel()
   }, [speaking])
-  if (typeof speechSynthesis === "undefined" || !text.trim()) return null
   const toggle = () => {
     speechSynthesis.cancel()
     if (speaking) return setSpeaking(false)
@@ -202,23 +189,7 @@ function ReadAloud({ text }: { text: string }) {
     speechSynthesis.speak(utterance)
     setSpeaking(true)
   }
-  return (
-    <button type="button" onClick={toggle} aria-label={speaking ? "Stop reading" : "Read aloud"} className={FOOTER_BUTTON}>
-      {speaking ? <Square size={11} aria-hidden="true" /> : <Volume2 size={11} aria-hidden="true" />}
-      {speaking ? "Stop" : "Read"}
-    </button>
-  )
-}
-
-/** A message's footer row: its actions, then its time at the right edge. `end` keeps the actions beside the time, as under a question. */
-function MessageFooter({ time, end = false, children }: { time: string | null; end?: boolean; children?: ReactNode }) {
-  if (!time && !children) return null
-  return (
-    <div className={end ? "mt-1 flex flex-wrap items-center justify-end gap-1.5" : "mt-1 flex flex-wrap items-center gap-1.5"}>
-      <div className="flex items-center gap-0.5">{children}</div>
-      {time && <span className={end ? "text-[10px] text-ink-faint" : "ml-auto text-[10px] text-ink-faint"}>{time}</span>}
-    </div>
-  )
+  return <TurnAction label={speaking ? "Stop reading" : "Read aloud"} onClick={toggle} icon={speaking ? <Square size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />} />
 }
 
 function clip(text: string): string {
@@ -270,26 +241,25 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   const branchFrom = !live && onBranch && lastConfirmed >= turn.start ? confirmed.entryIds[lastConfirmed] : undefined
   // Edit branches from the entry before the prompt, with the prompt back in the composer
   const editFrom = !live && !compaction && onBranch && turn.start > 0 && turn.start < confirmed.count ? confirmed.entryIds[turn.start - 1] : undefined
+  const questionActions = live ? [] : [
+    <CopyAction key="copy" text={text} label="Copy message" />,
+    ...(editFrom ? [<TurnAction key="edit" label="Edit in a new branch" icon={<CornerUpLeft size={14} aria-hidden="true" />} onClick={() => onBranch!(editFrom, text)} />] : []),
+  ]
   const answerActions = live ? [] : [
-    ...(answerText ? [<CopyAction key="copy" text={answerText} label="Copy answer as markdown" />] : []),
+    ...(answerText ? [<CopyAction key="copy" text={answerText} label="Copy message" />] : []),
+    ...(answerText.trim() && typeof speechSynthesis !== "undefined" ? [<ReadAloudAction key="read" text={answerText} />] : []),
     ...(branchFrom ? [<ForkAction key="branch" label="Branch session from this point" onFork={() => onBranch!(branchFrom)} />] : []),
   ]
   return (
     <TurnCard expanded>
-      <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={live ? undefined : <CopyAction text={text} label="Copy question as markdown" />}>
+      <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
-        {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <p className="whitespace-pre-wrap text-sm leading-6">{text}</p>}
-        {!live && (
-          <MessageFooter time={formatTime(prompt.timestamp)} end>
-            {editFrom && <button type="button" onClick={() => onBranch!(editFrom, text)} className={FOOTER_BUTTON}><CornerUpLeft size={11} aria-hidden="true" />Edit</button>}
-          </MessageFooter>
-        )}
+        {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <div><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>
           <TurnRegion role="answer" tail={isActivity(pieces[pieces.length - 1]) ? "activity" : "text"} actions={answerActions.length > 0 ? answerActions : undefined}>
             <Answer pieces={pieces} runs={runs} live={live} fileLinks={fileLinks} />
-            {!live && <MessageFooter time={formatTime(messages[turn.end - 1]?.timestamp)}><ReadAloud text={answerText} /></MessageFooter>}
           </TurnRegion>
         </TurnSurface>
       )}
@@ -298,17 +268,24 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
 })
 
 /**
- * Every turn as a gigachad Q&A card like omp-web's: the question with Edit and its time, the answer with activity folded into "Process details", Read aloud and its time.
- * The newest is expanded, older ones collapse to their question over a preview of the answer until opened, in the regular chat's column width.
- * File links open through `fileLinks`.
+ * Every turn as the regular chat's Q&A card: the question with Edit, the answer with activity folded into "Process details" and Read aloud.
+ * The newest is expanded, older ones collapse to their question over a preview of the answer until opened, in the regular chat's column
+ * (its width, wide mode from the top bar's toggle). File links open through `fileLinks`.
  *
- * - Follows the end while the reader is there
+ * - Follows the end while the reader is there, `paddingBottom` keeps the last turn clear of the floating composer
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
  *   from the end the window's top stays put, so appended turns do not push the read ones out
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
  *   and Edit, with the entry before the prompt and the prompt
+ * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  */
-export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: Transcript; fileLinks: FileLinks; onBranch?: (entryId: string, prompt?: string) => void }) {
+export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, onColumnChange }: {
+  transcript: Transcript
+  fileLinks: FileLinks
+  onBranch?: (entryId: string, prompt?: string) => void
+  paddingBottom?: number
+  onColumnChange?: (column: HTMLDivElement | null) => void
+}) {
   const { messages: confirmedMessages, unconfirmed, optimistic, entryIds, marks, streaming, running, runs: liveRuns } = transcript
   // Derived from the fields that change per message, not per streamed delta, so settled turns keep their props
   const messages = useMemo(() => shownMessages({ messages: confirmedMessages, unconfirmed, optimistic }), [confirmedMessages, unconfirmed, optimistic])
@@ -319,6 +296,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: 
   const [pageCount, setPageCount] = useState(TURN_PAGE_SIZE)
   /** First mounted turn while the reader is away from the end, null while following the end. */
   const [anchor, setAnchor] = useState<number | null>(null)
+  const [wide, setWide] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const earlierRef = useRef<HTMLButtonElement>(null)
   const pinnedRef = useRef(true)
@@ -371,11 +349,10 @@ export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: 
   const liveTail = running || streaming !== null || optimistic !== null
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full flex-col gap-3 py-6" style={{ maxWidth: CHAT_COLUMN_MAX_PX }}>
-        {turns.length === 0 && <p className="py-16 text-center text-sm text-ink-faint">New session</p>}
+    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
+      <div ref={onColumnChange} className="mx-auto" style={{ maxWidth: wide ? undefined : CHAT_COLUMN_MAX_PX }}>
         {start > 0 && (
-          <button ref={earlierRef} type="button" onClick={showEarlier} className="self-center rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">
+          <button ref={earlierRef} type="button" onClick={showEarlier} className="mx-auto mt-3 block rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">
             Show earlier turns
           </button>
         )}
@@ -399,6 +376,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch }: { transcript: 
           )
         })}
       </div>
+      <WideModeToggle wide={wide} onToggle={() => setWide((current) => !current)} />
     </div>
   )
 }

@@ -8,7 +8,7 @@ import { MenuPopover } from "@/components/ui/MenuPopover"
 import { FilePanel } from "@/features/editor/FilePanel"
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import { PiSessionView, type PiShellCommands } from "@/features/pi/PiTab"
-import { PiPanelBar, type PiSessionControls, type PiSessionHeader } from "@/features/pi/PiTopBar"
+import { PiPanelBar, type PiCatalogProps, type PiSessionControls, type PiSessionHeader } from "@/features/pi/PiTopBar"
 import { archivePiSession, fetchWorkbenchChats, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import { cn, errorMessage } from "@/lib/utils"
 import { withoutFileLead } from "./fileLead"
@@ -115,23 +115,25 @@ function SessionMenu({ chat, onNew }: { chat: DocumentChatState; onNew: () => vo
 /**
  * One file's Pi chat (`useDocumentChat`) in the tab's file panel: `PiSessionView` below a compact header.
  *
- * - The header (`PiPanelBar` in the panel's top row) shows the session's live dot, name, model, thinking and usage, then the file's sessions and New session
+ * - The header (`PiPanelBar` in the panel's top row) shows the session's live dot, thinking, model (the chats' dropdown over `modelProps`), name and
+ *   context readout, then the file's sessions and New session
  * - A new session starts on the shown session's model and thinking level
  * - `insertion` (a quote, a canvas screenshot) goes into the composer once the session is ready
  * - A PDF whose text is still extracted shows that instead of the session until it is ready (`pending`)
  */
-export function DocumentChat({ chat, width, onClose, shellCommands, insertion, onInserted }: {
+export function DocumentChat({ chat, width, onClose, shellCommands, modelProps, insertion, onInserted }: {
   chat: DocumentChatState
   width: number
   onClose: () => void
   shellCommands?: PiShellCommands
+  modelProps: PiCatalogProps
   insertion?: PiInsertion | null
   onInserted?: () => void
 }) {
   const [bar, setBar] = useState<HTMLDivElement | null>(null)
   const { opened, error, pending } = chat
   const inBar = (header: PiSessionHeader | null) => bar && createPortal(
-    <PiPanelBar header={header} actions={<SessionMenu chat={chat} onNew={() => chat.reset(optionsOf(header?.controls ?? null))} />} />,
+    <PiPanelBar header={header} modelProps={modelProps} actions={<SessionMenu chat={chat} onNew={() => chat.reset(optionsOf(header?.controls ?? null))} />} />,
     bar,
   )
 

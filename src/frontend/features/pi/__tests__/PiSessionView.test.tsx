@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { fetchPiFiles } from "@/lib/backend/api"
+import type { ModelsResponse } from "@/lib/domain/types"
 import { PiSessionView, withLead } from "../PiTab"
 import { PiPanelBar } from "../PiTopBar"
 import { EMPTY_TRANSCRIPT } from "../transcript"
@@ -82,13 +83,21 @@ describe("PiSessionView in a document panel", () => {
     expect(fetchPiFiles).toHaveBeenCalledWith({ cwd: "/work/markdown" })
   })
 
-  it("shows the compact panel bar: session, model, thinking, context and cost", () => {
-    render(<PiSessionView sessionId="d1" cwd="/work/markdown" files={{ cwd: "/work/markdown" }} renderHeader={(header) => <PiPanelBar header={header} actions={<button type="button">Sessions</button>} />} />)
+  it("shows the panel bar like a chat's top bar: thinking, the chats' model dropdown, session, context readout", () => {
+    const models: ModelsResponse = {
+      ollama: [],
+      providers: [{ label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-haiku-4-5"], source: "pi" }],
+      defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+      tab_order: ["Pi"],
+      unavailable: [],
+    }
+    const modelProps = { models, onProvidersChange: async () => {}, onDefaultsChange: async () => {}, placement: "below" as const }
+    render(<PiSessionView sessionId="d1" cwd="/work/markdown" files={{ cwd: "/work/markdown" }} renderHeader={(header) => <PiPanelBar header={header} modelProps={modelProps} actions={<button type="button">Sessions</button>} />} />)
 
     expect(screen.getByText("Notes chat")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Model: Claude Haiku 4.5" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Thinking: medium" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Context 20k of 200k tokens, cost $0.12")).toHaveTextContent("10% · $0.12")
+    expect(screen.getByRole("button", { name: "Model: anthropic/claude-haiku-4-5" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Reasoning: medium" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Context 20k tokens, 10% of 200k")).toHaveTextContent("20k | 10%")
     expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument()
   })
 })

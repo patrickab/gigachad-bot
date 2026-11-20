@@ -111,13 +111,14 @@ describe("PiTab", () => {
   it("starts a new session on the catalog model and thinking level picked in the empty tab's top bar", async () => {
     vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
     const topBar = document.createElement("div")
+    const slots = { thinking: topBar.appendChild(document.createElement("div")), model: topBar.appendChild(document.createElement("div")), usage: null }
     document.body.append(topBar)
-    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} topBar={topBar} />)
+    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} slots={slots} />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Model: Select model" }))
     fireEvent.click(screen.getByRole("menuitemradio", { name: "anthropic/claude-haiku-4-5" }))
     await waitFor(() => expect(screen.getByRole("button", { name: "Model: anthropic/claude-haiku-4-5" })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: "Thinking: medium" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reasoning: medium" }))
     fireEvent.click(screen.getByRole("menuitemradio", { name: "high" }))
     sendText("hello")
 
@@ -128,8 +129,9 @@ describe("PiTab", () => {
   it("offers only the catalog models Pi serves and starts on a typed OpenRouter model", async () => {
     vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
     const topBar = document.createElement("div")
+    const slots = { thinking: topBar.appendChild(document.createElement("div")), model: topBar.appendChild(document.createElement("div")), usage: null }
     document.body.append(topBar)
-    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} topBar={topBar} />)
+    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} slots={slots} />)
 
     fireEvent.click(await screen.findByRole("button", { name: "Model: Select model" }))
     fireEvent.click(screen.getByRole("button", { name: "OpenRouter" }))
@@ -199,7 +201,7 @@ describe("PiTab", () => {
     vi.mocked(openPiSession).mockRejectedValue(new ApiError("Unknown repository notes", 404))
     render(<PiTab view={{ repo: "notes", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} />)
     sendText("hello")
-    expect(await screen.findByRole("alert")).toHaveTextContent("notes is not a Git checkout under ~/git, Pi sessions start only there")
+    expect(await screen.findByText("notes is not a Git checkout under ~/git, Pi sessions start only there")).toHaveClass("text-danger")
   })
 
   it("opens a turn's branch as a fork of the session in the same tab", async () => {

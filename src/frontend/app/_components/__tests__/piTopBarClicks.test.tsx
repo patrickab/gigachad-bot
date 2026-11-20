@@ -5,9 +5,12 @@ import { TabContext, type Tab } from "@/contexts/TabContext"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { WorkspaceSurface } from "../WorkspaceSurface"
 
-// The Pi tab portals its controls into the top bar slot it gets, as the real one does.
+// The Pi tab portals its controls into the top bar slots it gets, as the real one does.
 vi.mock("@/features/pi/PiTab", () => ({
-  PiTab: ({ topBar }: { topBar: HTMLElement | null }) => topBar ? createPortal(<button>Model: Default</button>, topBar) : null,
+  PiTab: ({ slots }: { slots: { thinking: HTMLElement | null; model: HTMLElement | null } }) => <>
+    {slots.thinking && createPortal(<button>Reasoning: medium</button>, slots.thinking)}
+    {slots.model && createPortal(<button>Model: Default</button>, slots.model)}
+  </>,
 }))
 vi.mock("@/features/pi/PiSessionPicker", () => ({ PiSessionPicker: () => null }))
 vi.mock("@/features/editor/FilePanel", () => ({ FilePanelToggle: () => null }))
@@ -52,8 +55,10 @@ describe("WorkspaceSurface Pi top bar", () => {
         </TopBarSlotProvider>
       </TabContext.Provider>,
     )
-    const trigger = screen.getByRole("button", { name: "Model: Default" })
-    expect(trigger.closest("header")).toHaveClass("pointer-events-none")
-    expect(pointerEvents(trigger)).toBe("pointer-events-auto")
+    for (const name of ["Reasoning: medium", "Model: Default"]) {
+      const trigger = screen.getByRole("button", { name })
+      expect(trigger.closest("header")).toHaveClass("pointer-events-none")
+      expect(pointerEvents(trigger)).toBe("pointer-events-auto")
+    }
   })
 })

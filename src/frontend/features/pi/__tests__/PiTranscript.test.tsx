@@ -76,7 +76,7 @@ describe("PiTranscript window", () => {
   it("edits a turn by branching before its prompt with the prompt", () => {
     const onBranch = vi.fn()
     render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={onBranch} />)
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit in a new branch" }))
     expect(onBranch).toHaveBeenCalledWith("e1", "Prompt 1")
   })
 

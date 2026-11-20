@@ -3,10 +3,11 @@
 import { useRef, useState } from "react"
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import type { PiShellCommands } from "@/features/pi/PiTab"
+import type { PiCatalogProps } from "@/features/pi/PiTopBar"
 import { DocumentChat } from "./DocumentChat"
 import { useDocumentChat, type DocumentChat as DocumentChatState } from "./useDocumentChat"
 
-/** What a workbench's owner hands its chat: the session the tab's item shows, the drawer and the composer's commands. */
+/** What a workbench's owner hands its chat: the session the tab's item shows, the drawer, the composer's commands and the chats' model catalog. */
 export interface WorkbenchChatProps {
   /** The Pi session this tab's item shows, undefined before the first one. */
   chatSessionId: string | undefined
@@ -14,6 +15,7 @@ export interface WorkbenchChatProps {
   drawerOpen: boolean
   onDrawerOpenChange: (open: boolean) => void
   shellCommands: PiShellCommands
+  modelProps: PiCatalogProps
 }
 
 /** One workbench's chat and the text waiting to go into its composer draft. */
@@ -40,8 +42,8 @@ export function useWorkbenchChat(key: string, lead: (cwd: string) => string, { c
   return { chat, insertion, quote, onInserted: () => setInsertion(null) }
 }
 
-/** The chat drawer of a workbench in the tab's file panel. Its header holds the session's model and thinking controls. */
-export function WorkbenchChat({ state, drawerOpen, onDrawerOpenChange, shellCommands }: Pick<WorkbenchChatProps, "drawerOpen" | "onDrawerOpenChange" | "shellCommands"> & { state: WorkbenchChatState }) {
+/** The chat drawer of a workbench in the tab's file panel. Its header holds the session's model and thinking controls, a chat's dropdown and selector. */
+export function WorkbenchChat({ state, drawerOpen, onDrawerOpenChange, shellCommands, modelProps }: Pick<WorkbenchChatProps, "drawerOpen" | "onDrawerOpenChange" | "shellCommands" | "modelProps"> & { state: WorkbenchChatState }) {
   if (!drawerOpen) return null
   return (
     <DocumentChat
@@ -49,6 +51,7 @@ export function WorkbenchChat({ state, drawerOpen, onDrawerOpenChange, shellComm
       width={DRAWER_WIDTH_PX}
       onClose={() => onDrawerOpenChange(false)}
       shellCommands={shellCommands}
+      modelProps={modelProps}
       insertion={state.insertion}
       onInserted={state.onInserted}
     />

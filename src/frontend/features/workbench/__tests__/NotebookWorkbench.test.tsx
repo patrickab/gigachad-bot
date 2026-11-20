@@ -88,6 +88,7 @@ const workbenchOf = (drawerOpen: boolean, onDrawerOpenChange = vi.fn(), path = P
     drawerOpen={drawerOpen}
     onDrawerOpenChange={onDrawerOpenChange}
     shellCommands={{} as never}
+    modelProps={{} as never}
   />
 )
 

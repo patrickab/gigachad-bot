@@ -93,7 +93,7 @@ const CANVAS_CHAT_WIDTH_PX = 320
  * - A LaTeX item's path may change under the same `sessionKey` too: another file of its project is a buffer switch in the same editor, the item keeps its `texFolder`
  * - A LaTeX item learns its project folder (`texFolder`) from the file's project, so the sidebar can route clicks on the project's files to this tab
  */
-function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands }: {
+function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDrawerOpenChange, onClose, shellCommands, modelProps }: {
   item: WorkspaceItem
   onItemChange: (item: WorkspaceItem) => void
   onModeLabel: (label: string) => void
@@ -101,6 +101,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
   onDrawerOpenChange: (open: boolean) => void
   onClose: () => void
   shellCommands: PiShellCommands
+  modelProps: ModelProps
 }) {
   const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => onItemChange({ ...item, path }), item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
@@ -115,6 +116,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
     onDrawerOpenChange,
     onClose,
     shellCommands,
+    modelProps,
   }
   const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
   return workbenchKindOf(prepared.path) === "latex"
@@ -130,9 +132,24 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const hostAccess = useHostAccess()
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
   const { config, projectSlug, appMode } = tab
-  const piTopBar = useTopBarSlot("workbenchAgent")
-  const piUsageBar = useTopBarSlot("workbenchStatus")
+  const piSlots = { thinking: useTopBarSlot("reasoning"), model: useTopBarSlot("model"), usage: useTopBarSlot("usage") }
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
+  // A conversation's bar, a chat's and a Pi tab's: reasoning, model and wide mode at the left, the context readout and theme toggle at the right
+  const conversationBar = ({ reasoning, model, usage }: { reasoning: ReactNode; model: ReactNode; usage: ReactNode }) => ({
+    left: <>
+      {reasoning}
+      {model}
+      <TopBarSlot name="wideToggle">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>
+    </>,
+    right: <>
+      <TopBarPill>
+        {usage}
+        <ThemeToggle />
+      </TopBarPill>
+      {filePanelToggle}
+    </>,
+    runsUnderTopBar: true,
+  })
   // The workbench's bar, a notebook's too: the surface renders its controls into the status and center slots, the chat drawer opens at the right end
   const workbenchBar = {
     left: null,
@@ -150,7 +167,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
     </>,
   }
-  const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands }
+  const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, shellCommands, modelProps }
   // A stored or mounted canvas has a Pi chat, a screenshot opens it and lands in its draft. The scratch canvas has none
   const [canvasChatOpen, setCanvasChatOpen] = useState(false)
   const [canvasInsertion, setCanvasInsertion] = useState<PiInsertion | null>(null)
@@ -163,23 +180,15 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
 
   const surfaces: Record<AppSurface, () => Surface> = {
     chat: () => ({
-      left: <>
-        <TopBarPill>
+      ...conversationBar({
+        reasoning: <TopBarPill>
           <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
-        </TopBarPill>
-        <TopBarTransparent>
+        </TopBarPill>,
+        model: <TopBarTransparent>
           <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />
-        </TopBarTransparent>
-        <TopBarSlot name="wideToggle">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>
-      </>,
-      right: <>
-        <TopBarPill>
-          <ChatContextUsage usage={totalUsage} model={config.selectedModel} />
-          <ThemeToggle />
-        </TopBarPill>
-        {filePanelToggle}
-      </>,
-      runsUnderTopBar: true,
+        </TopBarTransparent>,
+        usage: <ChatContextUsage usage={totalUsage} model={config.selectedModel} />,
+      }),
       body: chatBody,
     }),
     canvas: () => ({
@@ -214,6 +223,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               width={CANVAS_CHAT_WIDTH_PX}
               onClose={() => setCanvasChatOpen(false)}
               shellCommands={shellCommands}
+              modelProps={modelProps}
               lead={() => canvasLead(canvasChatPath)}
               insertion={canvasInsertion}
               onInserted={() => setCanvasInsertion(null)}
@@ -267,7 +277,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               chatOpen={pdfChatOpen}
               onChatOpenChange={setPdfChatOpen}
               renderChat={hostAccess ? ({ width, onClose }) => (
-                <FileChat path={documentItem.path} width={width} onClose={onClose} shellCommands={shellCommands} />
+                <FileChat path={documentItem.path} width={width} onClose={onClose} shellCommands={shellCommands} modelProps={modelProps} />
               ) : undefined}
             >
               <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} />
@@ -289,13 +299,15 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     pi: () => {
       const piItem = itemOf(tab, "pi")
       return {
-        // The Pi tab renders its top bar into the left slot and its usage into the right one. The pills take clicks, the bar around them lets them through
-        left: <TopBarSlot name="workbenchAgent">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
-        right: <><TopBarSlot name="workbenchStatus">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
-        runsUnderTopBar: false,
+        // The Pi tab renders its thinking, model and usage into the places a chat's bar has its own
+        ...conversationBar({
+          reasoning: <TopBarSlot name="reasoning">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
+          model: <TopBarSlot name="model">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
+          usage: <TopBarSlot name="usage">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
+        }),
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} topBar={piTopBar} usageBar={piUsageBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} slots={piSlots} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
           </div>
         ) : chatBody,
       }
