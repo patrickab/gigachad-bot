@@ -227,8 +227,9 @@ if [[ "$profile" == production ]]; then
     uvicorn src.backend.server:app --host 127.0.0.1 --port "$port" --workers "$workers" &
 else
     printf 'Starting development backend on http://127.0.0.1:%s\n' "$port"
+    # Watch only Python packages: src/ also holds frontend/ and c4/ with node_modules and .next build output.
     # Open websockets (editor file watches, terminals) would hold a reload until the worker is killed
-    uvicorn src.backend.server:app --host 127.0.0.1 --port "$port" --reload --reload-dir src --timeout-graceful-shutdown 3 &
+    uvicorn src.backend.server:app --host 127.0.0.1 --port "$port" --reload --reload-dir src/backend --reload-dir src/lib --timeout-graceful-shutdown 3 &
 fi
 backend_pid=$!
 

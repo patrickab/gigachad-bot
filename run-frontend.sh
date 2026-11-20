@@ -16,4 +16,5 @@ sync_python_deps
 install_frontend_deps
 
 echo "Starting frontend on http://127.0.0.1:2999"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 exec .venv/bin/npm --prefix src/frontend run dev
