@@ -859,14 +859,17 @@ describe("profiles (G1, G5, G6)", () => {
     for (const tools of [[], ["+bash"], ["read,bash"], "read"]) expect(await refusal({ ...DOC, tools })).toEqual(invalidTools);
   });
 
-  test("resume by sessionId returns the live child unchanged for the same prompt, profile_mismatch otherwise", async () => {
-    const { sessionId } = document;
+  test("resume by sessionId reuses the live child for the same spec, restarts an idle one for a new prompt or tools", async () => {
+    const { sessionId, sessionPath } = document;
     const again = await startSession({ cwd, ...DOC, resume: { sessionId } });
     expect(again.status).toBe(200);
     expect((await again.json()).session).toMatchObject({ sessionId, profile: "document", live: { running: false } });
-    for (const body of [{ ...DOC, systemPrompt: "Other" }, { ...DOC, tools: ["read"] }, { profile: "coding" }]) {
-      expect(await refusal({ ...body, resume: { sessionId } })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
-    }
+    const changed = await startSession({ cwd, ...DOC, systemPrompt: "Answer only with the word NEW", resume: { sessionId } });
+    expect(changed.status).toBe(200);
+    expect((await changed.json()).session).toMatchObject({ sessionId, sessionPath, profile: "document" });
+    const driver = await client();
+    expect((await driver.attach(sessionId)).attached.state.argv).toContain("Answer only with the word NEW");
+    expect(await refusal({ profile: "coding", resume: { sessionId } })).toEqual({ status: 409, body: { error: "profile_mismatch" } });
     expect(await refusal({ ...DOC, resume: { sessionId: "no-such-session" } })).toEqual({ status: 404, body: { error: "not_found" } });
     expect((await refusal({ ...DOC, resume: { sessionId: "" } })).status).toBe(400);
   });

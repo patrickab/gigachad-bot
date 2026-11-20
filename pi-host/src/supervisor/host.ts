@@ -39,6 +39,12 @@ function fail(status: number, error: string, extra: Record<string, unknown> = {}
   return { status, body: { error, ...extra } };
 }
 
+/** True when `live` differs from `spec` only in its document prompt or tools and nothing is in flight. */
+function isRestartable(live: LiveSession, spec: ProfileSpec): boolean {
+  const { running, waiting } = live.liveStatus();
+  return live.spec.profile === spec.profile && !running && !waiting;
+}
+
 /** Validated `POST /sessions` body, or the failure to answer with. */
 async function parseStartRequest(body: unknown, host: Host): Promise<StartRequest | Failure> {
   if (!isRecord(body)) return fail(400, "invalid_body");
@@ -222,10 +228,10 @@ export class SupervisorHost implements Supervisor {
     } else if (resume) {
       // A new session has no file before its first message, only its live child knows the id.
       const liveById = "sessionId" in resume ? this.byId.get(resume.sessionId) : undefined;
-      if (liveById && !liveById.closing) return this.reuse(liveById, spec);
+      if (liveById && !liveById.closing && sameProfile(liveById.spec, spec)) return this.reuse(liveById, spec);
       const sessionPath = "sessionId" in resume ? await this.host.findSession(resume.sessionId) : resume.sessionPath;
       meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
-      if (!meta) return fail(404, "not_found");
+      if (!meta) return liveById && !liveById.closing ? fail(409, "profile_mismatch") : fail(404, "not_found");
       if (meta.archived) return fail(409, "archived");
       if ((await profileOf(this.host, meta.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
       cwd = meta.cwd;
@@ -234,8 +240,12 @@ export class SupervisorHost implements Supervisor {
     const sessionPath = meta.realPath;
 
     const live = this.byPath.get(sessionPath) ?? this.byPath.get(meta.sessionPath);
-    if (live && !live.closing) return this.reuse(live, spec);
-    if (live) await live.exited;
+    if (live && !live.closing) {
+      if (sameProfile(live.spec, spec)) return this.reuse(live, spec);
+      // A document prompt or tool change (a template edit, a new AGENTS.md) restarts an idle child with the new spec
+      if (!isRestartable(live, spec)) return fail(409, "profile_mismatch");
+      await live.close();
+    } else if (live) await live.exited;
     const inFlight = this.starting.get(sessionPath);
     if (inFlight) {
       const outcome = await inFlight;
