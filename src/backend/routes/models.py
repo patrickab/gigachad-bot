@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from lib import ollama_models, pi_models, reasoning_levels
+from lib import ollama_models, pi_catalog_models, pi_models, reasoning_levels
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
 from lib.provider_usage import UsageUnavailable, provider_usage
@@ -45,6 +45,15 @@ async def _models_payload(
     (installed, served), (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
         asyncio.to_thread(ollama), asyncio.to_thread(stored)
     )
+
+    def with_catalog_models(served: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
+        """Hand-entered models Pi lacks added to its `models.json`, then the gateway's models again when that changed them."""
+        if served is None or not pi_catalog_models.sync(all_providers, served):
+            return served
+        pi_models.reset_cache()
+        return pi_models.served_ladders()
+
+    served = await asyncio.to_thread(with_catalog_models, served)
     visible = providers_for_ui(all_providers)
     selectors = installed + [f"{provider['provider_id']}/{model}" for provider in visible.values() for model in provider["models"]]
     return {

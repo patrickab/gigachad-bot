@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { isFrameStateOf, learnSelectorModels, selectorIdOf, servedModelOf } from "../model"
+import { isFrameStateOf, learnSelectorModels, servedModelOf } from "../model"
 
 describe("isFrameStateOf", () => {
   it("matches a session by id, home and the new-session draft by null", () => {
@@ -41,12 +41,5 @@ describe("learnSelectorModels", () => {
     expect(servedModelOf(served, "ollama/qwen3")).toEqual({ provider: "custom", modelId: "ollama/qwen3" })
     expect(servedModelOf(served, "litellm_proxy/anthropic/claude-sonnet-5")).toEqual({ provider: "custom", modelId: "anthropic/claude-sonnet-5" })
     expect(servedModelOf(served, "gemini/gemini-3.1-pro")).toBeNull()
-  })
-
-  it("names LearnHarness's model by the catalog's selector id, else by its own id", () => {
-    expect(selectorIdOf(models, "google/gemini-3.5-flash")).toBe("gemini/gemini-3.5-flash")
-    expect(selectorIdOf(models, "anthropic/claude-sonnet-5")).toBe("litellm_proxy/anthropic/claude-sonnet-5")
-    expect(selectorIdOf(models, "ollama/gemma4")).toBe("ollama/gemma4")
-    expect(selectorIdOf(models, "openai/gone")).toBe("openai/gone")
   })
 })

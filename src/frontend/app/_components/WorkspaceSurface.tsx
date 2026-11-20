@@ -38,7 +38,7 @@ import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
 import { isNotebookPath } from "@/lib/paths"
 
-/** Model picker props shared by the chat, document and learn top bars. */
+/** Model picker props shared by the chat, document, learn and Pi top bars. */
 export type ModelProps = Omit<ComponentProps<typeof ModelDropdown>, "selectedModel" | "onSelect" | "chatColumn">
 
 /** The parts of the tab's canvas view state that the canvas surface reads. */
@@ -295,7 +295,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         runsUnderTopBar: false,
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} topBar={piTopBar} usageBar={piUsageBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} topBar={piTopBar} usageBar={piUsageBar} launch={launch} onLaunched={onLaunched} shellCommands={shellCommands} />
           </div>
         ) : chatBody,
       }

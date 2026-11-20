@@ -65,6 +65,7 @@ export default defineConfig([
           crossFeature("workbench", "pi"),
           crossFeature("pi", "chat"),
           crossFeature("pi", "editor"),
+          crossFeature("pi", "settings"),
         ],
       }],
     },

@@ -3,23 +3,20 @@
 - Consumes Ollama's API at `config.OLLAMA_BASE_URL`: `/api/tags` (installed models) and `/api/show` (capabilities,
   context window), never starts Ollama
 - Provides `installed_chat_models` (the tags of the installed chat models) and `sync_pi_provider`, which writes them
-  into Pi's `models.json` (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) so pi-host's gateway serves `ollama/<tag>`
+  into Pi's `models.json` (`pi_models_json`) so pi-host's gateway serves `ollama/<tag>`
 
 pi-host reloads `models.json` when it changes, so a newly pulled model is served after the next sync.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-from pathlib import Path
-import tempfile
 from typing import Any
 
 import httpx
 
 from config import OLLAMA_BASE_URL
+from lib import pi_models_json
 
 log = logging.getLogger(__name__)
 
@@ -88,59 +85,30 @@ def _pi_model(tag: str, details: dict[str, Any]) -> dict[str, Any]:
     return model
 
 
-def models_json_path() -> Path:
-    """Pi's `models.json`, in `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`) like Pi resolves it."""
-    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
-    return Path(agent_dir).expanduser() / "models.json" if agent_dir else Path.home() / ".pi" / "agent" / "models.json"
-
-
-def _write_atomically(path: Path, config: dict[str, Any]) -> None:
-    """Replace *path* with *config* in one rename, keeping an existing file's mode (new files are owner-only)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, staging = tempfile.mkstemp(dir=path.parent, prefix=".models-", suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file:
-            json.dump(config, file, indent=2, ensure_ascii=False)
-            file.write("\n")
-        if path.exists():
-            os.chmod(staging, path.stat().st_mode & 0o777)
-        os.replace(staging, path)
-    except BaseException:
-        Path(staging).unlink(missing_ok=True)
-        raise
-
-
 def sync_pi_provider() -> bool:
     """Merge the installed chat models into Pi's provider `ollama`, True when `models.json` was rewritten."""
     # Other providers and keys stay. Ollama down, an unreadable file or an unchanged provider writes nothing.
     details = _installed_chat_details()
     if details is None:
         return False
-    path = models_json_path()
+
+    def with_installed(providers: dict[str, Any]) -> dict[str, Any] | None:
+        if not details and PROVIDER_ID not in providers:
+            return None
+        provider = {
+            **providers.get(PROVIDER_ID, {}),
+            "baseUrl": f"{OLLAMA_BASE_URL.rstrip('/')}/v1",
+            "api": "openai-completions",
+            "apiKey": "ollama",  # Ollama ignores it, Pi lists a provider only with credentials.
+            "models": [_pi_model(tag, model_details) for tag, model_details in details.items()],
+        }
+        return None if providers.get(PROVIDER_ID) == provider else {**providers, PROVIDER_ID: provider}
+
     try:
-        config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, ValueError):
-        log.exception("Could not read Pi's %s, Ollama models are not synced", path)
+        written = pi_models_json.update(with_installed)
+    except pi_models_json.ModelsJsonError:
+        log.exception("Ollama models are not synced")
         return False
-    if not isinstance(config, dict) or not isinstance(config.get("providers", {}), dict):
-        log.error("Pi's %s has no providers object, Ollama models are not synced", path)
-        return False
-    providers = config.get("providers", {})
-    if not details and PROVIDER_ID not in providers:
-        return False
-    provider = {
-        **providers.get(PROVIDER_ID, {}),
-        "baseUrl": f"{OLLAMA_BASE_URL.rstrip('/')}/v1",
-        "api": "openai-completions",
-        "apiKey": "ollama",  # Ollama ignores it, Pi lists a provider only with credentials.
-        "models": [_pi_model(tag, model_details) for tag, model_details in details.items()],
-    }
-    if providers.get(PROVIDER_ID) == provider:
-        return False
-    try:
-        _write_atomically(path, {**config, "providers": {**providers, PROVIDER_ID: provider}})
-    except OSError:
-        log.exception("Could not write Pi's %s, Ollama models are not synced", path)
-        return False
-    log.info("Synced %d Ollama models into Pi's %s", len(details), path)
-    return True
+    if written:
+        log.info("Synced %d Ollama models into Pi's %s", len(details), pi_models_json.models_json_path())
+    return written

@@ -5,9 +5,9 @@ import { Lock } from "lucide-react"
 import { useTab } from "@/contexts/TabContext"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
-import { displayName } from "@/lib/models"
+import { displayName, selectorIdOf } from "@/lib/models"
 import type { LearnView } from "@/lib/domain/types"
-import { isFrameStateOf, learnSelectorModels, selectorIdOf, servedModelOf, type LearnModelState } from "./model"
+import { isFrameStateOf, learnSelectorModels, servedModelOf, type LearnModelState } from "./model"
 import { useLearn, useLearnDrive, useLearnFrameEvent, useLearnFrameState } from "./LearnProvider"
 
 /** The frame's model pills when it shows `view` in drive mode, null otherwise. A session's model is read-only unless it is no longer served. */

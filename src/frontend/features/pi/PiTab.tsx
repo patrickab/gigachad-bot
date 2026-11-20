@@ -8,7 +8,7 @@ import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
-import { PiRepoLabel, PiTopBar, PiUsageBar, type PiSessionControls, type PiSessionHeader } from "./PiTopBar"
+import { piGatewayId, PiRepoLabel, PiTopBar, PiUsageBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { refreshPiSessions } from "./sessionStore"
 import { textOf } from "./transcript"
@@ -84,14 +84,13 @@ async function resumableSession(repo: string, sessionId: string): Promise<PiSess
   return restored
 }
 
-type CatalogModel = PiCatalog["providers"][number]["models"][number]
-
 /**
- * Models a new session may start on (`/api/models/pi`), as Pi names them, with each one's thinking ladder. Empty until loaded or when pi-host is offline.
+ * Models a new session may start on (`/api/models/pi`), as Pi names them, and each one's thinking ladder by `<provider>/<id>`. Empty until loaded or
+ * when pi-host is offline.
  *
  * `defaultLevels` (for Pi's default model, whose ladder the catalog does not name) is the longest ladder: Pi clamps a level its model lacks.
  */
-function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<PiModel, string[]>; defaultLevels: string[] } {
+function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<string, string[]>; defaultLevels: string[] } {
   const [catalog, setCatalog] = useState<PiCatalog | null>(null)
   useEffect(() => {
     if (!enabled || catalog) return
@@ -102,19 +101,18 @@ function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map
     }
   }, [enabled, catalog])
   return useMemo(() => {
-    const levels = new Map<PiModel, string[]>()
+    const models: PiModel[] = []
+    const levels = new Map<string, string[]>()
     for (const provider of catalog?.providers ?? []) {
-      for (const model of provider.models) levels.set(piModelOf(provider.id, model), model.thinking_levels)
+      for (const model of provider.models) {
+        const piModel = { provider: provider.id, id: model.id.startsWith(`${provider.id}/`) ? model.id.slice(provider.id.length + 1) : model.id }
+        models.push(piModel)
+        levels.set(piGatewayId(piModel), model.thinking_levels)
+      }
     }
     const defaultLevels = [...levels.values()].reduce<string[]>((longest, ladder) => (ladder.length > longest.length ? ladder : longest), [])
-    return { models: [...levels.keys()], levels, defaultLevels }
+    return { models, levels, defaultLevels }
   }, [catalog])
-}
-
-/** A catalog model (`anthropic/claude-haiku-4-5`) as Pi names it: provider plus its own id. */
-function piModelOf(provider: string, model: CatalogModel): PiModel {
-  const id = model.id.startsWith(`${provider}/`) ? model.id.slice(provider.length + 1) : model.id
-  return { provider, id, name: model.name, reasoning: model.thinking_levels.length > 0 }
 }
 
 /** `level` if `levels` offers it, else medium, else the highest offered. Any level for a model without reasoning (Pi turns thinking off). */
@@ -251,17 +249,20 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
 /**
  * A Pi tab: the session `view` names in its repo, with its top bar rendered into `topBar` (the tab's top bar slot) and its usage into `usageBar` (the slot at its right end).
  *
- * - A tab without a session shows an empty composer and the model and thinking level to start on (Pi's default model at `medium`, from `/api/models/pi`),
- *   its first send creates the session and reports it through `onViewChange`. Its draft is kept per repo
+ * - A tab without a session shows an empty composer and the model and thinking level to start on (Pi's default model at `medium`, the models from
+ *   `/api/models/pi`), its first send creates the session and reports it through `onViewChange`. Its draft is kept per repo
+ * - The top bar picks the model from the user's catalog (`modelProps`, the chats' dropdown with Manage models) among those Pi offers, the thinking
+ *   level from the model's ladder
  * - A tab with a session resumes it (spawns its Pi process when none runs), an archived one is restored first
  * - `shellCommands` (`/memorize`) share the composer's `/` menu, the shell runs them instead of sending them
  * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
  * - The repo and live dot sit in the composer's action row
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  */
-export function PiTab({ view, onViewChange, topBar = null, usageBar = null, launch = null, onLaunched, shellCommands }: {
+export function PiTab({ view, onViewChange, modelProps, topBar = null, usageBar = null, launch = null, onLaunched, shellCommands }: {
   view: PiView
   onViewChange: (view: PiView) => void
+  modelProps: PiCatalogProps
   topBar?: HTMLElement | null
   usageBar?: HTMLElement | null
   launch?: PiLaunch | null
@@ -276,7 +277,7 @@ export function PiTab({ view, onViewChange, topBar = null, usageBar = null, laun
   const { sessionId, repo } = view
   const newSession = useNewSessionModels(!sessionId)
   const [choice, setChoice] = useState<{ model: PiModel | null; thinking: string }>({ model: null, thinking: NEW_SESSION_OPTIONS.thinking ?? "medium" })
-  const choiceLevels = choice.model ? newSession.levels.get(choice.model) ?? [] : newSession.defaultLevels
+  const choiceLevels = choice.model ? newSession.levels.get(piGatewayId(choice.model)) ?? [] : newSession.defaultLevels
 
   // Resume the view's session unless this tab opened it
   useEffect(() => {
@@ -341,7 +342,7 @@ export function PiTab({ view, onViewChange, topBar = null, usageBar = null, laun
         sessionId={shown.sessionId}
         cwd={shown.cwd}
         files={{ repo }}
-        renderHeader={(header) => <>{inTopBar(<PiTopBar header={header} />)}{inUsageBar(<PiUsageBar stats={header.controls.stats} />)}</>}
+        renderHeader={(header) => <>{inTopBar(<PiTopBar header={header} modelProps={modelProps} />)}{inUsageBar(<PiUsageBar stats={header.controls.stats} />)}</>}
         composerLeading={(header) => <PiRepoLabel repo={repo} tone={header.tone} />}
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
@@ -353,19 +354,18 @@ export function PiTab({ view, onViewChange, topBar = null, usageBar = null, laun
     )
   }
 
-  const newControls: PiSessionControls = {
+  const newControls: PiModelControls = {
     model: choice.model,
     models: newSession.models,
     thinkingLevel: choice.thinking,
     thinkingLevels: choiceLevels,
-    stats: null,
-    onModel: (model) => setChoice((current) => ({ model, thinking: clampThinking(current.thinking, newSession.levels.get(model) ?? []) })),
+    onModel: (model) => setChoice((current) => ({ model, thinking: clampThinking(current.thinking, newSession.levels.get(piGatewayId(model)) ?? []) })),
     onThinking: (thinking) => setChoice((current) => ({ ...current, thinking })),
   }
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {inTopBar(<PiTopBar header={null} controls={sessionId ? undefined : newControls} />)}
+      {inTopBar(<PiTopBar header={null} controls={sessionId ? undefined : newControls} modelProps={modelProps} />)}
       <div className="flex flex-1 items-center justify-center">
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       </div>

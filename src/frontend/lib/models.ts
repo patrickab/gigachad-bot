@@ -1,4 +1,4 @@
-import type { ModelProvider } from "@/lib/domain/types"
+import type { ModelProvider, ModelsResponse } from "@/lib/domain/types"
 
 /** Stored selector prefix of Pi gateway models, kept from before Pi: `litellm_proxy/<pi-provider>/<id>`. */
 export const PI_LITELLM_ID = "litellm_proxy"
@@ -21,6 +21,22 @@ export function gatewayModelId(selector: string): string {
 /** A provider's models as `provider_id/model` ids. */
 export function qualifiedModelIds(provider: ModelProvider): string[] {
   return provider.models.map((model) => `${provider.provider_id}/${model}`)
+}
+
+/** The catalog's selector id for the gateway's `<provider>/<id>`, that id itself when no catalog entry names it. */
+export function selectorIdOf(models: ModelsResponse, gatewayId: string): string {
+  const selectorIds = [...models.providers.flatMap(qualifiedModelIds), ...models.ollama]
+  return selectorIds.find((selectorId) => gatewayModelId(selectorId) === gatewayId) ?? gatewayId
+}
+
+/** `models` with only the entries whose gateway id is in `gatewayIds`, for a pick list of what a runtime offers. */
+export function catalogOffering(models: ModelsResponse, gatewayIds: ReadonlySet<string>): ModelsResponse {
+  const offered = (selectorId: string) => gatewayIds.has(gatewayModelId(selectorId))
+  return {
+    ...models,
+    ollama: models.ollama.filter(offered),
+    providers: models.providers.map((provider) => ({ ...provider, models: provider.models.filter((model) => offered(`${provider.provider_id}/${model}`)) })),
+  }
 }
 
 export function displayName(m: string): string {

@@ -1,22 +1,43 @@
 "use client"
 
-import type { ReactNode } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { compactTokens, ContextUsage } from "@/features/chat/ContextUsage"
+import { ModelDropdown } from "@/features/settings/ModelDropdown"
+import { catalogOffering, gatewayModelId, selectorIdOf } from "@/lib/models"
 import { PiModelSelector, PiThinkingSelector } from "./PiModelSelector"
 import type { PiModel } from "./types"
 import type { PiSessionStats } from "./usePiSession"
 
-/** The session's model, thinking and usage as its header shows and changes them. */
-export interface PiSessionControls {
+/** The session's model and thinking level as a header shows and changes them, with every model Pi offers it (`get_available_models`). */
+export interface PiModelControls {
   model: PiModel | null
   models: PiModel[]
   thinkingLevel: string | null
   /** Levels the model offers, `["off"]` (no selector) for a model without reasoning. */
   thinkingLevels: string[]
-  stats: PiSessionStats | null
   onModel: (model: PiModel) => void
   onThinking: (level: string) => void
+}
+
+/** The session's model, thinking and usage. */
+export interface PiSessionControls extends PiModelControls {
+  stats: PiSessionStats | null
+}
+
+/** The app's model dropdown as chats get it: the user's catalog, its saves, Manage models and default models. */
+export type PiCatalogProps = Omit<ComponentProps<typeof ModelDropdown>, "selectedModel" | "onSelect" | "pickModels" | "chatColumn">
+
+/** Pi's `<provider>/<id>` of a model, how the gateway and the catalog's selectors (`gatewayModelId`) name it. */
+export function piGatewayId(model: PiModel): string {
+  return `${model.provider}/${model.id}`
+}
+
+/** The Pi model a catalog selector names (`openrouter/acme/x` -> provider `openrouter`, id `acme/x`), null for one without a provider. */
+export function piModelOfSelector(selector: string): PiModel | null {
+  const gatewayId = gatewayModelId(selector)
+  const slash = gatewayId.indexOf("/")
+  return slash > 0 && slash < gatewayId.length - 1 ? { provider: gatewayId.slice(0, slash), id: gatewayId.slice(slash + 1) } : null
 }
 
 /** What a session view's header shows. */
@@ -42,28 +63,54 @@ function StatsLine({ stats }: { stats: PiSessionStats | null }) {
   return shown && <span aria-label={shown.label} className="shrink-0 whitespace-nowrap px-1.5 font-mono text-xs tabular-nums text-ink-faint">{shown.text}</span>
 }
 
-/** Model and thinking selectors, then the usage line unless `usage` is false, for a session header. `compact` shortens the model name for a side panel. */
-export function PiSessionControlsBar({ controls, compact = false, usage = true }: { controls: PiSessionControls; compact?: boolean; usage?: boolean }) {
-  return (
-    <div className={compact ? "flex min-w-0 items-center gap-1" : "flex shrink-0 items-center gap-1"}>
-      {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
-      {controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
-        <div className="shrink-0">
-          <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
-        </div>
-      )}
-      {usage && <StatsLine stats={controls.stats} />}
+function ThinkingControl({ controls }: { controls: PiModelControls }) {
+  return controls.thinkingLevel && controls.thinkingLevels.length > 1 && (
+    <div className="shrink-0">
+      <PiThinkingSelector levels={controls.thinkingLevels} selected={controls.thinkingLevel} onSelect={controls.onThinking} />
     </div>
   )
 }
 
-/** A Pi tab's top bar: session name, then the session's model and thinking once it runs, or `controls` (what a new session starts on) before. */
-export function PiTopBar({ header, controls }: { header: PiSessionHeader | null; controls?: PiSessionControls }) {
+/** Model and thinking selectors, then the usage line, for a side panel's session header. `compact` shortens the model name. */
+export function PiSessionControlsBar({ controls, compact = false }: { controls: PiSessionControls; compact?: boolean }) {
+  return (
+    <div className={compact ? "flex min-w-0 items-center gap-1" : "flex shrink-0 items-center gap-1"}>
+      {controls.models.length > 0 && <PiModelSelector models={controls.models} selected={controls.model} onSelect={controls.onModel} compact={compact} />}
+      <ThinkingControl controls={controls} />
+      <StatsLine stats={controls.stats} />
+    </div>
+  )
+}
+
+/**
+ * A Pi tab's top bar: session name, then the session's model and thinking once it runs, or `controls` (what a new session starts on) before.
+ *
+ * The model is the app's dropdown over the user's catalog (`modelProps`): it offers the catalog models Pi offers the session, shows the session's
+ * model by its catalog selector, and opens Manage models and default models like a chat's. Hidden until Pi names its models.
+ */
+export function PiTopBar({ header, controls, modelProps }: { header: PiSessionHeader | null; controls?: PiModelControls; modelProps: PiCatalogProps }) {
   const shown = header?.controls ?? controls
+  const current = shown?.model ? piGatewayId(shown.model) : ""
+  const select = (selector: string) => {
+    const model = piModelOfSelector(selector)
+    if (model) shown?.onModel(model)
+  }
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm">
       {header?.sessionName && <span className="truncate text-ink-muted">{header.sessionName}</span>}
-      {shown && <PiSessionControlsBar controls={shown} usage={false} />}
+      {shown && (
+        <div className="flex shrink-0 items-center gap-1">
+          {shown.models.length > 0 && (
+            <ModelDropdown
+              {...modelProps}
+              pickModels={(catalog) => catalogOffering(catalog, new Set(shown.models.map(piGatewayId)))}
+              selectedModel={current && modelProps.models ? selectorIdOf(modelProps.models, current) : current}
+              onSelect={select}
+            />
+          )}
+          <ThinkingControl controls={shown} />
+        </div>
+      )}
     </div>
   )
 }

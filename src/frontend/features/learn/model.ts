@@ -1,6 +1,6 @@
 import type { LearnView, ModelsResponse } from "@/lib/domain/types"
 import type { LearnFrameMessageOf, LearnModelRef } from "@gigachad/chat-ui/learn-protocol"
-import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
+import { catalogOffering, gatewayModelId } from "@/lib/models"
 
 export type LearnModelState = LearnFrameMessageOf<"model">
 
@@ -15,23 +15,11 @@ export function isFrameStateOf(view: LearnView, sessionId: string | null): boole
  * after a LearnHarness restart).
  */
 export function learnSelectorModels(models: ModelsResponse, served: readonly LearnModelRef[]): ModelsResponse {
-  const ids = new Set(served.map((model) => model.modelId))
-  const isServed = (selectorId: string) => ids.has(gatewayModelId(selectorId))
-  return {
-    ...models,
-    ollama: models.ollama.filter(isServed),
-    providers: models.providers.map((provider) => ({ ...provider, models: provider.models.filter((model) => isServed(`${provider.provider_id}/${model}`)) })),
-  }
+  return catalogOffering(models, new Set(served.map((model) => model.modelId)))
 }
 
 /** The served model a selector id names, null for one LearnHarness does not serve. */
 export function servedModelOf(served: readonly LearnModelRef[], selectorId: string): LearnModelRef | null {
   const modelId = gatewayModelId(selectorId)
   return served.find((model) => model.modelId === modelId) ?? null
-}
-
-/** The catalog's selector id for LearnHarness's model id, the model id itself when no catalog entry names it. */
-export function selectorIdOf(models: ModelsResponse, modelId: string): string {
-  const selectorIds = [...models.providers.flatMap(qualifiedModelIds), ...models.ollama]
-  return selectorIds.find((selectorId) => gatewayModelId(selectorId) === modelId) ?? modelId
 }
