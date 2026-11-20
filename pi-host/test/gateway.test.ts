@@ -255,3 +255,29 @@ describe("GET /usage", () => {
     expect(seenTokens).toHaveLength(2);
   });
 });
+
+describe("OMP gateway routing", () => {
+  test("Anthropic completions go to OMP with the body intact, other providers stay on Pi", async () => {
+    const forwarded: string[] = [];
+    const omp = {
+      handles: (model: unknown) => typeof model === "string" && model.startsWith("anthropic/"),
+      forward: async (_request: Request, body: string) => {
+        forwarded.push(body);
+        return Response.json({ via: "omp" });
+      },
+    };
+    const models = createModels();
+    models.setProvider(fauxProvider({ provider: "anthropic", models: [{ id: "claude-test" }] }).provider);
+    const handler = createGateway(async () => models, undefined, omp);
+    const post = async (model: string) => {
+      const url = new URL("http://pi-host/v1/chat/completions");
+      const body = JSON.stringify({ model, messages: [user("hi")] });
+      return (await handler(new Request(url, { method: "POST", body, headers: { "content-type": "application/json" } }), url))!;
+    };
+
+    expect(await (await post("anthropic/claude-test")).json()).toEqual({ via: "omp" });
+    expect(JSON.parse(forwarded[0]).model).toBe("anthropic/claude-test");
+    expect((await post("openai/none")).status).toBe(404);
+    expect(forwarded).toHaveLength(1);
+  });
+});

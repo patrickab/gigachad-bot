@@ -12,6 +12,7 @@ import type { Server } from "bun";
 import { authorize, loadToken, type Tokens } from "./auth.ts";
 import { handleCatalog } from "./catalog/index.ts";
 import { handleGateway } from "./gateway/index.ts";
+import { stopOmp } from "./gateway/omp.ts";
 import { LocalHost } from "./host/local/index.ts";
 import { loadConfig } from "./supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "./supervisor/index.ts";
@@ -65,6 +66,7 @@ if (import.meta.main) {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
       await supervisor.shutdown();
+      stopOmp();
       process.exit(0);
     });
   }
