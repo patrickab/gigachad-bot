@@ -184,8 +184,6 @@ def test_every_kind_has_a_pi_prompt_without_omp_tools(kind):
     prompt = prompts.render(kind)
     assert not any(word in prompt for word in OMP_TOOL_WORDS)
     assert "{{" not in prompt
-    if kind != "canvas":
-        assert "read, edit, write, grep, find and ls, there is no shell" in prompt
 
 
 def test_the_latex_prompt_names_the_template_sets_by_absolute_path(template_sets):
@@ -193,26 +191,6 @@ def test_the_latex_prompt_names_the_template_sets_by_absolute_path(template_sets
     assert f"`{latex_templates.TEMPLATE_SETS}/X/STYLE.md`" in prompt
     assert f"`{latex_templates.TEMPLATE_SETS}/letter/skeleton.tex`" in prompt
     assert latex_templates.TEMPLATE_SETS.is_absolute()
-
-
-def test_a_chat_in_a_repository_gets_its_agents_files_appended_outermost_first(tmp_path, root):
-    repository = tmp_path / "paper"
-    (repository / "talk").mkdir(parents=True)
-    run_git(repository, "init", "-q")
-    (repository / "AGENTS.md").write_text("Use British spelling.\n", encoding="utf-8")
-    (repository / "talk" / "AGENTS.md").write_text("Slides are in German.\n", encoding="utf-8")
-
-    prompt = prompts.render("latex", repository / "talk")
-
-    assert prompt.startswith(prompts.render("latex"))
-    assert prompt.index("Use British spelling.") < prompt.index("Slides are in German.")
-    assert f"`{repository / 'AGENTS.md'}`" in prompt
-
-
-def test_chats_in_the_workbench_get_no_agents_files(root):
-    (root / "markdown").mkdir(parents=True)
-    (root / "markdown" / "AGENTS.md").write_text("Workbench marker 42", encoding="utf-8")
-    assert "Workbench marker 42" not in prompts.render("markdown", root / "markdown")
 
 
 def test_a_prompt_that_is_a_file_path_is_refused(tmp_path, monkeypatch):
@@ -307,14 +285,13 @@ def test_a_latex_file_chats_in_its_project_folder_even_at_a_repository_top(clien
     repository = vault / "paper"
     repository.mkdir()
     run_git(repository, "init", "-q")
-    (repository / "AGENTS.md").write_text("Cite carefully.\n", encoding="utf-8")
     tex = repository / "main.tex"
     tex.write_text("\\documentclass{article}\n\\begin{document}\n\\end{document}\n", encoding="utf-8")
 
     for path in (tex, repository):
         opened = client.post("/api/workbench/chat", json={"path": str(path), "new": True}).json()
         assert (opened["kind"], opened["cwd"]) == ("latex", str(repository))
-    assert all(body["cwd"] == str(repository) and "Cite carefully." in body["systemPrompt"] for body in host.bodies)
+    assert all(body["cwd"] == str(repository) for body in host.bodies)
     assert not (repository / ".omp").exists()
 
 
@@ -332,7 +309,7 @@ def test_a_canvas_and_a_notebook_chat_where_they_did(client, host, root, vault, 
     assert (root / "canvas").is_dir()
     assert (lab["kind"], lab["cwd"]) == ("notebook", str(vault))
     assert [body["systemPrompt"] for body in host.bodies] == [
-        prompts.render("canvas", root / "canvas"), prompts.render("notebook", vault),
+        prompts.render("canvas"), prompts.render("notebook"),
     ]
 
 

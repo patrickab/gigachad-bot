@@ -410,7 +410,7 @@ def _prepare_chat(path: str, docs: DataStore, roots: FileRoots, assets: AssetSto
     if chat.cwd.parent == config.WORKBENCH:
         chat.cwd.mkdir(parents=True, exist_ok=True)
     pdf_text = _pdf_text(Path(chat.file), assets) if chat.kind == "pdf" else None
-    return chat, render(chat.kind, chat.cwd), pdf_text
+    return chat, render(chat.kind), pdf_text
 
 
 @router.post("/chat")

@@ -28,7 +28,7 @@ The user edits in Neovim and saves often, so re-read a file before every edit an
 
 A selection arrives as `file:start-end` followed by the quoted lines. Treat it as the part of the project the request is about.
 
-Your tools are read, edit, write, grep, find and ls, there is no shell. Edit files with edit, never rewrite a whole file with write. Read files with read, find them with find, grep or ls, never guess a path.
+Edit files in place, never rewrite a whole file. Find a file before you use it, never guess a path. When the project needs an image the user did not provide, find one on the web and download it into `imgs/`.
 
 Batch independent reads and searches into one turn.
 

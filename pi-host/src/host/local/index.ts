@@ -6,10 +6,11 @@
  * - Provides: `LocalHost`, the only place that spawns processes, touches or watches files or takes `flock`s
  *
  * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes its arguments
- * (`supervisor/profiles.ts`) and `coding` also loads the repo extensions (C6). `sandboxed` runs the same arguments
- * through `agent-sandbox pi-rpc` (`sandbox.ts`, C4, C5), which keeps the same stdio, stdin-EOF and SIGTERM contract.
+ * (`supervisor/profiles.ts`) and both load the repo extensions (C6) unless those arguments carry `--no-extensions`.
  * Both always load pi-host's `extensions/gateway-provider.ts` with the gateway URL and the gateway-only token in their
  * environment: the provider `gateway` serves models of providers the child has no key for, keys stay in pi-host.
+ * `sandboxed` runs the same arguments through `agent-sandbox pi-rpc` (`sandbox.ts`, C4, C5), which keeps the same
+ * stdio, stdin-EOF and SIGTERM contract.
  */
 import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
@@ -42,7 +43,7 @@ export type LocalHostOptions = {
   piBin: string;
   /** Extra variable names children inherit beyond the M6 allowlist. */
   extraChildEnv: string[];
-  /** Repo extensions dir, each top-level extension loaded into `coding` children (C6). */
+  /** Repo extensions dir, each top-level extension loaded into unrestricted local children (C6). */
   extensionsDir: string;
   /** `agent-sandbox` CLI running `sandboxed` children (C5). */
   agentSandboxBin: string;
@@ -96,7 +97,7 @@ export class LocalHost implements Host {
 
   async spawn({ profile, cwd, piArgs }: SpawnRequest): Promise<PiChild> {
     if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs);
-    const extensions = profile === "coding" ? await extensionArgs(this.options.extensionsDir) : [];
+    const extensions = piArgs.includes("--no-extensions") ? [] : await extensionArgs(this.options.extensionsDir);
     const gateway = gatewayEnv(this.options.gatewayPort, await loadToken(this.options.gatewayTokenPath));
     return Bun.spawn([this.options.piBin, ...piArgs, "-e", GATEWAY_EXTENSION, ...extensions], {
       cwd,

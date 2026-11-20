@@ -322,21 +322,7 @@ test("a document fork carries the source's profile marker and refuses a coding s
   expect(host.spawned.at(-1)).toEqual({
     profile: "document",
     cwd: CWD,
-    piArgs: [
-      "--mode",
-      "rpc",
-      "--tools",
-      "read,edit,write,grep,find,ls",
-      "--system-prompt",
-      "Answer only with DOC",
-      "--no-skills",
-      "--no-context-files",
-      "--no-extensions",
-      "--no-prompt-templates",
-      "--no-approve",
-      "--session",
-      forkPath,
-    ],
+    piArgs: ["--mode", "rpc", "--append-system-prompt", "Answer only with DOC", "--session", forkPath],
   });
   const listed = await api(`/sessions?cwd=${encodeURIComponent(CWD)}&profile=document`);
   expect(listed.body.sessions.map((session: { sessionPath: string }) => session.sessionPath).sort()).toEqual([sourcePath, forkPath].sort());

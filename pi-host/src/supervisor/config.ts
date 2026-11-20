@@ -27,7 +27,7 @@ export type SupervisorConfig = {
   gatewayPort: number;
   /** The gateway-only token file (C1) handed to sandboxed children. */
   gatewayTokenPath: string;
-  /** Repo extensions loaded into `coding` children (C6, `PI_HOST_EXTENSIONS_DIR`, default `<repo>/pi-extensions`). */
+  /** Repo extensions loaded into unrestricted local children (C6, `PI_HOST_EXTENSIONS_DIR`, default `<repo>/pi-extensions`). */
   extensionsDir: string;
   /** Agents-in-a-box CLI running `sandboxed` children (C5, `PI_HOST_AGENT_SANDBOX_BIN`, default `agent-sandbox`). */
   agentSandboxBin: string;

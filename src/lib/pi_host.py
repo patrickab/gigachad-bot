@@ -60,7 +60,8 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
 
 
-# `coding`: a repository session with Pi's own tools and prompt. `document`: a workbench chat, tools and prompt set by the backend.
+# `coding`: a repository session with Pi's own tools and prompt. `document`: a workbench chat, the same Pi with the
+# backend's prompt appended, restricted when the backend passes a tool allowlist.
 # `sandboxed`: `coding` in an Agents-in-a-box container that reaches models only through the gateway.
 Profile = Literal["coding", "document", "sandboxed"]
 
@@ -270,8 +271,8 @@ async def open_session(
     elsewhere answers 409 `locked`, an unknown fork source, entry or session id 404, a live session of the other
     profile 409 `profile_mismatch`.
 
-    - `document` needs *system_prompt* (sent on every create and resume, Pi keeps it per process), *tools* default to
-      pi-host's `document` set. `coding` takes neither
+    - `document` needs *system_prompt* (sent on every create and resume, Pi keeps it per process), *tools* restricts it
+      to those tools and nothing discovered. `coding` takes neither
     """
     body: dict[str, object] = {
         "cwd": cwd,

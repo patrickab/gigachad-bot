@@ -7,7 +7,8 @@ import type { Server } from "bun";
 import { loadToken } from "../src/auth.ts";
 import { startServer } from "../src/server.ts";
 import type { PiChild } from "../src/host/index.ts";
-import { childEnv, sandboxEnv } from "../src/host/local/env.ts";
+import { childEnv, gatewayEnv, sandboxEnv } from "../src/host/local/env.ts";
+import { GATEWAY_EXTENSION } from "../src/host/local/index.ts";
 import { tryLockFile } from "../src/host/local/lock.ts";
 import { cwdDirName } from "../src/host/local/paths.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
@@ -207,6 +208,14 @@ describe("live sessions", () => {
     const refused = await startSession({ cwd, model: { provider: "bad", id: "x" } });
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: "model" });
+  });
+
+  test("a model of a provider the child lacks falls back to the gateway provider", async () => {
+    const response = await startSession({ cwd: workdir("keyless"), model: { provider: "keyless", id: "acme/x" } });
+    expect(response.status).toBe(200);
+    const { session } = await response.json();
+    const driver = await client();
+    expect((await driver.attach(session.sessionId)).attached.state.model).toEqual({ provider: "gateway", id: "keyless/acme/x" });
   });
 
   test("two clients attach, both receive events, either may command", async () => {
@@ -805,19 +814,7 @@ test("first starts create one 0600 token exclusively and all agree on it", async
 describe("profiles (G1, G5, G6)", () => {
   const cwd = workdir("documents");
   const DOC = { profile: "document", systemPrompt: "Answer only with the word DOC" };
-  const DOCUMENT_ARGV = [
-    "--mode",
-    "rpc",
-    "--tools",
-    "read,edit,write,grep,find,ls",
-    "--system-prompt",
-    "Answer only with the word DOC",
-    "--no-skills",
-    "--no-context-files",
-    "--no-extensions",
-    "--no-prompt-templates",
-    "--no-approve",
-  ];
+  const DOCUMENT_ARGV = ["--mode", "rpc", "--append-system-prompt", "Answer only with the word DOC"];
   let document: { sessionId: string; sessionPath: string };
 
   async function settle(sessionId: string, message: string): Promise<void> {
@@ -832,22 +829,33 @@ describe("profiles (G1, G5, G6)", () => {
     return { status: response.status, body: await response.json() };
   }
 
-  test("a document session runs Pi with the G1 flags and the request's prompt, marked in its sidecar", async () => {
+  test("a document session runs the user's Pi with the request's prompt appended, marked in its sidecar", async () => {
     const response = await startSession({ cwd, ...DOC });
     expect(response.status).toBe(200);
     const { session } = await response.json();
     expect(session).toMatchObject({ cwd, profile: "document" });
     document = session;
     const driver = await client();
-    expect((await driver.attach(document.sessionId)).attached.state.argv).toEqual(DOCUMENT_ARGV);
+    expect((await driver.attach(document.sessionId)).attached.state.argv.slice(0, DOCUMENT_ARGV.length)).toEqual(DOCUMENT_ARGV);
     await settle(document.sessionId, "hello");
     expect(JSON.parse(readFileSync(`${document.sessionPath}.gigachad.json`, "utf8"))).toMatchObject({ profile: "document" });
   });
 
-  test("tools replace the default list; systemPrompt and tools are validated per profile", async () => {
+  test("tools restrict a document session to them and nothing discovered; systemPrompt and tools are validated per profile", async () => {
     const { session } = await (await startSession({ cwd, ...DOC, tools: ["read", "grep"] })).json();
     const driver = await client();
-    expect((await driver.attach(session.sessionId)).attached.state.argv.slice(2, 4)).toEqual(["--tools", "read,grep"]);
+    expect((await driver.attach(session.sessionId)).attached.state.argv.slice(2)).toEqual([
+      "--tools",
+      "read,grep",
+      "--append-system-prompt",
+      "Answer only with the word DOC",
+      "--no-skills",
+      "--no-extensions",
+      "--no-prompt-templates",
+      "--no-approve",
+      "-e",
+      GATEWAY_EXTENSION,
+    ]);
     await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
 
     const invalidPrompt = { status: 400, body: { error: "invalid_system_prompt" } };
@@ -883,7 +891,11 @@ describe("profiles (G1, G5, G6)", () => {
     expect(resumed.status).toBe(200);
     expect((await resumed.json()).session).toMatchObject({ sessionId, sessionPath, profile: "document" });
     const driver = await client();
-    expect((await driver.attach(sessionId)).attached.state.argv).toEqual([...DOCUMENT_ARGV, "--session", sessionPath]);
+    expect((await driver.attach(sessionId)).attached.state.argv.slice(0, DOCUMENT_ARGV.length + 2)).toEqual([
+      ...DOCUMENT_ARGV,
+      "--session",
+      sessionPath,
+    ]);
   });
 
   test("continue and the profile filter keep coding and document sessions apart", async () => {
@@ -969,30 +981,27 @@ describe("spawn strategies (C5, C6)", () => {
     strategiesServer.stop(true);
   });
 
-  test("coding children load each top-level extension sorted, document children none", async () => {
-    const coding = await argvOf({ cwd: workdir("extensions") });
-    expect(coding.argv).toEqual([
-      "--mode",
-      "rpc",
-      "-e",
-      join(extensionsDir, "alpha.ts"),
-      "-e",
-      join(extensionsDir, "files.ts"),
-      "-e",
-      join(extensionsDir, "tools"),
-    ]);
-    const document = await argvOf({ cwd: workdir("extensions"), profile: "document", systemPrompt: "Doc" });
-    expect(document.argv).not.toContain("-e");
+  test("coding and document children load the gateway provider, then each top-level extension sorted, restricted document children the gateway provider only", async () => {
+    const gateway = ["-e", GATEWAY_EXTENSION];
+    const extensions = [...gateway, "-e", join(extensionsDir, "alpha.ts"), "-e", join(extensionsDir, "files.ts"), "-e", join(extensionsDir, "tools")];
+    expect((await argvOf({ cwd: workdir("extensions") })).argv).toEqual(["--mode", "rpc", ...extensions]);
+    const document = { cwd: workdir("extensions"), profile: "document", systemPrompt: "Doc" };
+    expect((await argvOf(document)).argv).toEqual(["--mode", "rpc", "--append-system-prompt", "Doc", ...extensions]);
+    expect((await argvOf({ ...document, tools: ["read"] })).argv.slice(-2)).toEqual(gateway);
   });
 
-  test("a missing extensions dir adds no flags", async () => {
+  test("gatewayEnv points a local child at this pi-host's /v1 with the gateway token", () => {
+    expect(gatewayEnv(8399, "gw")).toEqual({ PI_GATEWAY_URL: "http://127.0.0.1:8399/v1", PI_GATEWAY_TOKEN: "gw" });
+  });
+
+  test("a missing extensions dir adds only the gateway provider", async () => {
     const bare = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, extensionsDir: join(root, "no-extensions") });
     const bareServer = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor: bare });
     try {
       const response = await startSession({ cwd: workdir("no-extensions") }, bareServer.port);
       const { session } = await response.json();
       const driver = await client(bareServer);
-      expect((await driver.attach(session.sessionId)).attached.state.argv).toEqual(["--mode", "rpc"]);
+      expect((await driver.attach(session.sessionId)).attached.state.argv).toEqual(["--mode", "rpc", "-e", GATEWAY_EXTENSION]);
     } finally {
       await bare.shutdown();
       bareServer.stop(true);

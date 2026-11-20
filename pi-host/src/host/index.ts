@@ -25,7 +25,8 @@
  */
 
 /**
- * `coding`: the user's Pi; `document`: the workbench chat's restricted Pi (D4, D9, `supervisor/profiles.ts`);
+ * `coding`: the user's Pi; `document`: the user's Pi with a workbench chat's prompt, restricted on request (D4, D9,
+ * `supervisor/profiles.ts`);
  * `sandboxed`: `coding` arguments in an Agents-in-a-box container that reaches models only through the gateway (C5).
  */
 export type Profile = "coding" | "document" | "sandboxed";
