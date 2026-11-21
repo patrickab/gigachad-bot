@@ -3,7 +3,7 @@
  *
  * - Consumes: the Pi agent dir (`PI_CODING_AGENT_DIR`, default `~/.pi/agent`): `auth.json`, `models.json`, `models-store.json`
  * - Provides: `reloadingPiRuntime`, a pi-ai `Models` collection shared with running Pi processes that reloads
- *   `models.json` when it changes (the backend syncs Ollama's models into it), so no restart is needed
+ *   `models.json` when it changes (the user edits it), so no restart is needed
  *
  * Writes: only `auth.json`, when an OAuth token is refreshed (under Pi's own file lock, so a rotated
  * refresh token is never lost to the Pi sessions sharing it). The model catalog store is read-only

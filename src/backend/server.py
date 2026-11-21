@@ -43,7 +43,7 @@ from backend.routes.terminal import router as terminal_router
 from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
-from lib import jupyter_service, ollama_models
+from lib import jupyter_service
 from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
 from lib.c4_service import C4ServiceUnavailable
 from lib.data_store import StorageConflictError
@@ -77,8 +77,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
         log.warning("Stopped %d processes an earlier backend left running: %s", len(reaped), reaped)
     widen_default_executor()
-    # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
-    asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())
     reset_cancel()
     from lib import extract_queue

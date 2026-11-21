@@ -242,7 +242,7 @@ For a commit that is no release tag (`origin/main`), or to hold a version. Go th
 
 ## Models: generator and gateway
 
-- LearnHarness's one custom endpoint is pi-host's completion gateway (`pi_host.gateway_url()`, `GIGACHAD_PI_HOST_URL` + `/v1`; production `127.0.0.1:8301`). Models come only from providers Pi serves, Ollama included through Pi's generated `ollama` provider (`lib.ollama_models.sync_pi_provider`).
+- LearnHarness's one custom endpoint is pi-host's completion gateway (`pi_host.gateway_url()`, `GIGACHAD_PI_HOST_URL` + `/v1`; production `127.0.0.1:8301`). Models come only from providers Pi serves, Ollama included when the user's own Pi `models.json` declares the provider `ollama`.
 - `python -m lib.learnharness_config write-config` (run by `run-learnharness.sh` right before the unit starts, and by `redeploy.sh` through `deploy/run-production-learnharness.sh models`) reads one login's catalog (`GIGACHAD_LEARNHARNESS_LOGIN`, else the OS user; read-only lookup), the installed Ollama models, syncs Pi's Ollama provider, reads the gateway's `/v1/models`, and writes, under a lock, staged and renamed:
   - LearnHarness's `settings.json`: `customProvider` (gateway base URL, binding id, models with `image` from the row's `input`, `reasoning` from its `thinking_levels`, `context` and `maxTokens` from `context_window`/`max_tokens`, assumed 128000/16384 when the row has none) and the `strong`/`cheap`/`vision` tiers only when absent or no longer served. Every other key is untouched;
   - the `auth.json` binding record, without the key.

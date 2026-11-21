@@ -237,7 +237,10 @@ def test_a_tier_naming_a_stored_selector_keeps_its_pick_under_the_gateway_id(mod
         json.dumps(
             {
                 "models": {
-                    "strong": {"model": {"provider": "custom", "id": "litellm_proxy/anthropic/claude-3-haiku"}, "thinkingLevel": "high"},
+                    "strong": {
+                        "model": {"provider": "custom", "id": "litellm_proxy/anthropic/claude-3-haiku"},
+                        "thinkingLevel": "high",
+                    },
                     "cheap": {"model": {"provider": "custom", "id": "gemini/gemini-3.5-flash"}, "thinkingLevel": "low"},
                 }
             }
@@ -356,21 +359,16 @@ def catalog(monkeypatch):
         calls.append("gateway")
         return list(GATEWAY_ROWS.values())
 
-    def sync():
-        calls.append("sync")
-        return False
-
     monkeypatch.setattr(learnharness_config, "_host_catalog", lambda login: (PROVIDERS, DEFAULTS))
     monkeypatch.setattr(ollama_models, "installed_chat_models", lambda: list(OLLAMA_TAGS))
-    monkeypatch.setattr(ollama_models, "sync_pi_provider", sync)
     monkeypatch.setattr(pi_models, "catalog_entries", gateway)
     return calls
 
 
-def test_the_catalog_is_described_from_one_gateway_read_after_the_ollama_sync(catalog, capsys):
+def test_the_catalog_is_described_from_one_gateway_read(catalog, capsys):
     models, defaults = asyncio.run(learnharness_config.served_catalog("host"))
 
-    assert catalog == ["sync", "gateway"]
+    assert catalog == ["gateway"]
     assert [model.id for model in models] == SERVED_IDS
     by_id = {model.id: model for model in models}
     assert by_id["anthropic/claude-sonnet-5-5"].reasoning

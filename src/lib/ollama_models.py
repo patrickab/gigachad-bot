@@ -1,11 +1,11 @@
-"""Installed Ollama chat models, served to chats through Pi as the custom provider `ollama`.
+"""Installed Ollama chat models.
 
 - Consumes Ollama's API at `config.OLLAMA_BASE_URL`: `/api/tags` (installed models) and `/api/show` (capabilities,
   context window), never starts Ollama
-- Provides `installed_chat_models` (the tags of the installed chat models) and `sync_pi_provider`, which writes them
-  into Pi's `models.json` (`pi_models_json`) so pi-host's gateway serves `ollama/<tag>`
+- Provides `installed_chat_models`, the tags of the installed chat models
 
-pi-host reloads `models.json` when it changes, so a newly pulled model is served after the next sync.
+Pi runs an Ollama model only when the user's own `models.json` has a provider `ollama` that lists it: this app never
+writes Pi's files.
 """
 
 from __future__ import annotations
@@ -16,14 +16,12 @@ from typing import Any
 import httpx
 
 from config import OLLAMA_BASE_URL
-from lib import pi_models_json
 
 log = logging.getLogger(__name__)
 
-PROVIDER_ID = "ollama"
 # Short: the backend start and `/api/models` wait on it, and a local Ollama answers in milliseconds.
 _TIMEOUT_SECONDS = 3.0
-# `/api/show` by model digest: a digest's details never change, so repeated syncs only list the tags.
+# `/api/show` by model digest: a digest's details never change, so repeated listings only read the tags.
 _details_by_digest: dict[str, dict[str, Any]] = {}
 
 
@@ -60,55 +58,3 @@ def _installed_chat_details() -> dict[str, dict[str, Any]] | None:
 def installed_chat_models() -> list[str]:
     """Tags of the installed Ollama chat models, [] when Ollama is not running."""
     return list(_installed_chat_details() or {})
-
-
-def _context_window(details: dict[str, Any]) -> int | None:
-    """`/api/show` reports the window as `<architecture>.context_length` in `model_info`."""
-    info = details.get("model_info") or {}
-    context = info.get(f"{info.get('general.architecture')}.context_length")
-    return context if isinstance(context, int) and context > 0 else None
-
-
-def _pi_model(tag: str, details: dict[str, Any]) -> dict[str, Any]:
-    """Pi's `models.json` entry of one Ollama model."""
-    capabilities = details.get("capabilities", [])
-    model: dict[str, Any] = {
-        "id": tag,
-        "input": ["text", "image"] if "vision" in capabilities else ["text"],
-        "reasoning": "thinking" in capabilities,
-    }
-    if model["reasoning"]:
-        # Ollama thinks unless told `none` and knows only low/medium/high, Pi sends nothing for `off` by default.
-        model["thinkingLevelMap"] = {"off": "none", "minimal": None}
-    if context := _context_window(details):
-        model["contextWindow"] = context
-    return model
-
-
-def sync_pi_provider() -> bool:
-    """Merge the installed chat models into Pi's provider `ollama`, True when `models.json` was rewritten."""
-    # Other providers and keys stay. Ollama down, an unreadable file or an unchanged provider writes nothing.
-    details = _installed_chat_details()
-    if details is None:
-        return False
-
-    def with_installed(providers: dict[str, Any]) -> dict[str, Any] | None:
-        if not details and PROVIDER_ID not in providers:
-            return None
-        provider = {
-            **providers.get(PROVIDER_ID, {}),
-            "baseUrl": f"{OLLAMA_BASE_URL.rstrip('/')}/v1",
-            "api": "openai-completions",
-            "apiKey": "ollama",  # Ollama ignores it, Pi lists a provider only with credentials.
-            "models": [_pi_model(tag, model_details) for tag, model_details in details.items()],
-        }
-        return None if providers.get(PROVIDER_ID) == provider else {**providers, PROVIDER_ID: provider}
-
-    try:
-        written = pi_models_json.update(with_installed)
-    except pi_models_json.ModelsJsonError:
-        log.exception("Ollama models are not synced")
-        return False
-    if written:
-        log.info("Synced %d Ollama models into Pi's %s", len(details), pi_models_json.models_json_path())
-    return written
