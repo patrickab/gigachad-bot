@@ -28,6 +28,7 @@ via `run.sh`.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
 - `.docs/integration-learnharness.md`: everything about learn mode (LearnHarness): goal, decisions, architecture, rules, operations. Read it only when working on learn mode.
 - `.docs/pi-migration.md`: moving from OMP to Pi (ADR 0003): pi-host, contracts, decisions, phases. Read it for any Pi or pi-host work. Keep it current as phases land, delete it once its lasting parts are in `.docs/architecture.md`.
+- `.docs/factory-on-pi.md`: plan for rebuilding the agent factory on Pi sessions (decisions, pipeline, phases). Read it for any factory work. Delete it once its lasting parts are in `.docs/architecture.md`.
 - `templates/latex/AGENTS.md`: rules for the LaTeX presentation template sets (primitives, theme, re-rendering `example.tex`/`example.pdf` after every change). Read it before touching `templates/latex/`.
 
 ## UI hints
