@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback } from "react"
+import { ResizeEdges, type ResizeStart } from "@/features/chat/columnResize"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { TurnCard, TurnHeader, TurnPreview, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
@@ -80,6 +81,8 @@ interface ChatPairProps {
   onDelete?: (index: number) => void
   onRegenerate?: (index: number) => void
   onBranch?: () => void
+  /** Pointer went down on a side edge: the session column resizes. */
+  onResizeStart?: ResizeStart
 }
 
 /** A question and its answer: a collapsed header card, or the expanded messages with their tool calls. */
@@ -97,6 +100,7 @@ export function ChatPair({
   onDelete,
   onRegenerate,
   onBranch,
+  onResizeStart,
 }: ChatPairProps) {
   if (!expanded) {
     const tools = (assistant.tool_calls ?? []).map((call) => {
@@ -116,7 +120,8 @@ export function ChatPair({
   }
 
   return (
-    <div data-qa-index={globalIndex}>
+    <div data-qa-index={globalIndex} className="relative">
+      <ResizeEdges onResizeStart={onResizeStart} />
       <TurnCard expanded focused={focused}>
         <ChatMessage
           role="user"

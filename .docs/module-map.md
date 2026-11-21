@@ -229,7 +229,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
-|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): running, recent and older sessions, full-text search
+|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search
+|       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview
 |       |   |   |-- PiWorkspacePicker.tsx Composer project selector of an empty chat, a pick makes the first message start a Pi session
 |       |   |   `-- tools/            Tool-call rows (ported from omp-web, MIT)
 |       |   |-- workbench/            Editor | rendered file | Pi chat drawer primitive
@@ -286,7 +287,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- ui/                   Reusable interaction primitives
 |       |   |   |-- Dialog.tsx
 |       |   |   |-- FloatingWindow.tsx Modal floating window, `FloatingPanel` its panel look shared with the picker preview
-|       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), preview in a floating window clear of the list
+|       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), with a preview a sidebar-card finder beside a centered preview window
+|       |   |   |-- AmbientCopy.tsx The app background's picture as a window's background (picker preview)
 |       |   |   |-- MenuPopover.tsx   Trigger plus popover menu, closed by outside press or Escape
 |       |   |   |-- PillTabs.tsx, BoardColumn.tsx, Field.tsx
 |       |   |   |-- IconButton.tsx, StatusDot.tsx Icon button, status tone dot (`StatusTone`)

@@ -36,21 +36,23 @@ export const TOP_BAR_PX = 44
 /** Space around each pane's content. With the split area's own 12 px padding every gap is 24 px, twice the sidebar's inset. */
 const MARGIN_X = 12
 const MARGIN_Y = 12
-/** Where both panes' boxes start: below the top bar and the margin. */
-const PANE_TOP_PX = TOP_BAR_PX + MARGIN_Y
+/**
+ * Where both panes' boxes start (below the top bar and the margin) and how far above the bottom they end.
+ * A framed surface, unlike an endless one (the canvas), keeps the same space above and below its content.
+ */
+const PANE_INSET_Y_PX = TOP_BAR_PX + MARGIN_Y
 
 /**
  * Where Neovim and the rendered file sit in a pane of the split in `areaRef`: same width, same top edge.
  *
  * - Width fills the pane up to the PDF viewer's `RENDER_WIDTH` cap, centered, so opening a side panel only changes the width
- * - `height` runs down to the bottom margin, the rendered pane scrolls inside it
+ * - `height` ends as far above the bottom as the panes start below the top, the rendered pane scrolls inside it
  */
 export function usePaneLayout(areaRef: RefObject<HTMLElement | null>, view: WorkbenchView): PaneLayout {
   const area = useElementSize(areaRef)
   const paneWidth = view === "split" ? area.width / 2 : area.width
   const width = Math.max(0, Math.floor(Math.min(RENDER_WIDTH, paneWidth - 2 * MARGIN_X)))
-  const top = PANE_TOP_PX
-  return { width, top, bottom: MARGIN_Y, height: Math.max(0, area.height - top - MARGIN_Y) }
+  return { width, top: PANE_INSET_Y_PX, bottom: PANE_INSET_Y_PX, height: Math.max(0, area.height - 2 * PANE_INSET_Y_PX) }
 }
 
 const VIEW_OPTIONS = [

@@ -112,6 +112,12 @@ export function piUsageText(status: { contextPercent?: number; cost?: number }):
   ].filter(Boolean).join(" · ")
 }
 
+/** Context size after a session's last answer as `84k`, `<1k` below a thousand, nothing before the first answer. */
+export function piTokenText(tokens: number): string {
+  if (tokens <= 0) return ""
+  return tokens < 1000 ? "<1k" : `${Math.round(tokens / 1000)}k`
+}
+
 /** The live dot of a session: pulsing while running, solid while it waits on a dialog, green once a run settled unseen. */
 export function PiSessionDot({ sessionId }: { sessionId: string }) {
   const mark = piStatusMark(usePiSessionStatus(sessionId))

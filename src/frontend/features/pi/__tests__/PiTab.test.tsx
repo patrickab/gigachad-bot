@@ -69,7 +69,7 @@ const MODEL_PROPS = { models: MODELS, onProvidersChange: async () => {}, onDefau
 function sessionInfo(sessionId: string): PiSessionInfo {
   return {
     sessionId, sessionPath: `/sessions/${sessionId}.jsonl`, cwd: "/home/u/git/repo", machine: "local", createdAt: "", modifiedAt: "",
-    firstMessage: "", messageCount: 0, live: null, pinned: false, archived: false,
+    firstMessage: "", messageCount: 0, tokens: 0, live: null, pinned: false, archived: false,
   }
 }
 

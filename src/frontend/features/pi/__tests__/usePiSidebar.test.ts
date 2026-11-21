@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
-import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
+import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piTokenText, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
 
 const store = vi.hoisted(() => ({ listFilters: [] as unknown[] }))
 vi.mock("@/contexts/TabContext", async (importOriginal) => ({
@@ -23,7 +23,7 @@ const repositories = [{ name: "proj", path: "/git/proj" }, { name: "proj-two", p
 function piSession(sessionId: string, cwd: string, extra: Partial<PiSessionInfo> = {}): PiSessionInfo {
   return {
     sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: "2026-01-01T00:00:00Z", modifiedAt: "2026-01-01T00:00:00Z",
-    firstMessage: sessionId, messageCount: 1, live: null, pinned: false, archived: false, ...extra,
+    firstMessage: sessionId, messageCount: 1, tokens: 0, live: null, pinned: false, archived: false, ...extra,
   }
 }
 
@@ -82,5 +82,13 @@ describe("usePiSidebar", () => {
     expect(store.listFilters).toContainEqual({ profile: "coding" })
     expect(store.listFilters).toContainEqual({ archived: true, profile: "coding" })
     for (const filter of store.listFilters) expect(filter).toMatchObject({ profile: "coding" })
+  })
+})
+
+describe("piTokenText", () => {
+  it("shows the context size in thousands, nothing before the first answer", () => {
+    expect(piTokenText(0)).toBe("")
+    expect(piTokenText(400)).toBe("<1k")
+    expect(piTokenText(84_300)).toBe("84k")
   })
 })

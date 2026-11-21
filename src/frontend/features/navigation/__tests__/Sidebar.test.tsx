@@ -174,7 +174,7 @@ function renderInLearnTab(element: ReactElement, sessionId: string, setWorkspace
 function piSession(sessionId: string, cwd: string, extra: Partial<PiSessionInfo> = {}): PiSessionInfo {
   return {
     sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: "2026-01-01T00:00:00Z", modifiedAt: "2026-01-01T00:00:00Z",
-    firstMessage: sessionId, messageCount: 1, live: null, pinned: false, archived: false, ...extra,
+    firstMessage: sessionId, messageCount: 1, tokens: 0, live: null, pinned: false, archived: false, ...extra,
   }
 }
 

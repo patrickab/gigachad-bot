@@ -24,6 +24,8 @@ export interface PiSessionInfo {
   modifiedAt: string
   firstMessage: string
   messageCount: number
+  /** Context size after the last answer, 0 before one. */
+  tokens: number
   parentSession?: string
   live: PiLiveStatus | null
   pinned: boolean
@@ -110,4 +112,25 @@ export async function restorePiSession(sessionId: string): Promise<PiSessionInfo
 export async function pinPiSession(sessionId: string, pinned: boolean): Promise<PiSessionInfo> {
   const { session } = await request<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/pin`, { method: "PUT", body: JSON.stringify({ pinned }) })
   return session
+}
+
+/** A persisted session entry (pi docs `session-format.md`), its type-specific fields untyped. */
+export interface PiSessionEntry {
+  type: string
+  id: string
+  parentId: string | null
+  timestamp: string
+  [field: string]: unknown
+}
+
+/** Every entry of a session in append order, all branches, and the current leaf: pi's `get_entries` shape. */
+export interface PiSessionEntries {
+  entries: PiSessionEntry[]
+  leafId: string | null
+}
+
+/** The persisted entries of a session, read from its file: no child attaches. `turns` keeps only the active branch's last ones. */
+export async function fetchPiSessionEntries(sessionId: string, options: { turns?: number } = {}): Promise<PiSessionEntries> {
+  const query = options.turns === undefined ? "" : `?turns=${options.turns}`
+  return request(`/pi/sessions/${encodeURIComponent(sessionId)}/entries${query}`)
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { readSceneAnchor, startNightOcean, type NightOceanFrame } from "deepfocus-ambient"
 import { useThemeName } from "@/hooks/useThemeName"
+import { setAmbientCanvas } from "@/lib/ambientCanvas"
 import { readToken } from "@/lib/palette"
 
 /** The baked sea, fetched by `npm run ambient:fetch`. Without the file the sea is computed live. */
@@ -13,6 +14,8 @@ const DEFAULT_SCENE = { horizon: 0.4, moonX: 0.5, moonY: 0.48 }
 const FOLLOW = 0.16
 /** A graphics context the browser took away and did not give back by then is replaced, with a fresh canvas. */
 const CONTEXT_WAIT_MS = 3000
+/** After a GPU reset the browser may refuse WebGL for a while: a canvas without a context is retried, waiting longer each time up to this. */
+const RETRY_MAX_MS = 60_000
 
 function toRgb(cssColor: string): [number, number, number] {
   const context = document.createElement("canvas").getContext("2d")
@@ -30,7 +33,8 @@ function toRgb(cssColor: string): [number, number, number] {
  * - One fixed canvas under everything: it shows wherever the shell paints no surface of its own
  * - The scene follows the newest `anchorScene` on screen (an empty conversation's composer) and stays where that left it
  * - Reduced motion gets a still sea
- * - The canvas is hidden while it has no picture (before the first frame, after a lost graphics context), the page color shows. A context that stays lost gets a fresh canvas
+ * - The canvas is hidden while it has no picture (before the first frame, after a lost graphics context), the page color shows. A context that stays lost gets a fresh canvas,
+ *   and a canvas the browser gives no context (WebGL refused after a GPU reset) is retried with a growing wait
  */
 export function AmbientBackdrop() {
   const theme = useThemeName()
@@ -48,6 +52,7 @@ export function AmbientBackdrop() {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    setAmbientCanvas(canvas)
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
     let scene: typeof DEFAULT_SCENE | null = null
     const frame = (): NightOceanFrame => {
@@ -79,8 +84,14 @@ export function AmbientBackdrop() {
         replace = setTimeout(() => setCanvasKey((key) => key + 1), CONTEXT_WAIT_MS)
       },
     })
+    if (!stop) {
+      // No context at all (WebGL refused after a GPU reset): try again on a fresh canvas
+      const wait = Math.min(RETRY_MAX_MS, CONTEXT_WAIT_MS * 2 ** Math.min(canvasKey, 5))
+      replace = setTimeout(() => setCanvasKey((key) => key + 1), wait)
+    }
     return () => {
       clearTimeout(replace)
+      setAmbientCanvas(null)
       stop?.()
       setHasFrame(false)
     }

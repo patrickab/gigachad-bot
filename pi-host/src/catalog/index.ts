@@ -1,5 +1,5 @@
 /**
- * Catalog HTTP routes: session listing, search, archive/restore, pin, private state and `@` file completion.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
@@ -8,6 +8,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { PROFILES, type Host, type Profile } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
+import { sessionEntries } from "./entries.ts";
 import { rankFiles } from "./files.ts";
 import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 import { isPlainObject, updateState } from "./state.ts";
@@ -19,7 +20,16 @@ const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
-const SESSION_ACTION = /^\/sessions\/([^/]+)\/(archive|restore|pin|state)$/;
+/** The methods each `/sessions/:id/<action>` route takes. */
+const ACTION_METHODS = {
+  archive: ["POST"],
+  restore: ["POST"],
+  pin: ["PUT"],
+  state: ["GET", "PUT"],
+  entries: ["GET"],
+} as const satisfies Record<string, readonly string[]>;
+type SessionAction = keyof typeof ACTION_METHODS;
+const SESSION_ACTION = new RegExp(`^/sessions/([^/]+)/(${Object.keys(ACTION_METHODS).join("|")})$`);
 
 /** One `GET /search` hit (M24). */
 export type SearchHit = { session: SessionInfo; snippet: string; entryId: string };
@@ -141,6 +151,14 @@ async function handlePutState(request: Request, sessionPath: string, host: Host)
   });
 }
 
+/** `GET /sessions/:id/entries?turns=N`: the session file's entries, a preview of the active branch's last N turns when `turns` is given. */
+async function handleEntries(url: URL, sessionPath: string, host: Host): Promise<Response> {
+  const raw = url.searchParams.get("turns");
+  const turns = raw === null ? undefined : Number(raw);
+  if (turns !== undefined && !(Number.isInteger(turns) && turns > 0)) return fail(400, "invalid_turns");
+  return Response.json(await sessionEntries(host, sessionPath, turns));
+}
+
 /** Route a Catalog request, undefined when the route is not the Catalog's. */
 export async function handleCatalog(request: Request, url: URL, live: LiveSessions, host: Host): Promise<Response | undefined> {
   if (url.pathname === "/sessions" && request.method === "GET") return handleList(url, live, host);
@@ -148,11 +166,9 @@ export async function handleCatalog(request: Request, url: URL, live: LiveSessio
   if (url.pathname === "/search" && request.method === "GET") return handleSearch(url, live, host);
   const match = SESSION_ACTION.exec(url.pathname);
   if (!match) return undefined;
-  const [, rawId, action] = match;
-  const allowed = action === "archive" || action === "restore" ? "POST" : action === "pin" ? "PUT" : undefined;
-  if (allowed ? request.method !== allowed : request.method !== "GET" && request.method !== "PUT") {
-    return fail(405, "method_not_allowed");
-  }
+  const [, rawId, rawAction] = match;
+  const action = rawAction as SessionAction;
+  if (!(ACTION_METHODS[action] as readonly string[]).includes(request.method)) return fail(405, "method_not_allowed");
   let sessionId: string;
   try {
     sessionId = decodeURIComponent(rawId!);
@@ -163,6 +179,7 @@ export async function handleCatalog(request: Request, url: URL, live: LiveSessio
   if (!sessionPath) return fail(404, "not_found");
   if (action === "archive" || action === "restore") return handleMove(sessionPath, action === "archive", live, host);
   if (action === "pin") return handlePin(request, sessionPath, live, host);
+  if (action === "entries") return handleEntries(url, sessionPath, host);
   if (request.method === "PUT") return handlePutState(request, sessionPath, host);
   const { revision, data } = await host.readState(sessionPath);
   return Response.json({ revision, data });

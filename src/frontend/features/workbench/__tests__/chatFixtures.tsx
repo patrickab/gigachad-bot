@@ -21,6 +21,7 @@ export function openedChat({ id, cwd, kind = "markdown", messageCount = 0, moved
     modifiedAt: "2026-01-01T00:00:00Z",
     firstMessage,
     messageCount,
+    tokens: 0,
     live: null,
     pinned: false,
     archived: false,

@@ -12,7 +12,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict
@@ -81,6 +81,8 @@ class SessionInfo(ContractModel):
     modified_at: str
     first_message: str
     message_count: int
+    # Context size after the last answer, 0 before one.
+    tokens: int
     parent_session: str | None = None
     live: LiveStatus | None
     pinned: bool
@@ -152,6 +154,13 @@ class SearchHit(ContractModel):
     session: SessionInfo
     snippet: str
     entry_id: str
+
+
+class SessionEntries(ContractModel):
+    """The persisted entries of a session file, pi's own shapes (`session-format.md`) passed through untouched."""
+
+    entries: list[dict[str, Any]]
+    leaf_id: str | None
 
 
 class SearchResult(ContractModel):
@@ -326,6 +335,13 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
     if limit is not None:
         params["limit"] = limit
     return (await _request("GET", "/files", FileList, params=params)).files
+
+
+async def session_entries(session_id: str, turns: int | None = None) -> SessionEntries:
+    """Every persisted entry of the session in append order, read from its file; with *turns* only the active branch's
+    last *turns* turns."""
+    params: dict[str, str | int] | None = None if turns is None else {"turns": turns}
+    return await _request("GET", f"/sessions/{session_id}/entries", SessionEntries, params=params)
 
 
 async def search_sessions(query: str, limit: int = 20) -> list[SearchHit]:

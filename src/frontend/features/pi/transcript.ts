@@ -1,4 +1,5 @@
 import type { AgentMessage, AssistantBlock, AssistantMessage, CustomMessage, ImageContent, TextContent, ToolResultMessage, ToolRun, UserMessage } from "./types"
+import type { PiSessionEntries, PiSessionEntry } from "@/lib/backend/api"
 
 /** What entry edits left on a confirmed message: a `context_edit` (omitted from or replaced in the model's context) and a `label`. */
 export interface MessageMarks {
@@ -35,20 +36,10 @@ export const EMPTY_TRANSCRIPT: Transcript = { messages: [], entryIds: [], marks:
 
 type PiEvent = { type: string; [field: string]: unknown }
 
-/** A persisted session entry (pi docs `session-format.md`); only the types that become transcript messages are read. */
-export interface SessionEntry {
-  type: string
-  id: string
-  parentId: string | null
-  timestamp: string
-  [field: string]: unknown
-}
-
-/** `get_entries` data: every entry in append order, all branches, and the current leaf. */
-export interface SessionEntries {
-  entries: SessionEntry[]
-  leafId: string | null
-}
+/** A persisted session entry; only the types that become transcript messages are read. */
+export type SessionEntry = PiSessionEntry
+/** `get_entries` data, live from a session or read from its file (`fetchPiSessionEntries`). */
+export type SessionEntries = PiSessionEntries
 
 /** The message an entry shows as, if any: compactions and branch summaries become their summary messages like in Pi's context. */
 function entryMessage(entry: SessionEntry): AgentMessage | null {
@@ -120,6 +111,11 @@ function appendEntries(confirmed: Confirmed, entries: SessionEntry[]): Confirmed
     entryIds.push(entry.id)
   }
   return { messages, entryIds, marks }
+}
+
+/** A settled transcript of persisted `entries`, as an `attached` snapshot of an idle session would give. */
+export function transcriptOfEntries(entries: SessionEntries): Transcript {
+  return transcriptReducer(EMPTY_TRANSCRIPT, { kind: "snapshot", entries, running: false, queue: { steering: [], followUp: [] } })
 }
 
 /** The active branch's messages, root to leaf, including what compactions summarized (the transcript shows the whole history). */

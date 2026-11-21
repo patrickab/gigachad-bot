@@ -25,6 +25,7 @@ import type {
   PiChild,
   PrivateState,
   SearchMatch,
+  SessionEntries,
   SessionMeta,
   SpawnRequest,
 } from "../index.ts";
@@ -34,7 +35,7 @@ import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { spawnSandboxed } from "./sandbox.ts";
 import { searchSessions } from "./search.ts";
-import { findSession, listSessions, moveSession, sessionMeta } from "./sessions.ts";
+import { findSession, listSessions, readEntries, moveSession, sessionMeta } from "./sessions.ts";
 import { readState, writeState } from "./state.ts";
 import { watchSessions } from "./watch.ts";
 
@@ -141,6 +142,10 @@ export class LocalHost implements Host {
 
   findSession(sessionId: string): Promise<string | undefined> {
     return findSession(sessionId);
+  }
+
+  readEntries(sessionPath: string): Promise<SessionEntries> {
+    return readEntries(sessionPath);
   }
 
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult> {

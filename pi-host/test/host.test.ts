@@ -10,6 +10,7 @@ import type {
   PiChild,
   PrivateState,
   SearchMatch,
+  SessionEntries,
   SessionMeta,
   SpawnRequest,
 } from "../src/host/index.ts";
@@ -126,6 +127,10 @@ class FakeHost implements Host {
     return { ok: true, path };
   }
 
+  async readEntries(): Promise<SessionEntries> {
+    return { entries: [], leafId: null };
+  }
+
   async readState(sessionPath: string): Promise<PrivateState> {
     return this.states.get(sessionPath) ?? { revision: 0, pinned: false, data: {} };
   }
@@ -176,6 +181,7 @@ beforeAll(async () => {
     modifiedAt: "2026-11-19T10:05:00.000Z",
     firstMessage: "hello remote",
     messageCount: 2,
+    tokens: 0,
     archived: false,
   });
   supervisor = await createSupervisor({ host, idleMs: 3_600_000 });
@@ -241,6 +247,7 @@ test("listing without a cwd, search and the sessions_changed broadcast go throug
     modifiedAt: "2026-11-19T11:05:00.000Z",
     firstMessage: "hello other",
     messageCount: 1,
+    tokens: 0,
     archived: false,
   });
   const listed = await api("/sessions");
@@ -274,6 +281,7 @@ test("a fork is written by the Host, gets the source's private data and runs und
     modifiedAt: "2026-11-19T12:05:00.000Z",
     firstMessage: "fork me",
     messageCount: 2,
+    tokens: 0,
     archived: false,
   });
   host.states.set(sourcePath, { revision: 3, pinned: true, data: { draft: "x" } });
@@ -302,6 +310,7 @@ test("a document fork carries the source's profile marker and refuses a coding s
     modifiedAt: "2026-11-19T13:05:00.000Z",
     firstMessage: "about the paper",
     messageCount: 2,
+    tokens: 0,
     archived: false,
   });
   host.states.set(sourcePath, { revision: 1, pinned: false, data: {}, profile: "document" });

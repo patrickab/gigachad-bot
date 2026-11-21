@@ -1,5 +1,6 @@
 "use client"
 
+import { useColumnWidth, CHAT_COLUMN_MAX_PX } from "@/features/chat/columnResize"
 import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
@@ -16,7 +17,7 @@ import { ComposerDock, useComposerDock } from "./ComposerDock"
 import { WideModeToggle } from "./WideModeToggle"
 
 /** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
-export const CHAT_COLUMN_MAX_PX = 960
+export { CHAT_COLUMN_MAX_PX }
 
 /** Asks the chat to expand and scroll to one question; a new `key` re-fires the request for the same index. */
 export interface ChatFocus {
@@ -126,7 +127,8 @@ export function ChatContainer({
     [attachmentActions, messages, openPreview],
   )
 
-  const effectiveMaxWidth = isWideMode ? undefined : CHAT_COLUMN_MAX_PX
+  const { width: columnWidth, startResize } = useColumnWidth()
+  const effectiveMaxWidth = isWideMode ? undefined : columnWidth
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
@@ -138,7 +140,7 @@ export function ChatContainer({
           className="flex-1 overflow-y-auto text-ink outline-none"
           style={{ paddingBottom: dock.paddingBottom }}
         >
-          <div ref={onChatColumnChange} className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
+          <div ref={onChatColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex, qaIndex }) => (
               <Fragment key={globalIndex}>
@@ -159,6 +161,7 @@ export function ChatContainer({
                   onDelete={onDeletePair}
                   onRegenerate={onRegenerate}
                   onBranch={onBranch ? () => onBranch(qaIndex) : undefined}
+                  onResizeStart={isWideMode ? undefined : startResize}
                 />
                 {branchMessageIdx != null && qaIndex === branchMessageIdx && (
                   <div role="separator" className="flex items-center gap-2 mx-3 my-3">

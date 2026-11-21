@@ -12,6 +12,9 @@ const EASE_S = 0.2
 
 type Side = "left" | "right"
 
+/** Look of a sidebar card, shared by every floating card that should read as a sidebar (the picker's finder too). */
+export const SIDEBAR_CARD_CLASS = "rounded-2xl bg-surface shadow-[var(--shadow-sm)]"
+
 /**
  * The card's width easing to `open ? width : 0`, the content's width, and a drag handler for the inner edge.
  *
@@ -104,8 +107,8 @@ export function SidePanel({ side, open, width, onWidthChange, minWidth = MIN_WID
       inert={!open}
       style={{ width: cardWidth, [side === "left" ? "marginLeft" : "marginRight"]: gutter }}
       // Fades with the width's easing, closed it casts no shadow
-      className={cn("relative my-5 flex shrink-0 overflow-hidden rounded-2xl bg-surface shadow-[var(--shadow-sm)] transition-opacity duration-200 ease-out",
-        !open && "opacity-0", side === "right" && "justify-end", className)}
+      className={cn("relative my-5 flex shrink-0 overflow-hidden transition-opacity duration-200 ease-out",
+        SIDEBAR_CARD_CLASS, !open && "opacity-0", side === "right" && "justify-end", className)}
     >
       <motion.div style={{ width: contentWidth }} className="flex min-h-0 shrink-0 flex-col">
         {children}

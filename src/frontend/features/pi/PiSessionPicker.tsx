@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Bot } from "lucide-react"
 import { CommandPicker, isRemoveRowKey, neighbourKey, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -12,35 +12,20 @@ import { archivePiSession, type PiRepository, type PiSessionInfo } from "@/lib/b
 import { baseName, shortPath } from "@/lib/paths"
 import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
 import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, type PiSearchHit } from "./sessionStore"
-import { PiSessionDot, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
+import { PiSessionPreview, prefetchPiSessionPreviews } from "./PiSessionPreview"
+import { PiSessionDot, piTokenText, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
 
 const TICK_MS = 60_000
 /** Typing pauses this long before the transcripts are searched. */
 const SEARCH_DELAY_MS = 200
-/** How long a session that stopped running stays in the "Recent" group. */
-export const RECENT_SESSION_MS = 24 * 60 * 60 * 1000
-/** Widest a row's title and its details line get, one value so both edges line up. It sets the finder's width. */
+/** Widest a row's title and its details line get, one value so both edges line up. */
 const ROW_TEXT_WIDTH = "max-w-[16rem]"
 
-type Entry =
-  | { kind: "session"; session: PiSessionInfo; snippet?: string }
-  | { kind: "older"; count: number }
+interface Entry { session: PiSessionInfo; snippet?: string }
 
-export interface PiSessionGroups {
-  running: PiSessionInfo[]
-  recent: PiSessionInfo[]
-  older: PiSessionInfo[]
-}
-
-/** `sessions` split into running ones, the rest modified within `RECENT_SESSION_MS` of `nowMs`, and the older rest. Each newest first. */
-export function groupPiSessions(sessions: readonly PiSessionInfo[], nowMs: number): PiSessionGroups {
-  const groups: PiSessionGroups = { running: [], recent: [], older: [] }
-  for (const session of [...sessions].sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))) {
-    if (session.live?.running || session.live?.waiting) groups.running.push(session)
-    else if (nowMs - Date.parse(session.modifiedAt) <= RECENT_SESSION_MS) groups.recent.push(session)
-    else groups.older.push(session)
-  }
-  return groups
+/** Newest first by last use. */
+function newestFirst(sessions: readonly PiSessionInfo[]): PiSessionInfo[] {
+  return [...sessions].sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))
 }
 
 /** Current time in ms, renewed every minute so rows age without a refetch. */
@@ -75,18 +60,18 @@ function SessionRow({ session, snippet, repositories, now }: { session: PiSessio
   const age = compactElapsed(Date.parse(session.modifiedAt), now)
   const details = snippet
     ? [snippet.replace(/\s+/g, " ").trim()]
-    : [shortPath(session.cwd), piSessionWorktree(session, piSessionRepository(session, repositories)), age === "now" ? age : `${age} ago`].filter(Boolean)
+    : [age === "now" ? age : `${age} ago`, piTokenText(session.tokens), shortPath(session.cwd), piSessionWorktree(session, piSessionRepository(session, repositories))].filter(Boolean)
   return <span className="flex min-w-0 flex-1 flex-col py-0.5">
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex w-1.5 shrink-0 justify-center"><PiSessionDot sessionId={session.sessionId} /></span>
       <span className={cn("truncate leading-5", ROW_TEXT_WIDTH)}>{piSessionTitle(session)}</span>
     </span>
-    <span className={cn("ml-3.5 truncate text-[10px] text-ink-faint", ROW_TEXT_WIDTH)}>{details.join(" · ")}</span>
+    <span className={cn("ml-3.5 truncate text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}>{details.join(" · ")}</span>
   </span>
 }
 
 /**
- * Top bar panel over every Pi coding session (Alt+A, G5): running ones first, then recent, older ones behind "Show N older".
+ * Top bar panel over every Pi coding session (Alt+A, G5), the most recently used first; a hovered session previews its transcript.
  *
  * - Typing filters by title and directory and searches the transcripts, matches show the text they matched
  * - Picking a session opens it, or switches to the tab already showing it; Delete at the search's end archives the highlighted one
@@ -97,12 +82,14 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   const repositories = usePiRepositories()
   const now = useNowMs()
   const [query, setQuery] = useState("")
-  const [showOlder, setShowOlder] = useState(false)
   const [archiving, setArchiving] = useState<ReadonlySet<string>>(() => new Set())
   const [archiveError, setArchiveError] = useState("")
   const search = useSearchHits(query)
   const popover = usePillPopover(useCallback(() => setQuery(""), []))
   const tabActive = useTabActive()
+  const sessionList = useMemo(() => newestFirst(listed), [listed])
+  // The recent sessions' previews are read ahead after load and whenever the list changes, so hovering shows them at once
+  useEffect(() => (hostAccess ? prefetchPiSessionPreviews(sessionList) : undefined), [hostAccess, sessionList])
   // Alt+A toggles the picker from anywhere in the tab, terminals keep their keys
   useEventListener("window", "keydown", (event) => {
     if (!isAltOnly(event) || event.key.toLowerCase() !== "a" || isTerminalKeyEvent(event)) return
@@ -112,7 +99,7 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   }, { active: tabActive && Boolean(hostAccess), capture: true })
   if (!hostAccess) return null
 
-  const sessions = listed.filter((session) => !archiving.has(session.sessionId))
+  const sessions = sessionList.filter((session) => !archiving.has(session.sessionId))
   const archive = async (session: PiSessionInfo) => {
     setArchiveError("")
     setArchiving((current) => new Set(current).add(session.sessionId))
@@ -125,9 +112,8 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     }
   }
 
-  const asEntries = (list: PiSessionInfo[]): Entry[] => list.map((session) => ({ kind: "session", session }))
-  const { running, recent, older } = groupPiSessions(sessions, now)
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const runningCount = sessions.filter((session) => session.live?.running || session.live?.waiting).length
   const groups: PickerGroup<Entry>[] = []
   if (words.length > 0) {
     const named = sessions.filter((session) => {
@@ -137,18 +123,12 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     const shown = new Set(named.map((session) => session.sessionId))
     const hits = (search.hits ?? []).filter((hit) => !shown.has(hit.session.sessionId) && !archiving.has(hit.session.sessionId))
     groups.push(
-      { key: "named", label: "Sessions", items: asEntries(named) },
-      { key: "content", label: "Content", items: hits.map((hit) => ({ kind: "session", session: hit.session, snippet: hit.snippet })) },
+      { key: "named", label: "Sessions", items: named.map((session) => ({ session })) },
+      { key: "content", label: "Content", items: hits.map((hit) => ({ session: hit.session, snippet: hit.snippet })) },
     )
   } else {
-    groups.push({ key: "running", label: "Running", items: asEntries(running) }, { key: "recent", label: "Recent", items: asEntries(recent) })
-    if (older.length > 0) {
-      groups.push(showOlder
-        ? { key: "older", label: "Older", items: asEntries(older) }
-        : { key: "older", items: [{ kind: "older", count: older.length }] })
-    }
+    groups.push({ key: "all", items: sessions.map((session) => ({ session })) })
   }
-  const runningCount = running.length
   const error = archiveError || search.error || listError
 
   return <CommandPicker<Entry>
@@ -161,17 +141,16 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     label="Agents"
     popover={popover}
     groups={groups}
-    itemKey={(entry) => (entry.kind === "session" ? entry.session.sessionId : "older")}
+    itemKey={(entry) => (entry.session.sessionId)}
     searchPlaceholder="Search sessions…"
     query={query}
     onQueryChange={setQuery}
     header={error ? <ErrorText className="text-[10px]">{error}</ErrorText> : undefined}
     emptyText={words.length > 0 && search.hits === null ? "Searching…" : "No sessions"}
-    renderItem={(entry) => entry.kind === "session"
-      ? <SessionRow session={entry.session} snippet={entry.snippet} repositories={repositories} now={now} />
-      : <span className="py-0.5 text-[11px] text-ink-subtle">Show {entry.count} older</span>}
+    renderItem={(entry) => <SessionRow session={entry.session} snippet={entry.snippet} repositories={repositories} now={now} />}
+    renderPreview={(entry) => <PiSessionPreview session={entry.session} />}
     onKeyDown={(event, entry, list) => {
-      if (!isRemoveRowKey(event) || entry?.kind !== "session") return false
+      if (!isRemoveRowKey(event) || !entry) return false
       event.preventDefault()
       const neighbour = neighbourKey(list, entry.session.sessionId)
       if (neighbour) list.highlight(neighbour)
@@ -179,10 +158,6 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
       return true
     }}
     onPick={(entry) => {
-      if (entry.kind === "older") {
-        setShowOlder(true)
-        return false
-      }
       const { session } = entry
       onOpenItem(piSessionItem(session, piSessionRepository(session, repositories)?.name ?? baseName(session.cwd), null))
       return true

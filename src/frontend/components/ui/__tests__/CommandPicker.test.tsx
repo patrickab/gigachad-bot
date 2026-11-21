@@ -163,14 +163,15 @@ describe("pickerLayout", () => {
     ["the window's own aspect", landscape.width / landscape.height],
     ["16:9", 16 / 9],
     ["a tall window's aspect", 0.8],
-  ])("centers the preview exactly on the window at %s, the finder inside its top left corner", (_name, aspect) => {
+  ])("centers the preview alone at the window's %s aspect, the finder beside it on the left and as tall", (_name, aspect) => {
     const { preview, finder } = pickerLayout(landscape, aspect)
     expect(preview.left + preview.width / 2).toBeCloseTo(landscape.width / 2)
     expect(preview.top + preview.height / 2).toBeCloseTo(landscape.height / 2)
     expect(preview.width / preview.height).toBeCloseTo(aspect)
     expect(preview.top).toBeGreaterThanOrEqual(44)
-    expect(finder.left).toBeGreaterThan(preview.left)
-    expect(finder.top).toBeGreaterThan(preview.top)
-    expect(finder.top + finder.maxHeight).toBeLessThan(preview.top + preview.height)
+    expect(finder.left).toBeGreaterThan(0)
+    expect(finder.left + finder.width).toBeLessThan(preview.left)
+    expect(finder.top).toBe(preview.top)
+    expect(finder.height).toBe(preview.height)
   })
 })

@@ -48,6 +48,9 @@ export interface PiChild {
   kill(signal: "SIGTERM" | "SIGKILL"): void;
 }
 
+/** A session file's entries (pi's `session-format.md` lines after the header) in append order, the last one the leaf. */
+export type SessionEntries = { entries: Record<string, unknown>[]; leafId: string | null };
+
 /** A held lock is addressed by `lockId`; `busy` when another holder has the file. */
 export type LockResult = { ok: true; lockId: string } | { ok: false; error: "busy" | "missing" };
 
@@ -63,6 +66,8 @@ export type SessionMeta = {
   modifiedAt: string;
   firstMessage: string;
   messageCount: number;
+  /** Context size after the last answer, 0 before one. */
+  tokens: number;
   parentSession?: string;
   archived: boolean;
 };
@@ -101,6 +106,8 @@ export interface Host {
   sessionMeta(sessionPath: string): Promise<SessionMeta | undefined>;
   /** Path of the session with Pi id `sessionId`, live root first. */
   findSession(sessionId: string): Promise<string | undefined>;
+  /** Every entry of the session file in append order, the last one the leaf; empty when the file is unreadable. */
+  readEntries(sessionPath: string): Promise<SessionEntries>;
   /** Move between the live and archive roots under the session's lock. */
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
   /**

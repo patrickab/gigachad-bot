@@ -3,16 +3,16 @@
  * restore (C7).
  *
  * - Consumes: session files under the roots from `paths.ts`, the M1 lock, sidecars from `state.ts`
- * - Provides: `sessionMeta`, `listSessions`, `findSession`, `moveSession` behind `LocalHost`
+ * - Provides: `sessionMeta`, `listSessions`, `findSession`, `moveSession`, `readEntries` behind `LocalHost`
  */
 import { mkdir, readdir, realpath, rename, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import type { MoveResult, SessionMeta } from "../index.ts";
+import type { MoveResult, SessionEntries, SessionMeta } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { archiveRoot, cwdSessionDir, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar } from "./state.ts";
 
-type Summary = Pick<SessionMeta, "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "parentSession">;
+type Summary = Pick<SessionMeta, "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession">;
 
 const FIRST_MESSAGE_MAX_CHARS = 300;
 const MESSAGE_LINE_PREFIX = '{"type":"message"';
@@ -39,8 +39,14 @@ function userText(line: string): string {
   }
 }
 
+/** The context size an assistant message line reports (`usage.totalTokens`), undefined when it has none. */
+function lastTotalTokens(line: string): number | undefined {
+  const found = [...line.matchAll(/"totalTokens":(\d+)/g)].pop();
+  return found ? Number(found[1]) : undefined;
+}
+
 /** Header fields of a session file's first line, undefined when it is not a Pi session header. */
-function parseHeader(line: string): Omit<Summary, "firstMessage" | "messageCount"> | undefined {
+function parseHeader(line: string): Omit<Summary, "firstMessage" | "messageCount" | "tokens"> | undefined {
   try {
     const header = JSON.parse(line);
     if (header?.type !== "session" || typeof header.id !== "string") return undefined;
@@ -58,9 +64,10 @@ function parseHeader(line: string): Omit<Summary, "firstMessage" | "messageCount
 /** Stream a session file once: parse the header, count message lines by prefix, parse only until the first user text. */
 async function scanSession(sessionPath: string): Promise<Summary | undefined> {
   const decoder = new TextDecoder();
-  let header: Omit<Summary, "firstMessage" | "messageCount"> | undefined;
+  let header: Omit<Summary, "firstMessage" | "messageCount" | "tokens"> | undefined;
   let firstMessage = "";
   let messageCount = 0;
+  let tokens = 0;
   let pending = "";
   const consume = (line: string): boolean => {
     if (!header) {
@@ -69,6 +76,7 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     }
     if (!line.startsWith(MESSAGE_LINE_PREFIX)) return true;
     messageCount++;
+    if (line.includes('"role":"assistant"')) tokens = lastTotalTokens(line) ?? tokens;
     if (!firstMessage && line.includes('"role":"user"')) firstMessage = userText(line);
     return true;
   };
@@ -85,6 +93,7 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     ...header,
     firstMessage: firstText.length > FIRST_MESSAGE_MAX_CHARS ? `${firstText.slice(0, FIRST_MESSAGE_MAX_CHARS)}…` : firstText,
     messageCount,
+    tokens,
   };
 }
 
@@ -211,4 +220,25 @@ export async function moveSession(sessionPath: string, toArchive: boolean): Prom
   } finally {
     lock.release();
   }
+}
+
+/** Entries of a session file in append order (the header line excluded), the last one the leaf. */
+export async function readEntries(sessionPath: string): Promise<SessionEntries> {
+  let text: string;
+  try {
+    text = await Bun.file(sessionPath).text();
+  } catch {
+    return { entries: [], leafId: null };
+  }
+  const entries: Record<string, unknown>[] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry && typeof entry === "object" && entry.type !== "session" && typeof entry.id === "string") entries.push(entry);
+    } catch {
+      // A half-written last line
+    }
+  }
+  return { entries, leafId: (entries.at(-1)?.id as string | undefined) ?? null };
 }

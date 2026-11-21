@@ -58,7 +58,7 @@ function socket(): FakeSocket {
 function session(sessionId: string, cwd: string, running = false): PiSessionInfo {
   return {
     sessionId, sessionPath: `/sessions/${sessionId}.jsonl`, cwd, machine: "local", createdAt: "2026-01-01T00:00:00Z", modifiedAt: "2026-01-01T00:00:00Z",
-    firstMessage: "hi", messageCount: 1, live: running ? { running, waiting: false, attached: 0 } : null, pinned: false, archived: false,
+    firstMessage: "hi", messageCount: 1, tokens: 0, live: running ? { running, waiting: false, attached: 0 } : null, pinned: false, archived: false,
   }
 }
 

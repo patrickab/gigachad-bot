@@ -66,6 +66,15 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   const drawnCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const backupRef = useRef<HTMLCanvasElement>(null)
   const regionsRequestedRef = useRef(false)
+  // Bumped when the browser gives back a canvas it cleared (a GPU reset): the page mounts and draws again instead of staying blank
+  const [restored, setRestored] = useState(0)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!drawn || !canvas) return
+    const redraw = () => setRestored((count) => count + 1)
+    canvas.addEventListener("contextrestored", redraw)
+    return () => canvas.removeEventListener("contextrestored", redraw)
+  }, [drawn, restored])
 
   const slotRef = useCallback((slot: HTMLDivElement | null) => registerSlot(pageNumber, slot), [registerSlot, pageNumber])
 
@@ -160,6 +169,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
         {mounted && (
           <div style={{ width: rasterWidth, transformOrigin: "0 0", transform: scale === 1 ? undefined : `scale(${scale})` }}>
             <Page
+              key={restored}
               pageNumber={pageNumber}
               width={rasterWidth}
               devicePixelRatio={devicePixelRatio}

@@ -5,7 +5,7 @@
 - `GET /files` also takes an absolute `cwd` for the `@` completion of workbench chats: inside the file roots or the
   workbench folder only
 - `POST /pastes` stores a video pasted into a Pi composer in the session folder's `.pi/pastes/` (`lib.pi_pastes`), the
-  composer mentions it and `pi-extensions/video-paste.ts` previews it
+  composer mentions it and the user's Pi extension `~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) previews it
 - pi-host failures map to HTTP: unreachable 503, unknown shape 502, refusal keeps its status and answers
   `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`, 409 stale state with the current `{revision, data}`)
 - `WS /api/pi/ws`: byte-transparent proxy to pi-host's `/ws` (M16), nothing is parsed. Either side closing closes both
@@ -152,6 +152,12 @@ async def get_state(session_id: SessionId) -> pi_host.SessionState:
 async def put_state(session_id: SessionId, body: pi_host.SessionState) -> pi_host.StateRevision:
     """Store the session's private state, *body.revision* being the one read. A stale one answers 409 with the current state."""
     return pi_host.StateRevision(revision=await _call(pi_host.write_session_state(session_id, body)))
+
+
+@http_router.get("/sessions/{session_id}/entries")
+async def get_entries(session_id: SessionId, turns: int | None = Query(default=None, ge=1)) -> pi_host.SessionEntries:
+    """The session's persisted entries, for a preview of a session that is not open; *turns* keeps only the last ones."""
+    return await _call(pi_host.session_entries(session_id, turns))
 
 
 @http_router.get("/search")

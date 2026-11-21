@@ -53,9 +53,9 @@ function sessionLines(id: string, cwd: string, timestamp: string, entries: objec
   return [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
 }
 
-/** A `message` entry. */
-function message(id: string, role: string, content: unknown): object {
-  return { type: "message", id, parentId: null, timestamp: "2026-11-19T10:00:00.000Z", message: { role, content, timestamp: 0 } };
+/** A `message` entry, `usage` on an assistant answer. */
+function message(id: string, role: string, content: unknown, usage?: { totalTokens: number }): object {
+  return { type: "message", id, parentId: null, timestamp: "2026-11-19T10:00:00.000Z", message: { role, content, timestamp: 0, ...(usage ? { usage } : {}) } };
 }
 
 /** Write a fixture session file and set its mtime. */
@@ -115,7 +115,8 @@ async function writeFixtures(): Promise<{ oldPath: string; newPath: string }> {
       { type: "model_change", id: "m1", parentId: null, timestamp: "2026-11-18T09:00:00.000Z", provider: "anthropic", modelId: "x" },
       message("a1", "system", ""),
       message("a2", "user", "first question"),
-      message("a3", "assistant", [{ type: "text", text: "answer" }]),
+      message("a3", "assistant", [{ type: "text", text: "draft" }], { totalTokens: 900 }),
+      message("a4", "assistant", [{ type: "text", text: "answer" }], { totalTokens: 1200 }),
     ]),
     new Date("2026-11-18T09:05:00.000Z"),
   );
@@ -159,13 +160,14 @@ describe("session listing", () => {
       modifiedAt: "2026-11-19T08:30:00.000Z",
       firstMessage: "fix the tests",
       messageCount: 3,
+      tokens: 0,
       parentSession: oldPath,
       live: { running: true, waiting: false, attached: 1 },
       pinned: false,
       archived: false,
       profile: "coding",
     });
-    expect(json.sessions[1]).toMatchObject({ firstMessage: "first question", messageCount: 3, live: null });
+    expect(json.sessions[1]).toMatchObject({ firstMessage: "first question", messageCount: 4, tokens: 1200, live: null });
     expect(json.sessions[1].parentSession).toBeUndefined();
   });
 
@@ -213,6 +215,38 @@ describe("session listing", () => {
 
   test("unknown session id is 404", async () => {
     expect((await call("GET", "/sessions/does-not-exist/state")).status).toBe(404);
+  });
+});
+
+describe("session entries", () => {
+  test("answers every entry after the header in append order, the last one the leaf", async () => {
+    await writeFixtures();
+    const { status, json } = await call<{ entries: { id: string }[]; leafId: string }>("GET", `/sessions/${OLD_ID}/entries`);
+    expect(status).toBe(200);
+    expect(json.entries.map((entry) => entry.id)).toEqual(["m1", "a1", "a2", "a3", "a4"]);
+    expect(json.leafId).toBe("a4");
+  });
+
+  test("with turns, answers a preview: the active branch from the turns-th last prompt on, without tool result images", async () => {
+    await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      { ...message("u1", "user", "first"), parentId: null },
+      { ...message("r1", "assistant", []), parentId: "u1" },
+      { ...message("u2", "user", "second"), parentId: "r1" },
+      { ...message("x", "assistant", []), parentId: "u2" },
+      { ...message("t2", "toolResult", [{ type: "text", text: "shot" }, { type: "image", data: "png" }]), parentId: "u2" },
+      { ...message("r2", "assistant", []), parentId: "t2" },
+    ]), new Date("2026-11-18T09:05:00.000Z"));
+    const { json } = await call<{ entries: { id: string; message: { content: unknown } }[]; leafId: string }>("GET", `/sessions/${OLD_ID}/entries?turns=1`);
+    expect(json.entries.map((entry) => entry.id)).toEqual(["u2", "t2", "r2"]);
+    expect(json.entries[1].message.content).toEqual([{ type: "text", text: "shot" }]);
+    expect(json.leafId).toBe("r2");
+    expect((await call("GET", `/sessions/${OLD_ID}/entries?turns=0`)).status).toBe(400);
+  });
+
+  test("takes only GET and 404s an unknown session", async () => {
+    await writeFixtures();
+    expect((await call("POST", `/sessions/${OLD_ID}/entries`)).status).toBe(405);
+    expect((await call("GET", "/sessions/missing/entries")).status).toBe(404);
   });
 });
 

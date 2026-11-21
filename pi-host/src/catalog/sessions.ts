@@ -18,6 +18,8 @@ export type SessionInfo = {
   modifiedAt: string;
   firstMessage: string;
   messageCount: number;
+  /** Context size after the last answer, 0 before one. */
+  tokens: number;
   parentSession?: string;
   live: LiveStatus | null;
   pinned: boolean;

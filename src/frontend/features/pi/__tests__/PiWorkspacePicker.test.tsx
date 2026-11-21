@@ -32,7 +32,7 @@ const HOUR = 60 * 60 * 1000
 
 function piSession(sessionId: string, cwd: string, ageMs: number, firstMessage = sessionId): PiSessionInfo {
   const at = new Date(Date.now() - ageMs).toISOString()
-  return { sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: at, modifiedAt: at, firstMessage, messageCount: 1, live: null, pinned: false, archived: false }
+  return { sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: at, modifiedAt: at, firstMessage, messageCount: 1, tokens: 0, live: null, pinned: false, archived: false }
 }
 
 const REPOSITORIES: PiRepository[] = [

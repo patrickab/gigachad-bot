@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { TabContext, type Tab } from "@/contexts/TabContext"
 import { ApiError, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
 import type { PiSessionStatus } from "../sessionStore"
-import { groupPiSessions, PiSessionPicker, RECENT_SESSION_MS } from "../PiSessionPicker"
+import { PiSessionPicker } from "../PiSessionPicker"
 
 const pi = vi.hoisted(() => ({
   sessions: [] as PiSessionInfo[],
@@ -38,7 +38,7 @@ function piSession(sessionId: string, ageMs: number, extra: Partial<PiSessionInf
   const at = new Date(Date.now() - ageMs).toISOString()
   return {
     sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd: "/git/proj", machine: "local", createdAt: at, modifiedAt: at,
-    firstMessage: sessionId, messageCount: 1, live: null, pinned: false, archived: false, ...extra,
+    firstMessage: sessionId, messageCount: 1, tokens: 0, live: null, pinned: false, archived: false, ...extra,
   }
 }
 
@@ -64,41 +64,22 @@ afterEach(() => {
   pi.archive.mockReset()
 })
 
-describe("groupPiSessions", () => {
-  it("puts running and waiting sessions first, then the ones of the last day, then the rest, each newest first", () => {
-    const now = Date.now()
-    const groups = groupPiSessions([
-      piSession("old", RECENT_SESSION_MS + HOUR),
-      piSession("fresh", HOUR),
-      piSession("busy", 3 * RECENT_SESSION_MS, { live }),
-      piSession("asking", 2 * HOUR, { live: { running: false, waiting: true, attached: 1 } }),
-      piSession("fresher", 1000),
-    ], now)
-    expect(groups.running.map((session) => session.sessionId)).toEqual(["asking", "busy"])
-    expect(groups.recent.map((session) => session.sessionId)).toEqual(["fresher", "fresh"])
-    expect(groups.older.map((session) => session.sessionId)).toEqual(["old"])
-  })
-})
-
 describe("PiSessionPicker", () => {
-  it("opens on Alt+A with Running, Recent and older sessions behind a row, marks them, and opens a picked one", () => {
+  it("opens on Alt+A with every session newest first, its age, tokens and directory, marks them, and opens a picked one", () => {
     pi.repositories = [{ name: "proj", path: "/git/proj" }]
     pi.sessions = [
-      piSession("busy", HOUR, { live }),
+      piSession("old", 3 * HOUR),
+      piSession("busy", 2 * HOUR, { live, tokens: 84_300 }),
       piSession("fresh", HOUR, { cwd: "/git/worktrees/proj/feat" }),
-      piSession("old", RECENT_SESSION_MS + HOUR),
     ]
     pi.statuses = { busy: { running: true, waiting: false, unread: false }, fresh: { running: false, waiting: false, unread: true } }
     const onOpenItem = renderPicker()
 
-    expect(within(screen.getByRole("group", { name: "Running" })).getByRole("option", { name: /busy/ })).toBeInTheDocument()
-    expect(within(screen.getByRole("group", { name: "Recent" })).getByRole("option", { name: /fresh/ })).toBeInTheDocument()
+    expect(screen.getAllByRole("option").map((option) => option.textContent?.split("·")[0])).toEqual(["fresh1h ago ", "busy2h ago ", "old3h ago "])
+    expect(screen.getByRole("option", { name: /busy/ })).toHaveTextContent("84k · /git/proj")
     expect(within(screen.getByRole("option", { name: /busy/ })).getByRole("img", { name: "Running" })).toBeInTheDocument()
     expect(within(screen.getByRole("option", { name: /fresh/ })).getByRole("img", { name: "Unread" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: /fresh/ })).toHaveTextContent("feat")
-
-    fireEvent.click(screen.getByRole("option", { name: "Show 1 older" }))
-    expect(screen.getByRole("option", { name: /old/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("option", { name: /fresh/ }))
     expect(onOpenItem).toHaveBeenCalledWith({ kind: "pi", path: "proj", projectSlug: null, pi: { sessionId: "fresh", repo: "proj" } })

@@ -10,6 +10,7 @@ import { NeovimEditor } from "@/features/editor/NeovimEditor"
 import { ChangedFiles, ChangeSummary } from "./diffTree"
 import { selectedComment } from "./diffSelection"
 import { FileSection } from "./FileSection"
+import { useColumnWidth } from "@/features/chat/columnResize"
 import { Annotations } from "./ReviewAnnotations"
 import { LAYOUTS, useDiffLayout } from "./useDiffLayout"
 import { useDiffNeovim } from "./useDiffNeovim"
@@ -35,6 +36,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
   const blocked = !!editing || opening
   const { selected, registerSection, jumpToFile, trackScroll } = useDiffScroll(scrollContainer, files, blocked)
   const { layout, choose: chooseLayout, split } = useDiffLayout(scrollContainer)
+  const { width: columnWidth, startResize } = useColumnWidth()
   const { notes, notesByPath, draft, setDraft, actions, send, sending, sendError, copied } = useReviewSession(root, review, files, patches)
   const { selected: selectionAction, clear: clearSelectionAction } = useSelectionAction(scrollContainer, (container) => selectedComment(container, patches), { live: true })
 
@@ -49,12 +51,13 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
     : !changes ? <Placeholder>Could not read this directory</Placeholder>
     : !changes.is_git_repository ? <Placeholder>This file mount is not a git repository</Placeholder>
     : !activePath ? <Placeholder>No changes</Placeholder>
-    : files.map((file) => <FileSection
+    : <div data-chat-column className="mx-auto flex w-full flex-col gap-4" style={{ maxWidth: columnWidth }}>{files.map((file) => <FileSection
       key={file.path} path={file.path} added={file.added} removed={file.removed} patch={patches[file.path]}
       editable={neovim.enabled && file.status !== "deleted"} opening={opening} openingThis={openingPath === file.path}
       onEdit={editFile} register={registerSection}
       split={split} notes={notesByPath.get(file.path) ?? NO_NOTES} draft={draft?.anchor.path === file.path ? draft : null} actions={actions}
-    />)
+      onResizeStart={startResize}
+    />)}</div>
 
   return <div className="flex h-full">
     <nav aria-label="Changed files" className="mb-3 ml-3 flex w-72 shrink-0 flex-col rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]">
@@ -108,7 +111,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
           event.preventDefault()
           jumpToNote(event.currentTarget, arrow)
         }}
-        className={cn("@container min-h-0 flex-1 overflow-auto focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ink-muted/40", editing && "hidden")}
+        className={cn("@container min-h-0 flex-1 overflow-y-auto px-3 pb-3 focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-ink-muted/40", editing && "hidden")}
       >
         {content}
       </div>

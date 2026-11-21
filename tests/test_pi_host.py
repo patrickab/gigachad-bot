@@ -35,6 +35,7 @@ SESSION = {
     "modifiedAt": "2026-11-19T10:05:00.000Z",
     "firstMessage": "Fix the tests",
     "messageCount": 4,
+    "tokens": 84300,
     "live": {"running": True, "waiting": False, "attached": 1},
     "pinned": False,
     "archived": False,
@@ -152,6 +153,19 @@ def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None, "profile": "coding"}}]}
     assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
     assert _client().get("/api/pi/search").status_code == 422
+
+
+def test_entries_pass_pi_shapes_through_untouched(monkeypatch):
+    entries = {"entries": [{"type": "message", "id": "e1", "parentId": None, "message": {"role": "user"}}], "leafId": "e1"}
+    host = _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/entries": (200, entries)})
+
+    response = _client().get(f"/api/pi/sessions/{SESSION_ID}/entries")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == entries
+    assert _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"turns": 3}).status_code == 200
+    assert dict(host.requests[-1].url.params) == {"turns": "3"}
+    assert _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"turns": 0}).status_code == 422
 
 
 def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositories):

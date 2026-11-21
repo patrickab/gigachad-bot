@@ -121,7 +121,7 @@ interface PiComposerProps {
  * - `select`/`confirm` dialogs pick in the composer's menu, `input`/`editor` dialogs take the next send as their answer
  * - Queued steering and follow-ups, extension status lines and notices sit above it
  * - A pasted, dropped or attached video is stored in the session folder's `.pi/pastes/` and mentioned as `@<path>`,
- *   `pi-extensions/video-paste.ts` turns the mention into a frame grid
+ *   the user's Pi extension `~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) turns the mention into frames
  */
 export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, leading, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
   const inputRef = useRef<ChatInputHandle>(null)

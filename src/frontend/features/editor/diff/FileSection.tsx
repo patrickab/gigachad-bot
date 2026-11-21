@@ -1,6 +1,7 @@
 import { Fragment, memo, useMemo } from "react"
 import { toSplitRows, type PatchLine } from "@/lib/diff"
 import { cn } from "@/lib/utils"
+import { ResizeEdges, type ResizeStart } from "@/features/chat/columnResize"
 import { LineCountLabel } from "./diffTree"
 import { locateNote, type ReviewNote, type ReviewSide } from "./review"
 import { Annotations } from "./ReviewAnnotations"
@@ -85,16 +86,17 @@ const PatchView = memo(function PatchView({ path, lines, split, placed, draft, a
 })
 
 /** One file of the diff, props are primitives or stable references so unchanged files skip re-rendering. */
-export const FileSection = memo(function FileSection({ path, added, removed, patch, editable, opening, openingThis, onEdit, register, split, notes, draft, actions }: {
+export const FileSection = memo(function FileSection({ path, added, removed, patch, editable, opening, openingThis, onEdit, register, split, notes, draft, actions, onResizeStart }: {
   path: string; added: number | null; removed: number | null; patch: FilePatch | undefined
   editable: boolean; opening: boolean; openingThis: boolean
   onEdit: (path: string) => void; register: (path: string, element: HTMLElement | null) => void
   split: boolean; notes: ReviewNote[]; draft: Draft | null; actions: ReviewActions
+  onResizeStart?: ResizeStart
 }) {
   const lines = patch?.lines ?? null
   const placed = useMemo(() => placeNotes(notes, draft, lines ?? []), [notes, draft, lines])
-  return <section aria-label={`Diff for ${path}`} ref={(element) => register(path, element)} className="min-h-24 border-b border-divider/50 last:min-h-full">
-    <h3 className="sticky left-0 top-0 z-10 flex items-center gap-2 bg-paper px-3 py-2 font-mono text-xs text-ink-muted">
+  return <section aria-label={`Diff for ${path}`} ref={(element) => register(path, element)} className="relative min-h-24 shrink-0 rounded-xl border border-divider/50 bg-surface-elevated shadow-[var(--shadow-lg)] [overflow:clip] last:min-h-full">
+    <h3 className="sticky left-0 top-0 z-10 flex items-center gap-2 rounded-t-xl border-b border-divider/50 bg-surface px-3 py-2 font-mono text-xs text-ink-muted">
       <span className="min-w-0 flex-1 truncate">{path}</span>
       {added !== null && removed !== null && <span aria-label={`Line changes in ${path}`} className="flex shrink-0 gap-2 tabular-nums">
         <LineCountLabel counts={{ added, removed }} />
@@ -109,7 +111,8 @@ export const FileSection = memo(function FileSection({ path, added, removed, pat
       notes={placed.outdated} draft={draft} showNewDraft={false} outdated actions={actions}
       className="sticky left-0 w-[min(44rem,100cqw)] pl-3"
     />}
-    {lines ? <PatchView path={path} lines={lines} split={split} placed={placed} draft={draft} actions={actions} /> : <div className="px-3 py-6 text-xs text-ink-faint">
+    <ResizeEdges onResizeStart={onResizeStart} />
+    {lines ? <div className="overflow-x-auto"><PatchView path={path} lines={lines} split={split} placed={placed} draft={draft} actions={actions} /></div> : <div className="px-3 py-6 text-xs text-ink-faint">
       {!patch ? "Loading diff" : patch.failed ? "Could not load diff" : "No text diff for this file"}
     </div>}
   </section>

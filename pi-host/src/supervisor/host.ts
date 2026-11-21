@@ -199,6 +199,7 @@ export class SupervisorHost implements Supervisor {
       modifiedAt: now,
       firstMessage: "(no messages)",
       messageCount: 0,
+      tokens: 0,
       live: session.liveStatus(),
       pinned: false,
       archived: false,

@@ -11,6 +11,8 @@ import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { cn } from "@/lib/utils"
 import { FLOATING_PANEL_CLASS, FloatingPanel } from "./FloatingWindow"
 import { ModalBackdrop } from "./ModalBackdrop"
+import { AmbientCopy } from "./AmbientCopy"
+import { SIDEBAR_CARD_CLASS, SidePanelScroll } from "./SidePanel"
 import { PillPopover, usePillPopover, type PillPopoverState } from "./PillPopover"
 
 /** Look of the list and the preview window alike, the floating window's panel at a radius that suits a small list. */
@@ -43,8 +45,7 @@ export interface PickerGroup<T> { key: string; label?: string; items: T[] }
  *     Row between the search field and the list, e.g. the folder shown.
  * renderPreview : ((item: T) => ReactNode) | undefined
  *     Set -> the page dims while the list is open and the highlighted row shows in a floating window at `previewAspect`.
- *     The list docks over the window's top left corner, fit to its rows. Content that must stay clear of it pads by `var(FINDER_INSET_VAR)`.
- *     Returning null shows no window.
+ *     The list becomes a sidebar-shaped floating card left of the window, as tall as it. Returning null shows no window.
  * previewAspect : number | undefined
  *     Width over height of the preview window, the window's own by default: a tab or file previews as the page it opens.
  * searchAction : ((close: () => void) => ReactNode) | undefined
@@ -89,35 +90,42 @@ export function neighbourKey(list: PickerKeyContext, key: string): string | unde
   return list.keys[index + 1] ?? list.keys[index - 1]
 }
 
-/** Margin of a picker's preview to the window edges, and the finder's inset into the preview's corner. */
+/** Margin of a picker's preview to the window edges, the gap between finder and preview. */
 const PICKER_MARGIN = 24
 const PICKER_GAP = 12
 /** The top bar (h-11) stays clear of the preview. */
 const TOP_BAR_PX = 44
-/**
- * The finder of a picker with a preview: placed over the preview's corner by `PickerPreview`.
- *
- * - As wide as its rows need, within bounds, the widest row sets it while nothing is typed
- * - A row that should not widen the finder caps its own text, e.g. `truncate max-w-[18rem]`
- */
-const FINDER_DOCK_CLASS = "fixed w-max min-w-56 max-w-[min(36rem,calc(100vw-6rem))]"
-/** CSS variable on the preview window: the inset from its left edge that clears the finder docked over it. */
-export const FINDER_INSET_VAR = "--picker-finder-inset"
+/** Width of the finder card beside a preview. */
+const FINDER_WIDTH = 300
+/** The preview's height is this share of the largest that fits, so the page behind stays visible around it. */
+const PREVIEW_SHARE = 0.8
+/** The finder of a picker with a preview: a sidebar card floating beside the preview, placed by `PickerPreview`. */
+const FINDER_CARD_CLASS = cn("fixed flex flex-col overflow-hidden", SIDEBAR_CARD_CLASS)
+
+/** The list's panel: a sidebar card beside a preview, else a small floating window at its trigger. */
+function listPanelClass(hasPreview: boolean): string {
+  return hasPreview ? FINDER_CARD_CLASS : PICKER_PANEL_CLASS
+}
 
 export interface Box { left: number; top: number; width: number; height: number }
 
 /**
- * Where a picker with a preview goes: the preview centered on the window, its finder over the preview's top left corner.
+ * Where a picker with a preview goes: the preview of `aspect` centered on the window, the finder card beside it on its left.
  *
- * - The preview is the largest box of `aspect` within symmetric margins that keep the top bar clear, exactly centered
- * - The finder lies inside it by `PICKER_GAP`, the preview gives up its corner rather than its size or center
+ * - The preview is the box of `aspect` within symmetric margins that keep the top bar and the finder clear, its height scaled by `PREVIEW_SHARE`
+ * - The finder is `FINDER_WIDTH` wide, `PICKER_GAP` left of the preview, as tall as it
  */
-export function pickerLayout(viewport: { width: number; height: number }, aspect: number): { preview: Box; finder: { left: number; top: number; maxHeight: number } } {
+export function pickerLayout(viewport: { width: number; height: number }, aspect: number): { preview: Box; finder: Box } {
   const vertical = TOP_BAR_PX + PICKER_MARGIN / 2
-  const width = Math.max(0, Math.min(viewport.width - 2 * PICKER_MARGIN, (viewport.height - 2 * vertical) * aspect))
+  const side = FINDER_WIDTH + PICKER_GAP + PICKER_MARGIN
+  const width = Math.max(0, Math.min(viewport.width - 2 * side, (viewport.height - 2 * vertical) * aspect * PREVIEW_SHARE))
   const height = width / aspect
-  const preview = { left: (viewport.width - width) / 2, top: (viewport.height - height) / 2, width, height }
-  return { preview, finder: { left: preview.left + PICKER_GAP, top: preview.top + PICKER_GAP, maxHeight: height - 2 * PICKER_GAP } }
+  const left = (viewport.width - width) / 2
+  const top = (viewport.height - height) / 2
+  return {
+    preview: { left, top, width, height },
+    finder: { left: left - PICKER_GAP - FINDER_WIDTH, top, width: FINDER_WIDTH, height },
+  }
 }
 
 function isInside(box: Box, x: number, y: number): boolean {
@@ -131,32 +139,21 @@ function firstScrollable(root: HTMLElement | null): HTMLElement | null {
   return [root, ...root.querySelectorAll<HTMLElement>("*")].find(scrolls) ?? null
 }
 
-/** The dimmed page and the floating preview window centered on it, the `finder` panel moved over its top left corner, `finderWidth` fixes its width when set. A click on the dimmed page runs `onClose`. */
-function PickerPreview({ finder, finderWidth, aspect, onClose, children }: { finder: HTMLElement | null; finderWidth: number | null; aspect: number; onClose: () => void; children: ReactNode }) {
+/** The dimmed page and the floating preview window centered on it, the `finder` card placed left of it, the window backed by `AmbientCopy`, so no page content shows through it. A click on the dimmed page runs `onClose`. */
+function PickerPreview({ finder, aspect, onClose, children }: { finder: HTMLElement | null; aspect: number; onClose: () => void; children: ReactNode }) {
   const [box, setBox] = useState<Box | null>(null)
-  const [finderInset, setFinderInset] = useState(0)
   useLayoutEffect(() => {
     const place = () => {
       const layout = pickerLayout({ width: window.innerWidth, height: window.innerHeight }, aspect)
       setBox(layout.preview)
       if (!finder) return
-      const { left, top, maxHeight } = layout.finder
-      Object.assign(finder.style, { left: `${left}px`, top: `${top}px`, maxHeight: `${maxHeight}px` }, finderWidth === null ? {} : { width: `${finderWidth}px` })
+      const { left, top, width, height } = layout.finder
+      Object.assign(finder.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` })
     }
     place()
     window.addEventListener("resize", place)
     return () => window.removeEventListener("resize", place)
-  }, [aspect, finder, finderWidth])
-  // offsetWidth ignores the finder's opening scale animation
-  useLayoutEffect(() => {
-    if (!finder) return
-    const measure = () => setFinderInset(finder.offsetWidth + 2 * PICKER_GAP)
-    measure()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
-    observer.observe(finder)
-    return () => observer.disconnect()
-  }, [finder])
+  }, [aspect, finder])
   // The window lets clicks through to the dimmed page, so a wheel over it scrolls its first scrollable content instead
   const content = useRef<HTMLDivElement>(null)
   useEventListener("window", "wheel", (event) => {
@@ -165,9 +162,10 @@ function PickerPreview({ finder, finderWidth, aspect, onClose, children }: { fin
   }, { passive: true })
   const shown = children !== null && children !== undefined && children !== false
   // The page washes out in its own paper color and blurs, a modal's dark scrim would turn a light page grey
-  return createPortal(<ModalBackdrop onClose={onClose} className="z-[55] bg-paper/50 backdrop-blur-[3px]">
+  return createPortal(<ModalBackdrop onClose={onClose} className="z-[55] bg-paper/50 backdrop-blur-[14px]">
     {shown && box && <FloatingPanel aria-hidden className={cn(PICKER_PANEL_CLASS, "pointer-events-none fixed")}
-      style={{ left: box.left, top: box.top, width: box.width, height: box.height, [FINDER_INSET_VAR]: `${finderInset}px` } as CSSProperties}>
+      style={{ left: box.left, top: box.top, width: box.width, height: box.height } as CSSProperties}>
+      <AmbientCopy left={box.left} top={box.top} />
       <div ref={content} className="contents">{children}</div>
     </FloatingPanel>}
   </ModalBackdrop>, document.body)
@@ -183,9 +181,8 @@ function PickerList<T>({
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null)
   const [ownQuery, setOwnQuery] = useState("")
   const query = controlledQuery ?? ownQuery
-  // The list's height and a preview's finder width when filtering starts, kept while it is open so neither jumps as rows come and go
+  // The list's height when filtering starts, kept while it is open so neither jumps as rows come and go
   const [listHeight, setListHeight] = useState<number | null>(null)
-  const [finderWidth, setFinderWidth] = useState<number | null>(null)
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLElement>(null)
   // Set by a key or filter change that moved the highlight, so only those scroll the list
@@ -244,8 +241,6 @@ function PickerList<T>({
   const onSearchChange = (value: string) => {
     if (listHeight === null) {
       setListHeight(listRef.current?.offsetHeight ?? null)
-      // A preview's finder fits its rows: keep the width it opened with while rows filter away
-      setFinderWidth(root?.parentElement?.offsetWidth ?? null)
     }
     if (onQueryChange) onQueryChange(value)
     else setOwnQuery(value)
@@ -287,14 +282,14 @@ function PickerList<T>({
       role="listbox"
       aria-label={label}
       style={lockedHeight}
-      className="max-h-[60vh] min-h-0 overflow-y-auto p-1"
+      className={renderPreview ? "p-1" : "max-h-[60vh] min-h-0 overflow-y-auto p-1"}
     >{shownGroups.map((group, index) => group.items.length > 0 && <div key={group.key} role="group" aria-labelledby={group.label ? `${baseId}-${index}` : undefined}>
       {group.label && <p id={`${baseId}-${index}`} className="px-2 pb-0.5 pt-1.5 text-[10px] font-medium text-ink-subtle">{group.label}</p>}
       {group.items.map(itemRow)}
     </div>)}</div>
     : <p ref={(element) => { listRef.current = element }} style={lockedHeight} className="px-3 py-3 text-xs text-ink-subtle">{words.length > 0 ? "No match" : emptyText}</p>
 
-  return <div ref={setRoot} inert={!present} aria-hidden={!present || undefined} className="flex min-h-0 flex-col">
+  return <div ref={setRoot} inert={!present} aria-hidden={!present || undefined} className="flex min-h-0 flex-1 flex-col">
     <div className="flex items-center gap-2 border-b border-divider px-3">
       <Search className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
       <input
@@ -316,8 +311,8 @@ function PickerList<T>({
       {searchAction?.(close)}
     </div>
     {header && <div className="flex min-w-0 items-center gap-1.5 border-b border-divider px-3 py-1.5 text-[10px] text-ink-faint">{header}</div>}
-    {list}
-    {renderPreview && present && <PickerPreview finder={root?.parentElement ?? null} finderWidth={finderWidth} aspect={previewAspect ?? window.innerWidth / window.innerHeight} onClose={close}>
+    {renderPreview && shownItems.length > 0 ? <SidePanelScroll>{list}</SidePanelScroll> : list}
+    {renderPreview && present && <PickerPreview finder={root?.parentElement ?? null} aspect={previewAspect ?? window.innerWidth / window.innerHeight} onClose={close}>
       {activeItem !== undefined ? renderPreview(activeItem) : null}
     </PickerPreview>}
   </div>
@@ -347,7 +342,7 @@ export function CommandPicker<T>({ triggerLabel, triggerContent, triggerClassNam
     label={list.label}
     placement={placement}
     portal={list.renderPreview ? "docked" : "trigger"}
-    panelClassName={cn(PICKER_PANEL_CLASS, list.renderPreview && FINDER_DOCK_CLASS, panelClassName)}
+    panelClassName={cn(listPanelClass(Boolean(list.renderPreview)), panelClassName)}
   >
     {/* PillPopover mounts its panel only while open, its exit animation keeps the last list */}
     <PickerList {...list} close={popover.close} />
@@ -361,7 +356,7 @@ export function FloatingPicker<T>({ onClose, panelClassName, ...list }: PickerLi
   useEscapeLayer(onClose)
   useOutsidePress(panelRef, onClose)
   return createPortal(<div ref={panelRef} role="dialog" aria-label={list.label}
-    className={cn("z-[60] w-80", list.renderPreview ? FINDER_DOCK_CLASS : "fixed left-3 top-12", PICKER_PANEL_CLASS, panelClassName)}>
+    className={cn("z-[60] w-80", !list.renderPreview && "fixed left-3 top-12", listPanelClass(Boolean(list.renderPreview)), panelClassName)}>
     <PickerList {...list} close={onClose} />
   </div>, document.body)
 }

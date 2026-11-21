@@ -1,5 +1,5 @@
-"""Videos pasted into a Pi composer, stored in the session folder's `.pi/pastes/` where `pi-extensions/video-paste.ts`
-turns an `@` mention of them into a frame grid."""
+"""Videos pasted into a Pi composer, stored in the session folder's `.pi/pastes/` where the user's Pi extension
+`~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) turns an `@` mention of them into frames."""
 
 from datetime import datetime
 from pathlib import Path

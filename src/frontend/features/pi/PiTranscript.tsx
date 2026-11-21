@@ -5,7 +5,7 @@ import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
-import { CHAT_COLUMN_MAX_PX } from "@/features/chat/ChatContainer"
+import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/features/chat/columnResize"
 import { WideModeToggle } from "@/features/chat/WideModeToggle"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
@@ -13,7 +13,7 @@ import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
-// Registers the `video-preview` card (`pi-extensions/video-paste.ts`)
+// Registers the `video-preview` card (`~/.pi/agent/extensions/video-paste.ts`, from `~/.os`)
 import "./VideoPreview"
 
 const MAX_LABEL_LENGTH = 80
@@ -215,10 +215,11 @@ interface PiTurnProps {
   /** Branch keeping `entryId`; `prompt` goes into the branch's composer (Edit). */
   onBranch?: (entryId: string, prompt?: string) => void
   fileLinks: FileLinks
+  onResizeStart?: ResizeStart
 }
 
 /** One turn; memoized so a streamed delta re-renders the newest turn only. */
-const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks }: PiTurnProps) {
+const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks, onResizeStart }: PiTurnProps) {
   const prompt = messages[turn.start]
   const { text, compaction } = promptOf(prompt)
   const pieces = answerPieces(messages, turn, streaming, confirmed)
@@ -251,6 +252,8 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     ...(branchFrom ? [<ForkAction key="branch" label="Branch session from this point" onFork={() => onBranch!(branchFrom)} />] : []),
   ]
   return (
+    <div className="relative">
+    <ResizeEdges onResizeStart={onResizeStart} />
     <TurnCard expanded>
       <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
@@ -264,6 +267,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
         </TurnSurface>
       )}
     </TurnCard>
+    </div>
   )
 })
 
@@ -297,6 +301,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, o
   /** First mounted turn while the reader is away from the end, null while following the end. */
   const [anchor, setAnchor] = useState<number | null>(null)
   const [wide, setWide] = useState(false)
+  const { width: columnWidth, startResize } = useColumnWidth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const earlierRef = useRef<HTMLButtonElement>(null)
   const pinnedRef = useRef(true)
@@ -350,7 +355,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, o
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
-      <div ref={onColumnChange} className="mx-auto" style={{ maxWidth: wide ? undefined : CHAT_COLUMN_MAX_PX }}>
+      <div ref={onColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
         {start > 0 && (
           <button ref={earlierRef} type="button" onClick={showEarlier} className="mx-auto mt-3 block rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">
             Show earlier turns
@@ -372,6 +377,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, o
               onToggle={onToggle}
               onBranch={onBranch}
               fileLinks={fileLinks}
+              onResizeStart={wide ? undefined : startResize}
             />
           )
         })}
