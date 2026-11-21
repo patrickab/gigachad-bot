@@ -4,6 +4,7 @@ import { useCallback, useRef, useState, type RefCallback } from "react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
+import { newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
 import { PromptEditor } from "@/features/settings/PromptEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
@@ -131,7 +132,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const chatBody = (
     <ChatContainer
       chatId={chatId}
-      draftKey={tab.historyFile && `chat:${projectSlug ?? ""}:${tab.historyFile}`}
+      draftKey={tab.historyFile ? `chat:${projectSlug ?? ""}:${tab.historyFile}` : newChatDraftKey(tab.id)}
       onChatColumnChange={setChatColumn}
       messages={chat.messages}
       historyLoading={historyLoading}

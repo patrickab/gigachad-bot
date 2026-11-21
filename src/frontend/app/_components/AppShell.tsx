@@ -10,6 +10,7 @@ import { TabManager, type TabManagerHandle } from "@/features/navigation/TabMana
 import { nextTab, piSessionOf, tabLabel } from "@/features/navigation/tabs"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
+import { forgetComposerDraft, newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
 import { FilePanelProvider } from "@/features/editor/FilePanel"
 import { ShellTerminals } from "@/features/editor/ShellTerminal"
@@ -93,8 +94,13 @@ export function AppShell() {
     })
   }, [])
 
+  const openTabIds = useRef<readonly string[]>([])
   const handleTabsChange = useCallback((tabs: Tab[]) => {
     setTabIds((current) => hasTabIds(current, tabs) ? current : tabs.map((tab) => tab.id))
+    // A closed tab takes the draft of its unsent new chat with it
+    const open = new Set(tabs.map((tab) => tab.id))
+    for (const id of openTabIds.current) if (!open.has(id)) forgetComposerDraft(newChatDraftKey(id))
+    openTabIds.current = [...open]
   }, [])
 
   const openNewTab = useCallback((patch: Partial<Tab>) => {
