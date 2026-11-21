@@ -3,15 +3,11 @@
 The backend (`uvicorn`, port 8001) and frontend (`next dev`, port 2999) start
 via `run.sh`.
 
-- Check whether the app is already up first (ports 2999 and 8001). If it is,
-  use that instance. Never launch a second copy alongside it.
-- Otherwise start `./run.sh` yourself as a supervised process (global
-  AGENTS.md, "Long-Running Processes"), tell the user how to watch it, and
-  stop it when done.
-- Never start it with plain background jobs, `nohup` or raw tmux.
-- Exception: the factory task view starts previews of task workspaces (backend
-  and frontend on ports 8100-8199, `.docs/architecture.md`, "Agent factory").
-  That is the backend's job, you never start one yourself.
+- The app hot-reloads: your edits show in the user's running instance (ports
+  2999 and 8001). Use it, never start a second copy.
+- None running: start `./run.sh` as a supervised process (global AGENTS.md,
+  "Long-Running Processes") and stop it when done.
+- Task previews (ports 8100-8199) are started by the backend, never by you.
 
 ## Testing
 
