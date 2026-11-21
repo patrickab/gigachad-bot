@@ -103,7 +103,16 @@ def _cwd(repo: str) -> str:
 
 @http_router.get("/repos")
 async def get_repositories() -> list[RepositoryOut]:
+    """Start folders, the most recently used (newest session activity) first, never-used ones after."""
     repositories = await asyncio.to_thread(pi_host.list_repositories)
+    try:
+        sessions = await pi_host.list_sessions(None, archived=False)
+    except (pi_host.PiHostUnavailable, pi_host.PiHostBadResponse):
+        sessions = []  # no usage history without pi-host: keep the discovery order
+    used: dict[str, str] = {}
+    for session in sessions:
+        used[session.cwd] = max(used.get(session.cwd, ""), session.modified_at)
+    repositories.sort(key=lambda repository: used.get(repository.path, ""), reverse=True)  # stable: ties keep order
     return [RepositoryOut(name=repository.name, path=repository.path) for repository in repositories]
 
 
