@@ -141,9 +141,10 @@ export function withLead(text: string, lead: string | undefined): string {
  * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
  * - Each settled turn branches through `onBranch` (D11), Edit with its prompt for the branch's composer; a failed branch shows as a notice
  * - A closed session's reason shows with the composer's notices
+ * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
  */
-export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent, docked = false }: {
   sessionId: string
   cwd: string
   files: PiFileScope
@@ -157,6 +158,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   onInserted?: () => void
   lead?: string
   onLeadSent?: () => void
+  docked?: boolean
 }) {
   const openFile = useOpenFile()
   const session = usePiSession(sessionId, openFile)
@@ -168,7 +170,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const { messages } = transcript
   // Known to be empty only once attached: a connecting session keeps the composer at the bottom, like a chat whose history loads
   const empty = status.kind === "ready" && !firstSubmit && messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
-  const dock = useComposerDock(empty)
+  const dock = useComposerDock(empty && !docked)
   const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
   useEffect(() => {
     openTranscripts.set(sessionId, messages)

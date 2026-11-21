@@ -142,6 +142,7 @@ export function DocumentChat({ chat, width, onClose, shellCommands, modelProps, 
       {opened && error && <ErrorText className="px-4 pt-2">{error}</ErrorText>}
       {opened && !pending ? (
         <PiSessionView
+          docked
           key={opened.session.sessionId}
           sessionId={opened.session.sessionId}
           cwd={opened.cwd}
