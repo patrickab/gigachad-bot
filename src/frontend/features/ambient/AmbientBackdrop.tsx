@@ -57,7 +57,9 @@ export function AmbientBackdrop() {
     let scene: typeof DEFAULT_SCENE | null = null
     const frame = (): NightOceanFrame => {
       const anchor = readSceneAnchor()
-      const { clientWidth: width, clientHeight: height } = canvas
+      // Measured only with an anchor on screen: without one no frame reads the layout
+      const width = anchor ? canvas.clientWidth : 0
+      const height = anchor ? canvas.clientHeight : 0
       if (anchor && width > 0 && height > 0) {
         const target = { horizon: 1 - anchor.horizonY / height, moonX: anchor.lightX / width, moonY: 1 - anchor.lightY / height }
         const follow = scene && !still ? FOLLOW : 1
