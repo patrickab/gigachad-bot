@@ -109,7 +109,7 @@ def _session(session_id: str, cwd: str, profile: str) -> dict:
     return {
         "sessionId": session_id, "sessionPath": f"/sessions/{session_id}.jsonl", "cwd": cwd, "machine": "local",
         "createdAt": "2026-11-19T10:00:00.000Z", "modifiedAt": "2026-11-19T10:00:00.000Z", "firstMessage": "",
-        "messageCount": 0, "live": None, "pinned": False, "archived": False, "profile": profile,
+        "messageCount": 0, "tokens": 0, "live": None, "pinned": False, "archived": False, "profile": profile,
     }
 
 

@@ -335,7 +335,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         left: null,
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
-        body: factoryItem ? <FactorySurface item={factoryItem} /> : chatBody,
+        body: factoryItem ? <FactorySurface item={factoryItem} modelProps={modelProps} shellCommands={shellCommands} /> : chatBody,
       }
     },
     learn: () => {

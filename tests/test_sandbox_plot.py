@@ -107,7 +107,8 @@ async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failin
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript() -> None:
+async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(completions, "text", lambda *_a, **_k: "print(fig.to_json())")
     sandbox = SandboxServiceStub("not json")
 
     outcome = await _plot(sandbox)
@@ -118,8 +119,9 @@ async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript() -
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_runner_failure_reports_its_own_error_not_invalid_figure() -> None:
+async def test_sandbox_plot_runner_failure_reports_its_own_error_not_invalid_figure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A sandbox that never ran (e.g. runtime failure) must not be reported as a bad figure."""
+    monkeypatch.setattr(completions, "text", lambda *_a, **_k: "print(fig.to_json())")
     sandbox = SandboxServiceStub(
         "not json",
         invoke_result=SandboxToolResult(

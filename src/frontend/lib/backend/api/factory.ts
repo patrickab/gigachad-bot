@@ -1,6 +1,7 @@
 // Factory engine routes.
 import { toQuery } from "../urls"
 import { post, put, request } from "./http"
+import type { PiSessionInfo } from "./pi"
 import type { FactoryDefaults, FactoryEvent, FactoryImage, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate } from "@/lib/domain/factory"
 
 export function fetchLatestFactoryEventSeq(): Promise<number> {
@@ -34,6 +35,11 @@ export function fetchFactoryTasks(repo: string): Promise<FactoryTask[]> {
 
 export function fetchFactoryTask(id: string): Promise<FactoryTaskDetail> {
   return request<FactoryTaskDetail>(`/factory/tasks/${encodeURIComponent(id)}`)
+}
+
+/** Open the task agent's newest saved Pi session in pi-host, continuable in the task's worktree. 404 before it has one. */
+export function openFactoryTaskSession(id: string): Promise<{ phase: string; session: PiSessionInfo }> {
+  return post(`/factory/tasks/${encodeURIComponent(id)}/session`, {})
 }
 
 export function fetchFactoryEvents(repo: string, after: number): Promise<FactoryEvent[]> {

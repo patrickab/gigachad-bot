@@ -9,6 +9,8 @@ import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { discardReviewNotes } from "@/features/editor/diff/review"
 import { PillTabs } from "@/components/ui/PillTabs"
 import { fetchFactoryTask, sendFactoryMessage } from "@/lib/backend/api"
+import type { PiShellCommands } from "@/features/pi/PiTab"
+import type { PiCatalogProps } from "@/features/pi/PiTopBar"
 import { AgentPanel } from "./AgentPanel"
 import { PreviewPane } from "./PreviewPane"
 import { FINISHED_STATES, allowedActions, statusTone, taskStatusLine } from "./states"
@@ -29,7 +31,13 @@ function changesKey(task: FactoryTaskDetail): string {
 }
 
 /** One task: preview or changes as the surface, the agent in the tab's file panel. */
-export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: string; onBack: () => void }) {
+export function TaskView({ repo, taskId, onBack, modelProps, shellCommands }: {
+  repo: string
+  taskId: string
+  onBack: () => void
+  modelProps: PiCatalogProps
+  shellCommands?: PiShellCommands
+}) {
   const [task, setTask] = useState<FactoryTaskDetail | null>(null)
   const [chosenPane, setChosenPane] = useState<TaskPane | null>(null)
   const [panelOpen, setPanelOpen] = useState(true)
@@ -97,7 +105,7 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
           )}
         </div>
       </div>
-      {current && panelOpen && <AgentPanel task={current} onChanged={reload} onClose={() => setPanelOpen(false)} />}
+      {current && panelOpen && <AgentPanel task={current} onChanged={reload} onClose={() => setPanelOpen(false)} modelProps={modelProps} shellCommands={shellCommands} />}
     </div>
   )
 }

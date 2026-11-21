@@ -1,20 +1,24 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ListChecks } from "lucide-react"
+import { Bot, ListChecks } from "lucide-react"
 import { CopyAction, TurnCard, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { COMPOSER_ICON_BUTTON, Composer } from "@/components/ui/Composer"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
+import { PillTabs } from "@/components/ui/PillTabs"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { FilePanel } from "@/features/editor/FilePanel"
+import type { PiShellCommands } from "@/features/pi/PiTab"
+import type { PiCatalogProps } from "@/features/pi/PiTopBar"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { runFactoryTaskAction, sendFactoryMessage } from "@/lib/backend/api"
 import { cn, errorMessage } from "@/lib/utils"
 import { AttachImagesButton, StagedImages, toFactoryImages, useImageAttachments } from "./ImageAttachments"
 import { PHASE_LABELS, STATE_LABELS, allowedActions } from "./states"
+import { TaskPiChat } from "./TaskPiChat"
 import { PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMessage, FactoryTaskDetail, GateResult, PhaseRun, TaskAction } from "@/lib/domain/factory"
 
@@ -185,12 +189,30 @@ const actionFailure = (action: TaskAction) => `Could not ${action} the task`
 
 const PANEL_WIDTH_PX = 420
 
+type PanelMode = "task" | "pi"
+
+const MODES: readonly { value: PanelMode; label: React.ReactNode; ariaLabel: string }[] = [
+  { value: "task", label: <ListChecks aria-hidden className="h-3.5 w-3.5" />, ariaLabel: "Task overview" },
+  { value: "pi", label: <Bot aria-hidden className="h-3.5 w-3.5" />, ariaLabel: "Agent session" },
+]
+
 /**
  * A task's agent in the tab's file panel: state and its actions in the header, the request and later messages as turns
  * with their phase runs and replies, and the composer while the engine takes messages.
+ *
+ * - Pi mode swaps the overview for the agent's own Pi session (`TaskPiChat`), to read and continue it
  */
-export function AgentPanel({ task, onChanged, onClose }: { task: FactoryTaskDetail; onChanged: () => void; onClose: () => void }) {
+export function AgentPanel({ task, onChanged, onClose, modelProps, shellCommands }: {
+  task: FactoryTaskDetail
+  onChanged: () => void
+  onClose: () => void
+  modelProps: PiCatalogProps
+  shellCommands?: PiShellCommands
+}) {
   const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [chosenMode, setMode] = useState<PanelMode>("task")
+  const [bar, setBar] = useState<HTMLDivElement | null>(null)
+  const mode: PanelMode = task.worktree ? chosenMode : "task"
   const { run, pending: busy, error, setError } = useAsyncAction(async (action: TaskAction) => {
     try {
       await runFactoryTaskAction(task.id, action)
@@ -209,7 +231,20 @@ export function AgentPanel({ task, onChanged, onClose }: { task: FactoryTaskDeta
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
   }, [task.messages.length])
 
+  const modeTabs = task.worktree && <PillTabs className="shrink-0" pillClassName="px-2" options={MODES} value={mode} onChange={setMode} tabs={{ label: "Agent view", idPrefix: "agent-mode", panelId: "agent-mode-panel" }} />
+
+  if (mode === "pi") {
+    return (
+      <FilePanel label="Agent" bare onClose={onClose} width={PANEL_WIDTH_PX} actions={<>{modeTabs}<div ref={setBar} className="flex min-w-0 flex-1" /></>}>
+        <div id="agent-mode-panel" role="tabpanel" aria-labelledby="agent-mode-pi" className="flex min-h-0 flex-1 flex-col">
+          <TaskPiChat task={task} bar={bar} modelProps={modelProps} shellCommands={shellCommands} />
+        </div>
+      </FilePanel>
+    )
+  }
+
   const actions = <>
+    {modeTabs}
     <span className="min-w-0 flex-1 truncate">{STATE_LABELS[task.state]}</span>
     {PRIMARY_ACTIONS.map(({ action, label }) => allowed[action] && <button key={action} type="button" disabled={busy} onClick={() => void run(action)} className={PRIMARY_BUTTON_CLASS}>{label}</button>)}
     {allowed.cancel && !confirmingCancel && <button type="button" disabled={busy} onClick={() => setConfirmingCancel(true)} className={QUIET_BUTTON_CLASS}>Cancel</button>}

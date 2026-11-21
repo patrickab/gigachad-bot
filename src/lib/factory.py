@@ -224,6 +224,14 @@ async def tasks(repo: str, state: TaskState | None = None) -> list[Task]:
     return await _client.request("GET", "/v1/tasks", list[Task], params=params)
 
 
+class TaskSession(ContractModel):
+    """The task agent's most recently saved Pi session: its phase, id and the session file's JSONL."""
+
+    phase: str
+    session_id: str
+    content: str
+
+
 async def create_task(new_task: NewTask) -> Task:
     """Create a task, it starts at once unless `new_task.start` is false."""
     return await _client.request("POST", "/v1/tasks", Task, json=new_task.model_dump(mode="json"))
@@ -257,3 +265,8 @@ async def send_message(task_id: str, message: NewMessage) -> Message:
 async def restart_preview(task_id: str) -> Preview:
     """Restart the task's preview and wait until it is ready or failed."""
     return await _client.request("POST", f"/v1/tasks/{task_id}/preview/restart", Preview, timeout=PREVIEW_RESTART_TIMEOUT_SECONDS)
+
+
+async def latest_session(task_id: str) -> TaskSession:
+    """The task agent's most recently saved Pi session, 404 before its first agent turn saved one."""
+    return await _client.request("GET", f"/v1/tasks/{task_id}/session", TaskSession)
