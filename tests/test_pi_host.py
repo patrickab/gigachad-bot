@@ -319,13 +319,14 @@ def test_files_of_an_absolute_cwd_inside_the_file_roots_or_the_workbench(monkeyp
 def test_unknown_repositories_are_refused_before_pi_host(monkeypatch, repositories):
     host = _serve(monkeypatch, {})
 
-    assert _client().post("/api/pi/sessions", json={"repo": "notes", "resume": None}).status_code == 404
+    assert _client().post("/api/pi/sessions", json={"repo": "missing", "resume": None}).status_code == 404
     assert _client().get("/api/pi/files", params={"repo": "../etc"}).status_code == 404
     assert host.requests == []
 
 
 def test_repositories_are_listed(repositories):
-    assert _client().get("/api/pi/repos").json() == [{"name": "app", "path": str(repositories / "app")}]
+    names = [repo["name"] for repo in _client().get("/api/pi/repos").json()]
+    assert names == ["app", "notes"]
 
 
 def test_pi_host_down_answers_503(monkeypatch):

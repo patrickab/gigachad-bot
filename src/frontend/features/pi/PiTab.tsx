@@ -39,7 +39,7 @@ const NO_SLOTS: PiTopBarSlots = { thinking: null, model: null, usage: null }
 /** The message an open in `repo` that failed shows. */
 function piOpenError(reason: unknown, repo?: string): string {
   if (reason instanceof ApiError && reason.status === 409) return "Another Pi process holds this session"
-  if (reason instanceof ApiError && reason.status === 404 && repo !== undefined && reason.message.startsWith("Unknown repository")) return `${repo} is not a Git checkout under ~/git, Pi sessions start only there`
+  if (reason instanceof ApiError && reason.status === 404 && repo !== undefined && reason.message.startsWith("Unknown repository")) return `${repo} is not a folder under ~/git`
   return reason instanceof Error ? reason.message : String(reason)
 }
 

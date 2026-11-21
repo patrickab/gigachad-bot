@@ -52,8 +52,8 @@ afterEach(() => {
 })
 
 /** The picker opened by its trigger, once its file mounts are read. */
-async function openPicker(folder: string | null = null, onChange = vi.fn()) {
-  render(<PiWorkspacePicker folder={folder} onChange={onChange} />)
+async function openPicker(folder: string | null = null, onChange = vi.fn(), onOpenSession = vi.fn()) {
+  render(<PiWorkspacePicker folder={folder} onChange={onChange} onOpenSession={onOpenSession} />)
   await act(async () => fireEvent.click(screen.getByRole("button", { name: `Project: ${folder === null ? "none" : folder.split("/").at(-1)}` })))
   return onChange
 }
@@ -75,7 +75,7 @@ describe("piStartDirectories", () => {
 })
 
 describe("PiWorkspacePicker", () => {
-  it("lists the Pi checkouts and file mounts with their recent coding sessions, newest first", async () => {
+  it("lists the Pi checkouts and file mounts with the age of their newest coding session, newest first", async () => {
     pi.repositories = REPOSITORIES
     pi.sessions = [piSession("s1", "/home/u/git/gamma", 2 * HOUR, "Fix the parser\nmore"), piSession("s2", "/home/u/git/beta", 30 * HOUR, "Add tests")]
     pi.tree = [{ path: "/mnt/notes", name: "notes", type: "root", children: [] }]
@@ -84,7 +84,7 @@ describe("PiWorkspacePicker", () => {
     const projects = screen.getByRole("group", { name: "Projects" })
     await waitFor(() => expect(within(projects).getAllByRole("option")).toHaveLength(4))
     expect(within(projects).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "gammaFix the parser2h", "betaAdd tests1d", "alpha", "notes",
+      "gamma2h", "beta1d", "alpha", "notes",
     ])
     expect(pi.listFilters).toContainEqual({ profile: "coding" })
   })
@@ -101,6 +101,20 @@ describe("PiWorkspacePicker", () => {
     expect(cleared).toHaveBeenLastCalledWith(null)
   })
 
+  it("lists a hovered row's sessions, a click opens one without picking the folder", async () => {
+    pi.repositories = REPOSITORIES
+    pi.sessions = [piSession("s1", "/home/u/git/gamma", 2 * HOUR, "Fix the parser"), piSession("s2", "/home/u/git/gamma/src", HOUR, "Newer")]
+    const onChange = vi.fn()
+    const onOpenSession = vi.fn()
+    await openPicker(null, onChange, onOpenSession)
+    fireEvent.mouseEnter(within(screen.getByRole("option", { name: /gamma/ })).getByText("gamma").parentElement!)
+    const menu = screen.getByRole("menu", { name: "Sessions in gamma" })
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Newer1h", "Fix the parser2h"])
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Fix the parser/ }))
+    expect(onOpenSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1" }), "gamma")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("says when the session list failed", async () => {
     pi.error = "pi-host is not reachable"
     await openPicker()
@@ -109,7 +123,7 @@ describe("PiWorkspacePicker", () => {
 
   it("is hidden without host access", () => {
     pi.hostAccess = false
-    render(<PiWorkspacePicker folder={null} onChange={vi.fn()} />)
+    render(<PiWorkspacePicker folder={null} onChange={vi.fn()} onOpenSession={vi.fn()} />)
     expect(screen.queryByRole("button", { name: "Project: none" })).toBeNull()
   })
 })

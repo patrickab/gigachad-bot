@@ -201,7 +201,7 @@ describe("PiTab", () => {
     vi.mocked(openPiSession).mockRejectedValue(new ApiError("Unknown repository notes", 404))
     render(<PiTab view={{ repo: "notes", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} />)
     sendText("hello")
-    expect(await screen.findByText("notes is not a Git checkout under ~/git, Pi sessions start only there")).toHaveClass("text-danger")
+    expect(await screen.findByText("notes is not a folder under ~/git")).toHaveClass("text-danger")
   })
 
   it("opens a turn's branch as a fork of the session in the same tab", async () => {

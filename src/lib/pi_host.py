@@ -407,11 +407,11 @@ async def open_websocket() -> ClientConnection:
 
 
 def _is_repository(directory: Path) -> bool:
-    return directory.is_dir() and not directory.name.startswith(".") and (directory / ".git").exists()
+    return directory.is_dir() and not directory.name.startswith(".")
 
 
 def list_repositories() -> list[Repository]:
-    """Git checkouts directly under `~/git`, by name."""
+    """Folders directly under `~/git` (checkouts, bind mounts), by name."""
     if not REPOSITORIES_ROOT.is_dir():
         return []
     children = sorted(REPOSITORIES_ROOT.iterdir(), key=lambda child: child.name.lower())
@@ -419,7 +419,7 @@ def list_repositories() -> list[Repository]:
 
 
 def resolve_repository(name: str) -> Path | None:
-    """The checkout called *name* directly under `~/git`, None for anything else (paths, symlinks out, non-repos)."""
+    """The folder called *name* directly under `~/git`, None for anything else (paths, symlinks out, missing)."""
     candidate = REPOSITORIES_ROOT / name
     if "/" in name or name in ("", ".", "..") or candidate.is_symlink() or not _is_repository(candidate):
         return None
