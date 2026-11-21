@@ -1,0 +1,16 @@
+{
+  "extends": "../pi-host/tsconfig.json",
+  "compilerOptions": {
+    "typeRoots": [
+      "../pi-host/node_modules/@types"
+    ],
+    "paths": {
+      "*": [
+        "../pi-host/node_modules/*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts"
+  ]
+}
