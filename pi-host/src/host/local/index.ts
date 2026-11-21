@@ -7,14 +7,18 @@
  *
  * Spawn strategies (plan D5): `coding` and `document` run the Pi binary directly, the profile shapes its arguments
  * (`supervisor/profiles.ts`) and both load the repo extensions (C6) unless those arguments carry `--no-extensions`.
+ * Names in `<extensionsDir>/exclude.json` (package source, extension name or path) are kept out of both: pi-host then
+ * resolves Pi's own extension set and passes it as `--no-extensions` plus explicit `-e` paths.
  * Both always load pi-host's `extensions/gateway-provider.ts` with the gateway URL and the gateway-only token in their
  * environment: the provider `gateway` serves models of providers the child has no key for, keys stay in pi-host.
  * `sandboxed` runs the same arguments through `agent-sandbox pi-rpc` (`sandbox.ts`, C4, C5), which keeps the same
  * stdio, stdin-EOF and SIGTERM contract.
  */
 import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadToken } from "../../auth.ts";
 import type {
   ForkRequest,
@@ -76,6 +80,44 @@ async function extensionArgs(dir: string): Promise<string[]> {
     .flatMap((name) => ["-e", join(dir, name)]);
 }
 
+/** Pi's built-in extensions (Pi 1.5.2 `settings.md`, "Resources"). */
+const BUILTIN_EXTENSIONS = ["mcp", "llama.cpp", "codemode", "tool-search"];
+
+/** Names in `<dir>/exclude.json`, extensions children skip; none when the file is missing. */
+async function excludedNames(dir: string): Promise<Set<string>> {
+  const text = await readFile(join(dir, "exclude.json"), "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "[]";
+    throw error;
+  });
+  const names: unknown = JSON.parse(text);
+  if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
+    throw new Error(`${join(dir, "exclude.json")} must be a JSON array of extension names`);
+  }
+  return new Set(names);
+}
+
+/** An extension's names: its package source (`npm:pi-foo`) and its own name (file stem, or dir of an `index.*`). */
+function extensionNames(path: string, source: string): string[] {
+  const file = basename(path).replace(/\.[cm]?[jt]s$/, "");
+  return [source, path, file === "index" ? basename(dirname(path)) : file];
+}
+
+/**
+ * The extensions Pi would load for `cwd` minus `excluded`, as `--no-extensions` plus `-e` each, so excluded ones are
+ * never imported (faster child start). Project-scope extensions are dropped: an RPC child cannot grant project trust.
+ */
+async function filteredExtensionArgs(cwd: string, excluded: Set<string>): Promise<string[]> {
+  const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi/agent");
+  const settingsManager = SettingsManager.create(cwd, agentDir);
+  const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager, builtinExtensions: BUILTIN_EXTENSIONS });
+  const { extensions } = await manager.resolve(async () => "skip");
+  const kept = extensions.filter(
+    ({ path, enabled, metadata }) =>
+      enabled && metadata.scope === "user" && !extensionNames(path, metadata.source).some((name) => excluded.has(name)),
+  );
+  return ["--no-extensions", ...kept.flatMap(({ path }) => ["-e", path])];
+}
+
 /** pi-host's own extension registering the provider `gateway` in local children. */
 export const GATEWAY_EXTENSION = resolve(import.meta.dir, "../../../extensions/gateway-provider.ts");
 
@@ -98,7 +140,10 @@ export class LocalHost implements Host {
 
   async spawn({ profile, cwd, piArgs }: SpawnRequest): Promise<PiChild> {
     if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs);
-    const extensions = piArgs.includes("--no-extensions") ? [] : await extensionArgs(this.options.extensionsDir);
+    const restricted = piArgs.includes("--no-extensions");
+    const excluded = restricted ? new Set<string>() : await excludedNames(this.options.extensionsDir);
+    const extensions = restricted ? [] : await extensionArgs(this.options.extensionsDir);
+    if (excluded.size > 0) extensions.unshift(...(await filteredExtensionArgs(cwd, excluded)));
     const gateway = gatewayEnv(this.options.gatewayPort, await loadToken(this.options.gatewayTokenPath));
     return Bun.spawn([this.options.piBin, ...piArgs, "-e", GATEWAY_EXTENSION, ...extensions], {
       cwd,
