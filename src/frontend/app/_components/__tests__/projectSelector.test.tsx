@@ -73,7 +73,9 @@ function renderTab() {
 }
 
 async function pick(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: /^Project: / }))
+  fireEvent.click(await screen.findByRole("button", { name: /^Project: / }))
+  const unused = screen.queryByRole("option", { name: /Not yet used/ })
+  if (unused && !screen.queryByRole("option", { name })) fireEvent.click(unused)
   fireEvent.click(await screen.findByRole("option", { name }))
 }
 

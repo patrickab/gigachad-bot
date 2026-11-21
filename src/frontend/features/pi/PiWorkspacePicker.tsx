@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Check, ChevronDown } from "lucide-react"
+import { Check, ChevronDown, ChevronRight } from "lucide-react"
 import { CommandPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { usePillPopover } from "@/components/ui/PillPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -11,7 +11,7 @@ import { fileRootTree, type PiRepository, type PiSessionInfo } from "@/lib/backe
 import { mountOf } from "@/lib/domain/files"
 import { fuzzyPathScore, rankByScore } from "@/lib/fuzzy"
 import { PATH_COLLATOR, baseName, isInside, trimSlash } from "@/lib/paths"
-import { cn, compactElapsed } from "@/lib/utils"
+import { compactElapsed } from "@/lib/utils"
 import { usePiRepositories, usePiSessions } from "./sessionStore"
 import { piSessionRepository, piSessionsInside, piSessionTitle } from "./usePiSidebar"
 
@@ -22,7 +22,7 @@ export interface PiStartDirectory {
   latest: PiSessionInfo | null
 }
 
-type Entry = { kind: "none" } | { kind: "folder"; directory: PiStartDirectory }
+type Entry = { kind: "none" } | { kind: "unused"; count: number } | { kind: "folder"; directory: PiStartDirectory }
 
 const NO_FOLDER_KEY = "none"
 /** Sessions the hover menu of a row lists, newest first. */
@@ -72,6 +72,7 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
   const [mounts, setMounts] = useState<string[]>([])
   const [mountsFailed, setMountsFailed] = useState(false)
   const [query, setQuery] = useState("")
+  const [showUnused, setShowUnused] = useState(false)
   const popover = usePillPopover(useCallback(() => setQuery(""), []))
   const { open } = popover
   // Rows age from the latest opening, set when its mount read settles
@@ -108,9 +109,14 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
   const searching = trimmedQuery.length > 0
   const directories = piStartDirectories(repositories, mounts, sessions)
   const folders = searching ? rankByScore(directories, (directory) => fuzzyPathScore(directory.path, trimmedQuery)) : directories
+  // Never-used folders sit behind a chevron row, a search shows them all
+  const used = searching ? folders : folders.filter((directory) => directory.latest)
+  const unused = searching ? [] : folders.filter((directory) => !directory.latest)
+  const asEntries = (list: PiStartDirectory[]): Entry[] => list.map((directory) => ({ kind: "folder", directory }))
   const groups: PickerGroup<Entry>[] = [
     { key: "none", items: searching ? [] : [{ kind: "none" }] },
-    { key: "folders", label: searching ? undefined : "Projects", items: folders.map((directory): Entry => ({ kind: "folder", directory })) },
+    { key: "folders", label: searching ? undefined : "Projects", items: asEntries(used) },
+    { key: "unused", items: unused.length === 0 ? [] : [{ kind: "unused", count: unused.length }, ...(showUnused ? asEntries(unused) : [])] },
   ]
   const name = folder === null ? null : baseName(folder)
   const hoveredSessions = hovered && open
@@ -145,14 +151,13 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
   return <CommandPicker<Entry>
     triggerLabel={`Project: ${name ?? "none"}`}
     triggerContent={<>
-      <span className="max-w-32 truncate">{name ?? "None"}</span>
-      <ChevronDown aria-hidden className="h-3 w-3 shrink-0" />
+      <span className="max-w-32 truncate text-[13px]">{name ?? "None"}</span>
     </>}
-    triggerClassName={cn("h-8 px-2 text-ink-faint hover:bg-surface-elevated", name !== null && "text-ink")}
+    triggerClassName="h-8 px-2 text-ink-faint hover:bg-surface-elevated hover:text-ink-muted"
     label="Project"
     popover={popover}
     groups={groups}
-    itemKey={(entry) => (entry.kind === "none" ? NO_FOLDER_KEY : entry.directory.path)}
+    itemKey={(entry) => (entry.kind === "none" ? NO_FOLDER_KEY : entry.kind === "unused" ? "unused" : entry.directory.path)}
     searchPlaceholder="Search projects…"
     query={query}
     onQueryChange={setQuery}
@@ -164,6 +169,11 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
         <span className="min-w-0 flex-1 truncate">None</span>
         {folder === null && <Check aria-hidden className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
       </span>
+      if (entry.kind === "unused") return <span onMouseEnter={(event) => hoverRow(null, event.currentTarget)} className="flex min-w-0 flex-1 items-center gap-1.5 text-ink-faint">
+        {showUnused ? <ChevronDown aria-hidden className="h-3 w-3 shrink-0" /> : <ChevronRight aria-hidden className="h-3 w-3 shrink-0" />}
+        <span className="min-w-0 flex-1 truncate text-[13px] leading-5">Not yet used</span>
+        <span className="shrink-0 text-[11px] tabular-nums">{entry.count}</span>
+      </span>
       const { path, label, latest } = entry.directory
       const age = latest && compactElapsed(Date.parse(latest.modifiedAt), now)
       return <span onMouseEnter={(event) => hoverRow(path, event.currentTarget)} onMouseLeave={leaveHover} className="flex min-w-0 flex-1 items-center gap-2">
@@ -174,6 +184,10 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
       </span>
     }}
     onPick={(entry) => {
+      if (entry.kind === "unused") {
+        setShowUnused((shown) => !shown)
+        return false
+      }
       onChange(entry.kind === "none" ? null : entry.directory.path)
       return true
     }}

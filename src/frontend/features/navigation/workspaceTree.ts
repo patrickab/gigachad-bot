@@ -52,7 +52,7 @@ type ProjectTreeContext =
 
 /** Everything the Code tree shows and does: the Pi parts are session folders and extra actions of directory rows. */
 type CodeTreeContext =
-  & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "folder" | "archived" | "setArchived" | "removeMount">
+  & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "unused" | "mountRepository" | "folder" | "archived" | "setArchived" | "removeMount">
   & FolderRowContext
   & {
     sessions: Pick<CodeMounts["sessions"], "directoryCode" | "directoryActions" | "archivedSessions">
@@ -230,7 +230,7 @@ function projectChats(project: ProjectListItem, branchMeta: Record<string, Branc
 /** Mount rows, checkouts with Pi sessions outside every mount, then the archived sessions folder. */
 export function codeItems(context: CodeTreeContext): FileTreeItem<string>[] {
   const archivedSessions = context.sessions.archivedSessions()
-  return [...mountItems(context), ...unmountedItems(context), ...(archivedSessions ? [archivedSessions] : [])]
+  return [...mountItems(context), ...unmountedItems(context), ...unusedItems(context), ...(archivedSessions ? [archivedSessions] : [])]
 }
 
 /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */
@@ -305,6 +305,27 @@ function unmountedItems({ unmounted, archived, sessions, setArchived }: CodeTree
         children: [code],
       }
     })
+}
+
+/** Checkouts never used: one chevron folder, each a row to mount (files, sessions) or open the factory of. */
+function unusedItems({ unused, archived, sessions, mountRepository }: CodeTreeContext): FileTreeItem<string>[] {
+  const shown = unused.filter((repository) => !archived.has(repository.path))
+  if (shown.length === 0) return []
+  return [{
+    id: "code-unused",
+    label: "Not yet used",
+    type: "folder",
+    children: shown.map((repository) => ({
+      id: `unused:${repository.path}`,
+      label: repository.name,
+      type: "element",
+      onSelect: () => { void mountRepository(repository.path) },
+      actions: [
+        { label: `Mount ${repository.name}`, menuLabel: "Mount", icon: FolderPlus, onClick: () => { void mountRepository(repository.path) } },
+        ...sessions.directoryActions(repository.path, repository.name),
+      ],
+    })),
+  }]
 }
 
 /** Every mount and unmounted workspace of the Code section, with its archive state. */

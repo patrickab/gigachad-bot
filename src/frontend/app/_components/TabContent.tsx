@@ -18,6 +18,7 @@ import { newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import type { Attachment } from "@/lib/domain/types"
 import type { PiLaunch } from "@/features/pi/PiTab"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
+import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { fetchPiRepositories, writeRootFile } from "@/lib/backend/api"
 import { baseName } from "@/lib/paths"
@@ -147,7 +148,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       slug={projectSlug}
       attachmentActions={attachmentActions}
       attachMenuItems={attachMenuItems}
-      composerLeading={isEmptyChat ? <PiWorkspacePicker folder={folder} onChange={pickFolder} /> : undefined}
+      composerLeading={isEmptyChat ? <PiWorkspacePicker folder={folder} onChange={pickFolder} onOpenSession={(session, repo) => onOpenItem(piSessionItem(session, repo ?? newPiItem(session.cwd, projectSlug).pi!.repo, projectSlug))} /> : undefined}
       composerNotice={(isEmptyChat && folderError) || docs.architectureError || undefined}
     />
   )

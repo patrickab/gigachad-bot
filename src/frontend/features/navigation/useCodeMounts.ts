@@ -7,11 +7,13 @@ import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
+import { usePiRepositories } from "@/features/pi/sessionStore"
 import { usePiSidebar } from "@/features/pi/usePiSidebar"
 import { useResource } from "@/hooks/useResource"
-import { removeFileRoot } from "@/lib/backend/api"
+import { addFileRoot, removeFileRoot } from "@/lib/backend/api"
 import { fileRootsEnabledResource, refreshRootTree, revalidateOnActivation, rootTreeResource } from "@/lib/backend/resources"
 import { mountOf, type FileTreeNode } from "@/lib/domain/files"
+import { isInside, trimSlash } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
 import { useWorktrees } from "./useWorktrees"
@@ -50,6 +52,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
       },
     }],
   })
+  const repositories = usePiRepositories()
   const worktrees = useWorktrees(mounts)
   const rootTree = rootTreeResource(worktrees.activeWorktrees.join("\n"))
   const loadedTree = useResource("Sidebar file mounts", rootTree)
@@ -74,8 +77,13 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
     fileRootsEnabledResource.invalidate()
   })
 
+  const unmounted = sessions.unmountedWorkspaces(mounts)
+  // Neither mounted nor holding a session: reachable only by mounting
+  const unused = repositories.filter((repository) => !mounts.some((mount) => isInside(repository.path, mount)) && !unmounted.some((workspace) => workspace.path === trimSlash(repository.path)))
+  const mountRepository = (path: string) => mountThen(() => addFileRoot(path))
+
   return {
-    hostAccess, sessions, rootTreeData, mounts, unmounted: sessions.unmountedWorkspaces(mounts), folder: worktrees.folder,
+    hostAccess, sessions, rootTreeData, mounts, unmounted, unused, mountRepository, folder: worktrees.folder,
     archived, setArchived, mountThen, removeMount,
   }
 }

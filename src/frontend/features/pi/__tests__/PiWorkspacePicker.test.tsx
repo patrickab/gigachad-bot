@@ -82,16 +82,18 @@ describe("PiWorkspacePicker", () => {
     await openPicker()
 
     const projects = screen.getByRole("group", { name: "Projects" })
-    await waitFor(() => expect(within(projects).getAllByRole("option")).toHaveLength(4))
-    expect(within(projects).getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "gamma2h", "beta1d", "alpha", "notes",
-    ])
+    await waitFor(() => expect(within(projects).getAllByRole("option")).toHaveLength(2))
+    expect(within(projects).getAllByRole("option").map((option) => option.textContent)).toEqual(["gamma2h", "beta1d"])
+    // Never-used folders wait behind the chevron row
+    fireEvent.click(screen.getByRole("option", { name: /Not yet used/ }))
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(expect.arrayContaining(["alpha", "notes"]))
     expect(pi.listFilters).toContainEqual({ profile: "coding" })
   })
 
   it("hands the picked checkout's path to the caller, None clears it", async () => {
     pi.repositories = REPOSITORIES
     const onChange = await openPicker()
+    fireEvent.click(screen.getByRole("option", { name: /Not yet used/ }))
     fireEvent.click(screen.getByRole("option", { name: "beta" }))
     expect(onChange).toHaveBeenLastCalledWith("/home/u/git/beta")
 
