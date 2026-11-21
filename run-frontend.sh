@@ -16,5 +16,7 @@ sync_python_deps
 install_frontend_deps
 
 echo "Starting frontend on http://127.0.0.1:2999"
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+# `next dev` restarts itself, and with it reloads the open page, once its heap is 80% full. After the first compile
+# about 3 GB are in use, so a 4 GB heap filled within half an hour of agent edits.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=6144}"
 exec .venv/bin/npm --prefix src/frontend run dev

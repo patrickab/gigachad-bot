@@ -37,6 +37,25 @@ const nextConfig = {
     config.resolve.alias.json5 = require.resolve("json5/lib/index.js");
     config.resolve.fallback = { ...config.resolve.fallback, buffer: require.resolve("buffer/") };
     config.plugins.push(new options.webpack.ProvidePlugin({ Buffer: ["buffer", "Buffer"] }));
+    // The notebook draws Plotly output with the prebuilt Plotly the chat's plots use, one file. Its own dependency is an older
+    // Plotly as some 1500 source modules, which a build bundled as a second copy.
+    config.resolve.alias["plotly.js$"] = require.resolve("plotly.js-dist-min");
+    // `next dev` renders the app in the browser only (`app/_components/AppEntry.dev.tsx`), and its server bundle gets a stub
+    // of the app: webpack builds what a browser-only import reaches for the server too, here some 11000 modules a second time.
+    if (options.dev) {
+      const appFile = (name) => path.join(frontendDir, "app/_components", name);
+      config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/app[\\/]_components[\\/]AppEntry\.tsx$/, appFile("AppEntry.dev.tsx")));
+      if (options.isServer) config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/app[\\/]_components[\\/]App\.tsx$/, appFile("App.dev-server.tsx")));
+      // The notebook editor is a third of the modules (JupyterLab, Primer, their icon sets): `next dev` compiles it when the first
+      // notebook opens, not at startup. webpack tells the page through its own port on localhost, so a browser on another machine
+      // never gets the editor: GIGACHAD_EAGER_NOTEBOOK=1 compiles it up front as a build does.
+      if (!options.isServer && !process.env.GIGACHAD_EAGER_NOTEBOOK) {
+        config.experiments = {
+          ...config.experiments,
+          lazyCompilation: { entries: false, imports: true, test: (module) => /features[\\/]notebook[\\/]NotebookEditor\.tsx$/.test(module.nameForCondition() ?? "") },
+        };
+      }
+    }
     // The toast and splash styles of JupyterLab's apputils-extension are not used by an embedded notebook, and their `@import '~react-toastify/...'` is a
     // webpack tilde path that Tailwind's own import resolver cannot follow.
     config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/@jupyterlab[\\/]apputils-extension[\\/]style[\\/]base\.css$/, require.resolve("./features/notebook/empty.css")));
