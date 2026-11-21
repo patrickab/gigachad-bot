@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Check, ChevronDown, ChevronRight } from "lucide-react"
+import { Check, ChevronDown, ChevronUp } from "lucide-react"
 import { CommandPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { usePillPopover } from "@/components/ui/PillPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -169,10 +169,8 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
         <span className="min-w-0 flex-1 truncate">None</span>
         {folder === null && <Check aria-hidden className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
       </span>
-      if (entry.kind === "unused") return <span onMouseEnter={(event) => hoverRow(null, event.currentTarget)} className="flex min-w-0 flex-1 items-center gap-1.5 text-ink-faint">
-        {showUnused ? <ChevronDown aria-hidden className="h-3 w-3 shrink-0" /> : <ChevronRight aria-hidden className="h-3 w-3 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate text-[13px] leading-5">Not yet used</span>
-        <span className="shrink-0 text-[11px] tabular-nums">{entry.count}</span>
+      if (entry.kind === "unused") return <span role="img" aria-label="Not yet used" onMouseEnter={(event) => hoverRow(null, event.currentTarget)} className="flex min-w-0 flex-1 items-center justify-center text-ink-faint">
+        {showUnused ? <ChevronUp aria-hidden className="h-3.5 w-3.5" /> : <ChevronDown aria-hidden className="h-3.5 w-3.5" />}
       </span>
       const { path, label, latest } = entry.directory
       const age = latest && compactElapsed(Date.parse(latest.modifiedAt), now)
