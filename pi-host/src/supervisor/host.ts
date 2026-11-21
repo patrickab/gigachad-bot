@@ -2,9 +2,12 @@
  * The supervisor behind `createSupervisor()`: live session registry, `POST /sessions`, `/ws` multiplexing, eviction,
  * and the `sessions_changed` broadcast (M25).
  *
- * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, fork, session watcher), Catalog's
- *   `sessionInfo`, `copyPrivateState` and the profile marker (G5), `profiles.ts` for each profile's Pi arguments
- * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18)
+ * - Consumes: `SupervisorConfig`, the `Host` (spawn, session lock, session metadata, fork, delete, session watcher),
+ *   Catalog's `sessionInfo`, `copyPrivateState` and the profile marker (G5), `profiles.ts` for each profile's Pi
+ *   arguments
+ * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18). The
+ *   HTTP rows: `POST /sessions`, `POST /sessions/:id/close`, `POST /sessions/:id/prompt` (a prompt without an attached
+ *   client) and `DELETE /sessions/:id` (it must stop the child first, which only the supervisor can)
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
@@ -30,6 +33,8 @@ type Failure = { status: number; body: Record<string, unknown> };
 type StartOutcome = { session: LiveSession } | Failure;
 
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
+const SESSION_PROMPT = /^\/sessions\/([^/]+)\/prompt$/;
+const SESSION = /^\/sessions\/([^/]+)$/;
 const MAX_EVICTION_INTERVAL_MS = 60_000;
 const MIN_EVICTION_INTERVAL_MS = 50;
 /** Far above any snapshot (omp sessions reach 27 MB): a healthy client never hits it, a stalled one is closed. */
@@ -37,6 +42,20 @@ const BACKPRESSURE_LIMIT_BYTES = 512 * 1024 * 1024;
 
 function fail(status: number, error: string, extra: Record<string, unknown> = {}): Failure {
   return { status, body: { error, ...extra } };
+}
+
+/** JSON response of a failure. */
+function respond({ status, body }: Failure): Response {
+  return Response.json(body, { status });
+}
+
+/** The session id of a route's path segment, undefined when it is not valid percent-encoding. */
+function sessionIdOf(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when `live` differs from `spec` only in its document prompt or tools and nothing is in flight. */
@@ -150,9 +169,9 @@ export class SupervisorHost implements Supervisor {
   async handle(request: Request, url: URL): Promise<Response | undefined> {
     if (url.pathname === "/sessions" && request.method === "POST") {
       const parsed = await parseStartRequest(await request.json().catch(() => undefined), this.host);
-      if ("status" in parsed) return Response.json(parsed.body, { status: parsed.status });
+      if ("status" in parsed) return respond(parsed);
       const outcome = await this.start(parsed);
-      if ("status" in outcome) return Response.json(outcome.body, { status: outcome.status });
+      if ("status" in outcome) return respond(outcome);
       return Response.json({ session: await this.info(outcome.session) });
     }
     const close = SESSION_CLOSE.exec(url.pathname);
@@ -160,7 +179,61 @@ export class SupervisorHost implements Supervisor {
       await this.byId.get(decodeURIComponent(close[1]!))?.close();
       return new Response(null, { status: 204 });
     }
+    const prompt = SESSION_PROMPT.exec(url.pathname);
+    if (prompt && request.method === "POST") {
+      const sessionId = sessionIdOf(prompt[1]!);
+      if (sessionId === undefined) return respond(fail(400, "invalid_session_id"));
+      return this.prompt(sessionId, await request.json().catch(() => undefined));
+    }
+    const target = SESSION.exec(url.pathname);
+    if (target && request.method === "DELETE") {
+      const sessionId = sessionIdOf(target[1]!);
+      if (sessionId === undefined) return respond(fail(400, "invalid_session_id"));
+      const refused = await this.delete(sessionId);
+      return refused ? respond(refused) : new Response(null, { status: 204 });
+    }
     return undefined;
+  }
+
+  /**
+   * `POST /sessions/:id/prompt` with `{message, streamingBehavior?}`: a Pi `prompt` for a live session from a caller
+   * that is not attached, answered with Pi's `{disposition}`. Sent as a pi-host request, so the response reaches no
+   * client; the run it starts reaches them like any other. Pi refuses a prompt during a run unless
+   * `streamingBehavior` (`steer` or `followUp`) says how to queue it.
+   */
+  private async prompt(sessionId: string, body: unknown): Promise<Response> {
+    if (!isRecord(body) || typeof body.message !== "string" || body.message === "") return respond(fail(400, "invalid_body"));
+    const { message, streamingBehavior } = body;
+    if (streamingBehavior !== undefined && streamingBehavior !== "steer" && streamingBehavior !== "followUp") {
+      return respond(fail(400, "invalid_body"));
+    }
+    const session = this.byId.get(sessionId);
+    if (!session || session.closing) return respond(fail(409, "not_live"));
+    const response = await session.requestAsync({ type: "prompt", message, ...(streamingBehavior && { streamingBehavior }) });
+    const disposition = isRecord(response.data) ? response.data.disposition : undefined;
+    if (response.success !== true || typeof disposition !== "string") {
+      return respond(fail(502, "prompt_failed", { message: String(response.error ?? "pi answered no disposition") }));
+    }
+    return Response.json({ disposition });
+  }
+
+  /**
+   * `DELETE /sessions/:id`: stop the session's child whatever it is doing, then remove the session file and its
+   * sidecar. 404 for an id neither a child nor a file has, 409 `live` like archive when another holder has the file
+   * (a child being spawned, another pi-host).
+   */
+  private async delete(sessionId: string): Promise<Failure | undefined> {
+    // A new session has no file before its first message, only its live child knows the id.
+    const liveById = this.byId.get(sessionId);
+    await liveById?.close();
+    const sessionPath = await this.host.findSession(sessionId);
+    const meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
+    if (!meta) return liveById ? undefined : fail(404, "not_found");
+    // Either path form may key the child: a new session's as Pi named it, a resumed one's real path
+    for (const path of new Set([meta.sessionPath, meta.realPath])) await this.byPath.get(path)?.close();
+    const deleted = await this.host.deleteSession(meta.sessionPath);
+    if (deleted.ok) return undefined;
+    return deleted.error === "locked" ? fail(409, "live") : fail(404, "not_found");
   }
 
   async shutdown(): Promise<void> {

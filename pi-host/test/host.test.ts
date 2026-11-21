@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "bun";
 import type {
+  DeleteResult,
   ForkRequest,
   ForkResult,
   Host,
@@ -115,6 +116,14 @@ class FakeHost implements Host {
     this.sessions.delete(sessionPath);
     this.sessions.set(path, { ...meta, sessionPath: path, realPath: path, archived: toArchive });
     return { ok: true, path };
+  }
+
+  async deleteSession(sessionPath: string): Promise<DeleteResult> {
+    if (!this.sessions.has(sessionPath)) return { ok: false, error: "not_found" };
+    if ([...this.locks.values()].includes(sessionPath)) return { ok: false, error: "locked" };
+    this.sessions.delete(sessionPath);
+    this.states.delete(sessionPath);
+    return { ok: true };
   }
 
   async forkSession(request: ForkRequest): Promise<ForkResult> {
@@ -335,4 +344,17 @@ test("a document fork carries the source's profile marker and refuses a coding s
   });
   const listed = await api(`/sessions?cwd=${encodeURIComponent(CWD)}&profile=document`);
   expect(listed.body.sessions.map((session: { sessionPath: string }) => session.sessionPath).sort()).toEqual([sourcePath, forkPath].sort());
+});
+
+test("a delete stops the session's child, then removes file and private state through the Host", async () => {
+  const fork = { sessionId: "01a1f3fe-0000-7000-8000-00000000000c", sessionPath: `${LIVE_ROOT}/project/fork.jsonl` };
+  expect(host.locks.size).toBeGreaterThan(0);
+  expect(supervisor.liveStatus(fork.sessionPath)).toBeDefined();
+
+  expect(await api(`/sessions/${fork.sessionId}`, { method: "DELETE" })).toEqual({ status: 204, body: null });
+  expect(supervisor.liveStatus(fork.sessionPath)).toBeUndefined();
+  expect(host.sessions.has(fork.sessionPath)).toBe(false);
+  expect(host.states.has(fork.sessionPath)).toBe(false);
+  expect([...host.locks.values()]).not.toContain(fork.sessionPath);
+  expect(await api(`/sessions/${fork.sessionId}`, { method: "DELETE" })).toEqual({ status: 404, body: { error: "not_found" } });
 });

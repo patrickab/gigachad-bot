@@ -4,7 +4,7 @@
  * - Consumes: `Host` session metadata and private state, `LiveSessions` for live status
  * - Provides: `SessionInfo`, `sessionInfo`, `listSessions`
  */
-import type { Host, Profile, SessionMeta } from "../host/index.ts";
+import type { FactoryState, Host, Profile, SessionMeta } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 
 export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
@@ -26,6 +26,8 @@ export type SessionInfo = {
   archived: boolean;
   /** The profile the session was started with, `coding` when its sidecar has no marker. */
   profile: Profile;
+  /** Present when the session is a factory task: its last `factory-state` entry. */
+  factory?: FactoryState;
 };
 
 /** Live status under either path form: a new session is keyed before its file exists, a resumed one by real path. */

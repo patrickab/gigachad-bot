@@ -13,6 +13,7 @@
  * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd or across all cwds, header and entry
  *   metadata, lookup by id
  * - `moveSession`: archive or restore a session file and its sidecar
+ * - `deleteSession`: remove a session file and its sidecar
  * - `forkSession`: write a new session file holding one branch of another (D11, Pi's fork and clone)
  * - `readState` / `writeState`: the private state sidecar (M19, M20)
  * - `listFiles`: `@` completion candidates of a cwd (M7)
@@ -54,6 +55,11 @@ export type SessionEntries = { entries: Record<string, unknown>[]; leafId: strin
 /** A held lock is addressed by `lockId`; `busy` when another holder has the file. */
 export type LockResult = { ok: true; lockId: string } | { ok: false; error: "busy" | "missing" };
 
+export const FACTORY_STATES = ["running", "waiting_approve", "blocked", "merging", "done", "cancelled"] as const;
+
+/** A factory task's state as its session file last recorded it (a `factory-state` custom entry, `at` its timestamp). */
+export type FactoryState = { state: (typeof FACTORY_STATES)[number]; round: number; reason: string; at: string };
+
 /** What a session file says about itself plus where it lives. */
 export type SessionMeta = {
   sessionId: string;
@@ -70,12 +76,16 @@ export type SessionMeta = {
   tokens: number;
   parentSession?: string;
   archived: boolean;
+  /** Present when the session is a factory task: its last `factory-state` entry in file order. */
+  factory?: FactoryState;
 };
 
 /** `profile` marks the profile a session was started with (G5); absent means `coding`. */
 export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile };
 
 export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
+
+export type DeleteResult = { ok: true } | { ok: false; error: "locked" | "not_found" };
 
 /** The entry a fork ends at (inclusive) in a source session file; the source's leaf makes a clone. */
 export type ForkRequest = { sessionPath: string; entryId: string };
@@ -110,6 +120,8 @@ export interface Host {
   readEntries(sessionPath: string): Promise<SessionEntries>;
   /** Move between the live and archive roots under the session's lock. */
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
+  /** Remove the session file and its sidecar under the session's lock. */
+  deleteSession(sessionPath: string): Promise<DeleteResult>;
   /**
    * New session in the live root of the source's cwd: new id, `parentSession` = source path, the entries from the
    * root to `entryId`. The source file stays unchanged.

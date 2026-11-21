@@ -3,8 +3,8 @@
  *
  * - Consumes: a `Host` (spawn, session lock, session metadata; Pi version checked at start, M13), Catalog's helpers
  * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
- *   `POST /sessions/:id/close`), the multiplexed `/ws` handler (M16, M18, resync M2) and `LiveSessions` (live status,
- *   closing an idle child before archive) for the catalog
+ *   `POST /sessions/:id/close`, `POST /sessions/:id/prompt`, `DELETE /sessions/:id`), the multiplexed `/ws` handler
+ *   (M16, M18, resync M2) and `LiveSessions` (live status, closing an idle child before archive) for the catalog
  *
  * Liveness (M17): Pi exposes no liveness registry over RPC, so an extension with background work keeps its session
  * from idle eviction by setting a non-empty `setStatus` under key `session-liveness` and clearing it when done.
@@ -13,7 +13,7 @@ import type { WebSocketHandler } from "bun";
 import { isPinned } from "../catalog/index.ts";
 import type { Host } from "../host/index.ts";
 import { LocalHost } from "../host/local/index.ts";
-import { loadConfig, PINNED_PI_VERSION, type SupervisorConfig } from "./config.ts";
+import { loadConfig, type SupervisorConfig } from "./config.ts";
 import { SupervisorHost } from "./host.ts";
 
 export type SocketData = { clientId: string };
@@ -47,14 +47,11 @@ export type SupervisorOptions = Partial<SupervisorConfig> & {
   isPinned?: (sessionPath: string) => Promise<boolean>;
 };
 
-/** Check the host's Pi binary and start the supervisor. Throws unless it is the pinned version (M13). */
+/** Start the supervisor on whatever Pi version the host has installed: Pi updates on its own schedule. */
 export async function createSupervisor(options: SupervisorOptions = {}): Promise<Supervisor> {
   const { host: givenHost, isPinned: pinLookup, ...overrides } = options;
   const config = { ...loadConfig(), ...overrides };
   const host = givenHost ?? new LocalHost(config);
   const version = await host.piVersion();
-  if (version !== PINNED_PI_VERSION) {
-    throw new Error(`Pi on ${host.machine} reported "${version}", pi-host needs ${PINNED_PI_VERSION}`);
-  }
   return new SupervisorHost(config, version, pinLookup ?? ((sessionPath) => isPinned(host, sessionPath)), host);
 }

@@ -1,5 +1,5 @@
 /**
- * Supervisor configuration from the environment and the pinned Pi version (M13).
+ * Supervisor configuration from the environment, and the Pi SDK version pi-host is built against.
  *
  * - Consumes: `PI_HOST_PI_BIN`, `PI_HOST_IDLE_MINUTES`, `PI_HOST_CHILD_ENV`, `PI_HOST_PORT`, `PI_HOST_EXTENSIONS_DIR`,
  *   `PI_HOST_AGENT_SANDBOX_BIN`, `PI_HOST_SANDBOX_PROFILE`, the gateway token path (`auth.ts`),
@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import packageJson from "../../package.json";
 import { gatewayTokenPath } from "../auth.ts";
 
-/** The Pi version pi-host speaks to, the same pin as the SDK dependency. */
+/** The version of the Pi SDK dependency. The installed Pi binary may be newer: pi-host runs whatever the host has. */
 export const PINNED_PI_VERSION: string = packageJson.dependencies["@earendil-works/pi-coding-agent"];
 
 const DEFAULT_IDLE_MINUTES = 15;

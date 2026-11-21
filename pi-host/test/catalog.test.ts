@@ -250,6 +250,143 @@ describe("session entries", () => {
   });
 });
 
+describe("filtered session entries", () => {
+  type EntriesBody = { entries: { id: string }[]; leafId: string | null; error?: string };
+
+  /** A `custom` entry as `pi.appendEntry` writes it. */
+  function custom(id: string, customType: string, data: object = {}): object {
+    return { type: "custom", id, parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType, data };
+  }
+
+  async function writeTimeline(): Promise<void> {
+    await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      custom("c1", "factory-task"),
+      message("u1", "user", "go"),
+      custom("c2", "factory-round", { round: 1 }),
+      custom("c3", "other-thing"),
+      { type: "custom_message", id: "f1", parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType: "factory-feedback", content: "fix" },
+      custom("c4", "factory-state", { state: "running", round: 1, reason: "" }),
+      message("a1", "assistant", []),
+    ]), new Date("2026-11-18T09:07:00.000Z"));
+  }
+
+  async function entries(query: string): Promise<{ status: number; json: EntriesBody }> {
+    return call<EntriesBody>("GET", `/sessions/${OLD_ID}/entries?${query}`);
+  }
+
+  test("customType keeps the custom entries whose type starts with the prefix, the leaf stays the file's", async () => {
+    await writeTimeline();
+    const { status, json } = await entries("customType=factory-");
+    expect(status).toBe(200);
+    expect(json.entries.map((entry) => entry.id)).toEqual(["c1", "c2", "c4"]);
+    expect(json.leafId).toBe("a1");
+    expect((await entries("customType=factory-state")).json.entries.map((entry) => entry.id)).toEqual(["c4"]);
+    expect((await entries("customType=nothing-")).json).toEqual({ entries: [], leafId: "a1" });
+  });
+
+  test("since keeps what was appended after the entry, of any type without customType", async () => {
+    await writeTimeline();
+    expect((await entries("customType=factory-&since=c1")).json.entries.map((entry) => entry.id)).toEqual(["c2", "c4"]);
+    expect((await entries("customType=factory-&since=u1")).json.entries.map((entry) => entry.id)).toEqual(["c2", "c4"]);
+    expect((await entries("since=c3")).json.entries.map((entry) => entry.id)).toEqual(["f1", "c4", "a1"]);
+    expect((await entries("customType=factory-&since=a1")).json).toEqual({ entries: [], leafId: "a1" });
+  });
+
+  test("an unknown since is 400 invalid_since, turns takes neither parameter", async () => {
+    await writeTimeline();
+    const unknown = await entries("customType=factory-&since=nope");
+    expect(unknown.status).toBe(400);
+    expect(unknown.json.error).toBe("invalid_since");
+    expect((await entries("since=")).json.error).toBe("invalid_since");
+    for (const query of ["turns=1&customType=factory-", "turns=1&since=c1"]) {
+      const combined = await entries(query);
+      expect(combined.status).toBe(400);
+      expect(combined.json.error).toBe("invalid_query");
+    }
+  });
+
+  test("an unchanged file answers each query its own cut", async () => {
+    await writeTimeline();
+    const whole = (await call<EntriesBody>("GET", `/sessions/${OLD_ID}/entries`)).json.entries.length;
+    expect(whole).toBe(7);
+    expect((await entries("customType=factory-")).json.entries.length).toBe(3);
+    expect((await entries("customType=factory-&since=c2")).json.entries.length).toBe(1);
+    expect((await entries("turns=1")).json.entries.map((entry) => entry.id)).toEqual(["a1"]);
+    expect((await call<EntriesBody>("GET", `/sessions/${OLD_ID}/entries`)).json.entries.length).toBe(whole);
+  });
+});
+
+describe("factory state", () => {
+  /** A `factory-state` entry as the factory extension appends it. */
+  function state(id: string, timestamp: string, data: object): object {
+    return { type: "custom", id, parentId: null, timestamp, customType: "factory-state", data };
+  }
+
+  /** Write the one fixture session with `lines` after the header and answer its listed row. */
+  async function listed(lines: string[], minute: number): Promise<SessionInfo> {
+    const header = sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", []);
+    await writeSession(OLD_ID, header + lines.map((line) => `${line}\n`).join(""), new Date(Date.UTC(2026, 10, 18, 10, minute)));
+    const { json } = await call("GET", `/sessions?cwd=${encodeURIComponent(projectDir)}`);
+    expect(json.sessions.map((session) => session.sessionId)).toEqual([OLD_ID]);
+    return json.sessions[0]!;
+  }
+
+  const user = JSON.stringify(message("u1", "user", "build it"));
+
+  test("a session without a factory-state entry has no factory field", async () => {
+    const quoted = message("a1", "assistant", [{ type: "text", text: '{"type":"custom","customType":"factory-state"}' }]);
+    const feedback = { type: "custom_message", id: "f1", parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType: "factory-state", content: "x" };
+    const other = { type: "custom", id: "c1", parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType: "factory-task", data: { state: "done" } };
+    const session = await listed([user, JSON.stringify(quoted), JSON.stringify(feedback), JSON.stringify(other)], 1);
+    expect("factory" in session).toBe(false);
+    expect(session.messageCount).toBe(2);
+  });
+
+  test("one entry gives state, round, reason and the entry's timestamp", async () => {
+    const entry = state("s1", "2026-11-18T09:30:00.000Z", { state: "blocked", round: 3, reason: "gates failed" });
+    const session = await listed([user, JSON.stringify(entry)], 2);
+    expect(session.factory).toEqual({ state: "blocked", round: 3, reason: "gates failed", at: "2026-11-18T09:30:00.000Z" });
+    expect(session.firstMessage).toBe("build it");
+  });
+
+  test("of several entries the last in file order wins, whatever their timestamps", async () => {
+    const session = await listed([
+      JSON.stringify(state("s1", "2026-11-18T09:50:00.000Z", { state: "running", round: 1, reason: "" })),
+      user,
+      JSON.stringify(state("s2", "2026-11-18T09:40:00.000Z", { state: "waiting_approve", round: 2, reason: "review ok" })),
+      JSON.stringify(state("s3", "2026-11-18T09:30:00.000Z", { state: "done", round: 2, reason: "merged" })),
+    ], 3);
+    expect(session.factory).toEqual({ state: "done", round: 2, reason: "merged", at: "2026-11-18T09:30:00.000Z" });
+  });
+
+  test("a malformed entry is skipped: the last valid one stays, none leaves the field out", async () => {
+    const valid = JSON.stringify(state("s1", "2026-11-18T09:30:00.000Z", { state: "merging", round: 4, reason: "" }));
+    const malformed = [
+      JSON.stringify(state("s2", "2026-11-18T09:31:00.000Z", { state: "paused", round: 4, reason: "" })),
+      JSON.stringify(state("s3", "2026-11-18T09:32:00.000Z", { state: "done", round: "4", reason: "" })),
+      JSON.stringify(state("s4", "2026-11-18T09:33:00.000Z", { state: "done", round: 4 })),
+      JSON.stringify(state("s5", "2026-11-18T09:34:00.000Z", { state: "done", round: 4, reason: "" })).slice(0, -9),
+    ];
+    const kept = await listed([user, valid, ...malformed], 4);
+    expect(kept.factory).toEqual({ state: "merging", round: 4, reason: "", at: "2026-11-18T09:30:00.000Z" });
+    expect("factory" in (await listed([user, ...malformed], 5))).toBe(false);
+  });
+
+  test("the state follows the file through the summary cache, into single rows and search hits", async () => {
+    // Chained by `parentId`: search reads the active branch only
+    const running = JSON.stringify({ ...state("s1", "2026-11-18T09:30:00.000Z", { state: "running", round: 1, reason: "" }), parentId: "u1" });
+    expect((await listed([user, running], 6)).factory?.state).toBe("running");
+    expect((await listed([user, running], 6)).factory?.state).toBe("running");
+    const done = JSON.stringify({ ...state("s2", "2026-11-18T09:35:00.000Z", { state: "done", round: 1, reason: "merged" }), parentId: "s1" });
+    expect((await listed([user, running, done], 7)).factory).toEqual({ state: "done", round: 1, reason: "merged", at: "2026-11-18T09:35:00.000Z" });
+
+    const pinned = await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
+    expect(pinned.json.session.factory?.state).toBe("done");
+    const search = await call<{ hits: { session: SessionInfo }[] }>("GET", "/search?q=build");
+    expect(search.json.hits.map((hit) => hit.session.factory?.state)).toEqual(["done"]);
+  });
+});
+
 describe("archive and pin", () => {
   test("archive and restore move the session and its sidecar", async () => {
     const { oldPath } = await writeFixtures();

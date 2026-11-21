@@ -155,9 +155,19 @@ async def put_state(session_id: SessionId, body: pi_host.SessionState) -> pi_hos
 
 
 @http_router.get("/sessions/{session_id}/entries")
-async def get_entries(session_id: SessionId, turns: int | None = Query(default=None, ge=1)) -> pi_host.SessionEntries:
-    """The session's persisted entries, for a preview of a session that is not open; *turns* keeps only the last ones."""
-    return await _call(pi_host.session_entries(session_id, turns))
+async def get_entries(
+    session_id: SessionId,
+    turns: int | None = Query(default=None, ge=1),
+    custom_type: str | None = Query(default=None, alias="customType"),
+    since: str | None = None,
+) -> pi_host.SessionEntries:
+    """The session's persisted entries, for a preview of a session that is not open; *turns* keeps only the last ones.
+
+    *customType* keeps the `custom` entries whose type starts with it and *since* those after that entry id: the
+    timeline of a factory task. pi-host refuses them together with *turns* (400 `invalid_query`) and a *since* it
+    does not know (400 `invalid_since`).
+    """
+    return await _call(pi_host.session_entries(session_id, turns, custom_type=custom_type, since=since))
 
 
 @http_router.get("/search")
@@ -212,7 +222,11 @@ async def post_paste(
         raise HTTPException(status_code=413, detail="Videos are at most 200 MB")
     folder = FilePath(await asyncio.to_thread(_cwd, repo) if repo is not None else cwd or "")
     mention = pi_pastes.paste_mention(filename, suffix, datetime.now())
-    with http_errors((pi_pastes.UnknownFolder, 404, None), (FileExistsError, 409, "A paste with that name exists already"), (ValueError, 400, None)):
+    with http_errors(
+        (pi_pastes.UnknownFolder, 404, None),
+        (FileExistsError, 409, "A paste with that name exists already"),
+        (ValueError, 400, None),
+    ):
         stored = await asyncio.to_thread(pi_pastes.store_paste, roots, folder, mention, content)
     return PastedVideo(path=str(stored), mention=mention.as_posix())
 

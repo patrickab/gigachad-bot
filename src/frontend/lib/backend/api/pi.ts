@@ -1,6 +1,7 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
 import { fileForm, post, request } from "./http"
+import type { FactoryState } from "@/lib/domain/factory"
 
 export interface PiRepository {
   name: string
@@ -32,6 +33,8 @@ export interface PiSessionInfo {
   archived: boolean
   /** Session profile (G5): coding tabs, or a workbench `document` chat. Sessions written before profiles are `coding`. */
   profile?: PiProfile
+  /** Newest factory state of a factory task's session, null for any other session. */
+  factory?: FactoryState | null
 }
 
 /** What a session runs as: a coding agent in a repo, or a workbench chat about one document. */

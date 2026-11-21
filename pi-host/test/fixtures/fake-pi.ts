@@ -6,7 +6,8 @@
  * - Provides: Pi-shaped responses and events. Prompt texts script the run: `hold` streams one delta and waits for
  *   `abort`, `dialog` opens a select dialog, `status <key> [text]` sets or clears a status, `compact` appends a
  *   compaction entry, `goto <entryId>` moves the leaf there (a branch switch), `orphan` starts a `sleep` that
- *   inherits stdout and stderr and answers its pid, anything else echoes. `bash` streams `bash_execution_update`s.
+ *   inherits stdout and stderr and answers its pid, anything else echoes. A prompt during a run is refused, or with
+ *   `streamingBehavior` queued (`queue_update`, never delivered). `bash` streams `bash_execution_update`s.
  *   `get_entries` honours `since` like Pi. The session file is written lazily at the first assistant `message_end`.
  *   `get_state` also answers `argv`, the arguments the fixture was started with, so tests can assert profile flags
  */
@@ -48,6 +49,7 @@ let model = { provider: "faux", id: "faux-1" };
 let thinkingLevel = "medium";
 let streaming = false;
 let release: (() => void) | undefined;
+const queue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
 let openDialog: string | undefined;
 
 function emit(record: object): void {
@@ -186,7 +188,12 @@ function handle(command: Command): void {
         orphan.unref();
         return respond(command, { success: true, data: { disposition: "handled", pid: orphan.pid } });
       }
-      if (streaming) return respond(command, { success: false, error: "Agent is streaming" });
+      if (streaming) {
+        if (command.streamingBehavior === undefined) return respond(command, { success: false, error: "Agent is streaming" });
+        queue[command.streamingBehavior === "steer" ? "steering" : "followUp"].push(text);
+        respond(command, { success: true, data: { disposition: "queued" } });
+        return emit({ type: "queue_update", ...queue });
+      }
       respond(command, { success: true, data: { disposition: "started" } });
       void run(text);
       return;

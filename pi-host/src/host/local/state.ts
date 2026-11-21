@@ -2,7 +2,7 @@
  * Private state sidecar files `<session>.jsonl.gigachad.json` on this machine (M19, M20, C6).
  *
  * - Consumes: session file paths
- * - Provides: `readState`, atomic `writeState`, `moveSidecar` for archive and restore
+ * - Provides: `readState`, atomic `writeState`, `moveSidecar` for archive and restore, `removeSidecar` for deletion
  */
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -69,4 +69,9 @@ export async function moveSidecar(fromPath: string, toPath: string): Promise<voi
     await copyFile(sidecarPath(fromPath), sidecarPath(toPath));
     await rm(sidecarPath(fromPath));
   }
+}
+
+/** Remove the sidecar of a deleted session file, no-op when none exists. */
+export async function removeSidecar(sessionPath: string): Promise<void> {
+  await rm(sidecarPath(sessionPath), { force: true });
 }

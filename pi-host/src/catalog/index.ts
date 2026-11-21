@@ -151,12 +151,21 @@ async function handlePutState(request: Request, sessionPath: string, host: Host)
   });
 }
 
-/** `GET /sessions/:id/entries?turns=N`: the session file's entries, a preview of the active branch's last N turns when `turns` is given. */
+/**
+ * `GET /sessions/:id/entries`: the session file's entries. `?turns=N` answers a preview of the active branch's last N
+ * turns. `?customType=<prefix>&since=<entryId>` answers only the `custom` entries whose `customType` starts with the
+ * prefix and only those appended after the entry, 400 `invalid_since` when the file has no such entry. `turns` takes
+ * neither of the two.
+ */
 async function handleEntries(url: URL, sessionPath: string, host: Host): Promise<Response> {
   const raw = url.searchParams.get("turns");
   const turns = raw === null ? undefined : Number(raw);
   if (turns !== undefined && !(Number.isInteger(turns) && turns > 0)) return fail(400, "invalid_turns");
-  return Response.json(await sessionEntries(host, sessionPath, turns));
+  const customType = url.searchParams.get("customType") ?? undefined;
+  const since = url.searchParams.get("since") ?? undefined;
+  if (turns !== undefined && (customType !== undefined || since !== undefined)) return fail(400, "invalid_query");
+  const answer = await sessionEntries(host, sessionPath, { turns, customType, since });
+  return answer ? Response.json(answer) : fail(400, "invalid_since");
 }
 
 /** Route a Catalog request, undefined when the route is not the Catalog's. */

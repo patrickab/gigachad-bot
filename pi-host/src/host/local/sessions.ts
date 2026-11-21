@@ -1,21 +1,29 @@
 /**
  * Pi's JSONL session files on this machine: metadata scan, listing per cwd or across cwds, lookup by id, archive and
- * restore (C7).
+ * restore (C7), deletion.
  *
  * - Consumes: session files under the roots from `paths.ts`, the M1 lock, sidecars from `state.ts`
- * - Provides: `sessionMeta`, `listSessions`, `findSession`, `moveSession`, `readEntries` behind `LocalHost`
+ * - Provides: `sessionMeta`, `listSessions`, `findSession`, `moveSession`, `deleteSession`, `readEntries` behind
+ *   `LocalHost`
  */
-import { mkdir, readdir, realpath, rename, stat } from "node:fs/promises";
+import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import type { MoveResult, SessionEntries, SessionMeta } from "../index.ts";
+import { FACTORY_STATES, type DeleteResult, type FactoryState, type MoveResult, type SessionEntries, type SessionMeta } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { archiveRoot, cwdSessionDir, isInside, sessionsRoot } from "./paths.ts";
-import { moveSidecar } from "./state.ts";
+import { moveSidecar, removeSidecar } from "./state.ts";
 
-type Summary = Pick<SessionMeta, "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession">;
+type Summary = Pick<
+  SessionMeta,
+  "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession" | "factory"
+>;
+type Header = Pick<Summary, "sessionId" | "cwd" | "createdAt" | "parentSession">;
 
 const FIRST_MESSAGE_MAX_CHARS = 300;
 const MESSAGE_LINE_PREFIX = '{"type":"message"';
+/** Pi writes entries with `JSON.stringify`, so a `factory-state` line holds exactly these two substrings. */
+const CUSTOM_LINE_PREFIX = '{"type":"custom",';
+const FACTORY_STATE_MARK = '"customType":"factory-state"';
 const summaryCache = new Map<string, { mtimeMs: number; size: number; summary: Summary }>();
 
 /** Text of a user message's content (string or text blocks). */
@@ -45,8 +53,21 @@ function lastTotalTokens(line: string): number | undefined {
   return found ? Number(found[1]) : undefined;
 }
 
+/** The state a `factory-state` line records, undefined when the line is not one or lacks a field. */
+function factoryState(line: string): FactoryState | undefined {
+  try {
+    const entry = JSON.parse(line);
+    const data = entry?.data;
+    if (entry?.type !== "custom" || entry.customType !== "factory-state" || typeof entry.timestamp !== "string") return undefined;
+    if (!FACTORY_STATES.includes(data?.state) || typeof data.round !== "number" || typeof data.reason !== "string") return undefined;
+    return { state: data.state, round: data.round, reason: data.reason, at: entry.timestamp };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Header fields of a session file's first line, undefined when it is not a Pi session header. */
-function parseHeader(line: string): Omit<Summary, "firstMessage" | "messageCount" | "tokens"> | undefined {
+function parseHeader(line: string): Header | undefined {
   try {
     const header = JSON.parse(line);
     if (header?.type !== "session" || typeof header.id !== "string") return undefined;
@@ -61,10 +82,14 @@ function parseHeader(line: string): Omit<Summary, "firstMessage" | "messageCount
   }
 }
 
-/** Stream a session file once: parse the header, count message lines by prefix, parse only until the first user text. */
+/**
+ * Stream a session file once: parse the header, count message lines by prefix, parse only until the first user text
+ * and the `factory-state` lines (matched by substring first, the last valid one in file order wins).
+ */
 async function scanSession(sessionPath: string): Promise<Summary | undefined> {
   const decoder = new TextDecoder();
-  let header: Omit<Summary, "firstMessage" | "messageCount" | "tokens"> | undefined;
+  let header: Header | undefined;
+  let factory: FactoryState | undefined;
   let firstMessage = "";
   let messageCount = 0;
   let tokens = 0;
@@ -74,7 +99,10 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
       header = parseHeader(line);
       return header !== undefined;
     }
-    if (!line.startsWith(MESSAGE_LINE_PREFIX)) return true;
+    if (!line.startsWith(MESSAGE_LINE_PREFIX)) {
+      if (line.startsWith(CUSTOM_LINE_PREFIX) && line.includes(FACTORY_STATE_MARK)) factory = factoryState(line) ?? factory;
+      return true;
+    }
     messageCount++;
     if (line.includes('"role":"assistant"')) tokens = lastTotalTokens(line) ?? tokens;
     if (!firstMessage && line.includes('"role":"user"')) firstMessage = userText(line);
@@ -94,6 +122,7 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     firstMessage: firstText.length > FIRST_MESSAGE_MAX_CHARS ? `${firstText.slice(0, FIRST_MESSAGE_MAX_CHARS)}…` : firstText,
     messageCount,
     tokens,
+    ...(factory ? { factory } : {}),
   };
 }
 
@@ -217,6 +246,29 @@ export async function moveSession(sessionPath: string, toArchive: boolean): Prom
     }
     summaryCache.delete(sessionPath);
     return { ok: true, path: target };
+  } finally {
+    lock.release();
+  }
+}
+
+/**
+ * Remove a session file and its sidecar. Like a move it holds the session's flock, so a spawn and a delete exclude
+ * each other.
+ */
+export async function deleteSession(sessionPath: string): Promise<DeleteResult> {
+  let lock: FileLock | undefined;
+  try {
+    lock = tryLockFile(sessionPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: false, error: "not_found" };
+    throw error;
+  }
+  if (!lock) return { ok: false, error: "locked" };
+  try {
+    await rm(sessionPath);
+    await removeSidecar(sessionPath);
+    summaryCache.delete(sessionPath);
+    return { ok: true };
   } finally {
     lock.release();
   }

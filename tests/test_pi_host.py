@@ -129,7 +129,7 @@ def test_sessions_pass_through_camel_case_with_the_repo_resolved(monkeypatch, re
     response = _client().get("/api/pi/sessions", params={"repo": "app", "archived": "true"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"sessions": [{**SESSION, "parentSession": None, "profile": "coding"}]}
+    assert response.json() == {"sessions": [{**SESSION, "parentSession": None, "profile": "coding", "factory": None}]}
     assert dict(host.requests[0].url.params) == {"cwd": str(repositories / "app"), "archived": "1"}
 
 
@@ -150,7 +150,7 @@ def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     response = _client().get("/api/pi/search", params={"q": "fix tests"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None, "profile": "coding"}}]}
+    assert response.json() == {"hits": [{**hit, "session": {**SESSION, "parentSession": None, "profile": "coding", "factory": None}}]}
     assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
     assert _client().get("/api/pi/search").status_code == 422
 
@@ -166,6 +166,83 @@ def test_entries_pass_pi_shapes_through_untouched(monkeypatch):
     assert _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"turns": 3}).status_code == 200
     assert dict(host.requests[-1].url.params) == {"turns": "3"}
     assert _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"turns": 0}).status_code == 422
+
+
+def test_entries_forward_the_custom_type_and_since_of_a_factory_timeline(monkeypatch):
+    entry = {"type": "custom", "id": "e2", "customType": "factory-state", "data": {"state": "running"}}
+    host = _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/entries": (200, {"entries": [entry], "leafId": "e9"})})
+
+    response = _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"customType": "factory-", "since": "e1"})
+
+    assert (response.status_code, response.json()) == (200, {"entries": [entry], "leafId": "e9"})
+    assert dict(host.requests[-1].url.params) == {"customType": "factory-", "since": "e1"}
+    _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params={"customType": "factory-"})
+    assert dict(host.requests[-1].url.params) == {"customType": "factory-"}
+
+
+@pytest.mark.parametrize(
+    ("params", "error"),
+    [({"customType": "factory-", "since": "gone"}, "invalid_since"), ({"turns": 2, "since": "e1"}, "invalid_query")],
+)
+def test_entries_pass_the_refusal_of_a_bad_filter_on_as_400(monkeypatch, params, error):
+    _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/entries": (400, {"error": error})})
+
+    refused = _client().get(f"/api/pi/sessions/{SESSION_ID}/entries", params=params)
+
+    assert (refused.status_code, refused.json()) == (400, {"detail": error, "body": {"error": error}})
+
+
+async def test_factory_entries_are_filtered_by_custom_type_and_since(monkeypatch):
+    entry = {"type": "custom", "id": "e2", "customType": "factory-state", "data": {"state": "running", "round": 1, "reason": ""}}
+    host = _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/entries": (200, {"entries": [entry], "leafId": "e9"})})
+
+    answer = await pi_host.session_entries(SESSION_ID, custom_type="factory-", since="e1")
+    await pi_host.session_entries(SESSION_ID, custom_type="factory-")
+
+    assert (answer.entries, answer.leaf_id) == ([entry], "e9")
+    assert dict(host.requests[0].url.params) == {"customType": "factory-", "since": "e1"}
+    assert dict(host.requests[1].url.params) == {"customType": "factory-"}
+
+
+async def test_a_prompt_reaches_the_session_and_answers_its_disposition(monkeypatch):
+    host = _serve(monkeypatch, {f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"})})
+
+    assert await pi_host.prompt_session(SESSION_ID, "/factory approve") == "handled"
+    assert await pi_host.prompt_session(SESSION_ID, "Also the icon", "followUp") == "handled"
+
+    assert json.loads(host.requests[0].content) == {"message": "/factory approve"}
+    assert json.loads(host.requests[1].content) == {"message": "Also the icon", "streamingBehavior": "followUp"}
+
+
+async def test_a_prompt_to_a_stopped_session_is_refused_with_pi_hosts_status(monkeypatch):
+    _serve(monkeypatch, {f"POST /sessions/{SESSION_ID}/prompt": (409, {"error": "not_live"})})
+
+    with pytest.raises(pi_host.PiHostRejected) as refused:
+        await pi_host.prompt_session(SESSION_ID, "/factory approve")
+
+    assert (refused.value.status, refused.value.body) == (409, {"error": "not_live"})
+
+
+async def test_delete_removes_the_session_and_an_unknown_one_is_refused(monkeypatch):
+    routes = {f"DELETE /sessions/{SESSION_ID}": (204, None), "DELETE /sessions/absent": (404, {"error": "not_found"})}
+    host = _serve(monkeypatch, routes)
+
+    assert await pi_host.delete_session(SESSION_ID) is None
+    with pytest.raises(pi_host.PiHostRejected) as refused:
+        await pi_host.delete_session("absent")
+
+    assert refused.value.status == 404
+    assert [request.method for request in host.requests] == ["DELETE", "DELETE"]
+
+
+def test_a_factory_task_session_carries_its_state():
+    state = {"state": "waiting_approve", "round": 2, "reason": "", "at": "2026-11-19T10:05:00.000Z"}
+
+    session = pi_host.SessionInfo.model_validate({**SESSION, "factory": state})
+
+    assert session.factory == pi_host.FactoryState(state="waiting_approve", round=2, reason="", at="2026-11-19T10:05:00.000Z")
+    assert session.model_dump(by_alias=True)["factory"] == state
+    assert pi_host.SessionInfo.model_validate(SESSION).factory is None
 
 
 def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositories):
@@ -193,7 +270,8 @@ def test_open_session_passes_a_fork_through(monkeypatch, repositories):
 
     assert response.status_code == 200, response.text
     assert response.json()["session"]["parentSession"] == "/s/source.jsonl"
-    assert json.loads(host.requests[0].content) == {"cwd": str(repositories / "app"), "profile": "coding", "resume": {"forkOf": fork_of}}
+    sent = json.loads(host.requests[0].content)
+    assert sent == {"cwd": str(repositories / "app"), "profile": "coding", "resume": {"forkOf": fork_of}}
     invalid = {"repo": "app", "resume": {"forkOf": {"sessionPath": "/s/source.jsonl"}}}
     assert _client().post("/api/pi/sessions", json=invalid).status_code == 422
 
@@ -410,9 +488,11 @@ def test_ws_refuses_foreign_origins_and_logins_without_host_access(monkeypatch):
     # The handshake succeeds and the close carries the code: a close before accept would reach the browser as 1006.
     with fake_socket_host(monkeypatch) as fake:
         for client, origin in ((_client(), "https://evil.example"), (_client(has_host_access=False), ORIGIN)):
-            with client.websocket_connect("/api/pi/ws", headers={"origin": origin}) as socket:
-                with pytest.raises(WebSocketDisconnect) as refused:
-                    socket.receive_text()
+            with (
+                client.websocket_connect("/api/pi/ws", headers={"origin": origin}) as socket,
+                pytest.raises(WebSocketDisconnect) as refused,
+            ):
+                socket.receive_text()
             assert refused.value.code == websocket_origin.POLICY_VIOLATION
         assert fake.headers == {}
 
@@ -420,7 +500,9 @@ def test_ws_refuses_foreign_origins_and_logins_without_host_access(monkeypatch):
 @pytest.mark.usefixtures("trusted_loopback")
 def test_ws_answers_try_again_later_when_pi_host_is_down(monkeypatch):
     monkeypatch.setenv("GIGACHAD_PI_HOST_URL", "http://127.0.0.1:9")
-    with _client().websocket_connect("/api/pi/ws", headers={"origin": ORIGIN}) as socket:
-        with pytest.raises(WebSocketDisconnect) as refused:
-            socket.receive_text()
+    with (
+        _client().websocket_connect("/api/pi/ws", headers={"origin": ORIGIN}) as socket,
+        pytest.raises(WebSocketDisconnect) as refused,
+    ):
+        socket.receive_text()
     assert refused.value.code == 1013

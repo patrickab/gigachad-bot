@@ -180,9 +180,9 @@ describe("auth", () => {
   });
 });
 
-test("refuses a Pi binary with another version", async () => {
-  const otherPi = wrapper("pi-old", "echo 1.4.0");
-  await expect(createSupervisor({ piBin: otherPi })).rejects.toThrow("pi-host needs 1.5.2");
+test("starts on a Pi binary of any version", async () => {
+  const otherPi = wrapper("pi-other", "echo 9.9.9");
+  await expect(createSupervisor({ piBin: otherPi })).resolves.toBeDefined();
 });
 
 describe("live sessions", () => {
@@ -928,6 +928,8 @@ test("the gateway token opens /v1/* only, the full token every route (C1)", asyn
   expect((await fetch(`${base}/sessions?cwd=/`, { headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/health`, { headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/usage`, { headers: gateway })).status).toBe(401);
+  expect((await fetch(`${base}/sessions/any/prompt`, { method: "POST", headers: gateway, body: '{"message":"hi"}' })).status).toBe(401);
+  expect((await fetch(`${base}/sessions/any`, { method: "DELETE", headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/ws`, { headers: { ...gateway, upgrade: "websocket" } })).status).toBe(401);
 });
 
@@ -1079,5 +1081,139 @@ describe("spawn strategies (C5, C6)", () => {
       ANTHROPIC_API_KEY: "secret",
     });
     expect(env).toEqual({ PATH: "/bin", HOME: "/home/someone", XDG_RUNTIME_DIR: "/run/user/1000", PI_GATEWAY_TOKEN: "gw" });
+  });
+});
+
+describe("POST /sessions/:id/prompt", () => {
+  async function prompt(sessionId: string, body: unknown): Promise<{ status: number; body: unknown }> {
+    const response = await api(`/sessions/${sessionId}/prompt`, { method: "POST", body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }
+
+  test("a live session takes the prompt without a client and answers Pi's disposition, the response reaches no client", async () => {
+    const { session } = await (await startSession({ cwd: workdir("prompt-live") })).json();
+    expect(await prompt(session.sessionId, { message: "hello" })).toEqual({ status: 200, body: { disposition: "started" } });
+    await until(() => (existsSync(session.sessionPath) && !supervisor.liveStatus(session.sessionPath)?.running ? true : undefined));
+    expect(readFileSync(session.sessionPath, "utf8")).toContain("echo: hello");
+
+    const viewer = await client();
+    await viewer.attach(session.sessionId);
+    expect(await prompt(session.sessionId, { message: "status build busy" })).toEqual({ status: 200, body: { disposition: "handled" } });
+    expect((await viewer.pi((record) => record.method === "setStatus")).record).toMatchObject({ statusKey: "build", statusText: "busy" });
+    expect(await prompt(session.sessionId, { message: "again" })).toEqual({ status: 200, body: { disposition: "started" } });
+    await viewer.pi((record) => record.type === "agent_settled");
+    expect(viewer.frames.filter((frame) => frame.type === "pi" && frame.record.type === "response")).toEqual([]);
+    expect(viewer.sequenceGaps).toEqual([]);
+  });
+
+  test("409 not_live without a child, 400 for a body without a message", async () => {
+    const { sessionId } = writeSessionFile(workdir("prompt-idle"), [messageEntry("u1", null, "user", "hi")]);
+    expect(await prompt(sessionId, { message: "hello" })).toEqual({ status: 409, body: { error: "not_live" } });
+    expect(await prompt("no-such-session", { message: "hello" })).toEqual({ status: 409, body: { error: "not_live" } });
+    for (const body of [{}, { message: 1 }, { message: "" }, "hello", { message: "hi", streamingBehavior: "queue" }, { message: "hi", streamingBehavior: null }]) {
+      expect(await prompt(sessionId, body)).toEqual({ status: 400, body: { error: "invalid_body" } });
+    }
+    expect((await api(`/sessions/${sessionId}/prompt`)).status).toBe(404);
+  });
+
+  test("502 prompt_failed with Pi's error when Pi refuses the prompt", async () => {
+    const { session } = await (await startSession({ cwd: workdir("prompt-refused") })).json();
+    expect((await prompt(session.sessionId, { message: "hold" })).status).toBe(200);
+    expect(await prompt(session.sessionId, { message: "more" })).toEqual({
+      status: 502,
+      body: { error: "prompt_failed", message: "Agent is streaming" },
+    });
+    expect((await api(`/sessions/${session.sessionId}/close`, { method: "POST" })).status).toBe(204);
+  });
+
+  test("streamingBehavior reaches Pi, which queues the prompt of a running session instead of refusing it", async () => {
+    const { session } = await (await startSession({ cwd: workdir("prompt-queued") })).json();
+    const viewer = await client();
+    await viewer.attach(session.sessionId);
+    expect((await prompt(session.sessionId, { message: "hold" })).status).toBe(200);
+    expect(await prompt(session.sessionId, { message: "later", streamingBehavior: "followUp" })).toEqual({ status: 200, body: { disposition: "queued" } });
+    expect((await viewer.pi((record) => record.type === "queue_update")).record).toMatchObject({ steering: [], followUp: ["later"] });
+    expect(await prompt(session.sessionId, { message: "now", streamingBehavior: "steer" })).toEqual({ status: 200, body: { disposition: "queued" } });
+    expect((await viewer.pi((record) => record.type === "queue_update" && record.steering.length > 0)).record).toMatchObject({
+      steering: ["now"],
+      followUp: ["later"],
+    });
+    expect((await api(`/sessions/${session.sessionId}/close`, { method: "POST" })).status).toBe(204);
+  });
+});
+
+describe("DELETE /sessions/:id", () => {
+  function remove(sessionId: string): Promise<Response> {
+    return api(`/sessions/${sessionId}`, { method: "DELETE" });
+  }
+
+  async function liveIds(): Promise<string[]> {
+    const health = await (await api("/health")).json();
+    return health.sessions.map((session: { sessionId: string }) => session.sessionId);
+  }
+
+  test("removes an idle session's file and sidecar, 404 once it is gone", async () => {
+    const cwd = workdir("delete-idle");
+    const { sessionId, sessionPath } = writeSessionFile(cwd, [messageEntry("u1", null, "user", "hi")]);
+    const sidecar = `${sessionPath}.gigachad.json`;
+    expect((await api(`/sessions/${sessionId}/pin`, { method: "PUT", body: JSON.stringify({ pinned: true }) })).status).toBe(200);
+    expect(existsSync(sidecar)).toBe(true);
+
+    const removed = await remove(sessionId);
+    expect(removed.status).toBe(204);
+    expect(await removed.text()).toBe("");
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(existsSync(sidecar)).toBe(false);
+    expect((await (await api(`/sessions?cwd=${encodeURIComponent(cwd)}`)).json()).sessions).toEqual([]);
+
+    const again = await remove(sessionId);
+    expect(again.status).toBe(404);
+    expect(await again.json()).toEqual({ error: "not_found" });
+  });
+
+  test("stops a running, attached child first", async () => {
+    const cwd = workdir("delete-live");
+    const { sessionId, sessionPath } = writeSessionFile(cwd, [
+      messageEntry("u1", null, "user", "hi"),
+      messageEntry("a1", "u1", "assistant", "hello"),
+    ]);
+    expect((await startSession({ cwd, resume: { sessionPath } })).status).toBe(200);
+    const viewer = await client();
+    await viewer.attach(sessionId);
+    viewer.command(sessionId, { type: "prompt", message: "hold" });
+    await viewer.pi((record) => record.type === "message_update");
+    expect(supervisor.liveStatus(sessionPath)).toMatchObject({ running: true, attached: 1 });
+
+    expect((await remove(sessionId)).status).toBe(204);
+    expect((await viewer.next((frame) => frame.type === "exit")).sessionId).toBe(sessionId);
+    expect(supervisor.liveStatus(sessionPath)).toBeUndefined();
+    expect(await liveIds()).not.toContain(sessionId);
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(existsSync(`${sessionPath}.gigachad.json`)).toBe(false);
+  });
+
+  test("stops the child of a new session that has no file yet", async () => {
+    const { session } = await (await startSession({ cwd: workdir("delete-new") })).json();
+    expect(existsSync(session.sessionPath)).toBe(false);
+    expect(await liveIds()).toContain(session.sessionId);
+    expect((await remove(session.sessionId)).status).toBe(204);
+    expect(await liveIds()).not.toContain(session.sessionId);
+    expect((await remove(session.sessionId)).status).toBe(404);
+  });
+
+  test("an unknown id is 404, a file another holder has locked 409 live like archive", async () => {
+    expect((await remove("no-such-session")).status).toBe(404);
+    expect((await remove("..%2F..%2Fetc")).status).toBe(404);
+    expect((await remove("%E0%A4%A")).status).toBe(400);
+
+    const { sessionId, sessionPath } = writeSessionFile(workdir("delete-held"), [messageEntry("u1", null, "user", "hi")]);
+    const held = tryLockFile(sessionPath)!;
+    const refused = await remove(sessionId);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "live" });
+    expect(existsSync(sessionPath)).toBe(true);
+    held.release();
+    expect((await remove(sessionId)).status).toBe(204);
+    expect(existsSync(sessionPath)).toBe(false);
   });
 });

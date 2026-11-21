@@ -4,6 +4,8 @@
 - Consumes pi-host's HTTP API (`.docs/pi-migration-contracts.md`, "pi-host HTTP") and the token file pi-host creates on start
 - Provides the session, file and private-state calls of `/api/pi/*` and the workbench chats (`document` profile with the
   backend's system prompt, P3), a WebSocket opener for the `/ws` proxy and the gateway URL
+- Provides what the factory drives a task's session with: a prompt without an attached client, its `factory-` entries,
+  its removal, and `SessionInfo.factory`
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
 - Failures are `PiHostUnavailable` (503), `PiHostBadResponse` (502) or `PiHostRejected` (pi-host's own status and body)
 - Also lists the repositories under `~/git` a session may start in, and resolves a repository name to its folder
@@ -72,6 +74,15 @@ class LiveStatus(ContractModel):
     attached: int
 
 
+class FactoryState(ContractModel):
+    """A factory task's state as its session file last recorded it (a `factory-state` entry), `at` its timestamp."""
+
+    state: Literal["running", "waiting_approve", "blocked", "merging", "done", "cancelled"]
+    round: int
+    reason: str
+    at: str
+
+
 class SessionInfo(ContractModel):
     session_id: str
     session_path: str
@@ -89,6 +100,8 @@ class SessionInfo(ContractModel):
     archived: bool
     # Sessions written before profiles existed are coding sessions.
     profile: Profile = "coding"
+    # Set when the session is a factory task.
+    factory: FactoryState | None = None
 
 
 class SessionList(ContractModel):
@@ -165,6 +178,12 @@ class SessionEntries(ContractModel):
 
 class SearchResult(ContractModel):
     hits: list[SearchHit]
+
+
+class PromptAnswer(ContractModel):
+    """How Pi took a prompt: `handled` for an extension command, else Pi's own disposition of a message."""
+
+    disposition: str
 
 
 class Health(ContractModel):
@@ -337,11 +356,37 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
     return (await _request("GET", "/files", FileList, params=params)).files
 
 
-async def session_entries(session_id: str, turns: int | None = None) -> SessionEntries:
+async def session_entries(
+    session_id: str, turns: int | None = None, *, custom_type: str | None = None, since: str | None = None
+) -> SessionEntries:
     """Every persisted entry of the session in append order, read from its file; with *turns* only the active branch's
-    last *turns* turns."""
-    params: dict[str, str | int] | None = None if turns is None else {"turns": turns}
-    return await _request("GET", f"/sessions/{session_id}/entries", SessionEntries, params=params)
+    last *turns* turns.
+
+    - *custom_type* keeps only the `custom` entries whose `customType` starts with it, *since* those after that entry
+      id (400 `invalid_since` for an unknown one). `leaf_id` is then the file's last entry. Neither goes with *turns*
+    """
+    given = {"turns": turns, "customType": custom_type, "since": since}
+    params: dict[str, str | int] = {name: value for name, value in given.items() if value is not None}
+    return await _request("GET", f"/sessions/{session_id}/entries", SessionEntries, params=params or None)
+
+
+async def prompt_session(
+    session_id: str, message: str, streaming_behavior: Literal["steer", "followUp"] | None = None
+) -> str:
+    """Send *message* to the live session as a Pi prompt, returns Pi's disposition (`handled` for an extension command).
+
+    - A session that is not live answers 409 `not_live`, a prompt Pi refuses 502 `prompt_failed`
+    - Pi refuses a prompt during a run unless *streaming_behavior* says how to queue it
+    """
+    body: dict[str, object] = {"message": message}
+    if streaming_behavior is not None:
+        body["streamingBehavior"] = streaming_behavior
+    return (await _request("POST", f"/sessions/{session_id}/prompt", PromptAnswer, json=body)).disposition
+
+
+async def delete_session(session_id: str) -> None:
+    """Remove the session file and its sidecar, stopping a live child first. 404 for an unknown session."""
+    await _send("DELETE", f"/sessions/{session_id}")
 
 
 async def search_sessions(query: str, limit: int = 20) -> list[SearchHit]:

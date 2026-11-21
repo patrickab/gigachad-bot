@@ -21,6 +21,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadToken } from "../../auth.ts";
 import type {
+  DeleteResult,
   ForkRequest,
   ForkResult,
   Host,
@@ -39,7 +40,7 @@ import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { spawnSandboxed } from "./sandbox.ts";
 import { searchSessions } from "./search.ts";
-import { findSession, listSessions, readEntries, moveSession, sessionMeta } from "./sessions.ts";
+import { deleteSession, findSession, listSessions, readEntries, moveSession, sessionMeta } from "./sessions.ts";
 import { readState, writeState } from "./state.ts";
 import { watchSessions } from "./watch.ts";
 
@@ -195,6 +196,10 @@ export class LocalHost implements Host {
 
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult> {
     return moveSession(sessionPath, toArchive);
+  }
+
+  deleteSession(sessionPath: string): Promise<DeleteResult> {
+    return deleteSession(sessionPath);
   }
 
   forkSession(request: ForkRequest): Promise<ForkResult> {
