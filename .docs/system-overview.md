@@ -15,7 +15,7 @@ GigaChad Bot is a self-hosted, local-first LLM workspace for conversations, rese
 | Canvas | An infinite drawing workspace with ink, notes, page/image frames, and document windows |
 | Architecture workspace | A project's merged LikeC4 model, editable as diagrams and `.c4` source |
 | Pi session | A coding-agent conversation run by Pi through pi-host, distinct from local model chat |
-| Factory task | An agent workflow running in its own git worktree, with review, gates, messages, and optional previews |
+| Factory task | A Pi coding session that a pipeline drives through gates, review and merge, in its own git worktree or the current checkout, with an optional preview |
 | Workbench | One `.md` file or one LaTeX project as Neovim beside its rendered view (Markdown preview or built PDF) with a Pi chat drawer. The files live on disk and the agent edits them there |
 | Learn session | A LearnHarness teaching session (probe, plan, teach, recall) shown in learn mode, host-only |
 | Memory | Reviewed, document-backed facts supplied to later chats, globally or within a project; not vector search |
@@ -26,11 +26,11 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 - Run the development workspace on Linux with Bash, Python 3.12 or 3.13, `uv`, and running Docker with Compose accessible to the user. The launcher installs dependencies, including Node.js; the default local MinerU OCR stack makes first installation large.
 - Start the workspace with `./run.sh` or the individual launchers. Agents start it as [AGENTS.md](../AGENTS.md#running-the-dev-server) describes.
-- Open the development UI at `localhost:2999`; the API runs at `127.0.0.1:8001`. LikeC4, pi-host, and factory are supporting services, not alternate user workspaces.
+- Open the development UI at `localhost:2999`; the API runs at `127.0.0.1:8001`. LikeC4, pi-host, and the preview gate are supporting services, not alternate user workspaces.
 - Startup reuses PostgreSQL credentials and data. If `POSTGRES_PASSWORD_DEV` is missing, setup asks before generating credentials and creating the database; declining stops startup without changes. Restore an existing database's original password rather than replacing it.
 - Keep provider credentials in private `~/.secrets` or the environment. Optional nonsecret configuration belongs in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env`.
 - Pi tabs require `pi` at the version `pi-host/package.json` pins on the backend's `PATH`; `run.sh` starts pi-host (set `GIGACHAD_PI_HOST=0` to skip it).
-- The factory launcher can provision its separate engine checkout, configuration, and database while preserving existing state. Set `GIGACHAD_FACTORY=0` to skip it. Running sandboxed tasks still requires the sandbox runtime setup.
+- `run.sh` also starts the factory preview gate. Set `GIGACHAD_FACTORY=0` to skip it.
 - Keep production backend services private. Development launchers are not production deployment. Host-access users can trigger a production redeploy from settings. Remote inference, identity, production setup, and service updates belong to the maintained runbooks indexed in [AGENTS.md](../AGENTS.md#documentation).
 - Failed startup reads show a shared warning after an error or a 15-second timeout. Retry reloads only failed data without losing drafts or already-loaded content.
 
@@ -40,7 +40,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Distinguish Pi models in local chat from Pi coding-session tabs. Every local-chat model, Ollama included, answers through pi-host's completion gateway, the tabs run Pi sessions through pi-host.
 - Stream replies, revisit saved histories, branch from a message, and merge branches back into a conversation.
 - Collapsed answers render their rich text when nearby or focused, reducing work in long chats. Hidden tabs wait until shown, and expanding a turn reveals its full answer.
-- Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent workflows and are separate.
+- Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent tasks and are separate.
 - Space outside text fields opens the tab picker: search over open tabs with a live preview of the highlighted one. Delete (at the end of the search) or Alt+W closes the highlighted tab, Alt+T opens a new background tab, both keep the picker open.
 - Rename a project to move all its chats, documents, canvases, architecture, memory and attachments to the new slug, with internal links updated. A name whose slug is taken is refused. Archive projects (and, per device, Code directories) to hide them from the sidebar, restore from the section's archive list.
 - Keep each chat's project membership independent of the currently selected project elsewhere. Its containing project determines project memory, even when another tab is active.
@@ -136,8 +136,8 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 - Open a mount's diff to compare working-tree changes with `HEAD`; navigate changed files in unified or split view.
 - Select code in one file and, in split view, one side to add a review note. Notes retain selected code/context per worktree across reloads.
-- Copy ordinary diff notes without clearing drafts. For factory tasks in `human_review` or `blocked`, send notes as feedback with the selected code and current locations/context.
-- When anchors cannot be resolved uniquely, preserve original locations and mark the note outdated. Failed sends retain notes; successful sends clear only submitted notes that have not changed. Sent reviews appear in task messages, not inline reply threads.
+- Copy diff notes without clearing drafts.
+- When anchors cannot be resolved uniquely, preserve original locations and mark the note outdated. Failed sends retain notes; successful sends clear only submitted notes that have not changed.
 - Optionally edit a diff in Neovim with read-only `HEAD` beside the working file. Save with `:w` and return with `:qa`. Deleted, binary, oversized, and symlinked diff files cannot use this path.
 - Enable Neovim per device when available: host-access identity, `nvim` on backend `PATH`, and an existing `$XDG_CONFIG_HOME/nvim` configuration directory (default `~/.config/nvim`). Otherwise use the built-in editor.
 - Neovim `:w` uses the document's normal save path, including architecture validation; failed saves leave the buffer modified. Yanks are copied to the browser clipboard. Preview/fullscreen switches preserve the session, but closing/quitting/disconnecting terminates it and loses unsaved edits. While focused, its terminal owns all keys, including Escape.
@@ -162,17 +162,19 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Agent factory
 
-The independent Agents-in-a-box engine runs agent workflows in task git worktrees. GigaChad provides repository boards, task messages, review findings, gates, diffs, and previews.
+A factory task is a normal Pi coding session. A pipeline inside it runs the coder, then the repository's gates and a read-only reviewer, feeds problems back as the next round, and merges when a round passes. GigaChad sets tasks up and shows boards, timelines, diffs and previews.
 
-1. Open a repository's factory board and register the repository if needed.
-2. Choose a workflow and submit a request, optionally with images (file picker or paste). Model overrides are Pi `provider/model` ids, not `litellm_proxy/` model names.
-3. Follow phases, findings, gate results, messages, and changes. Approve, retry, cancel, or send feedback (text, optionally with images) when the task's state permits.
-4. Review task diffs and send selected-code comments during human review or when blocked. Host users can inspect admitted factory worktrees without first creating a mount.
-5. Open a preview when the workflow provides one. Preview data starts empty; a task scenario can seed representative content and select a chat, document, canvas, or architecture deep link.
+1. Open a repository's factory board and register its primary checkout if needed. Set its defaults: the branch tasks start from and merge into (`main`, else `master`, when unset), merge `auto` or `review`, max rounds, review on or off, worktree or current checkout, a model per role.
+2. Create a task with a title and a request, optionally overriding worktree, branch and merge.
+3. Follow it on the board (Needs you, Working, Merging, Finished) and in the task view: the diff, the round timeline with gate output and review findings, and the agent's Pi session, which can be steered while it runs. Comment on lines of the diff and send the comments as one review message, which starts a new round.
+4. Approve a task waiting for approval, retry a blocked or cancelled one, cancel a running one, or write to it: a message to a finished task starts new rounds on the same branch.
+5. Start a preview from the task view when the repository's `factory.yaml` defines one. Preview data starts empty.
+6. Delete a finished, blocked or interrupted task: its session, worktree and branch go.
 
-- Agent/default configuration affects new tasks, not already-running tasks. Repository conventions and workflow configuration determine agents, sandboxing, hooks, gates, and preview processes; see [architecture](architecture.md) for precedence and the repository contract.
-- The engine alone starts preview services on ports 8100–8199. Their backend uses development identity and an empty database. Remote production previews must be disabled because remote browsers cannot reach host-loopback ports.
-- Factory features require host access, the separate engine, and its configured sandbox prerequisites. Engine refusals remain refusals; a disconnected engine does not silently turn into an in-process task runner.
+- A worktree task starts from the tip of its branch and merges into it; a branch checked out in another worktree is refused. Before every run and at merge the task is squashed to one commit and rebased onto the branch: a conflict becomes a coder round, which counts against max rounds. The reviewer sees the request and every follow-up message; a round without changes ends the task done. A current-checkout task commits to the checked-out branch and only its own changes: edits the user made before it started stay uncommitted, and commits or pulls the user makes meanwhile become its new base. One unfinished current-checkout task per checkout.
+- `factory.yaml`, `.factory/agents/coder.md` and `reviewer.md` come from the task's base commit; the coder cannot change them. Precedence and contracts: [architecture](architecture.md).
+- Previews run on host loopback ports 8100–8199 with the development identity, reachable only through the preview gate.
+- Factory features require host access and a running pi-host.
 
 ## Learn mode
 

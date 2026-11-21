@@ -72,7 +72,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, the session WebSocket relay to pi-host (host access)
-|   |       |-- factory.py            Agent factory API boundary
+|   |       |-- factory.py            `/api/factory`: repos, settings, tasks, commands, diff (host access)
+|   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
 |   |       `-- upstream.py           Host-access dependency and adapter error mapping
 |   |-- lib/                          Python domain services, stores and external adapters
@@ -131,7 +132,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- pi_models.py              Pi model catalog for local chats, stored selector -> gateway id (`gateway_model_id`)
 |   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
-|   |   |-- factory.py                External factory engine adapter
+|   |   |-- factory.py                Factory tasks: models, `FactoryStore` (`factory_tasks`, `factory_repo_settings`), settings chain, branch resolution, diff, task life over pi-host
+|   |   |-- factory_workspace.py      Task worktrees through `agent-worktree`, current-checkout rule, `factory.yaml` reader
+|   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
@@ -261,10 +264,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- AddSlide.tsx, useLatexTemplates.ts Primitive picker of a presentation root, template set per root
 |       |   |   `-- present/          PresentButton, presenter and audience windows over one `BroadcastChannel`, slide notes from PDF annotations
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
-|       |   |-- factory/              Boards, task details, settings and previews
-|       |   |   |-- FactoryBoard.tsx
-|       |   |   |-- ImageAttachments.tsx Images staged on a new task or task message (picker, paste), sent as base64 `images`
-|       |   |   `-- TaskView.tsx
+|       |   |-- factory/              Boards, task view, settings and previews
+|       |   |   |-- FactoryBoard.tsx  Task columns per repo, delete
+|       |   |   |-- states.ts         Shown state, labels, board columns, allowed actions
+|       |   |   |-- useFactoryTasks.ts Task list per repo, refetched on pi-host session changes
+|       |   |   |-- TaskView.tsx      Diff or preview, commands, `AgentPanel` (timeline, Pi session)
+|       |   |   |-- taskReview.ts     Review comments on the task diff, sent as one message that opens a round
+|       |   |   `-- TaskTimeline.tsx, useTaskTimeline.ts Rounds, gates, review and merge from the session's `factory-` entries
 |       |   |-- memory/               Memory window, review panel and memory commands
 |       |   |   |-- MemoryViewer.tsx  Memory window shell and view switching
 |       |   |   |-- useMemoryLibrary.ts Scope loading, queued per-scope writes, delete with undo
@@ -367,16 +373,18 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-frontend.sh                   Frontend launch/setup
 |-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
 |-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md`
+|-- pi-extensions/                    Pi extensions loaded into every `coding` session
+|   `-- factory/                      Factory pipeline: commands, rounds, rebase onto the task branch, gates, review child (`reviewer-tool.ts`), merge, entries
 |-- run-learnharness.sh               LearnHarness sidecar launcher
 |-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
-|-- run-factory.sh                    External factory engine launcher
 |-- run-preview-gate.sh               Factory preview gate launcher
-|-- factory.yaml                      Factory hooks, test gate and preview configuration
+|-- factory.yaml                      Factory hooks, gates, protected paths and preview configuration
+|-- .factory/agents/                  Factory role prompts `coder.md`, `reviewer.md`
 `-- deploy/                           Production units and service/ingress helpers
     |-- gigachad-bot.service
     |-- gigachad-bot-pi-host.service
     |-- gigachad-bot-learnharness*.service/.timer  Learn mode units, see `.docs/integration-learnharness.md`
-    |-- gigachad-bot-factory.service
+    |-- gigachad-bot-preview-gate.service
     |-- run-production-*.sh           Production runners of pi-host and LearnHarness
     |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile)
     |-- install-systemd-service.sh
@@ -404,7 +412,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Route mounted-file work through `lib/file_roots.py` (listing in `file_walk.py`, host-access policy in `host_access.py`, wiki links in `wiki_links.py`); use `git_diff.py` and `git_worktree.py` for git operations, both over `git.py` (`GitError`, `git_text`, `git_ok`; `WorktreeError` is a `GitError`). Keep host paths distinct from database keys and client URLs.
 - Split architecture changes by ownership: `architecture_workspace.py` reads/commits sources; `architecture_service.py` runs validated writes and the commit-conflict retry; `c4_service.py` calls the service; `src/c4/` parses, lays out and edits source in memory; `features/editor/architecture/` handles browser interaction. The C4 service does not own persistence.
 - Keep pi-host contract knowledge in `lib/pi_host.py`, factory contracts in `lib/factory.py`, and shared request/validation plumbing (`request_json`, `UpstreamClient`) in `lib/upstream.py`. Their route adapters map failures; `backend/learnharness_gate.py` and `backend/preview_gate.py` are identity proxies, not upstream API adapters.
-- Treat Pi, the Agents-in-a-box factory engine, and native sandbox implementation as external dependencies. This repository owns their integration surfaces (pi-host included), not their internal task/session/execution engines.
+- Treat Pi and the native sandbox implementation (Agents-in-a-box) as external dependencies. This repository owns their integration surfaces (pi-host and `pi-extensions/` included), not their internal session/execution engines.
 - Keep sandbox execution and persistence distinct: `sandbox_service.py` stages workspace state, `routes/histories.py` checkpoints it after a successful chat save, and `sandbox_store.py` records durable manifests/runs. See [architecture](architecture.md#sandbox-checkpoint-boundary).
 - Add a new numbered SQL migration under `db/schema/` for schema changes; `lib/db_schema.py` records checksums, so applied migration files are not editable history.
 
@@ -418,7 +426,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | `factory.yaml`, `run-factory.sh`, `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
+| Factory integration | `factory.yaml`, `.factory/agents/`, `pi-extensions/factory/`, `src/lib/factory.py`, `src/lib/factory_workspace.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 
@@ -447,7 +455,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
 | Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
-| Factory tasks, review submission or preview UI | `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/frontend/features/editor/diff/review.ts`, `app/_components/deepLink.ts`, `factory.yaml`; `tests/test_factory.py`, factory/diff `__tests__/` |
+| Factory pipeline, tasks or preview UI | `pi-extensions/factory/`, `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_workspace.py`, `src/lib/factory_preview.py`, `factory.yaml`; `pi-extensions/factory/*.test.ts`, `tests/test_factory*.py`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |
@@ -459,7 +467,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 - Use `tests/` for Python route/service/store and access-policy coverage. `tests/conftest.py` and `pyproject.toml` own fixture/test setup: Postgres fixtures (`database_url`, `postgres_pool`, `clean_database`, `data_store`, `asset_store`) and the `route_client` app builder live only in `conftest.py`, in-memory fakes in `tests/fakes.py`. PostgreSQL integration behavior is represented by `test_postgres_mode_end_to_end.py` and store conformance tests.
 - Use colocated `src/frontend/**/__tests__/` for browser logic/components, including shared package tests. Configuration lives at `src/frontend/vitest.config.ts` and `vitest.setup.ts`.
 - Use `src/c4/operations.test.ts` for LikeC4 source-edit/layout regressions; this service has its own `package.json`, separate from the frontend package.
-- Use `factory.yaml` to locate the repository-wide factory gate and preview process configuration, not to infer factory engine internals.
+- Use `factory.yaml` to locate the repository-wide factory hooks, gates and preview process configuration.
 
 ## Refresh evidence and scope
 

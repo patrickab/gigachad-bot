@@ -48,7 +48,7 @@ To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optio
 
 `./run.sh` also starts pi-host on `127.0.0.1:8300`, which runs the Pi sessions of the code tabs and workbench chats. It needs `pi` on `PATH` at the version `pi-host/package.json` pins. Set `GIGACHAD_PI_HOST=0` to skip it. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
 
-`./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires sandbox runtime setup. Find the runbook in the [repository documentation index](AGENTS.md#documentation).
+`./run.sh` also starts the factory preview gate on `127.0.0.1:30185`, the one address a browser reaches factory previews through. Factory tasks run as pi-host sessions. Set `GIGACHAD_FACTORY=0` to skip the gate.
 
 ## Further reading
 

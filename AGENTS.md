@@ -5,13 +5,13 @@ via `run.sh`.
 
 - Check whether the app is already up first (ports 2999 and 8001). If it is,
   use that instance. Never launch a second copy alongside it.
-- Otherwise start it yourself in tmux via `agent-proc start app './run.sh'`
-  (global AGENTS.md, "Long-Running Processes"), tell the user
-  `tmux attach -t gigachad-bot`, and `agent-proc stop app` when done.
+- Otherwise start `./run.sh` yourself as a supervised process (global
+  AGENTS.md, "Long-Running Processes"), tell the user how to watch it, and
+  stop it when done.
 - Never start it with plain background jobs, `nohup` or raw tmux.
-- Exception: the agent factory engine starts previews of task worktrees (backend
+- Exception: the factory task view starts previews of task workspaces (backend
   and frontend on ports 8100-8199, `.docs/architecture.md`, "Agent factory").
-  That is the engine's job, you never start one yourself.
+  That is the backend's job, you never start one yourself.
 
 ## Testing
 
@@ -28,7 +28,6 @@ via `run.sh`.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
 - `.docs/integration-learnharness.md`: everything about learn mode (LearnHarness): goal, decisions, architecture, rules, operations. Read it only when working on learn mode.
 - `.docs/pi-migration.md`: moving from OMP to Pi (ADR 0003): pi-host, contracts, decisions, phases. Read it for any Pi or pi-host work. Keep it current as phases land, delete it once its lasting parts are in `.docs/architecture.md`.
-- `.docs/factory-on-pi.md`: plan for rebuilding the agent factory on Pi sessions (decisions, pipeline, phases). Read it for any factory work. Delete it once its lasting parts are in `.docs/architecture.md`.
 - `templates/latex/AGENTS.md`: rules for the LaTeX presentation template sets (primitives, theme, re-rendering `example.tex`/`example.pdf` after every change). Read it before touching `templates/latex/`.
 
 ## UI hints
