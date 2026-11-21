@@ -52,7 +52,7 @@ export function CanvasFrameView({ frame: f, aspect, scale, onDragStart, onRemove
         )}
       </g>
       {/* rounded border */}
-      <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} fill="none" stroke="var(--divider-strong)" strokeWidth={u} style={{ pointerEvents: "none" }} />
+      <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} fill="none" stroke="var(--divider)" strokeWidth={u} style={{ pointerEvents: "none" }} />
 
       {/* top drag-band hit area (move) */}
       <rect

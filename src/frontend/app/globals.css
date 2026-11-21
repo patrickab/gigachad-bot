@@ -847,6 +847,12 @@ code {
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.6 -0.55'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
   mask-size: 240px 240px;
 }
+/* A window's title bar and resize grip wait for the pointer or focus. Touch screens cannot hover, there they stay. */
+.canvas-card-chrome { transition: opacity 150ms ease-out; }
+@media (hover: hover) {
+  .canvas-card:not(:hover):not(:focus-within) > .canvas-card-chrome { opacity: 0; }
+}
+
 .ink-highlight { opacity: 0.4; mix-blend-mode: multiply; }
 :root:not(.light) .ink-highlight { mix-blend-mode: screen; }
 :root:not(.light) .pdf-light-paper .ink-highlight { mix-blend-mode: multiply; }

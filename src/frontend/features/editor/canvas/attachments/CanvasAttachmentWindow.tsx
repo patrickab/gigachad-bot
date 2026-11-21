@@ -11,6 +11,7 @@ import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useEventListener } from "@/hooks/useEventListener"
 
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + its 8px side gaps — wider layout gains no resolution
 const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
@@ -42,13 +43,24 @@ interface CanvasAttachmentWindowProps {
   renderNestedCanvas: (attachment: NestedCanvasAttachment, name: string) => ReactNode
 }
 
-/** A live, scrollable window over the canvas for a PDF, document, architecture diagram or nested canvas. Never baked into export. */
+/**
+ * A live, scrollable window over the canvas for a PDF, document, architecture diagram or nested canvas. Never baked into export.
+ *
+ * - A borderless card lying on the canvas. Its title, buttons and resize grip show on hover or focus (always on touch screens)
+ * - Picked up by its title bar or grip it lifts: a deeper shadow until the release
+ */
 export function CanvasAttachmentWindow({
   attachment: att, shownName, scale, settledScale, offset, pdfAspect, full, inert,
   onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, pdfPen, renderNestedCanvas,
 }: CanvasAttachmentWindowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   useEscapeLayer(() => setEditingTitle(false), editingTitle)
+  const [lifted, setLifted] = useState(false)
+  useEventListener("window", "pointerup", () => setLifted(false))
+  const startDrag = (mode: "move" | "resize", clientX: number, clientY: number) => {
+    setLifted(true)
+    onDragStart(mode, clientX, clientY)
+  }
   const pdf = att.kind === "pdf"
   const fixedSize = attachmentTraits[att.kind].fixedHeight
   const aspect = pdf ? pdfAspect : CANVAS_ASPECT
@@ -100,8 +112,9 @@ export function CanvasAttachmentWindow({
   return (
     <div
       className={cn(
-        "absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]",
-        full && "z-20",
+        "canvas-card absolute flex flex-col overflow-hidden bg-surface transition-shadow duration-200 ease-out motion-reduce:transition-none",
+        full ? "z-20" : "rounded-2xl",
+        lifted ? "shadow-[var(--shadow-xl),var(--inner-highlight)]" : "shadow-[var(--shadow-md),var(--inner-highlight)]",
         inert && "pointer-events-none",
       )}
       style={full
@@ -112,10 +125,10 @@ export function CanvasAttachmentWindow({
     >
       <div
         className={cn(
-          "flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 select-none shrink-0",
+          "canvas-card-chrome flex items-center gap-1.5 px-2.5 py-1 select-none shrink-0",
           !full && "cursor-grab active:cursor-grabbing",
         )}
-        onPointerDown={(e) => { e.stopPropagation(); if (!full) onDragStart("move", e.clientX, e.clientY) }}
+        onPointerDown={(e) => { e.stopPropagation(); if (!full) startDrag("move", e.clientX, e.clientY) }}
       >
         {att.kind === "canvas" ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
         {editingTitle ? (
@@ -158,7 +171,7 @@ export function CanvasAttachmentWindow({
       >
         {body()}
       </div>
-      {!full && <CanvasResizeHandle className="w-4 h-4" onDragStart={onDragStart} />}
+      {!full && <CanvasResizeHandle className="canvas-card-chrome w-4 h-4" onDragStart={startDrag} />}
     </div>
   )
 }
