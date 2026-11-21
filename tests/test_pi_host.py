@@ -55,6 +55,10 @@ def repositories(tmp_path, monkeypatch):
     root = tmp_path / "git"
     (root / "app" / ".git").mkdir(parents=True)
     (root / "notes").mkdir()
+    (tmp_path / "dev" / "tool").mkdir(parents=True)
+    (tmp_path / "code" / "proj" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(pi_host, "HOME", tmp_path)
+    monkeypatch.setattr(pi_host, "DEV_ROOT", tmp_path / "dev")
     monkeypatch.setattr(pi_host, "REPOSITORIES_ROOT", root)
     return root
 
@@ -326,7 +330,7 @@ def test_unknown_repositories_are_refused_before_pi_host(monkeypatch, repositori
 
 def test_repositories_are_listed(repositories):
     names = [repo["name"] for repo in _client().get("/api/pi/repos").json()]
-    assert names == ["app", "notes"]
+    assert names == ["app", "notes", "dev/tool", "code/proj"]
 
 
 def test_pi_host_down_answers_503(monkeypatch):

@@ -19,6 +19,8 @@ VIDEO = b"\x00\x00\x00\x18ftypmp42"
 def git_root(tmp_path, monkeypatch):
     root = tmp_path / "git"
     (root / "app" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(pi_host, "HOME", tmp_path)
+    monkeypatch.setattr(pi_host, "DEV_ROOT", tmp_path / "dev")
     monkeypatch.setattr(pi_host, "REPOSITORIES_ROOT", root)
     return root
 

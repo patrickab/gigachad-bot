@@ -35,6 +35,10 @@ from lib.upstream import (
 DEFAULT_URL = "http://127.0.0.1:8300"
 LABEL = "pi-host"
 REPOSITORIES_ROOT = Path.home() / "git"
+HOME = Path.home()
+DEV_ROOT = HOME / "dev"
+SCAN_DEPTH = 4
+SCAN_SKIP = frozenset({"node_modules", ".cache", ".local", ".cargo", ".rustup", ".npm", ".venv", "venv", ".git", "__pycache__"})
 
 # Tests swap in an `httpx.MockTransport`, None is the real network.
 _transport: httpx.AsyncBaseTransport | None = None
@@ -406,21 +410,45 @@ async def open_websocket() -> ClientConnection:
         raise PiHostUnavailable(f"{LABEL} refused the WebSocket: {exc}") from exc
 
 
-def _is_repository(directory: Path) -> bool:
-    return directory.is_dir() and not directory.name.startswith(".")
+def _is_folder(directory: Path) -> bool:
+    return directory.is_dir() and not directory.name.startswith(".") and not directory.is_symlink()
+
+
+def _git_repositories(directory: Path, depth: int) -> list[Path]:
+    """Folders under *directory* holding a `.git`, not descending into a repository or `SCAN_SKIP`."""
+    try:
+        children = sorted(directory.iterdir(), key=lambda child: child.name.lower())
+    except OSError:
+        return []
+    found: list[Path] = []
+    for child in children:
+        if child.name in SCAN_SKIP or child.is_symlink() or not child.is_dir():
+            continue
+        if (child / ".git").exists():
+            found.append(child)
+        elif depth > 1:
+            found.extend(_git_repositories(child, depth - 1))
+    return found
 
 
 def list_repositories() -> list[Repository]:
-    """Folders directly under `~/git` (checkouts, bind mounts), by name."""
-    if not REPOSITORIES_ROOT.is_dir():
-        return []
-    children = sorted(REPOSITORIES_ROOT.iterdir(), key=lambda child: child.name.lower())
-    return [Repository(name=child.name, path=str(child)) for child in children if _is_repository(child)]
+    """Where a session may start, by name: every folder directly under `~/git` (plain `<folder>`), every folder
+    directly under `~/dev` and every Git checkout found within `SCAN_DEPTH` levels of `~` (`<path from ~>`)."""
+    paths: dict[str, Path] = {}
+    if REPOSITORIES_ROOT.is_dir():
+        for child in sorted(REPOSITORIES_ROOT.iterdir(), key=lambda child: child.name.lower()):
+            if _is_folder(child):
+                paths[child.name] = child
+    if DEV_ROOT.is_dir():
+        for child in sorted(DEV_ROOT.iterdir(), key=lambda child: child.name.lower()):
+            if _is_folder(child):
+                paths.setdefault(str(child.relative_to(HOME)), child)
+    for checkout in _git_repositories(HOME, SCAN_DEPTH):
+        if checkout.parent != REPOSITORIES_ROOT:
+            paths.setdefault(str(checkout.relative_to(HOME)), checkout)
+    return [Repository(name=name, path=str(path)) for name, path in paths.items()]
 
 
 def resolve_repository(name: str) -> Path | None:
-    """The folder called *name* directly under `~/git`, None for anything else (paths, symlinks out, missing)."""
-    candidate = REPOSITORIES_ROOT / name
-    if "/" in name or name in ("", ".", "..") or candidate.is_symlink() or not _is_repository(candidate):
-        return None
-    return candidate
+    """The folder *name* names in `list_repositories`, None for anything else."""
+    return next((Path(repository.path) for repository in list_repositories() if repository.name == name), None)

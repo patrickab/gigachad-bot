@@ -1,7 +1,7 @@
 """`/api/pi/*`: Pi coding sessions for logins with host access (`backend.identity.HOST_CAPABILITY`), served by pi-host.
 
 - Consumes `lib.pi_host`, the only module that knows pi-host (D6). These routes never build pi-host URLs
-- `repo` is a checkout name under `~/git`, resolved to the session folder here (`pi_host.resolve_repository`)
+- `repo` is a name from `pi_host.list_repositories` (folders under `~/git` and `~/dev`, Git checkouts under `~`), resolved to the session folder here (`pi_host.resolve_repository`)
 - `GET /files` also takes an absolute `cwd` for the `@` completion of workbench chats: inside the file roots or the
   workbench folder only
 - `POST /pastes` stores a video pasted into a Pi composer in the session folder's `.pi/pastes/` (`lib.pi_pastes`), the
