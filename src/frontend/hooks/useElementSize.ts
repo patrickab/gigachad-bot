@@ -6,11 +6,14 @@ type Size = { width: number; height: number }
 
 const ZERO_SIZE: Size = { width: 0, height: 0 }
 
-/** Rounded rendered size of the element mounted in `ref`, measured before paint and tracked with a `ResizeObserver`; `initial` until the first measurement. */
-export function useElementSize(ref: RefObject<HTMLElement | null>, initial: Size = ZERO_SIZE): Size {
+/**
+ * Rounded rendered size of the element mounted in `ref`, measured before paint and tracked with a `ResizeObserver`; `initial` until the first measurement.
+ * `ref` may also be the element itself, from a callback ref kept in state.
+ */
+export function useElementSize(ref: RefObject<HTMLElement | null> | HTMLElement | null, initial: Size = ZERO_SIZE): Size {
   const [size, setSize] = useState(initial)
   useLayoutEffect(() => {
-    const element = ref.current
+    const element = ref instanceof HTMLElement || ref === null ? ref : ref.current
     if (!element) return
     const update = (width: number, height: number) => {
       const next = { width: Math.round(width), height: Math.round(height) }

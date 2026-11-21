@@ -171,6 +171,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   // Known to be empty only once attached: a connecting session keeps the composer at the bottom, like a chat whose history loads
   const empty = status.kind === "ready" && !firstSubmit && messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
   const dock = useComposerDock(empty && !docked)
+  const { mountColumn } = dock
   const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
   useEffect(() => {
     openTranscripts.set(sessionId, messages)
@@ -233,7 +234,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   }
 
   return (
-    <section ref={dock.columnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
       <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
       <ComposerDock dock={dock}>
@@ -347,6 +348,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   const newCommands = useComposerCommands(NO_COMMANDS, shellCommands)
   const shown = opened && opened.sessionId === sessionId ? opened : null
   const dock = useComposerDock(!sessionId)
+  const { mountColumn } = dock
 
   if (shown) {
     return (
@@ -386,7 +388,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   }
 
   return (
-    <section ref={dock.columnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <PiTopBar slots={slots} header={null} controls={newControls} modelProps={modelProps} />
       <ComposerDock dock={dock}>
         <PiComposer

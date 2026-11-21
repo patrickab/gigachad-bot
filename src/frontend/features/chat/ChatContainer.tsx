@@ -101,6 +101,7 @@ export function ChatContainer({
 
   // A chat known to be empty lifts the composer to just below the column's middle. A loading one keeps it at the bottom
   const dock = useComposerDock(messages.length === 0 && !historyLoading)
+  const { mountColumn } = dock
 
   // Neovim starts from the text it is given, so a text preview waits for the fresh file. PDFs and images open at once and update.
   const onPreviewOpen = attachmentActions?.onPreviewOpen
@@ -133,7 +134,7 @@ export function ChatContainer({
 
   return (
     <div className="absolute inset-0 flex">
-      <div ref={dock.columnRef} className="flex-1 min-w-0 flex flex-col relative">
+      <div ref={mountColumn} className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
           tabIndex={-1}

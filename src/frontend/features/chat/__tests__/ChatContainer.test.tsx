@@ -12,11 +12,12 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useSettings: () => ({ ocrModel: "" }),
   useNeovimSetting: () => ({ available: false, enabled: false, setPreferred: () => {} }),
 }))
-// jsdom lays nothing out: size the composer (measured first each render) and the column (second) so the empty state can center
-const sizeCalls = vi.hoisted(() => ({ count: 0 }))
-vi.mock("@/hooks/useElementSize", () => ({ useElementSize: () => ({ width: 800, height: sizeCalls.count++ % 2 === 0 ? 100 : 600 }) }))
+const GREETING = vi.hoisted(() => "What's on your mind?")
 
-const GREETING = "What's on your mind?"
+// jsdom lays nothing out: size the composer (the element holding the greeting) and the column so the empty state can center
+vi.mock("@/hooks/useElementSize", () => ({
+  useElementSize: (element: HTMLElement | null) => ({ width: 800, height: !element ? 0 : element.firstElementChild?.textContent === GREETING ? 100 : 600 }),
+}))
 
 function renderChat(historyLoading: boolean) {
   render(<ChatContainer chatId="c1" messages={[]} historyLoading={historyLoading} isStreaming={false} onSend={() => {}} onCancel={() => {}} onDeletePair={() => {}} />)
