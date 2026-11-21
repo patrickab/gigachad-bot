@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useId, useRef, useState, type ElementType, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
-import { ChevronRight, Ellipsis, Plus, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Ellipsis, Plus, Trash2 } from "lucide-react"
 import { cn, errorMessage, toggled } from "@/lib/utils"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
@@ -54,6 +54,8 @@ export interface FileTreeItem<T = unknown> {
   badge?: string | number
   /** Replaces the chevron of an app-generated branch (worktrees, sessions), marking it apart from the files beside it. */
   icon?: ElementType
+  /** A folder shown as a chevron and its child count in the disclosure column, `label` only its accessible name, e.g. a row hiding rarely used entries. */
+  chevronOnly?: boolean
   /** Space below the row and its contents, separating it from the next sibling. */
   gapAfter?: boolean
   /** Right-aligned row end, e.g. line change counts. The label truncates first. */
@@ -292,6 +294,11 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           className={cn("flex min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted", rowHeight(depth),
             item.isActive ? "font-medium text-ink" : item.type === "root" || (branch && depth === 0) ? "text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
         >
+          {item.chevronOnly ? <span className="flex items-center gap-2 text-ink-faint">
+            <ChevronDown aria-hidden className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-180")} />
+            <span aria-hidden className="px-1 text-[10px] tabular-nums">{item.children?.length}</span>
+            <span className="sr-only">{item.label}</span>
+          </span> : <>
           {!(branch && item.onSelect) && (branch ? disclosure : <span className="w-3 shrink-0" />)}
           <span
             data-workspace-highlight={item.type === "element" && item.isActive || selected || undefined}
@@ -303,6 +310,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
             {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
           </span>
           {item.meta != null && <span className="ml-auto flex shrink-0 gap-1.5 text-[10px] tabular-nums">{item.meta}</span>}
+          </>}
         </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
         {!item.rename?.editing && <>

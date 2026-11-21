@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Check, ChevronDown, ChevronUp } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 import { CommandPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { usePillPopover } from "@/components/ui/PillPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -11,7 +11,7 @@ import { fileRootTree, type PiRepository, type PiSessionInfo } from "@/lib/backe
 import { mountOf } from "@/lib/domain/files"
 import { fuzzyPathScore, rankByScore } from "@/lib/fuzzy"
 import { PATH_COLLATOR, baseName, isInside, trimSlash } from "@/lib/paths"
-import { compactElapsed } from "@/lib/utils"
+import { cn, compactElapsed } from "@/lib/utils"
 import { usePiRepositories, usePiSessions } from "./sessionStore"
 import { piSessionRepository, piSessionsInside, piSessionTitle } from "./usePiSidebar"
 
@@ -25,9 +25,9 @@ export interface PiStartDirectory {
 type Entry = { kind: "none" } | { kind: "unused"; count: number } | { kind: "folder"; directory: PiStartDirectory }
 
 const NO_FOLDER_KEY = "none"
-/** Sessions the hover menu of a row lists, newest first. */
+/** Sessions the side menu of a hovered row lists, newest first. */
 const HOVER_SESSION_LIMIT = 8
-/** Time the hover menu stays after the pointer leaves, enough to cross the gap into it. */
+/** Time the side menu stays after the pointer leaves, enough to cross the gap into it. */
 const HOVER_CLOSE_MS = 150
 
 /**
@@ -73,25 +73,28 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
   const [mountsFailed, setMountsFailed] = useState(false)
   const [query, setQuery] = useState("")
   const [showUnused, setShowUnused] = useState(false)
-  const popover = usePillPopover(useCallback(() => setQuery(""), []))
-  const { open } = popover
-  // Rows age from the latest opening, set when its mount read settles
-  const [now, setNow] = useState(Date.now)
-  // The row whose sessions the hover menu lists, and its offset from the panel's top
-  const [hovered, setHovered] = useState<{ path: string; top: number } | null>(null)
+  // The row whose sessions the side menu lists, and its offset from the panel's top
+  const [hovered, setHoveredRow] = useState<{ path: string; top: number } | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const keepHover = () => clearTimeout(closeTimer.current)
   const leaveHover = () => {
     clearTimeout(closeTimer.current)
-    closeTimer.current = setTimeout(() => setHovered(null), HOVER_CLOSE_MS)
+    closeTimer.current = setTimeout(() => setHoveredRow(null), HOVER_CLOSE_MS)
   }
-  const hoverRow = (path: string | null, row: HTMLElement) => {
+  const popover = usePillPopover(useCallback(() => {
+    setQuery("")
+    setHoveredRow(null)
+  }, []))
+  const { open } = popover
+  const setHovered = (path: string | null, row?: HTMLElement) => {
     keepHover()
     const panel = popover.panelRef.current
-    if (path === null || !panel) return setHovered(null)
+    if (path === null || !row || !panel) return setHoveredRow(null)
     const rowBox = (row.parentElement ?? row).getBoundingClientRect()
-    setHovered({ path, top: rowBox.top - panel.getBoundingClientRect().top })
+    setHoveredRow({ path, top: rowBox.top - panel.getBoundingClientRect().top })
   }
+  // Rows age from the latest opening, set when its mount read settles
+  const [now, setNow] = useState(Date.now)
 
   // Read on every opening, so a mount added meanwhile shows
   useLoadWhile(open, fileRootTree, ({ tree }) => {
@@ -119,14 +122,15 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
     { key: "unused", items: unused.length === 0 ? [] : [{ kind: "unused", count: unused.length }, ...(showUnused ? asEntries(unused) : [])] },
   ]
   const name = folder === null ? null : baseName(folder)
-  const hoveredSessions = hovered && open
-    ? piSessionsInside(sessions, hovered.path, repositories).sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt)).slice(0, HOVER_SESSION_LIMIT)
-    : []
+  const sessionsOf = (path: string) => piSessionsInside(sessions, path, repositories)
+    .sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))
+    .slice(0, HOVER_SESSION_LIMIT)
   const panel = popover.panelRef.current
+  const hoveredSessions = hovered && open ? sessionsOf(hovered.path) : []
   // Portaled into the panel, so a press on it counts as inside the popover; clicks stop here, the row under it in React would pick its folder
-  const hoverMenu = hovered && panel && hoveredSessions.length > 0 && createPortal(<div
+  const sideMenu = (label: string) => hovered && panel && hoveredSessions.length > 0 && createPortal(<div
     role="menu"
-    aria-label={`Sessions in ${baseName(hovered.path)}`}
+    aria-label={`Sessions in ${label}`}
     onMouseEnter={keepHover}
     onMouseLeave={leaveHover}
     onClick={(event) => event.stopPropagation()}
@@ -155,6 +159,7 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
     </>}
     triggerClassName="h-8 px-2 text-ink-faint hover:bg-surface-elevated hover:text-ink-muted"
     label="Project"
+    placement="below"
     popover={popover}
     groups={groups}
     itemKey={(entry) => (entry.kind === "none" ? NO_FOLDER_KEY : entry.kind === "unused" ? "unused" : entry.directory.path)}
@@ -165,20 +170,22 @@ export function PiWorkspacePicker({ folder, onChange, onOpenSession }: {
     header={mountsFailed ? "Could not list file mounts" : error ?? undefined}
     emptyText="No projects"
     renderItem={(entry) => {
-      if (entry.kind === "none") return <span onMouseEnter={(event) => hoverRow(null, event.currentTarget)} className="flex min-w-0 flex-1 items-center gap-2">
+      if (entry.kind === "none") return <span onMouseEnter={() => setHovered(null)} className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate">None</span>
         {folder === null && <Check aria-hidden className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
       </span>
-      if (entry.kind === "unused") return <span role="img" aria-label="Not yet used" onMouseEnter={(event) => hoverRow(null, event.currentTarget)} className="flex min-w-0 flex-1 items-center justify-center text-ink-faint">
-        {showUnused ? <ChevronUp aria-hidden className="h-3.5 w-3.5" /> : <ChevronDown aria-hidden className="h-3.5 w-3.5" />}
+      if (entry.kind === "unused") return <span onMouseEnter={() => setHovered(null)} className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+        <ChevronDown aria-hidden className={cn("h-3 w-3 shrink-0 transition-transform", showUnused && "rotate-180")} />
+        <span aria-hidden className="text-[11px] tabular-nums">{entry.count}</span>
+        <span className="sr-only">Not yet used</span>
       </span>
       const { path, label, latest } = entry.directory
       const age = latest && compactElapsed(Date.parse(latest.modifiedAt), now)
-      return <span onMouseEnter={(event) => hoverRow(path, event.currentTarget)} onMouseLeave={leaveHover} className="flex min-w-0 flex-1 items-center gap-2">
+      return <span onMouseEnter={(event) => setHovered(path, event.currentTarget)} onMouseLeave={leaveHover} className="flex min-w-0 flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[13px] leading-5">{label}</span>
         {age && <span className="shrink-0 pl-1 text-[11px] tabular-nums text-ink-faint">{age}</span>}
         {path === folder && <Check aria-hidden className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
-        {hovered?.path === path && hoverMenu}
+        {hovered?.path === path && sideMenu(label)}
       </span>
     }}
     onPick={(entry) => {

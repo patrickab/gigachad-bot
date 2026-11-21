@@ -75,8 +75,8 @@ describe("PiSessionPicker", () => {
     pi.statuses = { busy: { running: true, waiting: false, unread: false }, fresh: { running: false, waiting: false, unread: true } }
     const onOpenItem = renderPicker()
 
-    expect(screen.getAllByRole("option").map((option) => option.textContent?.split("·")[0])).toEqual(["fresh1h ago ", "busy2h ago ", "old3h ago "])
-    expect(screen.getByRole("option", { name: /busy/ })).toHaveTextContent("84k · /git/proj")
+    expect(screen.getAllByRole("option").map((option) => option.textContent?.split(/\dh/)[0])).toEqual(["fresh", "busy", "old"])
+    expect(screen.getByRole("option", { name: /busy/ })).toHaveTextContent("2h84k/git/proj")
     expect(within(screen.getByRole("option", { name: /busy/ })).getByRole("img", { name: "Running" })).toBeInTheDocument()
     expect(within(screen.getByRole("option", { name: /fresh/ })).getByRole("img", { name: "Unread" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: /fresh/ })).toHaveTextContent("feat")

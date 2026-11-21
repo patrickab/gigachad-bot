@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Bot } from "lucide-react"
 import { CommandPicker, isRemoveRowKey, neighbourKey, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -9,7 +9,7 @@ import { useHostAccess } from "@/contexts/SettingsContext"
 import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { archivePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
-import { baseName, shortPath } from "@/lib/paths"
+import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
 import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
 import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, type PiSearchHit } from "./sessionStore"
 import { PiSessionPreview, prefetchPiSessionPreviews } from "./PiSessionPreview"
@@ -56,17 +56,43 @@ function useSearchHits(query: string): { hits: PiSearchHit[] | null; error: stri
   return found?.query === trimmed ? { hits: found.hits, error: found.error } : { hits: null, error: "" }
 }
 
+/** `path` whole while it fits its box, else abbreviated to its first and last dir. */
+function FittedPath({ path }: { path: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [short, setShort] = useState(false)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const fit = () => {
+      element.textContent = path
+      const overflows = element.scrollWidth > element.clientWidth
+      element.textContent = overflows ? abbreviatePath(path) : path
+      setShort(overflows)
+    }
+    fit()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(fit)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [path])
+  return <span ref={ref} className="min-w-0 flex-1 truncate">{short ? abbreviatePath(path) : path}</span>
+}
+
 function SessionRow({ session, snippet, repositories, now }: { session: PiSessionInfo; snippet?: string; repositories: readonly PiRepository[]; now: number }) {
-  const age = compactElapsed(Date.parse(session.modifiedAt), now)
-  const details = snippet
-    ? [snippet.replace(/\s+/g, " ").trim()]
-    : [age === "now" ? age : `${age} ago`, piTokenText(session.tokens), shortPath(session.cwd), piSessionWorktree(session, piSessionRepository(session, repositories))].filter(Boolean)
+  const worktree = piSessionWorktree(session, piSessionRepository(session, repositories))
   return <span className="flex min-w-0 flex-1 flex-col py-0.5">
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex w-1.5 shrink-0 justify-center"><PiSessionDot sessionId={session.sessionId} /></span>
       <span className={cn("truncate leading-5", ROW_TEXT_WIDTH)}>{piSessionTitle(session)}</span>
     </span>
-    <span className={cn("ml-3.5 truncate text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}>{details.join(" · ")}</span>
+    {snippet
+      ? <span className={cn("ml-3.5 truncate text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}>{snippet.replace(/\s+/g, " ").trim()}</span>
+      : <span className={cn("ml-3.5 flex min-w-0 gap-2 text-[10px] tabular-nums text-ink-subtle", ROW_TEXT_WIDTH)}>
+        <span className="w-6 shrink-0">{compactElapsed(Date.parse(session.modifiedAt), now)}</span>
+        <span className="w-8 shrink-0 text-right">{piTokenText(session.tokens)}</span>
+        <FittedPath path={shortPath(session.cwd)} />
+        {worktree && <span className="max-w-[6rem] shrink-0 truncate">{worktree}</span>}
+      </span>}
   </span>
 }
 

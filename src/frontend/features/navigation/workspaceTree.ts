@@ -314,6 +314,7 @@ function unusedItems({ unused, archived, sessions, mountRepository }: CodeTreeCo
     id: "code-unused",
     label: "Not yet used",
     type: "folder",
+    chevronOnly: true,
     children: shown.map((repository) => ({
       id: `unused:${repository.path}`,
       label: repository.name,

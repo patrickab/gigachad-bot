@@ -15,6 +15,13 @@ export function shortPath(path: string): string {
   return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~")
 }
 
+/** `path` cut to `<root><first dir>/.../<last dir>`, e.g. `~/git/.../feat`; paths with fewer than three dirs stay whole. */
+export function abbreviatePath(path: string): string {
+  const root = path.startsWith("~/") ? "~/" : path.startsWith("/") ? "/" : ""
+  const dirs = path.slice(root.length).split("/").filter(Boolean)
+  return dirs.length < 3 ? path : `${root}${dirs[0]}/.../${dirs[dirs.length - 1]}`
+}
+
 /**
  * `path` (with its leading slash) of this app under the base path it is served at.
  *
