@@ -38,3 +38,6 @@ src/frontend/public/ambient
 .omp/
 .wayfinder/
 /latex/
+
+# Pi project settings and session state
+.pi/

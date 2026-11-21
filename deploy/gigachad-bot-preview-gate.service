@@ -1,7 +1,7 @@
 [Unit]
 Description=gigachad-bot factory preview Tailnet identity gate
-Wants=network-online.target gigachad-bot-factory.service
-After=network-online.target gigachad-bot-factory.service
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=exec

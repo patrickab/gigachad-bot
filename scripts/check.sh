@@ -12,6 +12,8 @@
 # - A worktree uses its main checkout's .venv (factory worktrees have none), node_modules must be installed
 # - lint checks Python files changed against the merge base with origin/master (the tree predates ruff's rules) and
 #   all frontend files with eslint
+# - pi-extensions/ has no packages of its own: types and pi-host cover it with pi-host's node_modules
+#   (pi-extensions/tsconfig.json)
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -104,6 +106,7 @@ step_types() {
     local status=0
     (cd src/frontend && node_modules/.bin/tsc --noEmit -p .) || status=1
     (cd pi-host && node_modules/.bin/tsc --noEmit) || status=1
+    (cd pi-host && node_modules/.bin/tsc --noEmit -p ../pi-extensions) || status=1
     return "$status"
 }
 
@@ -127,7 +130,10 @@ step_frontend() {
 }
 
 step_pi_host() {
-    (cd pi-host && bun test)
+    local status=0
+    (cd pi-host && bun test) || status=1
+    (cd pi-extensions && bun test) || status=1
+    return "$status"
 }
 
 failed=()

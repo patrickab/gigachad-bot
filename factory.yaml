@@ -1,12 +1,20 @@
-profile: gigachad
-# Tests and previews run on the main checkout's virtualenv (`{repo_path}`, the engine fills it in), the sandbox profile mounts it at the same path.
-# Worktrees get frontend packages only: `uv sync` per worktree would carry a second venv (and the OCR group) around.
+# What the agent factory needs to know about this repo: hooks, gates, protected paths and the preview. Per-repo settings
+# (merge, rounds, models) live in gigachad's database. `{repo_path}` is the main checkout, filled in by the reader.
+#
+# A task's worktree comes from `agent-worktree`: an overlay venv on the main checkout's `.venv` and a copy-on-write
+# `node_modules` for `src/frontend` and `pi-host`. So `after_create` has nothing to install, and tests and previews of a
+# worktree run on the main checkout's packages.
 hooks:
-  after_create:
-    - [npm, ci, --prefix, src/frontend, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
-    - [bun, install, --cwd, pi-host, --frozen-lockfile]
+  after_create: []
   after_code: []
-  before_remove: []
+  # Run in the main checkout after a merge that changed a lockfile, so its packages (the ones every worktree shares or
+  # copies) match the merged lockfiles. Never run `uv sync` in a worktree: it would rebuild the overlay as a full venv.
+  # The dev servers may be running from that checkout, so every command installs in place: no `npm ci`, which deletes
+  # `node_modules` first. `--no-save` keeps npm from writing `package-lock.json`.
+  after_merge:
+    - [uv, sync, --locked]
+    - [npm, install, --prefix, src/frontend, --no-save, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
+    - [bun, install, --cwd, pi-host, --frozen-lockfile]
 # The pipeline of scripts/check.sh, one gate per step so a failure names it. The script is hermetic (env -i) and gives the
 # Postgres-backed tests a throwaway database, so a gate fails only for the task's own change.
 gates:
@@ -35,5 +43,4 @@ preview:
     NEXT_PUBLIC_API_BASE: "/preview-api/{port.backend}/api"
   database: true
   url: "http://127.0.0.1:{port.frontend}/preview/{port.frontend}"
-  api_url: "http://127.0.0.1:{port.backend}/api"
   ready_timeout_s: 180

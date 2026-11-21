@@ -65,11 +65,9 @@ if [[ "${GIGACHAD_PI_HOST:-1}" != "0" ]]; then
     service_pids+=($!)
 fi
 
-# Opt out with GIGACHAD_FACTORY=0. Serves the Factory board's engine and the gate its previews are framed through,
-# reusing an instance already on its port. The engine waits for the PostgreSQL run-backend.sh starts.
+# Opt out with GIGACHAD_FACTORY=0. Serves the gate the Factory task view frames its previews through, reusing an
+# instance already on its port.
 if [[ "${GIGACHAD_FACTORY:-1}" != "0" ]]; then
-    "$root_dir/run-factory.sh" &
-    service_pids+=($!)
     "$root_dir/run-preview-gate.sh" &
     service_pids+=($!)
 fi

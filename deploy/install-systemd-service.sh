@@ -20,7 +20,6 @@ if [[ ! -x $backend ]]; then
 fi
 require_runner backend "${worktree}/run-backend.sh"
 require_runner pi-host "${script_dir}/run-production-pi-host.sh"
-require_runner factory "${worktree}/run-factory.sh"
 require_runner "preview gate" "${worktree}/run-preview-gate.sh"
 require_runner "learn mode" "${script_dir}/run-production-learnharness.sh"
 require_runner "LearnHarness backup" "${script_dir}/backup-learnharness.sh"
@@ -28,7 +27,6 @@ require_runner "LearnHarness backup" "${script_dir}/backup-learnharness.sh"
 readonly units=(
     gigachad-bot.service
     gigachad-bot-pi-host.service
-    gigachad-bot-factory.service
     gigachad-bot-preview-gate.service
     gigachad-bot-learnharness.service
     gigachad-bot-learnharness-gate.service
@@ -36,9 +34,10 @@ readonly units=(
 # Started by its timer, not enabled itself.
 readonly timer_units=(gigachad-bot-learnharness-backup.service gigachad-bot-learnharness-backup.timer)
 # Units an earlier version installed: the OMP model source (its runner is gone, pi-host replaced it), omp-web with its
-# host daemon and Tailnet gate (Pi replaced the omp tabs, their runner is gone too), and the LiteLLM proxy (LearnHarness
-# calls pi-host's gateway directly, its runner is gone).
-retired_units=(gigachad-bot-omp.service gigachad-bot-litellm-proxy.service)
+# host daemon and Tailnet gate (Pi replaced the omp tabs, their runner is gone too), the LiteLLM proxy (LearnHarness
+# calls pi-host's gateway directly, its runner is gone), and the Agents-in-a-box factory engine (factory tasks run in
+# pi-host sessions, its runner is gone).
+retired_units=(gigachad-bot-omp.service gigachad-bot-litellm-proxy.service gigachad-bot-factory.service)
 readonly omp_web_units=(gigachad-bot-omp-web-gate.service gigachad-bot-omp-web.service gigachad-bot-omp-web-host.service)
 readonly omp_web_host_unit=gigachad-bot-omp-web-host.service
 
