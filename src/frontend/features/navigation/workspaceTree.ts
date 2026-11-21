@@ -55,7 +55,7 @@ type CodeTreeContext =
   & Pick<CodeMounts, "rootTreeData" | "mounts" | "unmounted" | "unused" | "mountRepository" | "folder" | "archived" | "setArchived" | "removeMount">
   & FolderRowContext
   & {
-    sessions: Pick<CodeMounts["sessions"], "directoryCode" | "directoryActions" | "archivedSessions">
+    sessions: Pick<CodeMounts["sessions"], "directoryCode" | "directoryActions">
     projects: ProjectListItem[]
     pending: (key: string) => boolean
     onDiffSelect?: (path: string) => void
@@ -227,10 +227,9 @@ function projectChats(project: ProjectListItem, branchMeta: Record<string, Branc
   })
 }
 
-/** Mount rows, checkouts with Pi sessions outside every mount, then the archived sessions folder. */
+/** Mount rows and checkouts with Pi sessions outside every mount. */
 export function codeItems(context: CodeTreeContext): FileTreeItem<string>[] {
-  const archivedSessions = context.sessions.archivedSessions()
-  return [...mountItems(context), ...unmountedItems(context), ...unusedItems(context), ...(archivedSessions ? [archivedSessions] : [])]
+  return [...mountItems(context), ...unmountedItems(context), ...unusedItems(context)]
 }
 
 /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */

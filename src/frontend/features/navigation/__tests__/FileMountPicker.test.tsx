@@ -5,7 +5,11 @@ import type { DirectoryListing } from "@/lib/domain/files"
 
 const tree: Record<string, DirectoryListing> = {
   "~": { path: "/home/noob", parent: "/home", directories: [".config", "git"] },
+  "/home/noob/git/": { path: "/home/noob/git", parent: "/home/noob", directories: ["gigachad-bot"] },
+  "/home/noob/git/gigachad-bot/": { path: "/home/noob/git/gigachad-bot", parent: "/home/noob/git", directories: [] },
+  "/home/noob/": { path: "/home/noob", parent: "/home", directories: [".config", "git"] },
   "/home/noob/git": { path: "/home/noob/git", parent: "/home/noob", directories: ["gigachad-bot"] },
+  "/home/noob/git/gigachad-bot": { path: "/home/noob/git/gigachad-bot", parent: "/home/noob/git", directories: [] },
   "/home/noob": { path: "/home/noob", parent: "/home", directories: [".config", "git"] },
 }
 
@@ -26,21 +30,41 @@ describe("FileMountPicker", () => {
     const onClose = vi.fn()
     render(<FileMountPicker open onClose={onClose} onConfirm={onConfirm} onClone={vi.fn()} />)
     const input = screen.getByLabelText("File mount path")
-    await waitFor(() => expect(input).toHaveValue("/home/noob"))
+    await waitFor(() => expect(input).toHaveValue("/home/noob/"))
 
     fireEvent.click(screen.getByRole("button", { name: "git" }))
-    await waitFor(() => expect(input).toHaveValue("/home/noob/git"))
+    await waitFor(() => expect(input).toHaveValue("/home/noob/git/"))
     expect(screen.getByRole("button", { name: "gigachad-bot" })).toBeVisible()
     expect(input).toHaveFocus()
 
     fireEvent.click(screen.getByRole("button", { name: "Open parent directory" }))
-    await waitFor(() => expect(input).toHaveValue("/home/noob"))
+    await waitFor(() => expect(input).toHaveValue("/home/noob/"))
     fireEvent.click(screen.getByRole("button", { name: "git" }))
-    await waitFor(() => expect(input).toHaveValue("/home/noob/git"))
+    await waitFor(() => expect(input).toHaveValue("/home/noob/git/"))
 
     fireEvent.submit(input)
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith("/home/noob/git"))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("filters the typed directory fuzzily, Tab completes the highlight and Enter completes a fragment before adding", async () => {
+    const onConfirm = vi.fn(async () => {})
+    render(<FileMountPicker open onClose={vi.fn()} onConfirm={onConfirm} onClone={vi.fn()} />)
+    const input = screen.getByLabelText("File mount path")
+    await waitFor(() => expect(input).toHaveValue("/home/noob/"))
+
+    fireEvent.change(input, { target: { value: "/home/noob/gt" } })
+    expect(screen.getByRole("button", { name: "git" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: ".config" })).toBeNull()
+
+    fireEvent.keyDown(input, { key: "Tab" })
+    await waitFor(() => expect(input).toHaveValue("/home/noob/git/"))
+    expect(await screen.findByRole("button", { name: "gigachad-bot" })).toBeVisible()
+
+    fireEvent.change(input, { target: { value: "/home/noob/git/gig" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(input).toHaveValue("/home/noob/git/gigachad-bot/")
   })
 
   it("keeps the window open and shows the reason when mounting fails", async () => {
@@ -59,7 +83,7 @@ describe("FileMountPicker", () => {
     const onClose = vi.fn()
     render(<FileMountPicker open onClose={onClose} onConfirm={onConfirm} onClone={onClone} />)
     const input = screen.getByLabelText("File mount path")
-    await waitFor(() => expect(input).toHaveValue("/home/noob"))
+    await waitFor(() => expect(input).toHaveValue("/home/noob/"))
     api.browseDirectories.mockClear()
 
     fireEvent.change(input, { target: { value: " git@github.com:owner/repo.git " } })

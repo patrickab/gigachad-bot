@@ -1,6 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
-import { fileForm, post, request } from "./http"
+import { fileForm, post, request, requestVoid } from "./http"
 import type { FactoryState } from "@/lib/domain/factory"
 
 export interface PiRepository {
@@ -97,6 +97,11 @@ export async function pastePiVideo(video: File, scope: PiFileScope): Promise<str
 export async function openPiSession(repo: string, resume: PiResume, options: PiSessionOptions = {}): Promise<PiSessionInfo> {
   const { session } = await post<{ session: PiSessionInfo }>("/pi/sessions", { repo, resume, ...options })
   return session
+}
+
+/** Delete a session file for good. */
+export function deletePiSession(sessionId: string): Promise<void> {
+  return requestVoid(`/pi/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
 }
 
 /** Move a session file into the archive (M9). */

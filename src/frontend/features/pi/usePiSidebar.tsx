@@ -1,11 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { Archive, Bot, Pin, PinOff, RotateCcw } from "lucide-react"
+import { Bot, Pin, PinOff } from "lucide-react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { itemOf, newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
-import { ApiError, archivePiSession, pinPiSession, restorePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
+import { ApiError, deletePiSession, pinPiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
 import { PATH_COLLATOR, baseName, dirName, isInside, relativeIn, trimSlash } from "@/lib/paths"
 import { refreshPiSessions, usePiRepositories, usePiSessions, usePiSessionStatus } from "./sessionStore"
 
@@ -141,7 +141,7 @@ function SessionMeta({ session, worktree, pinned }: { session: PiSessionInfo; wo
  * - Each mount and each checkout outside the mounts gets a Sessions folder, worktree sessions sit under their main checkout
  * - Forks nest under their parent, a row shows its worktree, pin, context use, cost and running/waiting/unread dot
  * - A row opens its session, or switches to the tab already showing it; `+` starts a session in a new tab
- * - Sessions archive and pin from their row's menu, the "archived" folder of the Code section restores them
+ * - Sessions pin from their row's menu and delete with its trash button
  */
 export function usePiSidebar({ onOpen, workspaceActions }: {
   onOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
@@ -150,26 +150,24 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
 }) {
   const { tab } = useTab()
   const listed = usePiSessions({ profile: "coding" }).sessions
-  const archived = usePiSessions({ archived: true, profile: "coding" }).sessions
   const repositories = usePiRepositories()
-  /** Rows moved by archive or restore before the lists read them again: session id to whether it is archived. */
-  const [moved, setMoved] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  /** Rows deleted before the list reads again. */
+  const [deleted, setDeleted] = useState<ReadonlySet<string>>(() => new Set())
   const [pins, setPins] = useState<ReadonlyMap<string, boolean>>(() => new Map())
   const [error, setError] = useState("")
   const shownSessionId = itemOf(tab, "pi")?.pi?.sessionId ?? null
-  const sessions = listed.filter((session) => moved.get(session.sessionId) !== true)
-  const archivedSessions = archived.filter((session) => moved.get(session.sessionId) !== false)
+  const sessions = listed.filter((session) => !deleted.has(session.sessionId))
 
-  /** Hide the row at once, in the archived folder after an archive, among the sessions after a restore. */
-  const move = async (session: PiSessionInfo, toArchive: boolean) => {
+  /** Hide the row at once, bring it back when the delete fails. */
+  const remove = async (session: PiSessionInfo) => {
     setError("")
-    setMoved((current) => new Map(current).set(session.sessionId, toArchive))
+    setDeleted((current) => new Set(current).add(session.sessionId))
     try {
-      await (toArchive ? archivePiSession : restorePiSession)(session.sessionId)
+      await deletePiSession(session.sessionId)
       refreshPiSessions()
     } catch (cause) {
-      setMoved((current) => new Map([...current].filter(([id]) => id !== session.sessionId)))
-      setError(piSessionError(cause, toArchive ? "Could not archive this session" : "Could not restore this session"))
+      setDeleted((current) => new Set([...current].filter((id) => id !== session.sessionId)))
+      setError(piSessionError(cause, "Could not delete this session"))
     }
   }
 
@@ -198,9 +196,9 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
       meta: <SessionMeta session={session} worktree={piSessionWorktree(session, repository)} pinned={pinned} />,
       onSelect: () => onOpen?.(piSessionItem(session, repository?.name ?? repo, projectSlug)),
       actions: [
-        { label: `Archive ${title}`, menuLabel: "Archive", icon: Archive, onClick: () => { void move(session, true) } },
         { label: `${pinned ? "Unpin" : "Pin"} ${title}`, menuLabel: pinned ? "Unpin" : "Pin", icon: pinned ? PinOff : Pin, onClick: () => { void pin(session, !pinned) } },
       ],
+      onDelete: () => { void remove(session) },
       children: node.forks.map((fork) => sessionItem(fork, repo, projectSlug)),
     }
   }
@@ -225,16 +223,5 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
   /** Every checkout outside all `mounts` holding sessions, with them. */
   const unmountedWorkspaces = (mounts: readonly string[]) => unmountedPiWorkspaces(sessions, repositories, mounts)
 
-  /** The "archived" folder restoring archived sessions, null while there are none. */
-  const archivedFolder = (): FileTreeItem<string> | null => archivedSessions.length === 0 ? null : {
-    id: "pi-archived",
-    label: "archived",
-    type: "folder",
-    children: [...archivedSessions].sort(byNewest).map((session) => {
-      const title = piSessionTitle(session)
-      return { id: `pi-archived:${session.sessionId}`, label: title, type: "element", actions: [{ label: `Restore ${title}`, icon: RotateCcw, onClick: () => { void move(session, false) } }] }
-    }),
-  }
-
-  return { error, directoryCode, directoryActions, unmountedWorkspaces, archivedSessions: archivedFolder }
+  return { error, directoryCode, directoryActions, unmountedWorkspaces }
 }

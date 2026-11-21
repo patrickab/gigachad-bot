@@ -137,6 +137,11 @@ async def post_close(session_id: SessionId) -> None:
     await _call(pi_host.close_session(session_id))
 
 
+@http_router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: SessionId) -> None:
+    await _call(pi_host.delete_session(session_id))
+
+
 @http_router.post("/sessions/{session_id}/archive")
 async def post_archive(session_id: SessionId) -> pi_host.SessionAnswer:
     return pi_host.SessionAnswer(session=await _call(pi_host.archive_session(session_id)))

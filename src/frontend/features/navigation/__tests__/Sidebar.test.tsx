@@ -62,8 +62,7 @@ const api = vi.hoisted(() => ({
   fetchWorktrees: vi.fn<typeof import("@/lib/backend/api").fetchWorktrees>(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
   removeWorktree: vi.fn<typeof import("@/lib/backend/api").removeWorktree>(async () => {}),
   deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
-  archivePiSession: vi.fn<typeof import("@/lib/backend/api").archivePiSession>(),
-  restorePiSession: vi.fn<typeof import("@/lib/backend/api").restorePiSession>(),
+  deletePiSession: vi.fn<typeof import("@/lib/backend/api").deletePiSession>(async () => {}),
   pinPiSession: vi.fn<typeof import("@/lib/backend/api").pinPiSession>(),
   listFactoryRepos: vi.fn<typeof import("@/lib/backend/api").listFactoryRepos>(async () => []),
   exportLearnSession: vi.fn<typeof import("@/lib/backend/api").exportLearnSession>(),
@@ -819,14 +818,11 @@ describe("Project navigation", () => {
     }
   })
 
-  it("archives a session from its menu, hiding it at once, restores it from the archived folder, and pins it", async () => {
+  it("deletes a session, hiding it at once, and pins another", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
     pi.repositories = piRepositories("proj")
     pi.sessions = [piSession("keep", "/git/proj"), piSession("old", "/git/proj")]
-    pi.archived = [piSession("stored", "/git/proj", { archived: true })]
-    api.archivePiSession.mockImplementation(async (id) => piSession(id, "/git/proj", { archived: true }))
-    api.restorePiSession.mockImplementation(async (id) => piSession(id, "/git/proj"))
     api.pinPiSession.mockImplementation(async (id, pinned) => piSession(id, "/git/proj", { pinned }))
     try {
       const view = render(<Sidebar appMode="chat" />)
@@ -835,18 +831,13 @@ describe("Project navigation", () => {
       fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
 
-      fireEvent.click(rowMenuItem(code, "keep", "Pin keep"))
+      fireEvent.click(code.getByRole("button", { name: "Pin keep" }))
       expect(api.pinPiSession).toHaveBeenCalledWith("keep", true)
       expect(await code.findByRole("img", { name: "Pinned" })).toBeInTheDocument()
 
-      fireEvent.click(code.getByRole("button", { name: "Archive old" }))
+      fireEvent.click(code.getByRole("button", { name: "Delete old" }))
       expect(code.queryByRole("button", { name: "old" })).not.toBeInTheDocument()
-      await waitFor(() => expect(api.archivePiSession).toHaveBeenCalledWith("old"))
-
-      fireEvent.click(section.getByRole("button", { name: "archived" }))
-      fireEvent.click(section.getByRole("button", { name: "Restore stored" }))
-      await waitFor(() => expect(api.restorePiSession).toHaveBeenCalledWith("stored"))
-      expect(section.queryByRole("button", { name: "Restore stored" })).not.toBeInTheDocument()
+      await waitFor(() => expect(api.deletePiSession).toHaveBeenCalledWith("old"))
     } finally {
       resetPi()
       api.fileRootTree.mockImplementation(listTree!)
@@ -1217,18 +1208,18 @@ describe("Project navigation", () => {
     }
   })
 
-  it("keeps a session whose archive fails, saying why", async () => {
+  it("keeps a session whose delete fails, saying why", async () => {
     pi.repositories = piRepositories("tool")
     pi.sessions = [piSession("busy", "/git/tool")]
     const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
-    api.archivePiSession.mockRejectedValueOnce(new ApiError("live", 409))
+    api.deletePiSession.mockRejectedValueOnce(new ApiError("live", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
       const section = within(view.getByLabelText("Code"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
       fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
 
-      fireEvent.click(section.getByRole("button", { name: "Archive busy" }))
+      fireEvent.click(section.getByRole("button", { name: "Delete busy" }))
       expect(await view.findByRole("alert")).toHaveTextContent("Session is running")
       expect(section.getByRole("button", { name: "busy" })).toBeVisible()
     } finally {

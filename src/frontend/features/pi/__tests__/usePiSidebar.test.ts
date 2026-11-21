@@ -77,10 +77,9 @@ describe("Pi sidebar grouping", () => {
 })
 
 describe("usePiSidebar", () => {
-  it("lists only coding sessions, active and archived (G5)", () => {
+  it("lists only coding sessions (G5)", () => {
     renderHook(() => usePiSidebar({}))
     expect(store.listFilters).toContainEqual({ profile: "coding" })
-    expect(store.listFilters).toContainEqual({ archived: true, profile: "coding" })
     for (const filter of store.listFilters) expect(filter).toMatchObject({ profile: "coding" })
   })
 })
