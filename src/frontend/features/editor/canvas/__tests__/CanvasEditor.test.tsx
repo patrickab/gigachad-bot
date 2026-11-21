@@ -847,6 +847,9 @@ describe("document attachments", () => {
     expect(frame().style.visibility).toBe("hidden")
     expect(frame().style.width).toBe(layoutWidth)
 
+    // The zoom glides to its target, then settles
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(frame().style.visibility).toBe("hidden")
     act(() => { vi.advanceTimersByTime(300) })
     expect(frame().style.visibility).toBe("")
     vi.useRealTimers()
