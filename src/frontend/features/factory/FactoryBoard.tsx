@@ -2,92 +2,102 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { Plus, Settings } from "lucide-react"
+import { GitBranch, Plus, Settings, Trash2 } from "lucide-react"
 import { BoardColumn } from "@/components/ui/BoardColumn"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ErrorText } from "@/components/ui/ErrorText"
+import { IconButton } from "@/components/ui/IconButton"
+import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { StatusDot } from "@/components/ui/StatusDot"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { deleteFactoryTask } from "@/lib/backend/api"
+import type { FactoryTask } from "@/lib/domain/factory"
+import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
-import { fetchFactoryTasks } from "@/lib/backend/api"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
-import { BOARD_COLUMNS, PHASE_LABELS, phaseProgress, statusTone, taskStatusLine } from "./states"
+import { BOARD_COLUMNS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
-import type { FactoryTask, Phase } from "@/lib/domain/factory"
-import { useFactoryPolling } from "./useFactoryPolling"
 
-/** Done tasks shown before "Show all", the column otherwise grows without bound. */
-const DONE_LIMIT = 10
+/** Finished tasks shown before "Show all", the column otherwise grows without bound. */
+const FINISHED_LIMIT = 10
 
-function newestFirst(left: FactoryTask, right: FactoryTask): number {
-  return right.updated_at.localeCompare(left.updated_at)
+/** Column order of two tasks: by state as the board orders them, then the one whose state changed last. */
+function boardOrder(left: FactoryTask, right: FactoryTask): number {
+  const byState = STATE_ORDER.indexOf(shownState(left)) - STATE_ORDER.indexOf(shownState(right))
+  return byState || (right.factory?.at ?? right.created_at).localeCompare(left.factory?.at ?? left.created_at)
 }
 
-function workflowPhases(task: FactoryTask): string[] {
-  const phases = task.config.phases
-  return Array.isArray(phases) ? phases.filter((phase): phase is string => typeof phase === "string") : []
-}
-
-/** One segment per workflow phase: finished ones filled, the running one half-filled. */
-function PhaseTrack({ task }: { task: FactoryTask }) {
-  const phases = workflowPhases(task)
-  if (phases.length === 0) return null
-  const { finished, active } = phaseProgress(phases, task.state, task.phase)
-  const label = phases.map((phase) => PHASE_LABELS[phase as Phase] ?? phase).join(", ")
+function TaskCard({ task, onOpen, onDelete }: { task: FactoryTask; onOpen: () => void; onDelete: () => Promise<unknown> }) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const state = shownState(task)
+  const failed = state === "blocked" || state === "interrupted"
+  const remove = async () => {
+    setDeleting(true)
+    await onDelete()
+    setDeleting(false)
+    setConfirming(false)
+  }
   return (
-    <div className="flex gap-1" role="img" aria-label={`Phases: ${label}, ${finished} finished`}>
-      {phases.map((phase, index) => (
-        <span
-          key={phase}
-          className={cn(
-            "h-1 flex-1 rounded-full transition-colors duration-300",
-            index < finished ? "bg-ink-muted" : index === active ? "bg-ink-faint" : "bg-divider/60",
-          )}
-        />
-      ))}
-    </div>
-  )
-}
-
-function TaskCard({ task, onOpen }: { task: FactoryTask; onOpen: () => void }) {
-  const tone = statusTone(task.state)
-  return (
-    <ElevatedContainer hoverLift className="rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
+    <ElevatedContainer hoverLift className="group relative rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
       <button
         type="button"
         onClick={onOpen}
         className="flex w-full flex-col gap-2 rounded-xl p-4 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
       >
-        <span className="line-clamp-2 text-sm font-semibold text-ink">{task.title}</span>
-        {task.request && <span className="line-clamp-2 text-xs leading-relaxed text-ink-muted">{task.request}</span>}
-        <PhaseTrack task={task} />
+        <span className="line-clamp-2 pr-6 text-sm font-semibold text-ink">{task.title}</span>
         <span className="flex min-w-0 items-center gap-2 text-[11px]">
-          <StatusDot tone={tone} />
-          <span className={cn("truncate", tone === "error" ? "text-danger" : "text-ink-subtle")}>
-            {taskStatusLine(task.state, task.phase, task.round)}
-          </span>
+          <StatusDot tone={taskTone(task)} />
+          <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
         </span>
-        {tone === "error" && task.error && <span className="line-clamp-2 text-[11px] text-ink-subtle">{task.error}</span>}
+        {state === "blocked" && task.factory?.reason && <span className="truncate text-[11px] text-ink-subtle">{task.factory.reason}</span>}
+        {/* The delete question covers this row, so asking never resizes the card. */}
+        <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
+          {task.branch !== null && <GitBranch aria-hidden className="h-3 w-3 shrink-0" />}
+          <span className="truncate">{task.branch ?? "Current checkout"}</span>
+        </span>
       </button>
+      {allowedActions(state, task.created_at).delete && !confirming && (
+        <IconButton
+          icon={Trash2}
+          label={`Delete ${task.title}`}
+          onClick={() => setConfirming(true)}
+          className="absolute right-2 top-2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        />
+      )}
+      {confirming && (
+        <div className="absolute inset-x-4 bottom-4 grid h-6 items-center">
+          <InlineConfirm question="Delete this task?" busy={deleting} onYes={() => void remove()} onNo={() => setConfirming(false)} />
+        </div>
+      )}
     </ElevatedContainer>
   )
 }
 
-/** Kanban board of the factory's tasks, kept current by polling the event log. */
-export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (taskId: string) => void }) {
-  const [tasks, setTasks] = useState<FactoryTask[] | null>(null)
+/** Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is finished. */
+export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
+  repo: string
+  tasks: FactoryTask[]
+  /** Why the last read of the tasks failed, null when it did not. */
+  error: string | null
+  /** Read the tasks again, after a change this board made. */
+  refresh: () => Promise<void>
+  onOpenTask: (taskId: string) => void
+}) {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [showAllDone, setShowAllDone] = useState(false)
-
-  const refresh = async () => setTasks(await fetchFactoryTasks(repo))
-  const error = useFactoryPolling(repo, refresh)
+  const [showAllFinished, setShowAllFinished] = useState(false)
+  const { run: deleteTask, error: deleteError } = useAsyncAction(async (id: string) => {
+    await deleteFactoryTask(id)
+    await refresh()
+  }, "Could not delete the task")
 
   return (
     <ElevationProvider>
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 items-center justify-between border-b border-divider/20 px-8 pb-4 pt-6 select-none">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Factory · {repo}</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Factory · {baseName(repo)}</h2>
           <div className="flex items-center gap-2">
             <button type="button" aria-label="Factory settings" onClick={() => setSettingsOpen(true)} className={ICON_BUTTON_CLASS}>
               <Settings className="h-4 w-4" />
@@ -98,12 +108,12 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
             </button>
           </div>
         </div>
-        <ErrorText className="px-8 pt-3">{error}</ErrorText>
+        <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-6 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
-            const columnTasks = (tasks ?? []).filter((task) => column.states.includes(task.state)).sort(newestFirst)
-            const capped = column.id === "done" && !showAllDone && columnTasks.length > DONE_LIMIT
-            const shown = capped ? columnTasks.slice(0, DONE_LIMIT) : columnTasks
+            const columnTasks = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            const capped = column.id === "finished" && !showAllFinished && columnTasks.length > FINISHED_LIMIT
+            const shown = capped ? columnTasks.slice(0, FINISHED_LIMIT) : columnTasks
             return (
               <BoardColumn
                 key={column.id}
@@ -113,20 +123,15 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
                 titleAs="h3"
                 count={columnTasks.length}
                 className="min-w-[15rem] border-divider/40"
-                action={column.id === "backlog" && (
-                  <button type="button" aria-label="New task" onClick={() => setNewTaskOpen(true)} className={ICON_BUTTON_CLASS}>
-                    <Plus className="h-4 w-4" />
-                  </button>
-                )}
                 bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
                 footer={<>
-                  {tasks !== null && columnTasks.length === 0 && (
+                  {columnTasks.length === 0 && (
                     <div className="rounded-xl border border-dashed border-divider/60 px-4 py-6 text-center text-[11px] text-ink-faint">No tasks</div>
                   )}
                   {capped && (
                     <button
                       type="button"
-                      onClick={() => setShowAllDone(true)}
+                      onClick={() => setShowAllFinished(true)}
                       className="rounded px-1 py-1 text-left text-[11px] text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
                     >
                       Show all {columnTasks.length}
@@ -144,7 +149,7 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <TaskCard task={task} onOpen={() => onOpenTask(task.id)} />
+                    <TaskCard task={task} onOpen={() => onOpenTask(task.id)} onDelete={() => deleteTask(task.id)} />
                   </motion.div>
                 ))}
               </BoardColumn>
@@ -152,8 +157,8 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
           })}
         </div>
       </div>
-      <NewTaskDialog repo={repo} open={newTaskOpen} onClose={() => setNewTaskOpen(false)} />
-      <FactorySettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <NewTaskDialog repo={repo} open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreated={() => void refresh()} />
+      <FactorySettingsDialog repo={repo} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </ElevationProvider>
   )
 }

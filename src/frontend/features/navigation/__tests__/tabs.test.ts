@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { newPiItem, showingItem, type WorkspaceItem } from "@/contexts/TabContext"
+import { factoryItem } from "@/features/factory/items"
 import { nextTab, parseSavedTabs, piSessionOf, relocatedTab, renamedTab, tabLabel, tabLocation, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
 const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
@@ -215,5 +216,16 @@ describe("Pi tabs", () => {
     expect(tab.appMode).toBe("pi")
     expect(tabLocation(tab, () => undefined)).toEqual({ category: "code", file: "app" })
     expect(tabLabel(tab, undefined, () => undefined)).toBe("app")
+  })
+})
+
+describe("factory tabs", () => {
+  it("locates a board by its repo's folder and a task as a task, a renamed tab by its name", () => {
+    const board = { ...nextTab(), ...showingItem(factoryItem("/home/me/git/app")) }
+    expect(board.appMode).toBe("factory")
+    expect(tabLocation(board, () => undefined)).toEqual({ category: "factory", file: "app" })
+    const task = { ...nextTab(), ...showingItem(factoryItem("/home/me/git/app", "0123456789abcdef0123456789abcdef")) }
+    expect(tabLocation(task, () => undefined)).toEqual({ category: "factory", file: "task" })
+    expect(tabLocation({ ...task, name: "Fix header" }, () => undefined)).toEqual({ category: "factory", file: "Fix header" })
   })
 })

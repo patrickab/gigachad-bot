@@ -1,6 +1,7 @@
 import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { parseFactoryPath } from "@/features/factory/items"
 import { relocatedWorkbenchPath, workbenchKindOf } from "@/lib/domain/workbench"
 import { baseName, isInside, kindOf } from "@/lib/paths"
 
@@ -166,7 +167,8 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
     return { category: kind ?? "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File") }
   }
   if (tab.appMode === "factory") {
-    return { category: "factory", file: tab.name ?? (tab.workspaceItem?.path.includes("/") ? "task" : tab.workspaceItem?.path ?? "board") }
+    const factory = tab.workspaceItem ? parseFactoryPath(tab.workspaceItem.path) : null
+    return { category: "factory", file: tab.name ?? (factory ? factory.taskId ? "task" : baseName(factory.repo) : "board") }
   }
   if (tab.appMode === "learn") {
     return { category: "learn", file: tab.name ?? tab.title ?? "Learn" }

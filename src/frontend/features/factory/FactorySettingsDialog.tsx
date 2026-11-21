@@ -1,19 +1,18 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { PillTabs } from "@/components/ui/PillTabs"
-import { errorMessage, cn } from "@/lib/utils"
+import { errorMessage } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
-import { fetchFactoryDefaults, fetchModels, saveFactoryDefaults } from "@/lib/backend/api"
+import { fetchModels, getFactorySettings, putFactorySettings } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { PI_MODEL_SOURCE } from "@/lib/models"
-import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode } from "@/lib/domain/factory"
+import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
@@ -24,74 +23,85 @@ const MERGE_OPTIONS = [
 
 const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 
-const AGENT_TABS = FACTORY_AGENT_NAMES.map((name) => ({ value: name, label: name }))
+/** The two agents of a task, in pipeline order. */
+const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
 
-/** Models the user filled in; an empty selector means the agent keeps its own model. */
-function withoutEmptyModels(settings: FactorySettings): FactorySettings {
-  return { ...settings, models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")) }
+/** A branch the user filled in, null for an empty field: the repo's default branch. */
+export function branchOrDefault(branch: string | null): string | null {
+  return branch?.trim() || null
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+/** Models the user filled in; an empty selector means the agent runs on Pi's default model. An empty branch is the default one. */
+function withoutEmpty(settings: FactorySettings): FactorySettings {
+  return {
+    ...settings,
+    models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")),
+    branch: branchOrDefault(settings.branch),
+  }
+}
+
+function validRounds(rounds: number): boolean {
+  return Number.isInteger(rounds) && rounds >= MAX_ROUNDS_LIMITS.min && rounds <= MAX_ROUNDS_LIMITS.max
+}
+
+/** Labelled checkbox of the factory dialogs. */
+export function Toggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return (
     <label className="flex items-center gap-2 text-sm text-ink">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-3.5 w-3.5 accent-ink" />
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="h-3.5 w-3.5 accent-ink" />
       {label}
     </label>
   )
 }
 
-/** Modal that edits the engine-wide factory defaults: workflow settings, a model per agent and each agent's prompt file. */
-export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [draft, setDraft] = useState<FactoryDefaults | null>(null)
+/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, branch, review, worktree, preview and a model per agent. */
+export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
+  const [draft, setDraft] = useState<FactorySettings | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
   const [modelError, setModelError] = useState("")
-  const [agent, setAgent] = useState<FactoryAgentName>(FACTORY_AGENT_NAMES[0])
   const { run: persist, pending: busy, error, setError } = useAsyncAction(async () => {
     if (!draft) return
-    await saveFactoryDefaults({ ...draft, settings: withoutEmptyModels(draft.settings) })
+    await putFactorySettings(repo, withoutEmpty(draft))
     onClose()
-  }, "Could not save the defaults")
+  }, "Could not save the settings")
 
-  // Every opening reloads the saved defaults, so a discarded edit never lingers.
+  // Every opening reloads the saved settings, so a discarded edit never lingers.
   useResetOnOpen(open, () => {
     setDraft(null)
     setCatalog(null)
     setModelError("")
-    setAgent(FACTORY_AGENT_NAMES[0])
     setError("")
   })
 
-  useLoadWhile(open, fetchFactoryDefaults, setDraft, (cause) => setError(errorMessage(cause, "Could not load the defaults")))
+  const loadSettings = useCallback(() => getFactorySettings(repo), [repo])
+  useLoadWhile(open, loadSettings, setDraft, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
 
-  const changeSettings = (change: Partial<FactorySettings>) =>
-    setDraft((current) => current && { ...current, settings: { ...current.settings, ...change } })
-  const changeModel = (name: string, selector: string) =>
-    setDraft((current) => current && { ...current, settings: { ...current.settings, models: { ...current.settings.models, [name]: selector } } })
-  const changeAgent = (markdown: string) =>
-    setDraft((current) => current && { ...current, agents: { ...current.agents, [agent]: markdown } })
+  const change = (changed: Partial<FactorySettings>) => setDraft((current) => current && { ...current, ...changed })
+  const changeModel = (agent: keyof FactoryModels, selector: string) =>
+    setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
 
   const modelOptions = [
-    { value: "", label: "Agent's own model" },
+    { value: "", label: "Pi default" },
     ...(catalog?.providers.filter((provider) => provider.source === PI_MODEL_SOURCE).flatMap((provider) => provider.models.map((model) => ({
       value: model,
       label: model,
     }))) ?? []),
   ]
 
+  const canSave = draft !== null && !busy && validRounds(draft.max_rounds)
   const save = () => {
-    if (draft && !busy) void persist()
+    if (canSave) void persist()
   }
 
   return (
-    <Dialog open={open} onClose={onClose} icon={Settings} title="Factory defaults" widthClassName="max-w-2xl">
-      <form onSubmit={(event) => { event.preventDefault(); void save() }} className="flex flex-col gap-4 px-5 pb-5">
-        <p className="-mt-1 text-[11px] text-ink-faint">Repos override these with factory.yaml and .factory/agents/</p>
+    <Dialog open={open} onClose={onClose} icon={Settings} title="Factory settings" widthClassName="max-w-lg">
+      <form onSubmit={(event) => { event.preventDefault(); save() }} className="flex flex-col gap-4 px-5 pb-5">
         {draft ? (
-          <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1 scrollbar-thin">
+          <>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Merge">
-                <StyledSelect ariaLabel="Merge" value={draft.settings.merge} onChange={(value) => changeSettings({ merge: value as MergeMode })} options={MERGE_OPTIONS} />
+                <StyledSelect ariaLabel="Merge" value={draft.merge} onChange={(value) => change({ merge: value as FactoryMergeMode })} options={MERGE_OPTIONS} />
               </Field>
               <Field label="Max rounds">
                 <input
@@ -99,64 +109,50 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
                   aria-label="Max rounds"
                   min={MAX_ROUNDS_LIMITS.min}
                   max={MAX_ROUNDS_LIMITS.max}
-                  value={Number.isNaN(draft.settings.max_rounds) ? "" : draft.settings.max_rounds}
-                  onChange={(event) => changeSettings({ max_rounds: event.target.valueAsNumber })}
+                  value={Number.isNaN(draft.max_rounds) ? "" : draft.max_rounds}
+                  onChange={(event) => change({ max_rounds: event.target.valueAsNumber })}
                   className={FIELD_CLASS}
+                />
+              </Field>
+              <Field label="Branch">
+                <input
+                  type="text"
+                  aria-label="Branch"
+                  value={draft.branch ?? ""}
+                  onChange={(event) => change({ branch: event.target.value })}
+                  className={FIELD_CLASS}
+                  autoComplete="off"
+                  spellCheck={false}
                 />
               </Field>
             </div>
             <div className="flex gap-6">
-              <Toggle label="Sandbox" checked={draft.settings.sandbox} onChange={(sandbox) => changeSettings({ sandbox })} />
-              <Toggle label="Preview" checked={draft.settings.preview} onChange={(preview) => changeSettings({ preview })} />
+              <Toggle label="Review" checked={draft.review} onChange={(review) => change({ review })} />
+              <Toggle label="Worktree" checked={draft.worktree} onChange={(worktree) => change({ worktree })} />
+              <Toggle label="Preview" checked={draft.preview} onChange={(preview) => change({ preview })} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {FACTORY_AGENT_NAMES.map((name) => {
-                const selected = draft.settings.models[name] ?? ""
+              {AGENTS.map((agent) => {
+                const selected = draft.models[agent] ?? ""
                 const options = modelOptions.some((option) => option.value === selected)
                   ? modelOptions
                   : [...modelOptions, { value: selected, label: `${selected} (saved, not added)` }]
                 return (
-                  <Field key={name} label={`Model of ${name}`}>
-                    <StyledSelect
-                      ariaLabel={`Model of ${name}`}
-                      value={selected}
-                      onChange={(value) => changeModel(name, value)}
-                      options={options}
-                    />
+                  <Field key={agent} label={`Model of ${agent}`}>
+                    <StyledSelect ariaLabel={`Model of ${agent}`} value={selected} onChange={(value) => changeModel(agent, value)} options={options} />
                   </Field>
                 )
               })}
             </div>
-            {modelError
-              ? <ErrorText>{modelError}</ErrorText>
-              : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "Pi models added in Providers / Models. Applies to new tasks." : "Loading Pi models"}</p>}
-            <div className="flex flex-col gap-2">
-              <PillTabs
-                options={AGENT_TABS}
-                value={agent}
-                onChange={setAgent}
-                tabs={{ label: "Agent", idPrefix: "agent-tab", panelId: "agent-markdown" }}
-              />
-              <textarea
-                id="agent-markdown"
-                role="tabpanel"
-                aria-labelledby={`agent-tab-${agent}`}
-                aria-label={`Markdown of ${agent}`}
-                value={draft.agents[agent] ?? ""}
-                onChange={(event) => changeAgent(event.target.value)}
-                rows={14}
-                className={cn(FIELD_CLASS, "resize-none font-mono text-xs leading-relaxed")}
-                spellCheck={false}
-              />
-            </div>
-          </div>
+            <ErrorText>{modelError}</ErrorText>
+          </>
         ) : (
-          !error && <div className="py-8 text-center text-xs text-ink-faint">Loading defaults</div>
+          !error && <div role="status" className="py-8 text-center text-xs text-ink-faint">Loading settings</div>
         )}
         <ErrorText>{error}</ErrorText>
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className={QUIET_BUTTON_CLASS}>Cancel</button>
-          <button type="submit" disabled={!draft || busy} className={PRIMARY_BUTTON_CLASS}>Save</button>
+          <button type="submit" disabled={!canSave} className={PRIMARY_BUTTON_CLASS}>Save</button>
         </div>
       </form>
     </Dialog>

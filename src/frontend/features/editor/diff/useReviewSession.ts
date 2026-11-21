@@ -4,8 +4,8 @@ import { errorMessage } from "@/lib/utils"
 import { formatReview, useReviewNotes, type NoteAnchor, type ReviewNote } from "./review"
 import type { FilePatch } from "./useRootDiff"
 
-/** Review delivery callback and receiver availability. */
-export type ReviewTarget = { send: (text: string) => Promise<void>; canSend: boolean }
+/** Review delivery callback and receiver availability, `format` replaces `formatReview` as the sent text. */
+export type ReviewTarget = { send: (text: string) => Promise<void>; canSend: boolean; format?: (notes: ReviewNote[]) => string }
 
 /** New note when noteId is null, otherwise an existing note. */
 export type Draft = { anchor: NoteAnchor; noteId: string | null; comment: string }
@@ -56,7 +56,7 @@ export function useReviewSession(root: string, review: ReviewTarget | undefined,
         const patch = patches[file.path]
         return [file.path, patch?.stamp === file.stamp ? patch.lines : null]
       }))
-      const text = formatReview(notes, currentPatches)
+      const text = review?.format ? review.format(notes) : formatReview(notes, currentPatches)
       if (review) {
         await review.send(text)
         updateNotes((current) => current.filter((note) => !sent.has(note)))
