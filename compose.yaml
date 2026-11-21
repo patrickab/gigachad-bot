@@ -10,6 +10,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      # Probed twice a second while starting, so `up --wait` returns when PostgreSQL is ready, not at the next 5s probe
+      start_period: 30s
+      start_interval: 500ms
     ports:
       - "${POSTGRES_HOST:?Set POSTGRES_HOST in the environment}:${POSTGRES_PORT:?Set POSTGRES_PORT in the environment}:5432"
     volumes:

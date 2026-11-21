@@ -82,7 +82,8 @@ stop_children() {
             mapfile -t pids < <(tree "$pid")
             kill -TERM "$pid" 2>/dev/null || true
             for _ in {1..20}; do
-                alive=$(ps -o stat=,pid= -p "$(IFS=,; echo "${pids[*]}")" 2>/dev/null | awk '$1 !~ /^Z/ { print $2 }')
+                # `ps` fails once every process is gone, which would end the script here under `set -e`
+                alive=$(ps -o stat=,pid= -p "$(IFS=,; echo "${pids[*]}")" 2>/dev/null | awk '$1 !~ /^Z/ { print $2 }') || true
                 [[ -z "$alive" ]] && break
                 sleep 0.5
             done
@@ -140,10 +141,13 @@ else
     export GIGACHAD_DEV_USER="$(whoami)"
 fi
 
+# PostgreSQL comes up in the background while the services below start, the backend waits for it.
+postgres_up_pid=''
 if ! postgres_is_running; then
     printf 'Starting PostgreSQL container for %s\n' "$profile"
-    compose up --detach --wait postgres
     postgres_started=true
+    compose up --detach --wait postgres &
+    postgres_up_pid=$!
 fi
 
 # Repair manifest/lock drift only in development, then install strictly from the lock.
@@ -185,13 +189,6 @@ c4_ready() {
     return 1
 }
 
-# The backend answers 503 on every architecture route while this service is down, so it
-# only starts once the service is healthy, and one that never gets there fails the unit.
-if ! wait_until 60 0.5 c4_ready; then
-    printf 'error: the C4 service did not become healthy within 30s\n' >&2
-    exit 1
-fi
-
 # The Jupyter service runs the one Jupyter Server and the notebooks' kernels every backend worker shares
 # (src/backend/jupyter_service.py). One process, no reload: kernels outlive backend reloads, not this script.
 # Its Unix socket sits in a folder only this user can enter (XDG_RUNTIME_DIR is missing in tmux and cron shells).
@@ -211,8 +208,19 @@ jupyter_ready() {
     fi
     return 1
 }
-if ! wait_until 60 0.5 jupyter_ready; then
+
+# The three start side by side and the backend waits for each: it answers 503 on every architecture route while the
+# C4 service is down, so one that never gets healthy fails the unit.
+if ! wait_until 300 0.1 c4_ready; then
+    printf 'error: the C4 service did not become healthy within 30s\n' >&2
+    exit 1
+fi
+if ! wait_until 300 0.1 jupyter_ready; then
     printf 'error: the Jupyter service did not become healthy within 30s\n' >&2
+    exit 1
+fi
+if [[ -n "$postgres_up_pid" ]] && ! wait "$postgres_up_pid"; then
+    printf 'error: the PostgreSQL container did not become healthy\n' >&2
     exit 1
 fi
 
