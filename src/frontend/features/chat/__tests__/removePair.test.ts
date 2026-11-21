@@ -34,14 +34,17 @@ describe("removePair restore", () => {
     expect(result.current.messages[3]).toBe(answer2)
   })
 
-  it("lands at the end-clamped index when the chat shrank during the undo window", () => {
+  it("appends the pair once its follower is gone, restores once only and ignores a user message outside the chat", () => {
     const { result, pairs, restore } = chatWithRemovedPair(4, 3)
     const [[user1, answer1], , [user3, answer3]] = pairs
     act(() => { result.current.replaceMessages(() => [user1, answer1]) })
 
     act(() => restore())
+    act(() => restore())
 
     expect(result.current.messages).toEqual([user1, answer1, user3, answer3])
     expect(result.current.messages[2]).toBe(user3)
+    expect(result.current.removePair({ role: "user", content: "question 1" })).toBeNull()
   })
+
 })

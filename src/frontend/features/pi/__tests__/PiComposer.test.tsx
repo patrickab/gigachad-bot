@@ -95,14 +95,6 @@ describe("PiComposer", () => {
     expect(onAbort).not.toHaveBeenCalled()
   })
 
-  it("runs !cmd and !!cmd in the shell", async () => {
-    const { onSubmit, send } = renderComposer()
-    send("!ls")
-    await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "bash", command: "ls", excludeFromContext: false } })))
-    send("!!git status")
-    await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "bash", command: "git status", excludeFromContext: true } })))
-  })
-
   it("keeps staged chips out of a ! command and staged for the next message", async () => {
     const { onSubmit, send } = renderComposer()
     act(() => {
@@ -112,12 +104,6 @@ describe("PiComposer", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "bash", command: "make test", excludeFromContext: false } })))
     send("explain the failure")
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "prompt", text: "explain the failure\n\nchip body" } })))
-  })
-
-  it("compacts with /compact and its instructions", async () => {
-    const { onSubmit, send } = renderComposer()
-    send("/compact keep the API notes")
-    await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ action: { kind: "compact", instructions: "keep the API notes" } })))
   })
 
   it("completes @ with the files of a chat's folder", async () => {

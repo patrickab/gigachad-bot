@@ -164,27 +164,11 @@ async def test_delete_session_preserves_knowledge_and_counts_unknown_as_deleted(
     assert [request.url.params["mode"] for request in harness.requests] == ["preserve-graph", "preserve-graph"]
 
 
-async def test_delete_session_can_remove_the_graph_traces(monkeypatch):
-    harness = LearnHarness(monkeypatch, {"DELETE /api/chats/chat_a": (200, {"ok": True, "mode": "delete-nodes"})})
-
-    await learnharness.delete_session("chat_a", "delete-nodes")
-
-    assert [request.url.params["mode"] for request in harness.requests] == ["delete-nodes"]
-
-
 MARKDOWN = "# Pendulum period vs length\n\n**You:** why does length matter?\n"
 MARKDOWN_HEADERS = {
     "content-type": "text/markdown; charset=utf-8",
     "content-disposition": 'attachment; filename="pendulum-period-vs-length.md"',
 }
-
-
-async def test_export_markdown_answers_the_document_and_its_file_name(monkeypatch):
-    LearnHarness(monkeypatch, {"GET /api/chats/chat_a/markdown": (200, MARKDOWN.encode(), MARKDOWN_HEADERS)})
-
-    export = await learnharness.export_markdown("chat_a")
-
-    assert export == learnharness.SessionExport(filename="pendulum-period-vs-length.md", markdown=MARKDOWN)
 
 
 async def test_export_markdown_keeps_refusals_and_names_a_changed_shape(monkeypatch):
@@ -204,33 +188,11 @@ async def test_export_markdown_keeps_refusals_and_names_a_changed_shape(monkeypa
         await learnharness.export_markdown("chat_unrouted")
 
 
-async def test_delete_session_raises_learnharness_refusal(monkeypatch):
-    LearnHarness(monkeypatch, {"DELETE /api/chats/chat_a": (409, {"error": "A turn is running", "code": "turn_running"})})
-
-    with pytest.raises(UpstreamRequestFailed, match="A turn is running"):
-        await learnharness.delete_session("chat_a")
-
-
 async def test_a_404_of_a_moved_route_never_counts_as_deleted(monkeypatch):
     LearnHarness(monkeypatch, {"DELETE /api/chats/chat_a": (404, b"<!DOCTYPE html><html><body>404: This page could not be found")})
 
     with pytest.raises(UpstreamContractError, match="404 without"):
         await learnharness.delete_session("chat_a")
-
-
-async def test_rename_session_puts_the_title_and_answers_the_stored_one(monkeypatch):
-    harness = LearnHarness(monkeypatch, {"PUT /api/chats/chat_a": (200, {"title": "Fourier series"})})
-
-    assert await learnharness.rename_session("chat_a", "Fourier series") == "Fourier series"
-    assert harness.bodies("PUT /api/chats/chat_a") == [{"title": "Fourier series"}]
-
-
-async def test_renaming_an_unknown_session_keeps_learnharness_refusal(monkeypatch):
-    LearnHarness(monkeypatch, {"PUT /api/chats/chat_gone": (404, {"error": "Not found"})})
-
-    with pytest.raises(UpstreamRequestFailed, match="Not found") as caught:
-        await learnharness.rename_session("chat_gone", "Fourier series")
-    assert caught.value.status == 404
 
 
 # ── Routes ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

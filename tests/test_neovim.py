@@ -1219,17 +1219,10 @@ async def test_paste_asks_the_browser_for_the_shown_file_and_pastes_its_answer(n
         browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
 
 
-@requires_nvim
-async def test_message_frame_shows_its_text_in_neovim(neovim_home, tmp_path, monkeypatch):
-    file = _notes(tmp_path)
-    async with _browsing(monkeypatch, file) as browser:
-        browser.send({"type": "message", "text": "Image is too large"})
-
-        await browser.shows("Image is too large")
-
 
 @requires_nvim
-async def test_frames_that_fit_no_message_are_ignored(neovim_home, tmp_path, monkeypatch):
+async def test_edit_frames_reach_the_shown_file_and_frames_that_fit_no_message_are_ignored(neovim_home, tmp_path, monkeypatch):
+    # The message frame needs no test of its own, _browsing waits for one before every body
     file = _notes(tmp_path)
     async with _browsing(monkeypatch, file) as browser:
         browser.send({"type": "insert_lines", "text": 5})
@@ -1237,57 +1230,27 @@ async def test_frames_that_fit_no_message_are_ignored(neovim_home, tmp_path, mon
         browser.send({"type": "teleport"})
         browser.send({"type": "insert_lines", "text": "kept"})
         await browser.shows("kept")
-        browser.type(b":w\r")
-
-        save = await browser.next_frame("save")
-        assert save["content"] == "abc\nkept\n"
-        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
-
-
-@requires_nvim
-async def test_insert_frame_frame_puts_the_slide_into_the_shown_file(neovim_home, tmp_path, monkeypatch):
-    file = _notes(tmp_path)
-    async with _browsing(monkeypatch, file) as browser:
+        browser.send({"type": "insert_image", "path": "imgs/cat.png", "reference": "\\roundimage{imgs/cat.png}"})
+        await browser.shows("imgs/cat.png")
         browser.send({"type": "insert_frame", "text": "\n".join(NEW_FRAME)})
         await browser.shows("{New}")
         browser.type(b":w\r")
 
         save = await browser.next_frame("save")
-        assert save["content"] == "abc\n\n" + "\n".join(NEW_FRAME) + "\n"
+        assert save["content"] == "abc\nkept\n\\roundimage{imgs/cat.png}\n\n" + "\n".join(NEW_FRAME) + "\n"
         browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
 
 
 @requires_nvim
-async def test_insert_image_frame_fills_the_placeholder_of_the_shown_file(neovim_home, tmp_path, monkeypatch):
-    file = _notes(tmp_path, "\\roundimage{example-image}\n")
-    async with _browsing(monkeypatch, file) as browser:
-        browser.send({"type": "insert_image", "path": "imgs/cat.png", "reference": "\\roundimage{imgs/cat.png}"})
-        await browser.shows("imgs/cat.png")
-        browser.type(b":w\r")
-
-        save = await browser.next_frame("save")
-        assert save["content"] == "\\roundimage{imgs/cat.png}\n"
-        browser.send({"type": "saved", "id": save["id"], "content": save["content"]})
-
-
-@requires_nvim
-async def test_open_file_frame_with_a_line_scrolls_the_shown_file_to_it(neovim_home, tmp_path, monkeypatch):
+async def test_open_file_frame_scrolls_to_its_line_and_leader_v_answers_a_forward_search_frame(neovim_home, tmp_path, monkeypatch):
     file = tmp_path / "main.tex"
     file.write_text("x\n" * 79 + "SYNCTARGET\n" + "x\n" * 20)
     async with _browsing(monkeypatch, file) as browser:
         browser.send({"type": "open_file", "path": str(file), "line": 80})
-
         await browser.shows("SYNCTARGET")
 
-
-@requires_nvim
-async def test_leader_v_in_a_tex_file_sends_a_forward_search_frame_with_the_cursor_line(neovim_home, tmp_path, monkeypatch):
-    file = tmp_path / "main.tex"
-    file.write_text("a\nb\nc\n")
-    async with _browsing(monkeypatch, file) as browser:
-        browser.type(b"2G\\v")
-
-        assert await browser.next_frame("forward_search") == {"type": "forward_search", "path": str(file), "line": 2}
+        browser.type(b"82G\\v")
+        assert await browser.next_frame("forward_search") == {"type": "forward_search", "path": str(file), "line": 82}
 
 
 SHIFT_ENTER, CTRL_ENTER = b"\x1b[13;2u", b"\x1b[13;5u"  # what the browser sends, Neovim reads them as <S-CR> and <C-CR>

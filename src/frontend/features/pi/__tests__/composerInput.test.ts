@@ -2,34 +2,18 @@ import { describe, expect, it } from "vitest"
 import { composerAction, draftOf, fileCompletions, piCompletions } from "../composerInput"
 
 describe("composerAction", () => {
-  it("runs !cmd in the shell, in context", () => {
-    expect(composerAction("!ls -la", [])).toEqual({ kind: "bash", command: "ls -la", excludeFromContext: false })
-  })
-
-  it("keeps !!cmd output out of the model's context", () => {
-    expect(composerAction("!! git status", [])).toEqual({ kind: "bash", command: "git status", excludeFromContext: true })
-  })
-
-  it("never appends chips to a ! command", () => {
-    expect(composerAction("!make test\n\nchip text", ["chip text"])).toEqual({ kind: "bash", command: "make test", excludeFromContext: false })
-  })
-
-  it("does not read a chip starting with ! as a command", () => {
-    expect(composerAction("!rm -rf", ["!rm -rf"])).toEqual({ kind: "prompt", text: "!rm -rf" })
-  })
-
-  it("sends a bare ! as a prompt", () => {
-    expect(composerAction("!", [])).toEqual({ kind: "prompt", text: "!" })
-  })
-
-  it("compacts with /compact, steered by the rest", () => {
-    expect(composerAction("/compact", [])).toEqual({ kind: "compact" })
-    expect(composerAction("/compact keep the test plan", [])).toEqual({ kind: "compact", instructions: "keep the test plan" })
-  })
-
-  it("leaves other slash commands and text to Pi as prompts", () => {
-    expect(composerAction("/compactor", [])).toEqual({ kind: "prompt", text: "/compactor" })
-    expect(composerAction("fix it\n\nchip", ["chip"])).toEqual({ kind: "prompt", text: "fix it\n\nchip" })
+  it.each([
+    ["runs !cmd in the shell, in context", "!ls -la", [], { kind: "bash", command: "ls -la", excludeFromContext: false }],
+    ["keeps !!cmd output out of the model's context", "!! git status", [], { kind: "bash", command: "git status", excludeFromContext: true }],
+    ["never appends chips to a ! command", "!make test\n\nchip text", ["chip text"], { kind: "bash", command: "make test", excludeFromContext: false }],
+    ["does not read a chip starting with ! as a command", "!rm -rf", ["!rm -rf"], { kind: "prompt", text: "!rm -rf" }],
+    ["sends a bare ! as a prompt", "!", [], { kind: "prompt", text: "!" }],
+    ["compacts with /compact", "/compact", [], { kind: "compact" }],
+    ["steers /compact by the rest", "/compact keep the test plan", [], { kind: "compact", instructions: "keep the test plan" }],
+    ["leaves other slash commands to Pi", "/compactor", [], { kind: "prompt", text: "/compactor" }],
+    ["sends text with its chips as a prompt", "fix it\n\nchip", ["chip"], { kind: "prompt", text: "fix it\n\nchip" }],
+  ])("%s", (_name, draft, chips, action) => {
+    expect(composerAction(draft, chips)).toEqual(action)
   })
 })
 

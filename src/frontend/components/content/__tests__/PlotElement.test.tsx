@@ -109,16 +109,14 @@ describe("PlotElement", () => {
 
     act(() => resizeObservers[0]!.resize(480))
 
-    expect(plotProps.at(-1)!.layout).toMatchObject({
-      paper_bgcolor: "transparent",
-      plot_bgcolor: "transparent",
-      font: { color: "#1a1816", family: "Inter" },
-      xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
-      xaxis2: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
-      scene: {
-        bgcolor: "transparent",
-        xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4", showbackground: false },
-      },
-    })
+    // The theme's own colours are not the contract: every axis takes the same theme colour instead of the model's
+    type Axis = Record<string, unknown>
+    const layout = plotProps.at(-1)!.layout as { xaxis: Axis; xaxis2: Axis; scene: { xaxis: Axis } }
+    const grid = layout.xaxis.gridcolor
+    expect(grid).not.toBe("white")
+    for (const axis of [layout.xaxis, layout.xaxis2, layout.scene.xaxis]) {
+      expect(axis).toMatchObject({ gridcolor: grid, zerolinecolor: grid, linecolor: grid })
+    }
+    expect(layout).toMatchObject({ paper_bgcolor: "transparent", plot_bgcolor: "transparent", scene: { bgcolor: "transparent", xaxis: { showbackground: false } } })
   })
 })

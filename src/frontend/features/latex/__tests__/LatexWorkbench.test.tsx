@@ -214,47 +214,30 @@ describe("LatexWorkbench", () => {
     expect(within(screen.getByRole("group", { name: "Key figures" })).getAllByRole("option").map((item) => item.textContent)).toEqual(["Big numberOne big number carries the slide"])
   })
 
-  it("opens on the first slide with the search field focused, moves across groups with the arrows and inserts with Enter", async () => {
-    const trigger = await openSlideList()
+  // Keys, focus, filtering mechanics and Escape belong to CommandPicker's tests, these prove AddSlide's wiring
+  it("inserts the picked slide's text into Neovim and closes", async () => {
+    await openSlideList()
     const search = screen.getByRole("combobox", { name: "Search slides…" })
-    const highlighted = () => screen.getByRole("option", { selected: true }).textContent
 
-    expect(search).toHaveFocus()
-    expect(highlighted()).toMatch(/^Title/)
-    for (const key of ["ArrowDown", "ArrowDown"]) fireEvent.keyDown(search, { key })
-    expect(highlighted()).toMatch(/^Big number/)
-    fireEvent.keyDown(search, { key: "ArrowUp" })
-    expect(highlighted()).toMatch(/^Bullets/)
-    expect(search).toHaveFocus()
+    fireEvent.keyDown(search, { key: "ArrowDown" })
     fireEvent.keyDown(search, { key: "Enter" })
 
     expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[1].text))
     expect(workbench.focus).toHaveBeenCalledOnce()
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Slide primitives" })).not.toBeInTheDocument())
-    expect(trigger).toHaveFocus()
   })
 
-  it("filters the slides by name, group and summary and says so when none match", async () => {
+  it("filters the slides by name, group and summary", async () => {
     await openSlideList()
     const search = screen.getByRole("combobox", { name: "Search slides…" })
+    const shown = () => screen.getAllByRole("option").map((item) => item.textContent)
 
     fireEvent.change(search, { target: { value: "carries" } })
-    expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual(["Big numberOne big number carries the slide"])
+    expect(shown()).toEqual(["Big numberOne big number carries the slide"])
     fireEvent.change(search, { target: { value: "text" } })
-    expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual(["TitleTitle slide", "BulletsCause and effect points"])
-    fireEvent.keyDown(search, { key: "ArrowDown" })
-    expect(screen.getByRole("option", { selected: true })).toHaveTextContent(/^Bullets/)
-    fireEvent.change(search, { target: { value: "te" } })
-    expect(screen.getByRole("option", { selected: true })).toHaveTextContent(/^Title/)
-    fireEvent.change(search, { target: { value: "zzz" } })
-    expect(screen.queryByRole("option")).not.toBeInTheDocument()
-    expect(screen.getByText("No match")).toBeInTheDocument()
-    fireEvent.keyDown(search, { key: "Enter" })
-    expect(workbench.send).not.toHaveBeenCalled()
-    fireEvent.change(search, { target: { value: "big" } })
-    fireEvent.keyDown(search, { key: "Enter" })
-
-    expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[2].text))
+    expect(shown()).toEqual(["TitleTitle slide", "BulletsCause and effect points"])
+    fireEvent.change(search, { target: { value: "bullets" } })
+    expect(shown()).toEqual(["BulletsCause and effect points"])
   })
 
   it("keeps the list open when Neovim cannot take the frame", async () => {
@@ -266,16 +249,6 @@ describe("LatexWorkbench", () => {
     expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[0].text))
     expect(workbench.focus).not.toHaveBeenCalled()
     expect(screen.getByRole("dialog", { name: "Slide primitives" })).toBeInTheDocument()
-  })
-
-  it("closes the list with Escape without inserting, focus back on the button", async () => {
-    const trigger = await openSlideList()
-
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search slides…" }), { key: "Escape" })
-
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Slide primitives" })).not.toBeInTheDocument())
-    expect(workbench.send).not.toHaveBeenCalled()
-    expect(trigger).toHaveFocus()
   })
 
   it("previews the highlighted slide in a card and shows none for one without a preview or a preview that fails", async () => {

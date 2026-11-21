@@ -558,6 +558,8 @@ class NeovimSession:
         """Stop `nvim` and delete the private copies, discarding unsaved edits."""
         if self._rpc is not None:
             await self._rpc.close()
+        # Closing the terminal first: on SIGTERM alone Neovim's TUI waits a second for terminal replies nobody sends
+        self._stop_reading()
         if self._process.poll() is None:
             self._process.terminate()
             try:
@@ -565,7 +567,6 @@ class NeovimSession:
             except subprocess.TimeoutExpired:
                 self._process.kill()
                 await asyncio.to_thread(self._process.wait)
-        self._stop_reading()
         shutil.rmtree(self._workdir, ignore_errors=True)
 
     def _read_terminal(self) -> None:

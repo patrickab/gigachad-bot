@@ -57,15 +57,20 @@ def test_synctex_view_maps_a_source_line_to_the_top_left_of_its_text_on_its_page
     assert spot_of(tmp_path / "elsewhere" / "aside.tex", 1).status_code == 403
 
 
-def test_synctex_view_answers_404_before_a_build_and_503_without_synctex(tex_client, document, monkeypatch):
-    def spot():
+def test_synctex_routes_answer_404_before_a_build_and_503_without_synctex(tex_client, document, monkeypatch):
+    def edit():
+        return tex_client.post("/api/latex/synctex", json={"path": str(document), "page": 1, "x": 10, "y": 10})
+
+    def view():
         return tex_client.post("/api/latex/synctex/view", json={"path": str(document), "file": str(document), "line": 1})
 
     monkeypatch.setattr(synctex.shutil, "which", lambda name: f"/usr/bin/{name}")
-    assert spot().status_code == 404
+    assert edit().status_code == view().status_code == 404
+    assert tex_client.post("/api/latex/synctex/slide", json={"path": str(document), "page": 1}).status_code == 404
     monkeypatch.setattr(synctex.shutil, "which", lambda name: None)
-    assert spot().status_code == 503
-    assert "synctex" in spot().json()["detail"]
+    for response in (edit(), view()):
+        assert response.status_code == 503
+        assert "synctex" in response.json()["detail"]
 
 
 SLIDES = (
@@ -207,19 +212,6 @@ def test_a_line_typesets_its_plain_words_without_commands_options_or_comments(li
     assert synctex.line_words(line) == words
 
 
-def test_synctex_answers_404_before_a_build(tex_client, document, monkeypatch):
-    monkeypatch.setattr(synctex.shutil, "which", lambda name: f"/usr/bin/{name}")
-    response = tex_client.post("/api/latex/synctex", json={"path": str(document), "page": 1, "x": 10, "y": 10})
-    assert response.status_code == 404
-
-
-def test_synctex_answers_503_when_synctex_is_missing(tex_client, document, monkeypatch):
-    monkeypatch.setattr(synctex.shutil, "which", lambda name: None)
-    response = tex_client.post("/api/latex/synctex", json={"path": str(document), "page": 1, "x": 10, "y": 10})
-    assert response.status_code == 503
-    assert "synctex" in response.json()["detail"]
-
-
 
 DECK = (
     "\\documentclass{beamer}\n"
@@ -255,10 +247,6 @@ def test_the_slide_end_of_a_page_is_its_frames_end_or_the_headings_of_a_chapter_
     assert end_of(4) == {"path": str(root), "line": 11}  # the chapter slide, past its subsection
     assert end_of(5) == {"path": str(vault / "deck" / "slides" / "more.tex"), "line": 3}
     assert end_of(6) == 404
-
-
-def test_the_slide_end_answers_404_before_a_build(tex_client, document):
-    assert tex_client.post("/api/latex/synctex/slide", json={"path": str(document), "page": 1}).status_code == 404
 
 
 @pytest.mark.parametrize(("source", "line", "end"), [
