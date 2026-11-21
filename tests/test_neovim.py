@@ -9,8 +9,8 @@ from pydantic import ValidationError
 import pytest
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from backend.identity import get_request_identity
 from backend import websocket_origin
+from backend.identity import get_request_identity
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
 from lib import neovim_session
@@ -245,7 +245,9 @@ async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
 
 @requires_nvim
 async def test_escape_in_normal_mode_leaves_after_the_users_own_escape_mapping(neovim_home):
-    (neovim_home / "init.lua").write_text('vim.keymap.set("n", "<Esc>", "<Cmd>let g:user_escapes = get(g:, \'user_escapes\', 0) + 1<CR>")\n')
+    (neovim_home / "init.lua").write_text(
+        'vim.keymap.set("n", "<Esc>", "<Cmd>let g:user_escapes = get(g:, \'user_escapes\', 0) + 1<CR>")\n'
+    )
     left: asyncio.Queue[None] = asyncio.Queue()
 
     async def save(path: str, text: str) -> str:
@@ -308,7 +310,8 @@ async def test_set_text_highlights_each_changed_hunk(neovim_home):
         await session.set_text("\n".join(lines) + "\n", "notes.md")
 
         rows = await session._lua(
-            "local marks = vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_get_namespaces().gigachad_remote_edit, 0, -1, { details = true })"
+            "local marks = vim.api.nvim_buf_get_extmarks("
+            "0, vim.api.nvim_get_namespaces().gigachad_remote_edit, 0, -1, { details = true })"
             " return vim.tbl_map(function(mark) return { mark[2], mark[4].line_hl_group } end, marks)"
         )
         assert rows == [[2, "DiffText"], [14, "DiffText"], [15, "DiffText"]]

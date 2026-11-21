@@ -206,7 +206,10 @@ def test_synctex_view_puts_a_line_inside_a_beamer_frame_on_the_page_of_its_frame
     ("\\begin{frame}[fragile]{Results} see \\ref{tab:main}", ["Results"]),
     ("\\includegraphics[width=0.5\\textwidth]{figures/plot.png} where $area = width$", ["where"]),
     ("data data again, \\only<2>{again} 50\\% done", ["data", "again", "done"]),
-    ("one two three four five six seven eight nine eleven twelve thirteen", ["three", "four", "five", "seven", "eight", "nine", "eleven", "twelve"]),
+    (
+        "one two three four five six seven eight nine eleven twelve thirteen",
+        ["three", "four", "five", "seven", "eight", "nine", "eleven", "twelve"],
+    ),
 ])
 def test_a_line_typesets_its_plain_words_without_commands_options_or_comments(line, words):
     assert synctex.line_words(line) == words
