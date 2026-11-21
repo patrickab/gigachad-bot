@@ -22,7 +22,8 @@ html:root {
   --jp-border-color2: var(--divider);
   --jp-border-color3: var(--divider);
   --jp-inverse-border-color: var(--divider-strong);
-  --jp-border-radius: 0.375rem; /* --radius-md */
+  /* --radius-md in px: the Jupyter toolkit reads this with parseInt, which a minified `.375rem` fails */
+  --jp-border-radius: 6px;
 
   /* Text */
   --jp-ui-font-color0: var(--ink);

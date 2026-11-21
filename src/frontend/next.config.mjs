@@ -2,6 +2,7 @@ import { copyFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 
 const frontendDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -21,6 +22,8 @@ for (const [name, source] of Object.entries(PUBLIC_RUNTIME_FILES)) {
   copyFileSync(path.join(frontendDir, "node_modules", source), path.join(frontendDir, "public", name));
 }
 
+const jupyterLoader = (name) => require.resolve(`./features/notebook/turbopack/${name}`);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: isTauriBuild ? "export" : "standalone",
@@ -30,6 +33,24 @@ const nextConfig = {
   // The notebook editor is client-only (`features/notebook`), these are the build seams `@datalayer/jupyter-react` needs
   // (see its `examples/next-js/next.config.mjs`). `options.webpack` is Next's own webpack: a second copy breaks every module.
   transpilePackages: ["@jupyterlab/settingregistry", "@jupyterlite/settings"],
+  // `next dev` runs Turbopack, a build runs webpack (`package.json`): both blocks below describe the same seams.
+  turbopack: {
+    root: frontendDir,
+    resolveAlias: {
+      json5: "json5/lib/index.js",
+      "plotly.js": "plotly.js-dist-min",
+      // Stylesheets of the Jupyter packages name files in node_modules with webpack's `~`.
+      "~*": "*",
+    },
+    rules: {
+      // Loaders in place of the webpack rules below, each for Jupyter packages only.
+      "*.css": [
+        { condition: { path: /@jupyterlab\/apputils-extension\/style\/base\.css$/ }, loaders: [jupyterLoader("emptyStylesheetLoader.cjs")], type: "css" },
+        { condition: { all: ["foreign", { query: "?raw" }] }, loaders: [jupyterLoader("stylesheetLoader.cjs")], as: "*.js" },
+      ],
+      "*.svg": { condition: { path: /node_modules\/@(jupyterlab|jupyter|jupyter-widgets|lumino|datalayer)\// }, loaders: [jupyterLoader("svgMarkupLoader.cjs")], as: "*.js" },
+    },
+  },
   webpack: (config, options) => {
     config.resolve.alias.canvas = false;
     config.resolve.alias.encoding = false;
@@ -40,22 +61,6 @@ const nextConfig = {
     // The notebook draws Plotly output with the prebuilt Plotly the chat's plots use, one file. Its own dependency is an older
     // Plotly as some 1500 source modules, which a build bundled as a second copy.
     config.resolve.alias["plotly.js$"] = require.resolve("plotly.js-dist-min");
-    // `next dev` renders the app in the browser only (`app/_components/AppEntry.dev.tsx`), and its server bundle gets a stub
-    // of the app: webpack builds what a browser-only import reaches for the server too, here some 11000 modules a second time.
-    if (options.dev) {
-      const appFile = (name) => path.join(frontendDir, "app/_components", name);
-      config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/app[\\/]_components[\\/]AppEntry\.tsx$/, appFile("AppEntry.dev.tsx")));
-      if (options.isServer) config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/app[\\/]_components[\\/]App\.tsx$/, appFile("App.dev-server.tsx")));
-      // The notebook editor is a third of the modules (JupyterLab, Primer, their icon sets): `next dev` compiles it when the first
-      // notebook opens, not at startup. webpack tells the page through its own port on localhost, so a browser on another machine
-      // never gets the editor: GIGACHAD_EAGER_NOTEBOOK=1 compiles it up front as a build does.
-      if (!options.isServer && !process.env.GIGACHAD_EAGER_NOTEBOOK) {
-        config.experiments = {
-          ...config.experiments,
-          lazyCompilation: { entries: false, imports: true, test: (module) => /features[\\/]notebook[\\/]NotebookEditor\.tsx$/.test(module.nameForCondition() ?? "") },
-        };
-      }
-    }
     // The toast and splash styles of JupyterLab's apputils-extension are not used by an embedded notebook, and their `@import '~react-toastify/...'` is a
     // webpack tilde path that Tailwind's own import resolver cannot follow.
     config.plugins.push(new options.webpack.NormalModuleReplacementPlugin(/@jupyterlab[\\/]apputils-extension[\\/]style[\\/]base\.css$/, require.resolve("./features/notebook/empty.css")));
@@ -75,4 +80,11 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// `next dev` renders the app in the browser only (`app/_components/AppEntry.dev.tsx`): the dev server then compiles the app
+// once, for the browser, not a second time for a server render.
+const devEntry = { "@/app/_components/AppEntry": "./app/_components/AppEntry.dev.tsx" };
+
+export default function config(phase) {
+  if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  return { ...nextConfig, turbopack: { ...nextConfig.turbopack, resolveAlias: { ...nextConfig.turbopack.resolveAlias, ...devEntry } } };
+}

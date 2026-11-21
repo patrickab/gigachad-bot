@@ -1,5 +1,6 @@
 "use client"
 
+import "./webpackGlobals"
 import { JupyterReactTheme, Notebook, NotebookCommandIds, notebookStore } from "@datalayer/jupyter-react"
 import type { INotebookContent } from "@jupyterlab/nbformat"
 import type { NotebookModel } from "@jupyterlab/notebook"

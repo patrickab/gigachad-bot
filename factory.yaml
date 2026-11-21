@@ -32,7 +32,7 @@ preview:
       argv: ["{repo_path}/.venv/bin/python3", -m, uvicorn, src.backend.server:app, --host, 127.0.0.1, --port, "{port.backend}"]
       ready_url: "http://127.0.0.1:{port.backend}/healthz"
     - name: frontend
-      argv: [npm, --prefix, src/frontend, exec, --, next, dev, --webpack, -H, 127.0.0.1, -p, "{port.frontend}", src/frontend]
+      argv: [npm, --prefix, src/frontend, exec, --, next, dev, --turbopack, -H, 127.0.0.1, -p, "{port.frontend}", src/frontend]
       ready_url: "http://127.0.0.1:{port.frontend}/preview/{port.frontend}"
   env:
     GIGACHAD_ENV: development

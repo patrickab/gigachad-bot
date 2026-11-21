@@ -1,6 +1,6 @@
 "use client"
 
-import { AppEntry } from "./_components/AppEntry"
+import { AppEntry } from "@/app/_components/AppEntry"
 
 export default function Home() {
   return <AppEntry />
