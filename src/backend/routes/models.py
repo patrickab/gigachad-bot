@@ -40,7 +40,8 @@ async def _models_payload(
         )
 
     def ollama() -> tuple[list[str], dict[str, list[str]] | None]:
-        """Installed Ollama chat models as selectors, then the gateway's models."""
+        """Installed Ollama chat models as selectors, synced into Pi first so the gateway lists a new pull, then its models."""
+        ollama_models.sync_pi_provider()
         return [f"ollama/{tag}" for tag in ollama_models.installed_chat_models()], pi_models.served_ladders()
 
     # Ollama's API runs alongside the store reads instead of after them.

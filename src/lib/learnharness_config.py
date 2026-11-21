@@ -334,7 +334,8 @@ def _gateway_entries() -> dict[str, dict[str, Any]]:
 
 
 def _ollama_and_gateway() -> tuple[list[str], dict[str, dict[str, Any]]]:
-    """The installed Ollama tags and the gateway's rows."""
+    """The installed Ollama tags and the gateway's rows, read after Pi's Ollama provider caught up with those tags."""
+    ollama_models.sync_pi_provider()
     return ollama_models.installed_chat_models(), _gateway_entries()
 
 

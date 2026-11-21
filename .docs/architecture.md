@@ -289,7 +289,7 @@ Coding tabs, the session picker and the workbench file chats (Markdown, LaTeX, n
 - The gateway is `pi_host.gateway_url()` (`GIGACHAD_PI_HOST_URL`, default `http://127.0.0.1:8300`, plus `/v1`), the bearer pi-host's token file. `GET /api/models/pi` returns its catalog. Every pick lands in one catalog row labelled `Pi` with `source: "pi"`. Stored selectors keep `litellm_proxy/<provider>/<model>`.
 - `ModelProviderStore` rewrites pre-Pi rows (`source: "omp"`, label `OMP` or one row per login) once on load into that row, and a tab-order entry `OMP` into `Pi`.
 - Return an offline catalog with a reason when the gateway is unreachable. That catalog response is distinct from a failed generation. Cache the catalog and the effort ladders for 60 seconds.
-- `lib/ollama_models.py` lists the installed Ollama chat models from Ollama's API at `OLLAMA_BASE_URL` (`/api/tags`, `/api/show` cached per digest; embedding models left out). The backend never writes Pi's agent dir: Pi runs an Ollama model, or a hand-entered model its registry lacks, only when the user's own `models.json` declares it.
+- Ollama is Pi's custom provider `ollama` in Pi's `models.json` (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`), so the gateway serves `ollama/<tag>`. `lib/ollama_models.py` reads Ollama's API at `OLLAMA_BASE_URL` (`/api/tags`, `/api/show` cached per digest; embedding models left out) and replaces only that provider's entry through `lib/pi_models_json.py` (locked, atomic, every other provider and key kept, an unreadable file never overwritten): at backend start and on `GET /api/models`. It is the only write into Pi's agent dir. A hand-entered model Pi's registry lacks runs only when the user's own `models.json` declares it.
 
 ## Agent factory
 

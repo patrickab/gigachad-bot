@@ -130,7 +130,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- sandbox_plot.py           Plot generation
 |   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token
 |   |   |-- pi_models.py              Pi model catalog for local chats, stored selector -> gateway id (`gateway_model_id`)
-|   |   |-- ollama_models.py          Installed Ollama chat models
+|   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
 |   |   |-- factory.py                Factory tasks: models, `FactoryStore` (`factory_tasks`, `factory_repo_settings`), settings chain, branch resolution, diff, task life over pi-host
 |   |   |-- factory_workspace.py      Task worktrees through `agent-worktree`, current-checkout rule, `factory.yaml` reader
