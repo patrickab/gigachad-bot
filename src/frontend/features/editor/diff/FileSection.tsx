@@ -1,7 +1,7 @@
 import { Fragment, memo, useMemo } from "react"
 import { toSplitRows, type PatchLine } from "@/lib/diff"
 import { cn } from "@/lib/utils"
-import { ResizeEdges, type ResizeStart } from "@/features/chat/columnResize"
+import { ResizeEdges, type ResizeStart } from "@/components/ui/columnResize"
 import { LineCountLabel } from "./diffTree"
 import { locateNote, type ReviewNote, type ReviewSide } from "./review"
 import { Annotations } from "./ReviewAnnotations"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { ResizeEdges, type ResizeStart } from "@/features/chat/columnResize"
+import { ResizeEdges, type ResizeStart } from "@/components/ui/columnResize"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { TurnCard, TurnHeader, TurnPreview, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"

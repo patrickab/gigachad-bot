@@ -1,6 +1,6 @@
 "use client"
 
-import { useColumnWidth, CHAT_COLUMN_MAX_PX } from "@/features/chat/columnResize"
+import { useColumnWidth, CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
 import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"

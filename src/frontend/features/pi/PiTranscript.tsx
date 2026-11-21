@@ -5,7 +5,7 @@ import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
-import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/features/chat/columnResize"
+import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/components/ui/columnResize"
 import { WideModeToggle } from "@/features/chat/WideModeToggle"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
