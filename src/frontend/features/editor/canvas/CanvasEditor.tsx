@@ -142,7 +142,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, docPath, depth
         {...containerHandlers}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <CanvasDotGrid offset={offset} scale={scale} />
+        {/* The surface of a top-level canvas: fine grain and a soft light, nested canvases lie on their window */}
+        {depth === 0 && <div className="canvas-surface absolute inset-0 pointer-events-none" aria-hidden />}
+        <CanvasDotGrid offset={offset} scale={scale} active={isPanning || isDrawing || scale !== settledScale} />
 
         {/* Transformed canvas layer — frames + strokes share this space so strokes
             always render over frame content and both export identically. */}

@@ -7,8 +7,12 @@ const GRID_SPACING = 28 // canvas units between dots at the finest grid level
 const GRID_MIN_SCREEN_SPACING = 18
 const DOT_RADIUS = 0.8
 
-/** Keep a quiet, world-anchored grid with eased fades between density levels. */
-export function CanvasDotGrid({ offset, scale }: { offset: Point; scale: number }) {
+/**
+ * Keep a quiet, world-anchored grid with eased fades between density levels.
+ *
+ * - Faint at rest, it comes forward while `active` (the canvas is moving or being drawn on), when a reference helps
+ */
+export function CanvasDotGrid({ offset, scale, active }: { offset: Point; scale: number; active: boolean }) {
   const patternId = useId()
   let spacing = GRID_SPACING * scale
   while (spacing < GRID_MIN_SCREEN_SPACING) spacing *= 2
@@ -17,7 +21,7 @@ export function CanvasDotGrid({ offset, scale }: { offset: Point; scale: number 
   const opacity = 0.85 + 0.1 * Math.min(1, scale)
   const cell = 2 * spacing
   return (
-    <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
+    <svg className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity ease-out motion-reduce:transition-none ${active ? "opacity-100 duration-150" : "opacity-40 duration-700"}`} aria-hidden>
       <defs>
         <pattern id={patternId} x={offset.x % cell} y={offset.y % cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
           <g className="fill-ink-muted dark:fill-ink-faint" opacity={opacity}>
