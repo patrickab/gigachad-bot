@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import logging
@@ -14,43 +14,43 @@ from fastapi.responses import JSONResponse
 
 from backend.http_plumbing import TransferMiddleware
 from backend.routes.architecture import router as architecture_router
-from backend.routes.canvases import router as canvases_router
 from backend.routes.assets import router as assets_router
-from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
-from lib.c4_service import C4ServiceUnavailable
-from lib.data_store import StorageConflictError
+from backend.routes.canvases import router as canvases_router
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
 from backend.routes.deploy import router as deploy_router
-from backend.routes.jupyter import router as jupyter_router
-from backend.routes.neovim import router as neovim_router
-from backend.routes.terminal import router as terminal_router
-from backend.routes.latex import router as latex_router
 from backend.routes.documents import router as documents_router
-from backend.routes.files import router as files_router
-from backend.routes.file_watch import router as file_watch_router
-from backend.routes.fileviewer import router as fileviewer_router
-from backend.routes.histories import router as histories_router
-from backend.routes.memory import router as memory_router
-from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib import jupyter_service
-from lib import ollama_models
-from backend.routes.models import router as models_router
-from backend.routes.file_roots import router as file_roots_router
+from backend.routes.factory import router as factory_router
+from backend.routes.factory_preview import router as factory_preview_router
 from backend.routes.file_attach import router as file_attach_router
 from backend.routes.file_git import router as file_git_router
-from backend.routes.factory import router as factory_router
+from backend.routes.file_roots import router as file_roots_router
+from backend.routes.file_watch import router as file_watch_router
+from backend.routes.files import router as files_router
+from backend.routes.fileviewer import router as fileviewer_router
+from backend.routes.histories import router as histories_router
+from backend.routes.jupyter import router as jupyter_router
+from backend.routes.latex import router as latex_router
+from backend.routes.learn import router as learn_router
+from backend.routes.memory import router as memory_router
+from backend.routes.models import router as models_router
+from backend.routes.neovim import router as neovim_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.pi import router as pi_router
-from backend.routes.learn import router as learn_router
 from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
+from backend.routes.terminal import router as terminal_router
 from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
+from config import CORS_ORIGINS, is_cors_unsafe_for_production
+from lib import jupyter_service, ollama_models
+from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
+from lib.c4_service import C4ServiceUnavailable
+from lib.data_store import StorageConflictError
 from lib.db_schema import database_url, upgrade
+from lib.mineru import kill_all_mineru_servers, reset_cancel
 from lib.postgres_pool import close_postgres_pool
 from lib.process_owner import reap_orphans, stop_owned
-from config import CORS_ORIGINS, is_cors_unsafe_for_production
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def widen_default_executor() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
         log.warning("Stopped %d processes an earlier backend left running: %s", len(reaped), reaped)
     widen_default_executor()
@@ -174,4 +174,5 @@ app.include_router(canvases_router)
 app.include_router(pi_router)
 app.include_router(learn_router)
 app.include_router(factory_router)
+app.include_router(factory_preview_router)
 

@@ -1,7 +1,7 @@
 """Identity gate in front of every factory preview: one port for all of them, picked by the URL path.
 
-- Consumes the previews the factory engine starts on loopback ports `lib.factory.PREVIEW_PORTS`, provides them to the browser
-  at `lib.factory.preview_gate_url()` (Tailscale Serve terminates HTTPS in production)
+- Consumes the factory previews on loopback ports `lib.factory_preview.PREVIEW_PORTS`, provides them to the browser
+  at `lib.factory_preview.preview_gate_url()` (Tailscale Serve terminates HTTPS in production)
 - `/preview/<port>/...` reaches the preview's frontend with the path kept, which Next serves under that base path.
   `/preview-api/<port>/...` reaches its backend with the prefix stripped
 - A preview runs the task agent's code as the host user: only the local dev login and Tailnet logins granted
@@ -28,7 +28,7 @@ from websockets.exceptions import InvalidHandshake
 
 from backend.identity import CAPABILITIES_HEADER, development_login, has_host_access, host_denied
 from backend.reverse_proxy import LOGIN_HEADER, METHODS, relay_websocket, streaming_response
-from lib.factory import PREVIEW_PORTS
+from lib.factory_preview import PREVIEW_PORTS
 from lib.upstream import forwardable_headers
 
 # `preview` keeps the whole path for the upstream, `preview-api` strips its prefix.

@@ -11,7 +11,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from backend import preview_gate
 from backend.identity import HOST_CAPABILITY
-from lib import factory
+from lib import factory_preview
 
 OWNER = "owner@example.com"
 GRANTED = f'{{"{HOST_CAPABILITY}":[{{}}]}}'
@@ -150,15 +150,11 @@ def test_refuses_websockets_without_a_host_login(echo_preview):
     assert refused.value.code == 1008
 
 
-def test_the_engines_preview_urls_move_onto_the_gate(monkeypatch):
+def test_preview_urls_move_onto_the_gate(monkeypatch):
     monkeypatch.setenv("GIGACHAD_PREVIEW_URL", f"https://{HOST}/")
 
-    preview = factory.Preview(
-        status="ready", url="http://127.0.0.1:8101/preview/8101", open_url="http://127.0.0.1:8101/preview/8101/?open=abc", error=None
-    )
-
-    assert preview.url == f"https://{HOST}/preview/8101"
-    assert preview.open_url == f"https://{HOST}/preview/8101/?open=abc"
+    assert factory_preview.through_gate("http://127.0.0.1:8101/preview/8101") == f"https://{HOST}/preview/8101"
+    assert factory_preview.through_gate("http://127.0.0.1:8101/preview/8101/?open=abc") == f"https://{HOST}/preview/8101/?open=abc"
     # Not a preview port, and a preview that never got a URL.
-    assert factory.through_gate("http://127.0.0.1:8001/api") == "http://127.0.0.1:8001/api"
-    assert factory.through_gate("") == ""
+    assert factory_preview.through_gate("http://127.0.0.1:8001/api") == "http://127.0.0.1:8001/api"
+    assert factory_preview.through_gate("") == ""
