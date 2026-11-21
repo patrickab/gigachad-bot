@@ -13,6 +13,13 @@ via `run.sh`.
   and frontend on ports 8100-8199, `.docs/architecture.md`, "Agent factory").
   That is the engine's job, you never start one yourself.
 
+## Testing
+
+- `scripts/check.sh [lint|types|python|frontend|pi-host]` is the one pipeline: local runs, factory gates (`factory.yaml`) and before a redeploy. Run it before you call work done.
+- It is hermetic (`env -i`), and gives the Postgres-backed tests a throwaway database on the dev or production PostgreSQL. Never rely on variables from your shell in tests: `tests/__init__.py` strips the host's `GIGACHAD_*`, `PI_*` and similar for plain `pytest` too.
+- Tests never reach the network or a real model: stub `completions`, pi-host and the engine.
+- `lint` runs ruff on Python files changed since `origin/master`: fix what ruff reports in a file you touch.
+
 ## Documentation
 
 - Follow the global documentation standard. Keep generated context complementary: system overview for concepts/workflows, architecture for implementation contracts, module map for source ownership and navigation.
