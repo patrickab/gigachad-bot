@@ -171,7 +171,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
           </div>
         </InTopBar>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
-        <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-8 pb-10 pt-6 scrollbar-thin">
+        <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
             const inColumn = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
             const isFinished = column.id === "finished"
