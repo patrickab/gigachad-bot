@@ -7,6 +7,8 @@
  * - Provides `runMerge`: the entries of a merge, used after a passed `auto` round and by `/factory approve`. A worktree
  *   task whose rebase conflicts gets a `conflict` round instead, within the run's `maxRounds`
  * - A rebase the coder left open in a worktree task goes back to the coder as a `conflict` round before anything runs
+ * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
+ *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
  */
 import { protectedPaths, type FactoryConfig } from "./config.ts";
 import type { TaskDiff } from "./git.ts";
@@ -53,6 +55,14 @@ export interface RoundResult {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Exit code of a hook or gate whose environment is broken (missing packages, tools, services): not the coder's to fix. */
+export const INFRA_EXIT = 75;
+
+function lastLine(output: string): string {
+  const lines = output.trim().split("\n");
+  return (lines[lines.length - 1] ?? "").slice(0, 200);
 }
 
 /**
@@ -122,6 +132,7 @@ export async function runRound(snapshot: Snapshot, steps: PipelineSteps): Promis
         const result = await steps.runCommand(argv);
         drafts.push(customDraft("factory-gate", gateData(round, phase, argv, result)));
         if (steps.cancelled()) return end("cancelled", "cancelled");
+        if (result.exitCode === INFRA_EXIT && !result.killed) return end("blocked", `infra: ${lastLine(result.output)}`);
         if (!passed(result)) return problem(phase, commandFeedback(round, argv, result));
       }
     }

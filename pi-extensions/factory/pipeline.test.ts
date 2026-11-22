@@ -136,6 +136,14 @@ describe("runRound", () => {
     expect(result.continue).toBe(true);
   });
 
+  test("a gate that exits 75 blocks the task as infra, with no feedback and no round for the coder", async () => {
+    const steps = fakeSteps({ runCommand: async (argv) => commandResult(argv[0] === "lint" ? 75 : 0, "noise\neslint is missing\n") });
+    const result = await runRound(snapshotOf(), steps);
+    expect(kinds(result.entries)).toEqual(["factory-gate", "factory-gate", "factory-state"]);
+    expect(lastState(result.entries)).toMatchObject({ state: "blocked", reason: "infra: eslint is missing" });
+    expect(result.continue).toBe(false);
+  });
+
   test("a failing hook is a round problem with trigger hooks", async () => {
     const result = await runRound(snapshotOf(), fakeSteps({ runCommand: async () => commandResult(1) }));
     expect(kinds(result.entries)).toEqual(["factory-gate", "factory-round", "custom_message"]);

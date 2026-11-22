@@ -15,14 +15,11 @@ hooks:
     - [uv, sync, --locked]
     - [npm, install, --prefix, src/frontend, --no-save, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
     - [bun, install, --cwd, pi-host, --frozen-lockfile]
-# The pipeline of scripts/check.sh, one gate per step so a failure names it. The script is hermetic (env -i) and gives the
-# Postgres-backed tests a throwaway database, so a gate fails only for the task's own change.
+# One gate: scripts/check.sh --changed runs the steps the task's change reaches, in parallel, and names the failed ones
+# in its last lines. It is hermetic (env -i) and gives the Postgres-backed tests a throwaway database. Exit 75 means a
+# broken environment (missing packages or tools): the factory blocks the task as `infra` instead of spending a round.
 gates:
-  - [bash, scripts/check.sh, lint]
-  - [bash, scripts/check.sh, types]
-  - [bash, scripts/check.sh, frontend]
-  - [bash, scripts/check.sh, pi-host]
-  - [bash, scripts/check.sh, python]
+  - [bash, scripts/check.sh, --changed]
 # The browser reaches a preview only through the preview gate (`src/backend/preview_gate.py`), which picks it by the port in
 # the path: the frontend is served under `/preview/<port>`, its API base is the gate path of the backend (a path, resolved
 # against the gate's origin in the browser). Both processes listen on loopback only, they run agent-written code.
