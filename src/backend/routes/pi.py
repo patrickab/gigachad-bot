@@ -1,7 +1,8 @@
 """`/api/pi/*`: Pi coding sessions for logins with host access (`backend.identity.HOST_CAPABILITY`), served by pi-host.
 
 - Consumes `lib.pi_host`, the only module that knows pi-host (D6). These routes never build pi-host URLs
-- `repo` is a name from `pi_host.list_repositories` (folders under `~/git` and `~/dev`, Git checkouts under `~`), resolved to the session folder here (`pi_host.resolve_repository`)
+- `repo` is a name from `repository_index.list_repositories` (folders under `~/git` and `~/dev`, Git checkouts under `~`),
+  resolved to the session folder here (`repository_index.resolve`)
 - `GET /files` also takes an absolute `cwd` for the `@` completion of workbench chats: inside the file roots or the
   workbench folder only
 - `POST /pastes` stores a video pasted into a Pi composer in the session folder's `.pi/pastes/` (`lib.pi_pastes`), the
@@ -31,7 +32,7 @@ from backend.reverse_proxy import relay_websocket
 from backend.routes.deps import get_file_roots
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 import config
-from lib import pi_host, pi_pastes
+from lib import pi_host, pi_pastes, repository_index
 from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ async def _call[Result](request: Awaitable[Result]) -> Result:
 
 
 def _cwd(repo: str) -> str:
-    folder = pi_host.resolve_repository(repo)
+    folder = repository_index.resolve(repo)
     if folder is None:
         raise HTTPException(status_code=404, detail=f"Unknown repository {repo}")
     return str(folder)
@@ -104,7 +105,7 @@ def _cwd(repo: str) -> str:
 @http_router.get("/repos")
 async def get_repositories() -> list[RepositoryOut]:
     """Start folders, the most recently used (newest session activity) first, never-used ones after."""
-    repositories = await asyncio.to_thread(pi_host.list_repositories)
+    repositories = await asyncio.to_thread(repository_index.list_repositories)
     try:
         sessions = await pi_host.list_sessions(None, archived=False)
     except (pi_host.PiHostUnavailable, pi_host.PiHostBadResponse):

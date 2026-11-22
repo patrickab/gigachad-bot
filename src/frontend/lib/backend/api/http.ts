@@ -49,20 +49,58 @@ export function leaveConnectionPool(pool: number): void {
   if (pool === connectionPool) connectionPool += 1
 }
 
-/** The single place that adds the API base URL and the device headers, the status is left to the caller. */
-function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = { ...(init?.headers as Record<string, string> | undefined), ...deviceHeaders() }
-  const credentials: RequestCredentials = connectionPool % 2 ? "include" : "same-origin"
-  return fetch(`${getApiBase()}${path}`, { credentials, ...init, headers })
+/** Methods a repeat cannot apply twice, so a request the backend never answered is safe to send again. */
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"])
+/** How long a request waits out an unreachable backend (a hot reload or restart) before it fails. */
+const OFFLINE_RETRY_WINDOW_MS = 30_000
+const OFFLINE_RETRY_MIN_MS = 250
+const OFFLINE_RETRY_MAX_MS = 2_000
+
+/** `retryOffline` sends a POST again too when the backend was unreachable: only for one that is safe to repeat. */
+export type ApiInit = RequestInit & { retryOffline?: boolean }
+
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener("abort", done, { once: true })
+    function done() {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", done)
+      resolve()
+    }
+  })
 }
 
-export async function request<T>(path: string, options?: RequestInit): Promise<T> {
+/**
+ * The single place that adds the API base URL and the device headers, the status is left to the caller.
+ * A network failure (fetch's TypeError: the backend is restarting or reloading) is retried with backoff for up to
+ * `OFFLINE_RETRY_WINDOW_MS` when the method is idempotent or `retryOffline` is set. An aborted signal ends it at once.
+ */
+async function apiFetch(path: string, init: ApiInit = {}): Promise<Response> {
+  const { retryOffline, ...fetchInit } = init
+  const retries = retryOffline || IDEMPOTENT_METHODS.has((fetchInit.method ?? "GET").toUpperCase())
+  const deadline = Date.now() + OFFLINE_RETRY_WINDOW_MS
+  for (let delay = OFFLINE_RETRY_MIN_MS; ; delay = Math.min(delay * 2, OFFLINE_RETRY_MAX_MS)) {
+    const headers = { ...(fetchInit.headers as Record<string, string> | undefined), ...deviceHeaders() }
+    const credentials: RequestCredentials = connectionPool % 2 ? "include" : "same-origin"
+    try {
+      return await fetch(`${getApiBase()}${path}`, { credentials, ...fetchInit, headers })
+    } catch (error) {
+      fetchInit.signal?.throwIfAborted()
+      if (!retries || !(error instanceof TypeError) || Date.now() + delay > deadline) throw error
+    }
+    await sleep(delay, fetchInit.signal)
+    fetchInit.signal?.throwIfAborted()
+  }
+}
+
+export async function request<T>(path: string, options?: ApiInit): Promise<T> {
   const res = await ensureOk(await apiFetch(path, options))
   return res.json()
 }
 
 /** Like `request` for endpoints whose response body is not read. */
-export async function requestVoid(path: string, init?: RequestInit): Promise<void> {
+export async function requestVoid(path: string, init?: ApiInit): Promise<void> {
   await ensureOk(await apiFetch(path, init))
 }
 
@@ -83,8 +121,9 @@ export function sseStream(path: string, body: Record<string, unknown>): SSEStrea
   return createSSEStream(async (signal) => apiFetch(path, { ...await jsonInit("POST", body), signal }))
 }
 
-export async function post<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, await jsonInit("POST", body))
+/** `retryOffline`: the POST is safe to repeat, so it waits out an unreachable backend like an idempotent request. */
+export async function post<T>(path: string, body: unknown, options: { retryOffline?: boolean } = {}): Promise<T> {
+  return request<T>(path, { ...await jsonInit("POST", body), ...options })
 }
 
 export async function put<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {

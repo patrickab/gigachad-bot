@@ -10,7 +10,7 @@ export function LoadFailure({ message, onRetry, size = "panel" }: { message: Rea
     : "flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint"
   return (
     <div className={className}>
-      <span>{message}</span>
+      <span role="alert">{message}</span>
       <button onClick={() => onRetry()} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
         Retry
       </button>

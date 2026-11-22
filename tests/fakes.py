@@ -19,6 +19,7 @@ from lib import sandbox_plot, tools
 from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.data_store import Entry, Revision, StorageNotFoundError
 from lib.fake_sandbox_runner import FakeSandboxRunner
+from lib.pi_host import Repository
 from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult
 from lib.tool_context import ToolContext, ToolOptions
 
@@ -87,6 +88,24 @@ class MemoryDataStore:
 
     def move(self, source: str, destination: str) -> None:
         self._documents[destination] = self._documents.pop(source)
+
+
+class MemoryRepositoryStore:
+    """`repository_index.RepositoryStore` in a list."""
+
+    def __init__(self) -> None:
+        self.repositories: list[Repository] = []
+
+    def load(self) -> list[Repository]:
+        return list(self.repositories)
+
+    def replace(self, repositories: list[Repository]) -> tuple[int, int]:
+        old, new = {r.name for r in self.repositories}, {r.name for r in repositories}
+        self.repositories = list(repositories)
+        return len(new - old), len(old - new)
+
+    def add(self, repository: Repository) -> None:
+        self.repositories = [r for r in self.repositories if r.name != repository.name] + [repository]
 
 
 @dataclass

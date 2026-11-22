@@ -102,6 +102,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- file_roots.py             Mounted-file roots, path safety, read/write/create, `ceiling_of` (root, else home for host access), tree
 |   |   |-- disk_files.py             `DiskFiles`: create/write/record files under the roots with their `document` change
 |   |   |-- file_roots_repository.py  Per-user root registry (`vault_roots`)
+|   |   |-- repository_index.py       Pi start folders stored in `repositories`, swept against `~` at startup
 |   |   |-- file_walk.py              `.gitignore`-aware directory walk and tree, build output hidden
 |   |   |-- host_access.py            Host-access reach: home dir minus credential stores
 |   |   |-- wiki_links.py             Obsidian wiki-link rewriting

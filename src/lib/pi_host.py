@@ -8,7 +8,7 @@
   its removal, and `SessionInfo.factory`
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
 - Failures are `PiHostUnavailable` (503), `PiHostBadResponse` (502) or `PiHostRejected` (pi-host's own status and body)
-- Also lists the repositories under `~/git` a session may start in, and resolves a repository name to its folder
+- Also scans the disk for the repositories a session may start in (`scan_repositories`, stored by `repository_index`)
 """
 
 from dataclasses import dataclass
@@ -431,24 +431,26 @@ def _git_repositories(directory: Path, depth: int) -> list[Path]:
     return found
 
 
-def list_repositories() -> list[Repository]:
-    """Where a session may start, by name: every folder directly under `~/git` (plain `<folder>`), every folder
-    directly under `~/dev` and every Git checkout found within `SCAN_DEPTH` levels of `~` (`<path from ~>`)."""
+def repository_name(folder: Path) -> str:
+    """The name `scan_repositories` gives *folder*: plain `<folder>` directly under `~/git`, else `<path from ~>`."""
+    if folder.parent in (REPOSITORIES_ROOT, REPOSITORIES_ROOT.resolve()):
+        return folder.name
+    return str(folder.relative_to(HOME))
+
+
+def scan_repositories() -> list[Repository]:
+    """Walk the disk for where a session may start, by name: every folder directly under `~/git`, every folder
+    directly under `~/dev` and every Git checkout found within `SCAN_DEPTH` levels of `~` (names: `repository_name`).
+
+    - Takes seconds on a full home folder: requests read the stored list (`repository_index`), never this
+    """
     paths: dict[str, Path] = {}
-    if REPOSITORIES_ROOT.is_dir():
-        for child in sorted(REPOSITORIES_ROOT.iterdir(), key=lambda child: child.name.lower()):
-            if _is_folder(child):
-                paths[child.name] = child
-    if DEV_ROOT.is_dir():
-        for child in sorted(DEV_ROOT.iterdir(), key=lambda child: child.name.lower()):
-            if _is_folder(child):
-                paths.setdefault(str(child.relative_to(HOME)), child)
+    for parent in (REPOSITORIES_ROOT, DEV_ROOT):
+        if parent.is_dir():
+            for child in sorted(parent.iterdir(), key=lambda child: child.name.lower()):
+                if _is_folder(child):
+                    paths.setdefault(repository_name(child), child)
     for checkout in _git_repositories(HOME, SCAN_DEPTH):
-        if checkout.parent != REPOSITORIES_ROOT:
-            paths.setdefault(str(checkout.relative_to(HOME)), checkout)
+        if checkout.parent != REPOSITORIES_ROOT:  # those are listed above, unless hidden
+            paths.setdefault(repository_name(checkout), checkout)
     return [Repository(name=name, path=str(path)) for name, path in paths.items()]
-
-
-def resolve_repository(name: str) -> Path | None:
-    """The folder *name* names in `list_repositories`, None for anything else."""
-    return next((Path(repository.path) for repository in list_repositories() if repository.name == name), None)

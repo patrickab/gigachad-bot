@@ -138,3 +138,53 @@ describe("api.ts — Jupyter kernels", () => {
     await expect(api.startKernel("/work/a.ipynb", "python3")).rejects.toMatchObject({ name: "ApiError", status: 503, message: "Jupyter is not available" })
   })
 })
+
+describe("api.ts — an unreachable backend (hot reload, restart)", () => {
+  const ok = () => new Response(JSON.stringify({ sessions: [], session: { sessionId: "s", cwd: "/" } }), { status: 200, headers: { "Content-Type": "application/json" } })
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it("retries an idempotent request until the backend answers", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch")).mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(ok())
+    vi.stubGlobal("fetch", fetch)
+    const sessions = api.fetchPiSessions()
+    await vi.runAllTimersAsync()
+    await expect(sessions).resolves.toEqual([])
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("gives up once the retry window is over", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")))
+    const sessions = api.fetchPiSessions()
+    const settled = expect(sessions).rejects.toThrow("Failed to fetch")
+    await vi.runAllTimersAsync()
+    await settled
+  })
+
+  it("sends a POST that is not safe to repeat only once", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    vi.stubGlobal("fetch", fetch)
+    await expect(api.openPiSession("repo", null)).rejects.toThrow("Failed to fetch")
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries resuming a session file", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(ok())
+    vi.stubGlobal("fetch", fetch)
+    const session = api.openPiSession("repo", { sessionPath: "/s.jsonl" })
+    await vi.runAllTimersAsync()
+    await expect(session).resolves.toEqual({ sessionId: "s", cwd: "/" })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("stops retrying when the caller aborts", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")))
+    const controller = new AbortController()
+    const hits = api.searchPiSessions("x", controller.signal)
+    const settled = expect(hits).rejects.toMatchObject({ name: "AbortError" })
+    controller.abort()
+    await vi.runAllTimersAsync()
+    await settled
+  })
+})

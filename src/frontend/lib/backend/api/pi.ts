@@ -93,9 +93,13 @@ export async function pastePiVideo(video: File, scope: PiFileScope): Promise<str
   return mention
 }
 
-/** Spawn a session in `repo`, or get the already-live one. Rejects with status 409 while another process holds the file. */
+/**
+ * Spawn a session in `repo`, or get the already-live one. Rejects with status 409 while another process holds the file.
+ * Resuming a session file is safe to repeat, so it waits out a restarting backend. A new session or a fork is sent once.
+ */
 export async function openPiSession(repo: string, resume: PiResume, options: PiSessionOptions = {}): Promise<PiSessionInfo> {
-  const { session } = await post<{ session: PiSessionInfo }>("/pi/sessions", { repo, resume, ...options })
+  const retryOffline = resume !== null && typeof resume === "object" && "sessionPath" in resume
+  const { session } = await post<{ session: PiSessionInfo }>("/pi/sessions", { repo, resume, ...options }, { retryOffline })
   return session
 }
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
-import { ErrorText } from "@/components/ui/ErrorText"
+import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
@@ -289,6 +289,8 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   const [insertion, setInsertion] = useState<PiInsertion | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by Retry after a resume failed, so the resume runs again
+  const [resumeAttempt, setResumeAttempt] = useState(0)
   const { sessionId, repo } = view
   const newSession = useNewSessionModels(!sessionId)
   const [choice, setChoice] = useState<{ model: PiModel | null; thinking: string }>({ model: null, thinking: NEW_SESSION_OPTIONS.thinking ?? "medium" })
@@ -304,7 +306,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
     return () => {
       cancelled = true
     }
-  }, [sessionId, repo, opened?.sessionId])
+  }, [sessionId, repo, opened?.sessionId, resumeAttempt])
 
   const { model: chosenModel, thinking: chosenThinking } = choice
   const start = useCallback(async (submit: PiSubmit) => {
@@ -382,7 +384,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
     return (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center">
         <PiTopBar slots={slots} header={null} modelProps={modelProps} />
-        <ErrorText className="text-sm">{error}</ErrorText>
+        {error && <LoadFailure message={error} onRetry={() => { setError(null); setResumeAttempt((value) => value + 1) }} />}
       </section>
     )
   }

@@ -43,7 +43,7 @@ from backend.routes.terminal import router as terminal_router
 from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
-from lib import jupyter_service, ollama_models
+from lib import jupyter_service, ollama_models, repository_index
 from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
 from lib.c4_service import C4ServiceUnavailable
 from lib.data_store import StorageConflictError
@@ -80,6 +80,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
     asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())
+    # Pi's start folders: requests serve the stored list at once, this rescan of `~` brings it up to date.
+    asyncio.get_running_loop().run_in_executor(None, repository_index.sweep_quietly)
     reset_cancel()
     from lib import extract_queue
 

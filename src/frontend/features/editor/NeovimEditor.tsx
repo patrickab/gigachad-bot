@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
 import { cn, errorMessage } from "@/lib/utils"
+import { retryImport } from "@/lib/retryImport"
 import { neovimSessionUrl } from "@/lib/backend/urls"
 import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -136,8 +137,15 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
     pendingContentRef.current = pendingContent
 
     void (async () => {
-      const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/addon-webgl")])
+      let modules
+      try {
+        modules = await retryImport(() => Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit"), import("@xterm/addon-webgl")]))
+      } catch {
+        if (!disposed) setStatus({ state: "stopped", message: "Could not load the terminal. Restart to try again." })
+        return
+      }
       if (disposed) return
+      const [{ Terminal }, { FitAddon }, { WebglAddon }] = modules
       const host = window.document.createElement("div")
       host.className = "h-full w-full font-mono"
       const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })

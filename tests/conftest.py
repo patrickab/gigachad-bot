@@ -1,6 +1,6 @@
 """Shared pytest fixtures."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 import json
 import os
 from pathlib import Path
@@ -20,18 +20,27 @@ import pytest
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes import latex as latex_route
 from backend.routes.deps import get_file_roots, get_user_scope
-from lib import latex_templates
+from lib import latex_templates, repository_index
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
 from lib.db_schema import upgrade
 from lib.file_roots import FileRoots
 from lib.postgres_data_store import PostgresDataStore
 from lib.process_owner import OWNER_VARIABLE, reap_orphans
-from tests.fakes import RecordingScope
+from tests.fakes import MemoryRepositoryStore, RecordingScope
 
 TRUNCATE_ALL = "TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE"
 SRC = Path(__file__).resolve().parents[1] / "src"
 requires_proc = pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="reads processes from /proc (Linux)")
+
+
+@pytest.fixture(autouse=True)
+def repository_store() -> Iterator[MemoryRepositoryStore]:
+    """Pi's start folders in memory, so route tests never need the database for them."""
+    store = MemoryRepositoryStore()
+    repository_index.use(store)
+    yield store
+    repository_index.use(None)
 
 
 @pytest.fixture(autouse=True)
