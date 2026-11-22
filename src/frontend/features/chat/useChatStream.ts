@@ -112,8 +112,13 @@ export function useChatStream(): UseChatStreamReturn {
           }
         }
       } catch (e) {
-        // Abort and transport failure are both swallowed: the turn keeps what it streamed.
-        unresolvedReason = e instanceof Error && e.name === "AbortError" ? "Cancelled" : errorMessage(e, "Stream failed")
+        // An abort keeps what streamed. A transport failure also says so in the reply, or it would show an empty bubble.
+        const aborted = e instanceof Error && e.name === "AbortError"
+        unresolvedReason = aborted ? "Cancelled" : errorMessage(e, "Stream failed")
+        if (!aborted) {
+          pacer.flush()
+          applyChatStreamEvent(assistantMsg, { kind: "error", message: unresolvedReason })
+        }
       } finally {
         pacer.flush()
         settleRunningToolCalls(assistantMsg, unresolvedReason)
