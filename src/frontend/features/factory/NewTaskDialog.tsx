@@ -6,14 +6,15 @@ import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
-import { getFactorySettings, listFactoryBranches } from "@/lib/backend/api"
+import { fetchModels, getFactorySettings, listFactoryBranches } from "@/lib/backend/api"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { BranchSelect, branchOrDefault, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
+import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryMergeMode, FactorySettings } from "@/lib/domain/factory"
+import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
+import type { ModelsResponse } from "@/lib/domain/types"
 
 const INHERIT = ""
 
@@ -49,6 +50,9 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [targetBranch, setTargetBranch] = useState("")
   const [branches, setBranches] = useState<string[] | null>(null)
   const [merge, setMerge] = useState<MergeChoice>(INHERIT)
+  const [models, setModels] = useState<FactoryModels>({})
+  const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
+  const [modelError, setModelError] = useState("")
   const [overridesOpen, setOverridesOpen] = useState(false)
   const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
@@ -67,6 +71,8 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setTargetBranch("")
     setBranches(null)
     setMerge(INHERIT)
+    setModels({})
+    setModelError("")
     setOverridesOpen(false)
     setError("")
   })
@@ -75,6 +81,8 @@ export function NewTaskDialog({ repo, open, onClose }: {
   useLoadWhile(open, loadSettings, setSettings, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   const loadBranches = useCallback(() => listFactoryBranches(repo), [repo])
   useLoadWhile(open, loadBranches, setBranches, (cause) => setError(errorMessage(cause, "Could not load the branches")))
+  // The model list only once the overrides are open: most starts take the repo's models.
+  useLoadWhile(open && overridesOpen, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
 
   const canSubmit = settings !== null && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
@@ -84,6 +92,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
       review,
       ...(worktree ? branchOverrides(sourceBranch, targetBranch) : {}),
       ...(merge !== INHERIT ? { merge } : {}),
+      ...(Object.keys(models).length > 0 ? { models } : {}),
     } })
     onClose()
   }
@@ -156,8 +165,22 @@ export function NewTaskDialog({ repo, open, onClose }: {
               <Field label="Merge">
                 <StyledSelect ariaLabel="Merge" value={merge} onChange={(value) => setMerge(value as MergeChoice)} options={mergeOptions} />
               </Field>
+              {AGENTS.map((agent) => (
+                <Field key={agent} label={`Model of ${agent}`}>
+                  <StyledSelect
+                    ariaLabel={`Model of ${agent}`}
+                    value={models[agent] ?? INHERIT}
+                    onChange={(value) => setModels((current) => { const next = { ...current }; if (value === INHERIT) delete next[agent]; else next[agent] = value; return next })}
+                    options={[
+                      { value: INHERIT, label: `Repo default (${settings?.models[agent] ?? "Pi default"})` },
+                      ...factoryModelIds(catalog).map((model) => ({ value: model, label: model })),
+                    ]}
+                  />
+                </Field>
+              ))}
             </div>
           )}
+          {overridesOpen && <ErrorText className="mt-2">{modelError}</ErrorText>}
         </div>
         <ErrorText>{error}</ErrorText>
         <div className="flex items-center justify-end gap-2 pt-1">

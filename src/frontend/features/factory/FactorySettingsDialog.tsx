@@ -25,7 +25,15 @@ const MERGE_OPTIONS = [
 const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 
 /** The two agents of a task, in pipeline order. */
-const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
+export const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
+
+/** Every model of the chat model selector the gateway serves, sorted, as the `<provider>/<id>` Pi's registry resolves. */
+export function factoryModelIds(catalog: ModelsResponse | null): string[] {
+  if (!catalog) return []
+  const unavailable = new Set(catalog.unavailable)
+  const selectors = [...catalog.ollama, ...catalog.providers.flatMap(qualifiedModelIds)]
+  return [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))].sort((a, b) => a.localeCompare(b))
+}
 
 /** A branch the user filled in, null for an empty field: the default branch. */
 export function branchOrDefault(branch: string | null): string | null {
@@ -138,13 +146,9 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
     setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
 
-  // Every model of the chat model selector the gateway serves, sorted as it lists them, as the `<provider>/<id>` Pi's registry resolves.
-  const unavailable = new Set(catalog?.unavailable)
-  const selectors = catalog ? [...catalog.ollama, ...catalog.providers.flatMap(qualifiedModelIds)] : []
-  const gatewayIds = [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))].sort((a, b) => a.localeCompare(b))
   const modelOptions = [
     { value: "", label: "Pi default" },
-    ...gatewayIds.map((model) => ({ value: model, label: model })),
+    ...factoryModelIds(catalog).map((model) => ({ value: model, label: model })),
   ]
 
   const canSave = draft !== null && !busy && validRounds(draft.max_rounds)

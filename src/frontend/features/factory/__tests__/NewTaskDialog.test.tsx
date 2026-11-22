@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react"
 import type { FactorySettings, FactoryTaskCreate } from "@/lib/domain/factory"
+import type { ModelsResponse } from "@/lib/domain/types"
 
 const api = vi.hoisted(() => ({
   createFactoryTask: vi.fn<(body: FactoryTaskCreate) => Promise<unknown>>(),
   listFactoryTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
   getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
   listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+  fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
 }))
+
+const CATALOG: ModelsResponse = {
+  ollama: [],
+  providers: [{ label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"] }],
+  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+  tab_order: [],
+} as unknown as ModelsResponse
 
 vi.mock("@/lib/backend/api", () => api)
 
@@ -22,6 +31,7 @@ beforeEach(() => {
   api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
   api.listFactoryTasks.mockReset().mockResolvedValue([])
   api.listFactoryBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
+  api.fetchModels.mockReset().mockResolvedValue(CATALOG)
 })
 
 function fill(view: ReturnType<typeof render>) {
@@ -66,6 +76,23 @@ describe("NewTaskDialog", () => {
 
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
     expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, review: false, merge: "auto" })
+  })
+
+  it("sends the model picked per role, the others stay the repo's", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, models: { coder: "anthropic/claude-sonnet-5-5" } })
+    const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
+    await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
+    expect(api.fetchModels).not.toHaveBeenCalled()
+
+    fill(view)
+    fireEvent.click(view.getByRole("button", { name: "Overrides" }))
+    fireEvent.click(view.getByLabelText("Model of coder"))
+    expect(view.getByRole("option", { name: "Repo default (anthropic/claude-sonnet-5-5)" })).toBeTruthy()
+    fireEvent.click(await view.findByRole("option", { name: "anthropic/claude-opus-5-5" }))
+    fireEvent.click(view.getByRole("button", { name: "Start" }))
+
+    await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
+    expect(api.createFactoryTask.mock.calls[0][0].overrides.models).toEqual({ coder: "anthropic/claude-opus-5-5" })
   })
 
   it("offers no workflow, image, sandbox or backlog control", async () => {
