@@ -159,7 +159,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
     <ElevationProvider base={1}>
       <div className="flex h-full flex-col">
         <InTopBar name="title">
-          <h2 className="truncate text-sm font-semibold tracking-tight text-ink select-none">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
+          <h2 className="truncate text-lg font-semibold tracking-tight text-ink select-none">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
         </InTopBar>
         <InTopBar name="center">
           <div className="flex items-center gap-2">
@@ -173,7 +173,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
           </div>
         </InTopBar>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
-        <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-8 pb-8 pt-4 scrollbar-thin">
+        <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-8 pb-10 pt-6 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
             const inColumn = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
             const isFinished = column.id === "finished"
