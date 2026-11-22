@@ -67,7 +67,7 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, pan
   }, [])
 
   return (
-    <ModalBackdrop onClose={onClose} className={cn("z-[90] p-3 sm:p-6", overlayClassName)}>
+    <ModalBackdrop onClose={onClose} className={cn("z-[var(--z-floating)] p-3 sm:p-6", overlayClassName)}>
       <FloatingPanel
         ref={panelRef}
         role="dialog"

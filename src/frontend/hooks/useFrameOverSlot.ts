@@ -5,8 +5,8 @@ import { useLayoutEffect } from "react"
 /** A tab the tab picker shows scaled down in its preview card (`TabManager`). */
 const PEEKED_TAB = ".workspace-tab[data-phase='peek']"
 
-/** z-index of a frame over a peeked tab: above the preview window (z-55), below the peeked tab (z-57) so its chrome stays on top. */
-const PEEK_FRAME_Z = "56"
+/** z-index of a frame over a peeked tab: above the preview window, below the peeked tab so its chrome stays on top (layers in globals.css). */
+const PEEK_FRAME_Z = "var(--z-picker-frame)"
 
 function placeOver(frame: HTMLIFrameElement, slot: HTMLElement | null) {
   const { top, left, width, height } = slot?.getBoundingClientRect() ?? { top: 0, left: 0, width: 0, height: 0 }

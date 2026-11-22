@@ -162,7 +162,7 @@ function PickerPreview({ finder, aspect, onClose, children }: { finder: HTMLElem
   }, { passive: true })
   const shown = children !== null && children !== undefined && children !== false
   // The page washes out in its own paper color and blurs, a modal's dark scrim would turn a light page grey
-  return createPortal(<ModalBackdrop onClose={onClose} className="z-[55] bg-paper/50 backdrop-blur-[14px]">
+  return createPortal(<ModalBackdrop onClose={onClose} className="z-[var(--z-picker)] bg-paper/50 backdrop-blur-[14px]">
     {shown && box && <FloatingPanel aria-hidden className={cn(PICKER_PANEL_CLASS, "pointer-events-none fixed")}
       style={{ left: box.left, top: box.top, width: box.width, height: box.height } as CSSProperties}>
       <AmbientCopy left={box.left} top={box.top} />
@@ -356,7 +356,7 @@ export function FloatingPicker<T>({ onClose, panelClassName, ...list }: PickerLi
   useEscapeLayer(onClose)
   useOutsidePress(panelRef, onClose)
   return createPortal(<div ref={panelRef} role="dialog" aria-label={list.label}
-    className={cn("z-[60] w-80", !list.renderPreview && "fixed left-3 top-12", listPanelClass(Boolean(list.renderPreview)), panelClassName)}>
+    className={cn("z-[var(--z-picker-list)] w-80", !list.renderPreview && "fixed left-3 top-12", listPanelClass(Boolean(list.renderPreview)), panelClassName)}>
     <PickerList {...list} close={onClose} />
   </div>, document.body)
 }

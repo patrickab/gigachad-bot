@@ -93,15 +93,15 @@ export function PillChoice<T extends string>({ label, options, value, disabled, 
   onChange: (value: T) => void
 }) {
   return (
-    <div role="group" aria-label={label} className="flex items-center gap-2 text-sm">
-      <span className="text-ink-muted">{label}</span>
+    <div role="group" aria-label={label} className="flex items-center gap-1.5">
+      <span className="text-[11px] text-ink-subtle">{label}</span>
       <PillTabs options={options} value={value} onChange={onChange} disabled={disabled} />
     </div>
   )
 }
 
 export const REVIEW_OPTIONS = [{ value: "off", label: "Off" }, { value: "on", label: "On" }] as const
-export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Current checkout" }] as const
+export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Checkout" }] as const
 
 /** Labelled checkbox of the factory dialogs. */
 export function Toggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {

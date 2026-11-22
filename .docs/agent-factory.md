@@ -98,5 +98,6 @@ One per repository, shared by every task's session through ticket files in `<git
 
 Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`review`, default `review`), `max_rounds`
 (default 3), `review` (default off), `worktree` (default on), `preview`, `models` per role (`coder`, `reviewer`),
-`source_branch`, `target_branch`. Review and workspace are pill choices in the settings and the new-task dialog; the
-new-task dialog's overrides also take the merge mode and a model per role. A task keeps the settings it started with.
+`source_branch`, `target_branch`. The new-task dialog shows them all at the repo's values: a model per role (the
+reviewer's only with review on), workspace, review and merge as pills, the branches. A task keeps the settings it
+started with.

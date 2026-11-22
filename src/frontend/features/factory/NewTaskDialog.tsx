@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useRef, useState } from "react"
-import { ChevronRight, Factory } from "lucide-react"
+import { Factory } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -25,15 +25,16 @@ function branchOverrides(source: string, target: string): Partial<FactorySetting
   return { ...(source_branch ? { source_branch } : {}), ...(target_branch ? { target_branch } : {}) }
 }
 
-type MergeChoice = FactoryMergeMode | typeof INHERIT
+const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review", label: "Approve" }] as const
 
 /**
  * Modal that starts a factory task in the repo at path `repo` from a title and a request, in a worktree off a source
  * branch that merges into a target branch, or in the current checkout.
  *
  * - Start closes the dialog at once: the start runs on as a launch on the board (`launchTask`), which shows a refusal
- * - The branches are sent only for a worktree task (a current-checkout task works on what is checked out), and only
- *   when picked: "Repo default", which names the repo's setting, keeps it
+ * - Everything starts at the repo's settings. The branches and models are sent only when picked ("Repo default" names
+ *   the setting), the merge mode only when changed, the branches only for a worktree task (a current-checkout task works
+ *   on what is checked out)
  */
 export function NewTaskDialog({ repo, open, onClose }: {
   repo: string
@@ -49,16 +50,15 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [sourceBranch, setSourceBranch] = useState("")
   const [targetBranch, setTargetBranch] = useState("")
   const [branches, setBranches] = useState<string[] | null>(null)
-  const [merge, setMerge] = useState<MergeChoice>(INHERIT)
+  const [mergeChoice, setMergeChoice] = useState<FactoryMergeMode | null>(null)
   const [models, setModels] = useState<FactoryModels>({})
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
-  const [modelError, setModelError] = useState("")
-  const [overridesOpen, setOverridesOpen] = useState(false)
   const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
   const worktree = worktreeChoice ?? settings?.worktree ?? false
   const [reviewChoice, setReviewChoice] = useState<boolean | null>(null)
   const review = reviewChoice ?? settings?.review ?? false
+  const merge = mergeChoice ?? settings?.merge ?? "review"
 
   // Every opening starts from an empty form and the repo's saved settings.
   useResetOnOpen(open, () => {
@@ -70,10 +70,8 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setSourceBranch("")
     setTargetBranch("")
     setBranches(null)
-    setMerge(INHERIT)
+    setMergeChoice(null)
     setModels({})
-    setModelError("")
-    setOverridesOpen(false)
     setError("")
   })
 
@@ -81,8 +79,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
   useLoadWhile(open, loadSettings, setSettings, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   const loadBranches = useCallback(() => listFactoryBranches(repo), [repo])
   useLoadWhile(open, loadBranches, setBranches, (cause) => setError(errorMessage(cause, "Could not load the branches")))
-  // The model list only once the overrides are open: most starts take the repo's models.
-  useLoadWhile(open && overridesOpen, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
+  useLoadWhile(open, fetchModels, setCatalog, (cause) => setError(errorMessage(cause, "Could not load Pi models")))
 
   const canSubmit = settings !== null && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
@@ -91,17 +88,13 @@ export function NewTaskDialog({ repo, open, onClose }: {
       worktree,
       review,
       ...(worktree ? branchOverrides(sourceBranch, targetBranch) : {}),
-      ...(merge !== INHERIT ? { merge } : {}),
+      ...(mergeChoice !== null ? { merge: mergeChoice } : {}),
       ...(Object.keys(models).length > 0 ? { models } : {}),
     } })
     onClose()
   }
 
-  const mergeOptions = [
-    { value: INHERIT, label: settings ? `Repo default (${settings.merge})` : "Repo default" },
-    { value: "review", label: "Review" },
-    { value: "auto", label: "Auto" },
-  ]
+  const modelIds = factoryModelIds(catalog)
 
   return (
     <Dialog open={open} onClose={onClose} icon={Factory} title="New factory task" initialFocusRef={titleRef} widthClassName="max-w-lg">
@@ -128,9 +121,31 @@ export function NewTaskDialog({ repo, open, onClose }: {
           rows={6}
           className={cn(FIELD_CLASS, "resize-none")}
         />
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div className="grid grid-cols-2 gap-3">
+          {AGENTS.map((agent) => (
+            <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
+              <StyledSelect
+                ariaLabel={`Model of ${agent}`}
+                value={models[agent] ?? INHERIT}
+                disabled={settings === null || (agent === "reviewer" && !review)}
+                onChange={(value) => setModels((current) => {
+                  const next = { ...current }
+                  if (value === INHERIT) delete next[agent]
+                  else next[agent] = value
+                  return next
+                })}
+                options={[
+                  { value: INHERIT, label: `Repo default (${settings?.models[agent] ?? "Pi default"})` },
+                  ...modelIds.map((model) => ({ value: model, label: model })),
+                ]}
+              />
+            </Field>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
           <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={worktree ? "worktree" : "checkout"} disabled={settings === null} onChange={(workspace) => setWorktreeChoice(workspace === "worktree")} />
           <PillChoice label="Review" options={REVIEW_OPTIONS} value={review ? "on" : "off"} disabled={settings === null} onChange={(choice) => setReviewChoice(choice === "on")} />
+          <PillChoice label="Merge" options={MERGE_OPTIONS} value={merge} disabled={settings === null} onChange={setMergeChoice} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <BranchSelect
@@ -149,38 +164,6 @@ export function NewTaskDialog({ repo, open, onClose }: {
             disabled={settings === null || !worktree}
             onChange={setTargetBranch}
           />
-        </div>
-        <div>
-          <button
-            type="button"
-            aria-expanded={overridesOpen}
-            onClick={() => setOverridesOpen((current) => !current)}
-            className="flex items-center gap-1 rounded text-[11px] text-ink-subtle transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-          >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", overridesOpen && "rotate-90")} />
-            Overrides
-          </button>
-          {overridesOpen && (
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <Field label="Merge">
-                <StyledSelect ariaLabel="Merge" value={merge} onChange={(value) => setMerge(value as MergeChoice)} options={mergeOptions} />
-              </Field>
-              {AGENTS.map((agent) => (
-                <Field key={agent} label={`Model of ${agent}`}>
-                  <StyledSelect
-                    ariaLabel={`Model of ${agent}`}
-                    value={models[agent] ?? INHERIT}
-                    onChange={(value) => setModels((current) => { const next = { ...current }; if (value === INHERIT) delete next[agent]; else next[agent] = value; return next })}
-                    options={[
-                      { value: INHERIT, label: `Repo default (${settings?.models[agent] ?? "Pi default"})` },
-                      ...factoryModelIds(catalog).map((model) => ({ value: model, label: model })),
-                    ]}
-                  />
-                </Field>
-              ))}
-            </div>
-          )}
-          {overridesOpen && <ErrorText className="mt-2">{modelError}</ErrorText>}
         </div>
         <ErrorText>{error}</ErrorText>
         <div className="flex items-center justify-end gap-2 pt-1">

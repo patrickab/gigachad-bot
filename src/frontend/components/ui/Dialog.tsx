@@ -36,7 +36,7 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
   return (
     <AnimatePresence>
       {open && (
-        <ModalBackdrop onClose={onClose} className="z-[100]">
+        <ModalBackdrop onClose={onClose} className="z-[var(--z-dialog)]">
           <motion.div
             initial={{ opacity: 0, scale: 0.97, y: 4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}

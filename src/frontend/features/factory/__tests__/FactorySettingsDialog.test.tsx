@@ -48,7 +48,7 @@ describe("FactorySettingsDialog", () => {
     fireEvent.click(view.getByLabelText("Merge"))
     fireEvent.click(view.getByRole("option", { name: "Auto" }))
     fireEvent.click(within(view.getByRole("group", { name: "Review" })).getByRole("button", { name: "Off" }))
-    fireEvent.click(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Current checkout" }))
+    fireEvent.click(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Checkout" }))
     fireEvent.click(view.getByLabelText("Preview"))
     fireEvent.click(view.getByLabelText("Model of reviewer"))
     fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))

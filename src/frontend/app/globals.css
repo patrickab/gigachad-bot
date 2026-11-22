@@ -23,6 +23,20 @@
    Tailwind utilities come from @theme below. */
 
  :root {
+  /* Stacking layers of the app's overlays, bottom to top. The tab picker sits above floating windows, so a window
+     open in the active tab never covers it, and below dialogs.
+     --z-floating   FloatingWindow (MemoryPanel 80 and MemoryViewer 95 shift it within the band)
+     --z-picker     the tab picker's dimmed page and preview window (components/ui/CommandPicker.tsx)
+     --z-picker-frame  a shared frame over a previewed tab's slot (hooks/useFrameOverSlot.ts)
+     --z-picker-tab the previewed tab, scaled into the window at full layout size (TabManager)
+     --z-picker-list   the picker's list, portaled out of the top bar
+     --z-dialog     Dialog */
+  --z-floating: 90;
+  --z-picker: 96;
+  --z-picker-frame: 97;
+  --z-picker-tab: 98;
+  --z-picker-list: 99;
+  --z-dialog: 100;
    --shadow-color: var(--gc-dark-shadow-color);
 
    --ink:        var(--gc-dark-ink);
@@ -238,11 +252,9 @@
   z-index: 1;
 }
 
-/* Picker layers (components/ui/CommandPicker.tsx), bottom to top:
-   55 the dimmed page (top bar included) and the preview window, 56 a shared frame over a previewed tab's slot (hooks/useFrameOverSlot.ts),
-   57 the previewed tab, scaled into the window at full layout size (TabManager), 60 the list, portaled out of the top bar */
+/* The previewed tab of the tab picker: see the layers in :root */
 .workspace-tab[data-phase="peek"] {
-  z-index: 57;
+  z-index: var(--z-picker-tab);
   pointer-events: none;
   overflow: hidden;
   transform-origin: 0 0;

@@ -45,6 +45,7 @@ beforeEach(() => {
   minute = 0
   api.deleteFactoryTask.mockReset().mockResolvedValue()
   api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, source_branch: null, target_branch: null })
+  api.fetchModels.mockReset().mockReturnValue(new Promise(() => {}))
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.listFactoryTasks.mockReset().mockResolvedValue([])
   api.listFactoryBranches.mockReset().mockResolvedValue(["main"])

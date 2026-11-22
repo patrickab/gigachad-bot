@@ -68,24 +68,23 @@ describe("NewTaskDialog", () => {
     fill(view)
     fireEvent.click(worktree)
     fireEvent.click(pill(view, "Review", "Off"))
-    fireEvent.click(view.getByRole("button", { name: "Overrides" }))
-    fireEvent.click(view.getByLabelText("Merge"))
-    expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Repo default (review)", "Review", "Auto"])
-    fireEvent.click(view.getByRole("option", { name: "Auto" }))
+    expect(pill(view, "Merge", "Approve")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(pill(view, "Merge", "Auto"))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
     expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, review: false, merge: "auto" })
   })
 
-  it("sends the model picked per role, the others stay the repo's", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, models: { coder: "anthropic/claude-sonnet-5-5" } })
+  it("sends the model picked per role, the others stay the repo's; the reviewer's only matters with review on", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, review: false, models: { coder: "anthropic/claude-sonnet-5-5" } })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
-    expect(api.fetchModels).not.toHaveBeenCalled()
+    expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
+    fireEvent.click(pill(view, "Review", "On"))
+    expect(view.getByLabelText("Model of reviewer")).toBeEnabled()
 
     fill(view)
-    fireEvent.click(view.getByRole("button", { name: "Overrides" }))
     fireEvent.click(view.getByLabelText("Model of coder"))
     expect(view.getByRole("option", { name: "Repo default (anthropic/claude-sonnet-5-5)" })).toBeTruthy()
     fireEvent.click(await view.findByRole("option", { name: "anthropic/claude-opus-5-5" }))
@@ -98,7 +97,6 @@ describe("NewTaskDialog", () => {
   it("offers no workflow, image, sandbox or backlog control", async () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
-    fireEvent.click(view.getByRole("button", { name: "Overrides" }))
 
     expect(view.queryByLabelText("Workflow")).toBeNull()
     expect(view.queryByLabelText("Image files")).toBeNull()
@@ -161,7 +159,7 @@ describe("NewTaskDialog", () => {
     await waitFor(() => expect(source).toBeEnabled())
     fireEvent.click(source)
     fireEvent.click(await view.findByRole("option", { name: "develop" }))
-    fireEvent.click(pill(view, "Workspace", "Current checkout"))
+    fireEvent.click(pill(view, "Workspace", "Checkout"))
     expect(source).toBeDisabled()
     expect(view.getByLabelText("Target branch")).toBeDisabled()
     fill(view)
