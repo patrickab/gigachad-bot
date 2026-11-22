@@ -1,7 +1,7 @@
 import type { WorkspaceItem } from "@/contexts/TabContext"
 
 /** A task item's path: the task id, "@", the repo path. An absolute repo path starts with "/", so it never reads as one. */
-const TASK_ITEM_PATH = /^([a-z0-9]{8,32})@(\/.*)$/
+const TASK_ITEM_PATH = /^([^@/]+)@(\/.*)$/
 
 /** Workspace item that shows the factory board of the repo at path `repo`, or one of its tasks when `taskId` is given. */
 export function factoryItem(repo: string, taskId?: string): WorkspaceItem {

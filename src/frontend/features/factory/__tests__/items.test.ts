@@ -12,4 +12,9 @@ describe("factory items", () => {
     const item = factoryItem("/home/me/git/a@b/abcdef12", "0123456789abcdef0123456789abcdef")
     expect(parseFactoryPath(item.path)).toEqual({ repo: "/home/me/git/a@b/abcdef12", taskId: "0123456789abcdef0123456789abcdef" })
   })
+
+  it("reads a task id the core gives (a dashed UUID)", () => {
+    const item = factoryItem("/home/me/git/gigachad", "b988f8c9-ac15-4531-9d57-bcb757a15526")
+    expect(parseFactoryPath(item.path)).toEqual({ repo: "/home/me/git/gigachad", taskId: "b988f8c9-ac15-4531-9d57-bcb757a15526" })
+  })
 })
