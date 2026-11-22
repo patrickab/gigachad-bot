@@ -10,7 +10,7 @@ const { createChatStream } = vi.hoisted(() => ({
   createChatStream: vi.fn(),
 }))
 
-vi.mock("@/lib/backend/api", () => ({ createChatStream }))
+vi.mock("@/lib/backend/api", () => ({ createChatStream, currentConnectionPool: () => 0, leaveConnectionPool: vi.fn() }))
 
 function stream(events: SSEEvent[]): SSEStreamResult {
   return {
@@ -265,6 +265,20 @@ describe("useChatStream", () => {
     expect(JSON.stringify(laterRequest.messages)).not.toContain(detailSentinel)
     expect(JSON.stringify(laterRequest.messages)).not.toContain(sourceSentinel)
     expect(JSON.stringify(laterRequest.messages)).not.toContain(sandboxSentinel)
+  })
+
+  it("sends the request again when the stream died before any event", async () => {
+    const dead: SSEStreamResult = {
+      abort: vi.fn(),
+      async *[Symbol.asyncIterator]() { throw new TypeError("NetworkError when attempting to fetch resource.") },
+    }
+    createChatStream.mockReturnValueOnce(dead).mockReturnValueOnce(stream([event("token", "Hi"), event("done", "")]))
+    const { result } = renderHook(() => useChatStream())
+    let completion: ChatStreamCompletion | null = null
+    await act(async () => { completion = await result.current.send(request("hi")) })
+    expect(createChatStream).toHaveBeenCalledTimes(2)
+    expect(completion).not.toBeNull()
+    expect(result.current.messages[1].content).toBe("Hi")
   })
 
   it("leaves no running tool record when the turn is aborted", async () => {

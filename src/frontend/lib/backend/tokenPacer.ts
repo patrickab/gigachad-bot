@@ -5,7 +5,6 @@
  *  A late chunk is covered by the cushion, a burst is absorbed within the lag. */
 const LAG_MS = 200
 const FINISH_LAG_MS = 60
-const START_DELAY_MS = 120
 const MIN_CHARS_PER_SECOND = 30
 const BACKLOG_SMOOTHING = 0.2
 const MAX_FRAME_MS = 100
@@ -23,16 +22,39 @@ interface Scheduler {
   cancel(handle: number): void
 }
 
+/** Frames stop in a hidden or unfocused window (Firefox, occluded windows), and the text must still arrive: a timer takes over after this. */
+const FRAME_FALLBACK_MS = 100
+
+let nextHandle = 1
+const pendingFrames = new Map<number, { frame: number; timer: ReturnType<typeof setTimeout> }>()
+
 const browserScheduler: Scheduler = {
-  request: (callback) => requestAnimationFrame(callback),
-  cancel: (handle) => cancelAnimationFrame(handle),
+  request: (callback) => {
+    const handle = nextHandle++
+    const run = () => {
+      const pending = pendingFrames.get(handle)
+      if (!pending) return
+      pendingFrames.delete(handle)
+      cancelAnimationFrame(pending.frame)
+      clearTimeout(pending.timer)
+      callback()
+    }
+    pendingFrames.set(handle, { frame: requestAnimationFrame(run), timer: setTimeout(run, FRAME_FALLBACK_MS) })
+    return handle
+  },
+  cancel: (handle) => {
+    const pending = pendingFrames.get(handle)
+    if (!pending) return
+    pendingFrames.delete(handle)
+    cancelAnimationFrame(pending.frame)
+    clearTimeout(pending.timer)
+  },
 }
 
 export function createTokenPacer(emit: (text: string) => void, scheduler: Scheduler = browserScheduler): TokenPacer {
   let queue = ""
   let handle: number | null = null
   let last = 0
-  let startAt = 0
   let credit = 0
   let smoothed = 0
   let lag = LAG_MS
@@ -53,11 +75,6 @@ export function createTokenPacer(emit: (text: string) => void, scheduler: Schedu
     handle = null
     // Not the rAF argument: its origin differs from `performance.now()` in some environments.
     const time = performance.now()
-    if (time < startAt) {
-      last = time
-      handle = scheduler.request(frame)
-      return
-    }
     const dt = Math.min(time - last, MAX_FRAME_MS)
     last = time
     smoothed += (queue.length - smoothed) * BACKLOG_SMOOTHING
@@ -84,7 +101,8 @@ export function createTokenPacer(emit: (text: string) => void, scheduler: Schedu
   const start = () => {
     if (handle !== null) return
     last = performance.now()
-    startAt = smoothed === 0 && credit === 0 ? last + START_DELAY_MS : last
+    // A reply starts with its first character, not after a delay
+    if (smoothed === 0 && credit === 0) credit = 1
     handle = scheduler.request(frame)
   }
 
@@ -105,7 +123,6 @@ export function createTokenPacer(emit: (text: string) => void, scheduler: Schedu
     finish() {
       if (!queue) return Promise.resolve()
       lag = FINISH_LAG_MS
-      startAt = 0
       return new Promise<void>((resolve) => {
         waiters.push(resolve)
         start()

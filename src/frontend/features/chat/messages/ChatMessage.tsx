@@ -146,7 +146,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           {content}
         </span>
       ) : isStreaming && !toolRunning ? (
-        <StatusLine>Processing…</StatusLine>
+        <span role="status" aria-label="Waiting for the reply" className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" />
       ) : null}
       {hasResearch && research_steps && (
         <ResearchTrace

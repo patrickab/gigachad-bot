@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
-import { createChatStream } from "@/lib/backend/api"
+import { createChatStream, currentConnectionPool, leaveConnectionPool } from "@/lib/backend/api"
 import { deactivateSentImages } from "@/features/chat/attachments"
 import { createTokenPacer } from "@/lib/backend/tokenPacer"
 import {
@@ -81,34 +81,45 @@ export function useChatStream(): UseChatStreamReturn {
       let finalMessages: Message[] | null = null
 
       try {
-        const stream = createChatStream({ ...req, messages: history })
-        abortRef.current = stream.abort
-
-        for await (const event of stream) {
-          const decoded = decodeChatStreamEvent(event)
-          if (!decoded) continue
-          if (decoded.kind === "usage") {
-            usage = decoded.usage
-            totalUsageRef.current = usage
-            setTotalUsage(usage)
-            continue
-          }
-          if (decoded.kind === "done") {
-            completed = true
-            await pacer.finish()
+        for (let attempt = 0; ; attempt++) {
+          let received = false
+          const pool = currentConnectionPool()
+          try {
+            const stream = createChatStream({ ...req, messages: history })
+            abortRef.current = stream.abort
+            for await (const event of stream) {
+              received = true
+              const decoded = decodeChatStreamEvent(event)
+              if (!decoded) continue
+              if (decoded.kind === "usage") {
+                usage = decoded.usage
+                totalUsageRef.current = usage
+                setTotalUsage(usage)
+                continue
+              }
+              if (decoded.kind === "done") {
+                completed = true
+                await pacer.finish()
+                break
+              }
+              if (decoded.kind === "token") {
+                pacer.push(decoded.text)
+                continue
+              }
+              if (decoded.kind === "error") pacer.flush()
+              applyChatStreamEvent(assistantMsg, decoded)
+              publish()
+              // An error event is the turn's last content: append it, then stop reading.
+              if (decoded.kind === "error") {
+                unresolvedReason = decoded.message
+                break
+              }
+            }
             break
-          }
-          if (decoded.kind === "token") {
-            pacer.push(decoded.text)
-            continue
-          }
-          if (decoded.kind === "error") pacer.flush()
-          applyChatStreamEvent(assistantMsg, decoded)
-          publish()
-          // An error event is the turn's last content: append it, then stop reading.
-          if (decoded.kind === "error") {
-            unresolvedReason = decoded.message
-            break
+          } catch (e) {
+            // A stream that died before any event is sent again, over a fresh connection
+            if (received || attempt >= 2 || !(e instanceof TypeError)) throw e
+            leaveConnectionPool(pool)
           }
         }
       } catch (e) {

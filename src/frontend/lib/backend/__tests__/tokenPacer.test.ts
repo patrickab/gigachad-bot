@@ -21,11 +21,11 @@ function setup() {
 }
 
 describe("createTokenPacer", () => {
-  it("waits for the start delay, then paces without losing text", () => {
+  it("starts with the first frame, then paces without losing text", () => {
     const { pacer, tick, text } = setup()
     pacer.push("a".repeat(200))
     tick(16)
-    expect(text()).toBe("")
+    expect(text().length).toBeGreaterThan(0)
     for (let i = 0; i < 200; i++) tick(16)
     expect(text()).toBe("a".repeat(200))
   })

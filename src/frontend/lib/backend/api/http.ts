@@ -82,11 +82,14 @@ async function apiFetch(path: string, init: ApiInit = {}): Promise<Response> {
   const deadline = Date.now() + OFFLINE_RETRY_WINDOW_MS
   for (let delay = OFFLINE_RETRY_MIN_MS; ; delay = Math.min(delay * 2, OFFLINE_RETRY_MAX_MS)) {
     const headers = { ...(fetchInit.headers as Record<string, string> | undefined), ...deviceHeaders() }
-    const credentials: RequestCredentials = connectionPool % 2 ? "include" : "same-origin"
+    const pool = connectionPool
+    const credentials: RequestCredentials = pool % 2 ? "include" : "same-origin"
     try {
       return await fetch(`${getApiBase()}${path}`, { credentials, ...fetchInit, headers })
     } catch (error) {
       fetchInit.signal?.throwIfAborted()
+      // A connection that failed is dead or stale (Firefox: "NetworkError when attempting to fetch resource"): the retry takes a fresh one
+      if (error instanceof TypeError) leaveConnectionPool(pool)
       if (!retries || !(error instanceof TypeError) || Date.now() + delay > deadline) throw error
     }
     await sleep(delay, fetchInit.signal)
@@ -118,7 +121,8 @@ export async function jsonInit(method: string, body: unknown, headers: Record<st
 
 /** POSTs `body` as JSON and streams the SSE response. */
 export function sseStream(path: string, body: Record<string, unknown>): SSEStreamResult {
-  return createSSEStream(async (signal) => apiFetch(path, { ...await jsonInit("POST", body), signal }))
+  // A chat request the backend never answered is sent again: at worst a reply is generated twice, never lost to a stale connection
+  return createSSEStream(async (signal) => apiFetch(path, { ...await jsonInit("POST", body), signal, retryOffline: true }))
 }
 
 /** `retryOffline`: the POST is safe to repeat, so it waits out an unreachable backend like an idempotent request. */
