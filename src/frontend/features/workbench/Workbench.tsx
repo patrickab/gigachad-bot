@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react"
 import { flushSync } from "react-dom"
+import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
+import { dirName } from "@/lib/paths"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor } from "@/features/editor/NeovimEditor"
 import { LOAD_MESSAGES } from "@/features/editor/FilePanel"
@@ -84,6 +86,7 @@ export interface WorkbenchProps extends WorkbenchChatProps {
  */
 export function Workbench({ path, project, onPathChange, onClose, renderPane, status, center, notices, onSaved, quoteLanguage, onForwardSearch, ...chatProps }: WorkbenchProps) {
   const neovim = useNeovimSetting()
+  useTabWorkingDirectory(project?.folder ?? dirName(path))
   const chat = useWorkbenchChat(project?.folder ?? path, (cwd) => (project ? projectLead(project.folder, project.root, cwd) : fileLead(path, cwd)), chatProps)
   const [view, setView, show] = useWorkbenchView()
   const { notice, report } = notices

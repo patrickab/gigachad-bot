@@ -2,10 +2,11 @@
 
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
+import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { NeovimEditor, NeovimStopped, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { NotebookDocument, useEditorPath } from "@/features/notebook/NotebookDocument"
 import { createNotebookTextStore } from "@/features/notebook/notebookTextStore"
-import { baseName, extOf } from "@/lib/paths"
+import { baseName, dirName, extOf } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { fileLead } from "./fileLead"
 import { EDITOR_PAGE, NOTEBOOK_PAGE } from "./pages"
@@ -32,6 +33,7 @@ type NotebookWorkbenchProps = WorkbenchChatProps & { path: string; tabId: string
  */
 export function NotebookWorkbench({ path, tabId, ...chatProps }: NotebookWorkbenchProps) {
   const neovim = useNeovimSetting()
+  useTabWorkingDirectory(dirName(path))
   const chat = useWorkbenchChat(path, (cwd) => fileLead(path, cwd), chatProps)
   const editor = useEditorPath(path)
   const [view, setView] = useWorkbenchView()

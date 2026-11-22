@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { motion } from "framer-motion"
 import { Archive, ArchiveRestore, GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
 import { BoardColumn } from "@/components/ui/BoardColumn"
@@ -139,6 +140,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   refresh: () => Promise<void>
   onOpenTask: (taskId: string) => void
 }) {
+  useTabWorkingDirectory(repo)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const launches = useFactoryLaunches(repo)
   const [settingsOpen, setSettingsOpen] = useState(false)

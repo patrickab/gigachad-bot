@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
 import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
@@ -349,6 +350,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   const clearInsertion = useCallback(() => setInsertion(null), [])
   const newCommands = useComposerCommands(NO_COMMANDS, shellCommands)
   const shown = opened && opened.sessionId === sessionId ? opened : null
+  useTabWorkingDirectory(shown?.cwd)
   const dock = useComposerDock(!sessionId)
   const { mountColumn } = dock
 

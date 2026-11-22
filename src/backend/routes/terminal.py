@@ -1,9 +1,10 @@
 """Shell terminal sessions for logins with host access (`backend.identity.HOST_CAPABILITY`).
 
-`WS /api/terminal/session` runs the user's login shell in the home directory, one per connection. Binary frames carry
+`WS /api/terminal/session` runs the user's login shell in the tab's working directory (the open message's `cwd`, the home
+directory when it is absent or not a directory), one per connection. Binary frames carry
 terminal bytes both ways, text frames carry JSON control messages:
 
-- client -> server: `{"type": "open", "rows", "cols"}` first, then `{"type": "resize", "rows", "cols"}` and
+- client -> server: `{"type": "open", "rows", "cols", "cwd"?}` first, then `{"type": "resize", "rows", "cols"}` and
   `{"type": "escape"}` (Esc pressed: the shell gets it while a program runs in the foreground, else the browser is told to leave)
 - server -> client: `{"type": "leave"}` for an Esc at the shell's prompt, `{"type": "exit", "code"}` when the shell exits
 
@@ -36,11 +37,21 @@ class OpenMessage(BaseModel):
     type: str = Field(pattern="^open$")
     rows: int = Field(gt=0, le=1000)
     cols: int = Field(gt=0, le=1000)
+    cwd: str | None = None
 
 
 def login_shell() -> str:
     """`$SHELL`, else the shell of the backend's user account."""
     return os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
+
+
+def start_directory(requested: str | None) -> Path:
+    """`requested` when it is an existing directory, else the home directory."""
+    if requested:
+        path = Path(requested).expanduser()
+        if path.is_absolute() and path.is_dir():
+            return path
+    return Path.home()
 
 
 async def _relay_output(websocket: WebSocket, shell: PtyProcess) -> None:
@@ -78,7 +89,7 @@ async def terminal_session(websocket: WebSocket, identity: RequestIdentity = Dep
     except (ValidationError, ValueError):
         await websocket.close(code=_UNSUPPORTED_DATA)
         return
-    shell = PtyProcess.spawn([login_shell(), "-l"], cwd=Path.home(), rows=opening.rows, cols=opening.cols)
+    shell = PtyProcess.spawn([login_shell(), "-l"], cwd=start_directory(opening.cwd), rows=opening.rows, cols=opening.cols)
     relays = [asyncio.create_task(_relay_output(websocket, shell)), asyncio.create_task(_relay_input(websocket, shell))]
     try:
         await asyncio.wait(relays, return_when=asyncio.FIRST_COMPLETED)

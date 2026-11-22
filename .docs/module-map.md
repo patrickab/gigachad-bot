@@ -64,7 +64,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
 |   |       |-- neovim.py             Neovim terminal WebSocket: typed control frames in, browser notifications out through one ordered queue, notebook text validation
-|   |       |-- terminal.py           `WS /api/terminal/session`: login shell on a PTY, `open`/`resize`/`escape` in, `leave`/`exit` out
+|   |       |-- terminal.py           `WS /api/terminal/session`: login shell on a PTY, `open` (with the tab's `cwd`)/`resize`/`escape` in, `leave`/`exit` out
 |   |       |-- jupyter.py            Kernelspecs, `POST`/`DELETE /api/jupyter/kernel`, HTTP and WebSocket proxy `/api/jupyter/server/` (trusted-request and host-access gates)
 |   |       |-- file_watch.py         `WS /api/files/watch`: replaceable watch set in, `changed`/`refused` frames out
 |   |       |-- workbench.py          Workbench prepare (move stored doc to disk), create, promote a `.tex` to a folder entry, pasted images, chat-key session links

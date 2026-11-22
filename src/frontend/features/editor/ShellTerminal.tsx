@@ -6,6 +6,7 @@ import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
+import { tabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { terminalSessionUrl } from "@/lib/backend/urls"
 import { isEditableTarget } from "@/lib/utils"
 import { NERD_FONTS, TERMINAL_FONT_SIZE, shellTheme } from "./terminalTheme"
@@ -34,12 +35,12 @@ function isLeaveKey(event: KeyboardEvent): boolean {
   return event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing
 }
 
-/** Run one backend login shell, a new `sessionKey` starts a new one.
+/** Run one backend login shell for tab `tabId`, in the tab's working directory as it is when the shell starts. A new `sessionKey` starts a new one.
  *
  * - `onExit` follows the shell's `exit`
  * - `onLeave` follows an Esc at the shell's prompt, or a double Esc while a program runs (the program gets the first one)
  */
-function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => void) {
+function useShellSession(tabId: string, sessionKey: number, onExit: () => void, onLeave: () => void) {
   const [terminal, setTerminal] = useState<ShellTerminal | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const exit = useEffectEvent(onExit)
@@ -64,7 +65,7 @@ function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => 
       socket.binaryType = "arraybuffer"
       const send = (data: string | Uint8Array<ArrayBuffer>) => { if (socket.readyState === WebSocket.OPEN) socket.send(data) }
       const encoder = new TextEncoder()
-      socket.onopen = () => send(JSON.stringify({ type: "open", rows: xterm.rows, cols: xterm.cols }))
+      socket.onopen = () => send(JSON.stringify({ type: "open", rows: xterm.rows, cols: xterm.cols, cwd: tabWorkingDirectory(tabId) }))
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
         if (typeof event.data !== "string") { xterm.write(new Uint8Array(event.data)); return }
         const message = JSON.parse(event.data)
@@ -125,7 +126,7 @@ function useShellSession(sessionKey: number, onExit: () => void, onLeave: () => 
       dispose()
       setTerminal(null)
     }
-  }, [sessionKey])
+  }, [tabId, sessionKey])
 
   return { terminal, failure }
 }
@@ -167,14 +168,15 @@ function ShellTerminalSlot({ terminal, failure, onRestart }: { terminal: ShellTe
 }
 
 /** One tab's shell: `sessionKey` names its run, the window shows while `shown`. Unmounting hangs the shell up. */
-function TabShell({ sessionKey, shown, onExit, onHide, onRestart }: {
+function TabShell({ tabId, sessionKey, shown, onExit, onHide, onRestart }: {
+  tabId: string
   sessionKey: number
   shown: boolean
   onExit: () => void
   onHide: () => void
   onRestart: () => void
 }) {
-  const { terminal, failure } = useShellSession(sessionKey, onExit, onHide)
+  const { terminal, failure } = useShellSession(tabId, sessionKey, onExit, onHide)
   if (!shown) return null
   return (
     // Black in both modes, xterm's colors and prompts need a dark background. `shellTheme` reads it from here
@@ -192,6 +194,7 @@ interface TabShellState {
 
 /** Floating login shells on the backend host, one per tab, for logins with host access.
  *
+ * - A shell starts in the tab's working directory (`useTabWorkingDirectory`: the Pi session, factory task or workbench file the tab shows), else in the home directory
  * - `t` outside a text field opens the active tab's shell, 2/3 of the screen wide and high. Another tab shows its own shell, or none
  * - Esc at the prompt or a click beside it hides it, the shell keeps running and `t` shows it again. While a program runs (vim,
  *   less) Esc is the program's, a double Esc hides the window
@@ -220,6 +223,7 @@ export function ShellTerminals({ activeTabId, tabIds }: { activeTabId: string | 
   return [...shells].filter(([tabId]) => tabIds.includes(tabId)).map(([tabId, shell]) => (
     <TabShell
       key={tabId}
+      tabId={tabId}
       sessionKey={shell.key}
       shown={shell.visible && tabId === activeTabId}
       onExit={() => update(tabId, () => undefined)}

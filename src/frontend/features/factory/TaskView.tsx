@@ -9,6 +9,7 @@ import { PillTabs } from "@/components/ui/PillTabs"
 import { StatusDot } from "@/components/ui/StatusDot"
 import type { PiShellCommands } from "@/features/pi/PiTab"
 import type { PiCatalogProps } from "@/features/pi/PiTopBar"
+import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { usePiSessions } from "@/features/pi/sessionStore"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { commandFactoryTask } from "@/lib/backend/api"
@@ -61,6 +62,7 @@ export function TaskView({ repo, taskId, onBack, modelProps, shellCommands }: {
 }) {
   const { error: tasksError } = useFactoryTasks(repo)
   const task = useFactoryTask(taskId)
+  useTabWorkingDirectory(task && (task.worktree ?? task.repo))
   const { sessions } = usePiSessions()
   // The task list is only read again on a state change: the session row moves with every entry appended to the session file
   const session = task && sessions.find((candidate) => candidate.sessionId === task.session_id)
