@@ -101,7 +101,7 @@ describe("FactorySettingsDialog", () => {
     fireEvent.click(await view.findByLabelText("Model of coder"))
     expect(await view.findByRole("option", { name: "openai-codex/fast" })).toBeVisible()
     expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Pi default", "local-model", "openai-codex/fast", "openrouter/vendor/model", "openrouter/hand-added", "google/gemini-pro",
+      "Pi default", "google/gemini-pro", "local-model", "openai-codex/fast", "openrouter/hand-added", "openrouter/vendor/model",
       "old-model (saved, not added)",
     ])
     expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")

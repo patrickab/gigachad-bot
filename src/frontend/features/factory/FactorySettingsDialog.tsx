@@ -118,10 +118,10 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
     setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
 
-  // Every model of the chat model selector the gateway serves, as the `<provider>/<id>` Pi's registry resolves.
+  // Every model of the chat model selector the gateway serves, sorted as it lists them, as the `<provider>/<id>` Pi's registry resolves.
   const unavailable = new Set(catalog?.unavailable)
   const selectors = catalog ? [...catalog.ollama, ...catalog.providers.flatMap(qualifiedModelIds)] : []
-  const gatewayIds = [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))]
+  const gatewayIds = [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))].sort((a, b) => a.localeCompare(b))
   const modelOptions = [
     { value: "", label: "Pi default" },
     ...gatewayIds.map((model) => ({ value: model, label: model })),

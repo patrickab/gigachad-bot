@@ -14,7 +14,7 @@ interface DialogProps {
   title: ReactNode
   /** Element focused once the enter animation has mounted it. */
   initialFocusRef?: RefObject<HTMLElement | null>
-  /** Surface classes of the card; sizing and clipping are fixed by the shell. */
+  /** Surface classes of the card; sizing is fixed by the shell. The card does not clip, so a select's list may reach past its edge. */
   panelClassName?: string
   /** Max-width class of the card, `max-w-sm` by default. */
   widthClassName?: string
@@ -43,7 +43,7 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
             exit={{ opacity: 0, scale: 0.98, y: 2, transition: { duration: reduceMotion ? 0 : 0.12, ease: "easeIn" } }}
             transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full ${widthClassName} mx-4 overflow-hidden ${panelClassName}`}
+            className={`w-full ${widthClassName} mx-4 ${panelClassName}`}
           >
             <div className="px-5 pt-5 pb-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
