@@ -7,7 +7,7 @@
 #
 # - Hermetic: the steps run under `env -i` with only HOME, USER, PATH, LANG, TERM and TMPDIR, so nothing a parent
 #   exports (run.sh's GIGACHAD_*, the production unit, a Pi session, the factory engine) changes a result
-# - Steps run in parallel, each step's output is printed whole once all ended, failed steps last (the factory feeds the
+# - Steps run in parallel (vitest on half the cores then), each step's output is printed whole once all ended, failed steps last (the factory feeds the
 #   end of the output back to the coder)
 # - Exit 0 passed, 1 a step failed, 75 (EX_TEMPFAIL) the environment is broken (missing tools or packages, an empty
 #   submodule): the factory blocks the task as `infra` instead of asking the coder to fix it. Last line: the reason
@@ -243,6 +243,8 @@ step_frontend() {
     local args=(run --retry=1)
     need_node_modules src/frontend || return
     [[ $frontend_all -eq 0 ]] && args+=(--changed "$base" --passWithNoTests)
+    # Beside other steps, vitest gets half the cores: oversubscribed, its tests hit their timeouts.
+    [[ ${#steps[@]} -gt 1 ]] && args+=(--maxWorkers=50%)
     (cd src/frontend && node_modules/.bin/vitest "${args[@]}")
 }
 

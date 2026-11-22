@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createRef, type RefObject } from "react"
-import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { TabPicker } from "@/features/navigation/TabPicker"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
@@ -72,7 +72,7 @@ const tabShowing = (item: WorkspaceItem) =>
   ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
 
 /** Sidebars of every tab inside a tab manager under the real undo provider, with tabs of the paper project open and the note's tab frontmost. */
-function renderWorkspace(openTabs = true) {
+async function renderWorkspace(openTabs = true) {
   const manager = createRef<TabManagerHandle>()
   const view = render(
     <UndoDeleteProvider>
@@ -84,6 +84,8 @@ function renderWorkspace(openTabs = true) {
       </TabManager>
     </UndoDeleteProvider>,
   )
+  // The tree can suspend on its first render (a lazy module that loads slowly under load): wait for it to mount.
+  await waitFor(() => expect(manager.current).not.toBeNull())
   const initial = manager.current!.getTabs()[0]
   const workbench = tabShowing({ kind: "workbench", path: `${FOLDER}/paper.tex`, projectSlug: "proj", texFolder: FOLDER })
   const image = tabShowing({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj", rootFile: true })
@@ -123,7 +125,7 @@ afterEach(() => {
 
 describe("deleting a folder entry", () => {
   it("drops its row after the deferred commit in every tab's sidebar and closes the tabs showing its files and its workbench", async () => {
-    const { manager, view, initial, note } = renderWorkspace()
+    const { manager, view, initial, note } = await renderWorkspace()
     await sidebar(view).findByRole("button", { name: "paper" })
 
     fireEvent.click(sidebar(view).getByRole("button", { name: "Delete paper" }))
@@ -145,7 +147,7 @@ describe("deleting a folder entry", () => {
   })
 
   it("keeps the row and every tab when it is undone", async () => {
-    const { manager, view } = renderWorkspace()
+    const { manager, view } = await renderWorkspace()
     await sidebar(view).findByRole("button", { name: "paper" })
 
     fireEvent.click(sidebar(view).getByRole("button", { name: "Delete paper" }))
@@ -158,7 +160,7 @@ describe("deleting a folder entry", () => {
   })
 
   it("does the same when another device deletes it", async () => {
-    const { manager, view, initial, note } = renderWorkspace()
+    const { manager, view, initial, note } = await renderWorkspace()
     await sidebar(view).findByRole("button", { name: "paper" })
     fixtures.documents = [NOTE]
 
@@ -169,7 +171,7 @@ describe("deleting a folder entry", () => {
   })
 
   it("is not touched by another device writing the same path", async () => {
-    const { manager, view } = renderWorkspace()
+    const { manager, view } = await renderWorkspace()
     await sidebar(view).findByRole("button", { name: "paper" })
 
     emit(`${FOLDER}/paper.tex`, "write")
@@ -191,7 +193,7 @@ describe("tab crumbs", () => {
   }
 
   it("name the project that lists the file, also for files inside a folder entry", async () => {
-    const { view } = renderWorkspace(false)
+    const { view } = await renderWorkspace(false)
     fireEvent.click(await sidebar(view).findByRole("button", { name: "paper" }))
 
     fireEvent.click(sidebar(view).getByRole("button", { name: "paper.tex" }))
