@@ -21,11 +21,12 @@ const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
   providers: [
     { label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["openai-codex/fast", "openrouter/vendor/model"] },
-    { label: "OpenRouter", provider_id: "openrouter", models: ["not-added-from-pi"] },
+    { label: "OpenRouter", provider_id: "openrouter", models: ["hand-added", "gone"] },
+    { label: "Gemini", provider_id: "gemini", models: ["gemini-pro"] },
   ],
   defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
   tab_order: [],
-  unavailable: [],
+  unavailable: ["openrouter/gone"],
 }
 
 beforeEach(() => {
@@ -93,12 +94,13 @@ describe("FactorySettingsDialog", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("offers only added Pi models and preserves native selectors with slashes", async () => {
+  it("offers every served model of the selector as a gateway id and preserves native selectors with slashes", async () => {
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     fireEvent.click(await view.findByLabelText("Model of coder"))
     expect(await view.findByRole("option", { name: "openai-codex/fast" })).toBeVisible()
     expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Pi default", "openai-codex/fast", "openrouter/vendor/model", "old-model (saved, not added)",
+      "Pi default", "local-model", "openai-codex/fast", "openrouter/vendor/model", "openrouter/hand-added", "google/gemini-pro",
+      "old-model (saved, not added)",
     ])
     expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "openrouter/vendor/model" }))

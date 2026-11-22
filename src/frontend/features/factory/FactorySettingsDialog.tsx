@@ -11,7 +11,7 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { fetchModels, getFactorySettings, putFactorySettings } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { PI_MODEL_SOURCE } from "@/lib/models"
+import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
 import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
@@ -81,12 +81,13 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
     setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
 
+  // Every model of the chat model selector the gateway serves, as the `<provider>/<id>` Pi's registry resolves.
+  const unavailable = new Set(catalog?.unavailable)
+  const selectors = catalog ? [...catalog.ollama, ...catalog.providers.flatMap(qualifiedModelIds)] : []
+  const gatewayIds = [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))]
   const modelOptions = [
     { value: "", label: "Pi default" },
-    ...(catalog?.providers.filter((provider) => provider.source === PI_MODEL_SOURCE).flatMap((provider) => provider.models.map((model) => ({
-      value: model,
-      label: model,
-    }))) ?? []),
+    ...gatewayIds.map((model) => ({ value: model, label: model })),
   ]
 
   const canSave = draft !== null && !busy && validRounds(draft.max_rounds)
