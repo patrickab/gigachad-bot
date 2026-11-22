@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, Path
 from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
 from backend.routes.upstream import call_upstream
-from lib import factory, factory_preview
+from lib import factory, factory_preview, pi_host
 from lib.factory_workspace import WorkspaceBusy, WorkspaceError
 from lib.git import GitError
 from lib.postgres_pool import get_postgres_pool
@@ -52,6 +52,7 @@ async def _call[Result](request: Awaitable[Result]) -> Result:
         (factory.InvalidConfig, 400, None),
         (WorkspaceBusy, 409, None),
         (factory.StartFailed, 502, None),
+        (pi_host.FactoryPluginMissing, 503, None),
         (WorkspaceError, 502, None),
         (GitError, 502, None),
         (factory_preview.PreviewError, 502, None),

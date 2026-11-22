@@ -593,10 +593,22 @@ describe("private state", () => {
 });
 
 describe("factory draft", () => {
-  test("drafts a factory.yaml for a checkout and writes nothing", async () => {
+  test("asks the installed factory plugin, and names its source when it is missing", async () => {
     const repo = join(scratch, "draft-repo");
     await mkdir(repo, { recursive: true });
-    await writeFile(join(repo, "Makefile"), "lint:\n\truff\n");
+    const draftUrl = `/factory/draft?cwd=${encodeURIComponent(repo)}`;
+    const missing = await call<{ error: string; message: string }>("GET", draftUrl);
+    expect(missing.status).toBe(503);
+    expect(missing.json.error).toBe("factory_plugin_missing");
+    expect(missing.json.message).toContain("github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory");
+
+    // The plugin is a Pi user extension: a stand-in in the agent dir is what pi-host loads.
+    const plugin = join(scratch, "agent", "extensions", "factory");
+    await mkdir(plugin, { recursive: true });
+    await writeFile(
+      join(plugin, "draft.ts"),
+      'export const initDraft = (root: string) => ({ text: "gates:\\n  - [make, lint]\\n", source: "Makefile" });\n',
+    );
     const { status, json } = await call<{ draft: string; source: string }>("GET", `/factory/draft?cwd=${encodeURIComponent(repo)}`);
     expect(status).toBe(200);
     expect(json.source).toBe("Makefile");

@@ -22,7 +22,7 @@ via `run.sh`.
 - Regenerate `.docs/system-overview.md`, `.docs/architecture.md`, and `.docs/module-map.md` through `/repomix`. Preserve operational details in maintained runbooks and load them only for relevant tasks.
 - `.docs/deployment.md` — Private production deployment, identity, service configuration, verification, and rollback.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
-- `.docs/agent-factory.md`: how factory tasks run: lifecycle, branches, checks, merge queue, failures, observability. Read it before touching `pi-extensions/factory/`, `src/lib/factory*.py`, `src/frontend/features/factory/` or `factory.yaml`.
+- `.docs/agent-factory.md`: how factory tasks run: lifecycle, branches, checks, merge queue, failures, observability. Read it before touching the factory plugin, `src/lib/factory*.py`, `src/frontend/features/factory/` or `factory.yaml`. The plugin is a Pi user extension outside this repo: `~/.os/chezmoi/dot_pi/agent/extensions/factory/` (deployed to `~/.pi/agent/extensions/factory/`). Factory tasks never change it.
 - `.docs/integration-learnharness.md`: everything about learn mode (LearnHarness): goal, decisions, architecture, rules, operations. Read it only when working on learn mode.
 - `.docs/pi-migration.md`: moving from OMP to Pi (ADR 0003): pi-host, contracts, decisions, phases. Read it for any Pi or pi-host work. Keep it current as phases land, delete it once its lasting parts are in `.docs/architecture.md`.
 - `templates/latex/AGENTS.md`: rules for the LaTeX presentation template sets (primitives, theme, re-rendering `example.tex`/`example.pdf` after every change). Read it before touching `templates/latex/`.

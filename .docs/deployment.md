@@ -276,8 +276,22 @@ Units, environment, gate, backup and restore: `.docs/integration-learnharness.md
 
 ### Provision the agent factory
 
-Factory tasks are sessions of the production pi-host, run by the `pi-extensions/factory/` extension of the production
-worktree, and rows in the production database. The only factory unit is the preview gate.
+Factory tasks are sessions of the production pi-host, run by the factory plugin of the service user's Pi, and rows in
+the production database. The only factory unit is the preview gate.
+
+The factory needs two things this repo does not ship. Both come from the owner's dotfiles
+([patrickab/.os](https://github.com/patrickab/.os), applied with `./setup.sh` or `chezmoi apply`) and must be current
+for the service user on every host that runs factory tasks:
+
+| Dependency | Source in `.os` | Installed as | Without it |
+| --- | --- | --- | --- |
+| Factory plugin (Pi user extension) | [`chezmoi/dot_pi/agent/extensions/factory/`](https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory) | `~/.pi/agent/extensions/factory/` | No task starts, the board reports `factory_plugin_missing` with this link |
+| `agent-worktree` | [`chezmoi/dot_local/bin/executable_agent-worktree`](https://github.com/patrickab/.os/blob/master/chezmoi/dot_local/bin/executable_agent-worktree) | `~/.local/bin/agent-worktree` | No worktree task starts (tasks in the checkout still do) |
+
+Without chezmoi: copy the plugin directory to `~/.pi/agent/extensions/factory/` (the `*.test.ts`, `tsconfig.json` and
+`bun.lock` files are for development only) and the script to a directory on the service's `PATH`. The other Pi plugins
+of that repo are optional: `chezmoi/dot_pi/README.md` there lists them. A plugin update reaches a task when its session
+next starts, the draft generator when pi-host restarts.
 
 | Concern | Contract |
 | --- | --- |

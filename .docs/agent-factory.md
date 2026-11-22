@@ -3,12 +3,27 @@
 A factory task is a request a Pi coding session carries out on its own: code, check, review, merge. This page is the
 behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" rows). Source map: `.docs/module-map.md`.
 
+## Where the plugin lives
+
+- **Not in this repo.** The factory plugin is a Pi user extension in the owner's dotfiles:
+  [`~/.os/chezmoi/dot_pi/agent/extensions/factory/`](https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory), deployed by chezmoi to
+  `~/.pi/agent/extensions/factory/`. Edit the source in `~/.os`, never the deployed copy.
+- **Why**: it runs in any Pi session on any repo (`/factory init`, `/factory start`), with or without gigachad.
+  gigachad only starts and monitors tasks on top of it.
+- **Factory tasks of this repo cannot change it.** A plugin change is a commit in `~/.os` (tests: `bun test` and
+  `bun run types` in the plugin's directory), then `chezmoi apply`. A change to the contract below needs a commit in
+  both repos.
+- **Contract with gigachad**: the commands (`/factory start|approve|retry|cancel|init`), the `factory-*` session
+  entries (`.docs/architecture.md`, "Agent factory") and `draft.ts`'s `initDraft(root)`, which pi-host imports from
+  the installed plugin.
+- **Not installed**: pi-host answers `factory_plugin_missing`, the board and a failed start name the link above.
+
 ## Parts
 
 - **Backend** (`src/lib/factory.py`, `routes/factory.py`): repos and their settings, a task's start (workspace, session,
   `/factory start`), list, diff, commands, messages, deletion. Stores no state: a task's state is its session's last
   `factory-state` entry, which pi-host reports.
-- **Extension** (`pi-extensions/factory/`): runs the pipeline inside the task's own Pi session. Every step is a `custom`
+- **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.
   - `index.ts` session hooks and commands, `pipeline.ts` round and merge control flow, `merge.ts` rebase and merge,
     `queue.ts` merge queue, `review.ts` reviewer child, `config.ts` `factory.yaml`, `state.ts` entries and feedback.
@@ -116,7 +131,7 @@ A repo needs a `factory.yaml` once, in either of two ways, both from the same ge
 
 Review and commit it: the factory reads `factory.yaml` from a task's base commit, so tasks pick it up from that commit on.
 
-- **Draft** (`pi-extensions/factory/draft.ts`, a pure function of the repo's files; the backend has no copy): fills
+- **Draft** (the plugin's `draft.ts`, a pure function of the repo's files; the backend has no copy): fills
   the commented template `factory.template.yaml` (`hooks`, `gates`, `merge_gates`, a comment per key) with `gates`
   (lint, types, format) and `merge_gates` (everything, tests included). The highest-level source wins:
   `factory/gates.sh`, Makefile targets (`lint`, `typecheck`, `check`, `test`), `.gitlab-ci.yml` scripts, then

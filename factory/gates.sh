@@ -34,8 +34,8 @@
 #   copy is still running) are waited for, an empty submodule is copied from the main checkout
 # - lint checks Python files changed against the merge base with origin/master (the tree predates ruff's rules) and
 #   the frontend with eslint
-# - pi-extensions/ has no packages of its own: types and pi-host cover it with pi-host's node_modules
-#   (pi-extensions/tsconfig.json)
+# - pi-extensions/ has no packages and no tests of its own: types cover it with pi-host's node_modules
+#   (pi-extensions/tsconfig.json). The factory plugin is not here: it is a Pi user extension, tested in its own repo
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -298,7 +298,6 @@ step_pi_host() {
     local status=0
     need_node_modules pi-host || return
     (cd pi-host && bun test) || status=1
-    (cd pi-extensions && bun test) || status=1
     return "$status"
 }
 

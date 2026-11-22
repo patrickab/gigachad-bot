@@ -228,6 +228,16 @@ async def test_a_prompt_to_a_stopped_session_is_refused_with_pi_hosts_status(mon
     assert (refused.value.status, refused.value.body) == (409, {"error": "not_live"})
 
 
+async def test_a_missing_factory_plugin_is_reported_with_where_it_comes_from(monkeypatch):
+    message = f"The factory plugin is not installed. Install it from {pi_host.FACTORY_PLUGIN_SOURCE}"
+    _serve(monkeypatch, {"GET /factory/draft": (503, {"error": "factory_plugin_missing", "message": message})})
+
+    with pytest.raises(pi_host.FactoryPluginMissing) as missing:
+        await pi_host.factory_draft("/repo")
+
+    assert "patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory" in str(missing.value)
+
+
 async def test_delete_removes_the_session_and_an_unknown_one_is_refused(monkeypatch):
     routes = {f"DELETE /sessions/{SESSION_ID}": (204, None), "DELETE /sessions/absent": (404, {"error": "not_found"})}
     host = _serve(monkeypatch, routes)

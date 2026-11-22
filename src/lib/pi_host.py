@@ -72,6 +72,15 @@ class PiHostRejected(UpstreamRequestFailed):
         self.body = body
 
 
+# The factory plugin is a Pi user extension from the owner's dotfiles, not part of this repo.
+FACTORY_PLUGIN_SOURCE = "https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory"
+FACTORY_PLUGIN_HINT = f"Install the factory plugin to ~/.pi/agent/extensions/factory from {FACTORY_PLUGIN_SOURCE}"
+
+
+class FactoryPluginMissing(RuntimeError):
+    """Pi has no factory plugin: the message names where it comes from."""
+
+
 class ContractModel(BaseModel):
     """pi-host JSON is camelCase and passes through to the browser as camelCase (the Pi feature speaks Pi's shapes)."""
 
@@ -415,7 +424,12 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
 
 async def factory_draft(cwd: str) -> str:
     """The draft `factory.yaml` of the checkout at *cwd*, from the factory plugin's generator. Writes nothing."""
-    return (await _request("GET", "/factory/draft", FactoryDraft, params={"cwd": cwd})).draft
+    try:
+        return (await _request("GET", "/factory/draft", FactoryDraft, params={"cwd": cwd})).draft
+    except PiHostRejected as exc:
+        if isinstance(exc.body, dict) and exc.body.get("error") == "factory_plugin_missing":
+            raise FactoryPluginMissing(str(exc.body.get("message") or FACTORY_PLUGIN_HINT)) from exc
+        raise
 
 
 async def session_entries(

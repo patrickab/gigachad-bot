@@ -5,7 +5,7 @@
   stopped), git for the diff, and the tables `factory_repo_settings` and `factory_tasks` (`db/schema/0017_factory_tasks.sql`)
 - Provides the repos with their settings and local branches, and a task's life: start, list, read, diff, command, message, delete
 - A repo is the absolute path of a primary git checkout, its name the folder's, for display only
-- The extension (`pi-extensions/factory`) runs the rounds, gates, review and merge inside the session. A task's state is
+- The extension (a Pi user extension) runs the rounds, gates, review and merge inside the session. A task's state is
   the session's last `factory-state` entry, which pi-host reports as `SessionInfo.factory`: no state is stored here
 - Settings chain: the defaults of `RepoSettings`, the repo's stored settings, a task's overrides. `source_branch` and
   `target_branch` resolve at a worktree task's start (`resolve_branches`): the worktree starts at the source branch's
@@ -696,7 +696,8 @@ async def create_task(store: FactoryStore, new_task: NewTask) -> Task:
             if not await _started(session_id):
                 raise StartFailed(
                     f"The session did not start the task (Pi answered {disposition!r}, no factory-task entry): the factory"
-                    " extension is not loaded or refused the start (not a git repository, an unknown model)"
+                    " plugin refused the start (not a git repository, an unknown model) or is not loaded."
+                    f" {pi_host.FACTORY_PLUGIN_HINT}"
                 )
             row = await asyncio.to_thread(
                 store.insert_task,

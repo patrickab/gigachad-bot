@@ -375,7 +375,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
 |-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md`
 |-- pi-extensions/                    Pi extensions loaded into every `coding` session
-|   `-- factory/                      Factory pipeline: commands, rounds, rebase onto the task branch, gates, review child (`reviewer-tool.ts`), merge, entries
+|                                     (the factory plugin is not here: `~/.os/chezmoi/dot_pi/agent/extensions/factory/`)
 |-- run-learnharness.sh               LearnHarness sidecar launcher
 |-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
 |-- run-preview-gate.sh               Factory preview gate launcher
@@ -427,7 +427,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | `factory.yaml`, `.factory/agents/`, `pi-extensions/factory/`, `src/lib/factory.py`, `src/lib/factory_workspace.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
+| Factory integration | `factory.yaml`, `.factory/agents/`, `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory.py`, `src/lib/factory_workspace.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 
@@ -456,7 +456,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
 | Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
-| Factory pipeline, tasks or preview UI | `pi-extensions/factory/`, `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_workspace.py`, `src/lib/factory_preview.py`, `factory.yaml`; `pi-extensions/factory/*.test.ts`, `tests/test_factory*.py`, factory `__tests__/` |
+| Factory pipeline, tasks or preview UI | `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_workspace.py`, `src/lib/factory_preview.py`, `factory.yaml`; the plugin's own tests in `~/.os`, `tests/test_factory*.py`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |

@@ -5,8 +5,8 @@
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
  *   `profileOf` and `markProfile` for the supervisor
  */
-import { isAbsolute, resolve } from "node:path";
-import { initDraft } from "../../../pi-extensions/factory/draft.ts";
+import { isAbsolute, join, resolve } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { PROFILES, type Host, type Profile } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
@@ -89,11 +89,30 @@ async function handleFiles(url: URL, host: Host): Promise<Response> {
   return Response.json({ files: rankFiles(candidates, query, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) });
 }
 
-/** `GET /factory/draft?cwd=`: the factory plugin's draft `factory.yaml` for the checkout at `cwd`, nothing is written. */
+/** Where the factory plugin comes from. It is a Pi user extension, not part of this repo. */
+export const FACTORY_PLUGIN_SOURCE = "https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory";
+
+/** The factory plugin's generator module in Pi's user extensions. Loaded on first use, so a pi-host started without the plugin finds it once installed. */
+function factoryPluginPath(): string {
+  return join(getAgentDir(), "extensions", "factory", "draft.ts");
+}
+
+/**
+ * `GET /factory/draft?cwd=`: the factory plugin's draft `factory.yaml` for the checkout at `cwd`, nothing is written.
+ * 503 `factory_plugin_missing` with a `message` naming the plugin's source when it is not installed.
+ */
 async function handleFactoryDraft(url: URL, host: Host): Promise<Response> {
   const cwd = await validCwd(host, url.searchParams.get("cwd"));
   if (!cwd) return fail(400, "invalid_cwd");
-  const { text, source } = initDraft(cwd);
+  const path = factoryPluginPath();
+  let plugin: { initDraft: (root: string) => { text: string; source: string } };
+  try {
+    plugin = await import(path);
+  } catch {
+    const message = `The factory plugin is not installed (${path}). Install it from ${FACTORY_PLUGIN_SOURCE}`;
+    return Response.json({ error: "factory_plugin_missing", message }, { status: 503 });
+  }
+  const { text, source } = plugin.initDraft(cwd);
   return Response.json({ draft: text, source });
 }
 
