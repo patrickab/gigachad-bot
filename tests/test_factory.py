@@ -30,6 +30,8 @@ class FakePiHost:
     sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     entries: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     requests: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    # Ids of the sessions created with `factoryRepo`: pi-host's factory root, listed only with `factory=1`.
+    factory_root: set[str] = field(default_factory=set)
     # False: `/factory start` is answered `handled` and writes nothing, like the extension refusing it.
     accepts_start: bool = True
     down: bool = False
@@ -57,10 +59,13 @@ class FakePiHost:
         match (request.method, *request.url.path.strip("/").split("/")):
             case ("GET", "sessions"):
                 archived = body["archived"] == "1"
+                with_factory_root = body.get("factory") == "1" and not archived
                 sessions = [
                     session
-                    for session in self.sessions.values()
-                    if body.get("cwd") in (None, session["cwd"]) and session["archived"] == archived
+                    for session_id, session in self.sessions.items()
+                    if body.get("cwd") in (None, session["cwd"])
+                    and session["archived"] == archived
+                    and (with_factory_root or session_id not in self.factory_root)
                 ]
                 return httpx.Response(200, json={"sessions": sessions})
             case ("GET", "factory", "draft"):
@@ -83,9 +88,12 @@ class FakePiHost:
     def _open(self, body: dict[str, Any]) -> httpx.Response:
         if body["resume"] is None:
             session_id = str(uuid4())
+            if "factoryRepo" in body:
+                self.factory_root.add(session_id)
+            root = "/factory/sessions" if "factoryRepo" in body else "/sessions"
             self.sessions[session_id] = {
                 "sessionId": session_id,
-                "sessionPath": f"/sessions/{session_id}.jsonl",
+                "sessionPath": f"{root}/{session_id}.jsonl",
                 "cwd": body["cwd"],
                 "machine": "local",
                 "createdAt": "2026-11-19T10:00:00.000Z",
@@ -315,9 +323,11 @@ def test_a_task_starts_in_a_worktree_with_a_coding_session_and_the_start_command
     assert (task["repo"], task["title"]) == (registered, "Rename the sidebar!")
     assert task["factory"]["state"] == "running"
     assert task["live"] == {"running": False, "waiting": False, "attached": 0}
-    assert host.sent("POST", "/sessions") == [{"cwd": str(worktree), "profile": "coding", "resume": None}]
+    assert host.sent("POST", "/sessions") == [
+        {"cwd": str(worktree), "profile": "coding", "resume": None, "factoryRepo": registered}
+    ]
     session = host.sessions[task["session_id"]]
-    assert task["session_path"] == session["sessionPath"]
+    assert task["session_path"] == session["sessionPath"] == f"/factory/sessions/{task['session_id']}.jsonl"
     (prompt,) = host.sent("POST", "/prompt")
     assert json.loads(prompt["message"].removeprefix("/factory start ")) == {
         "request": "Call it Library",
@@ -367,19 +377,37 @@ def test_tasks_are_listed_with_their_state_from_one_pi_host_listing(client, host
     assert [task["id"] for task in tasks] == [second["id"], first["id"]]
     assert tasks[1]["factory"] == {"state": "waiting_approve", "round": 1, "reason": "", "at": "2026-11-19T10:00:02.000Z"}
     assert tasks[1]["live"] is None
-    assert host.requests == [("GET", "/sessions", {"archived": "0"})]
+    assert host.requests == [("GET", "/sessions", {"archived": "0", "factory": "1"})]
 
     # A session pi-host lost takes the archive listing too, and shows no state.
     host.sessions.pop(second["session_id"])
     host.requests.clear()
     tasks = client.get("/api/factory/tasks", params={"repo": registered}).json()
     assert (tasks[0]["factory"], tasks[0]["live"]) == (None, None)
-    assert host.requests == [("GET", "/sessions", {"archived": "0"}), ("GET", "/sessions", {"archived": "1"})]
+    assert host.requests == [
+        ("GET", "/sessions", {"archived": "0", "factory": "1"}),
+        ("GET", "/sessions", {"archived": "1"}),
+    ]
 
     one = client.get(f"/api/factory/tasks/{first['id']}").json()
     assert one == tasks[1]
     assert client.get("/api/factory/tasks", params={"repo": "/absent"}).status_code == 404
     assert client.get("/api/factory/tasks/absent000").status_code == 404
+
+
+def test_tasks_find_their_sessions_in_the_factory_root_and_older_ones_in_pis_normal_root(client, host, registered):
+    older = _start(client, registered)
+    newer = _start(client, registered)
+    # A task started before the factory root existed: its session file stays in Pi's normal root.
+    host.factory_root.discard(older["session_id"])
+    host.set_state(older["session_id"], "waiting_approve")
+
+    tasks = {task["id"]: task for task in client.get("/api/factory/tasks", params={"repo": registered}).json()}
+
+    assert tasks[older["id"]]["factory"]["state"] == "waiting_approve"
+    assert tasks[newer["id"]]["factory"]["state"] == "running"
+    assert client.get(f"/api/factory/tasks/{newer['id']}").json()["factory"]["state"] == "running"
+    assert client.get(f"/api/factory/tasks/{older['id']}").json()["factory"]["state"] == "waiting_approve"
 
 
 def test_a_start_the_session_does_not_take_fails_and_leaves_nothing(client, host, registered, repo, tmp_path):
@@ -504,6 +532,8 @@ def test_a_message_is_queued_behind_a_running_turn(client, host, registered):
 
 def test_an_archived_task_session_keeps_its_state(client, host, registered):
     task = _start(client, registered)
+    # Only an older task's session, in Pi's normal root, can be archived: the factory root never is.
+    host.factory_root.discard(task["session_id"])
     host.sessions[task["session_id"]]["archived"] = True
 
     listed = client.get("/api/factory/tasks", params={"repo": registered}).json()

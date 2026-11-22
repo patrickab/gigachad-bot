@@ -10,7 +10,7 @@ import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { FACTORY_STATES, type DeleteResult, type FactoryState, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
-import { archiveRoot, cwdSessionDir, isInside, sessionsRoot } from "./paths.ts";
+import { archiveRoot, cwdSessionDir, factorySessionsRoot, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar, removeSidecar } from "./state.ts";
 
 type Summary = Pick<
@@ -198,25 +198,39 @@ function newestFirst(a: SessionMeta, b: SessionMeta): number {
   return b.modifiedAt.localeCompare(a.modifiedAt) || b.createdAt.localeCompare(a.createdAt);
 }
 
-/** Sessions of `cwd` (every cwd when null), newest first. */
-export async function listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
-  const root = archived ? archiveRoot() : sessionsRoot();
+/**
+ * Sessions of `cwd` (every cwd when null), newest first. Live ones come from the live root, plus the factory root with
+ * `factory`. Archived ones come from the archive root, which never holds a factory-root session. The factory root is
+ * grouped by repository, not cwd: it is scanned whole and filtered by the header's cwd.
+ */
+export async function listSessions(cwd: string | null, archived: boolean, factory = false): Promise<SessionMeta[]> {
+  const withFactory = factory && !archived;
   if (cwd === null) {
-    const metas = await Promise.all((await sessionFiles(root, ".jsonl")).map((path) => sessionMeta(path)));
+    const roots = [archived ? archiveRoot() : sessionsRoot(), ...(withFactory ? [factorySessionsRoot()] : [])];
+    const files = (await Promise.all(roots.map((root) => sessionFiles(root, ".jsonl")))).flat();
+    const metas = await Promise.all(files.map((path) => sessionMeta(path)));
     return metas.filter((meta): meta is SessionMeta => meta !== undefined).sort(newestFirst);
   }
-  const dir = cwdSessionDir(root, cwd);
+  const paths = [
+    ...(await cwdSessionFiles(cwdSessionDir(archived ? archiveRoot() : sessionsRoot(), cwd))),
+    ...(withFactory ? await sessionFiles(factorySessionsRoot(), ".jsonl") : []),
+  ];
+  const metas = await Promise.all(paths.map((path) => sessionMeta(path)));
+  const wantedCwd = resolve(cwd);
+  return metas
+    .filter((meta): meta is SessionMeta => meta !== undefined && resolve(meta.cwd || "/") === wantedCwd)
+    .sort(newestFirst);
+}
+
+/** Session files directly in a cwd's session directory, none when it is missing. */
+async function cwdSessionFiles(dir: string): Promise<string[]> {
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
     return [];
   }
-  const metas = await Promise.all(names.filter((name) => name.endsWith(".jsonl")).map((name) => sessionMeta(join(dir, name))));
-  const wantedCwd = resolve(cwd);
-  return metas
-    .filter((meta): meta is SessionMeta => meta !== undefined && resolve(meta.cwd || "/") === wantedCwd)
-    .sort(newestFirst);
+  return names.filter((name) => name.endsWith(".jsonl")).map((name) => join(dir, name));
 }
 
 /** Files ending in `suffix` directly under `dir`, and its subdirectories. */
@@ -239,10 +253,13 @@ async function sessionFiles(root: string, suffix: string): Promise<string[]> {
   return [...top.files, ...nested.flatMap((level) => level.files)];
 }
 
-/** Path of the session file with Pi session id `sessionId` (`<timestamp>_<id>.jsonl`), live root first. */
+/**
+ * Path of the session file with Pi session id `sessionId` (`<timestamp>_<id>.jsonl`): live root first, then the factory
+ * and archive roots.
+ */
 export async function findSession(sessionId: string): Promise<string | undefined> {
   if (!sessionId || /[/\\]/.test(sessionId) || sessionId.includes("..")) return undefined;
-  for (const root of [sessionsRoot(), archiveRoot()]) {
+  for (const root of [sessionsRoot(), factorySessionsRoot(), archiveRoot()]) {
     for (const candidate of await sessionFiles(root, `_${sessionId}.jsonl`)) {
       const scanned = await summarize(candidate);
       if (scanned?.summary.sessionId === sessionId) return candidate;
@@ -253,9 +270,11 @@ export async function findSession(sessionId: string): Promise<string | undefined
 
 /**
  * Move a session file and its sidecar between the live and archive roots. The move holds the session's flock, the
- * one taken before a child starts, so a spawn and an archive exclude each other.
+ * one taken before a child starts, so a spawn and an archive exclude each other. A factory-root session is never
+ * archived (`factory`).
  */
 export async function moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult> {
+  if (isInside(factorySessionsRoot(), sessionPath)) return { ok: false, error: "factory" };
   const fromRoot = toArchive ? sessionsRoot() : archiveRoot();
   const toRoot = toArchive ? archiveRoot() : sessionsRoot();
   if (!isInside(fromRoot, sessionPath)) return { ok: false, error: "not_in_root" };

@@ -13,7 +13,7 @@ import { dirname } from "node:path";
 import { loadToken } from "../../auth.ts";
 import type { PiChild } from "../index.ts";
 import { sandboxEnv } from "./env.ts";
-import { cwdSessionDir, sessionsRoot } from "./paths.ts";
+import { cwdSessionDir, factorySessionDir, sessionsRoot } from "./paths.ts";
 
 export type SandboxOptions = {
   agentSandboxBin: string;
@@ -22,16 +22,20 @@ export type SandboxOptions = {
   gatewayTokenPath: string;
 };
 
-/** Host directory of the child's session: the resumed file's directory, else Pi's directory for `cwd`. */
-function sessionDirOf(cwd: string, piArgs: string[]): string {
+/**
+ * Host directory of the child's session: the resumed file's directory, else the factory directory of the repository of
+ * a new factory task, else Pi's directory for `cwd`.
+ */
+function sessionDirOf(cwd: string, piArgs: string[], factoryRepo: string | undefined): string {
   const at = piArgs.indexOf("--session");
   const sessionPath = at >= 0 ? piArgs[at + 1] : undefined;
-  return sessionPath ? dirname(sessionPath) : cwdSessionDir(sessionsRoot(), cwd);
+  if (sessionPath) return dirname(sessionPath);
+  return factoryRepo ? factorySessionDir(factoryRepo) : cwdSessionDir(sessionsRoot(), cwd);
 }
 
 /** `agent-sandbox pi-rpc` argv (C4) running `piArgs` in `cwd`, the session directory passed to both. */
-function sandboxArgv(options: SandboxOptions, cwd: string, piArgs: string[]): string[] {
-  const sessionDir = sessionDirOf(cwd, piArgs);
+function sandboxArgv(options: SandboxOptions, cwd: string, piArgs: string[], factoryRepo: string | undefined): string[] {
+  const sessionDir = sessionDirOf(cwd, piArgs, factoryRepo);
   return [
     options.agentSandboxBin,
     "pi-rpc",
@@ -51,10 +55,15 @@ function sandboxArgv(options: SandboxOptions, cwd: string, piArgs: string[]): st
 }
 
 /** Start a sandboxed child; its session directory exists first, so the bind mount never creates it. */
-export async function spawnSandboxed(options: SandboxOptions, cwd: string, piArgs: string[]): Promise<PiChild> {
-  await mkdir(sessionDirOf(cwd, piArgs), { recursive: true });
+export async function spawnSandboxed(
+  options: SandboxOptions,
+  cwd: string,
+  piArgs: string[],
+  factoryRepo: string | undefined,
+): Promise<PiChild> {
+  await mkdir(sessionDirOf(cwd, piArgs, factoryRepo), { recursive: true });
   const gatewayToken = await loadToken(options.gatewayTokenPath);
-  return Bun.spawn(sandboxArgv(options, cwd, piArgs), {
+  return Bun.spawn(sandboxArgv(options, cwd, piArgs, factoryRepo), {
     cwd,
     env: sandboxEnv(gatewayToken),
     stdin: "pipe",

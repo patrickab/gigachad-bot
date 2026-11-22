@@ -6,10 +6,15 @@ import type { FactoryState, FactoryTask } from "@/lib/domain/factory"
 const api = vi.hoisted(() => ({
   listFactoryTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
 }))
-const store = vi.hoisted(() => ({ sessions: [] as PiSessionInfo[] }))
+const store = vi.hoisted(() => ({ sessions: [] as PiSessionInfo[], filters: [] as unknown[] }))
 
 vi.mock("@/lib/backend/api", () => api)
-vi.mock("@/features/pi/sessionStore", () => ({ usePiSessions: () => ({ sessions: store.sessions, loading: false, error: null }) }))
+vi.mock("@/features/pi/sessionStore", () => ({
+  usePiSessions: (filter: unknown) => {
+    store.filters.push(filter)
+    return { sessions: store.sessions, loading: false, error: null }
+  },
+}))
 
 import { useFactoryTask, useFactoryTasks } from "@/features/factory/useFactoryTasks"
 
@@ -50,6 +55,8 @@ describe("useFactoryTasks", () => {
     await waitFor(() => expect(result.current.tasks).toEqual([task("task0001")]))
     expect(api.listFactoryTasks).toHaveBeenCalledWith(repo)
     expect(result.current.error).toBeNull()
+    // The factory's own session list: factory tasks are in no other
+    expect(store.filters.at(-1)).toEqual({ factory: true })
   })
 
   it("reads again when the session store reports a new session, factory state or running child, and not otherwise", async () => {

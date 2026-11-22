@@ -62,7 +62,10 @@ function limitParam(url: URL, fallback: number, max: number): number {
   return Number.isInteger(requested) ? Math.min(Math.max(requested, 1), max) : fallback;
 }
 
-/** `GET /sessions?cwd=&archived=0|1&profile=`, every cwd's sessions without `cwd`, every profile's without `profile`. */
+/**
+ * `GET /sessions?cwd=&archived=0|1&profile=&factory=0|1`, every cwd's sessions without `cwd`, every profile's without
+ * `profile`. `factory=1` adds the factory root's sessions (the factory's own listing); without it none of them.
+ */
 async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Response> {
   const rawCwd = url.searchParams.get("cwd");
   const cwd = rawCwd === null ? null : await validCwd(host, rawCwd);
@@ -70,7 +73,8 @@ async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Res
   const profile = url.searchParams.get("profile") ?? undefined;
   if (profile !== undefined && !PROFILES.includes(profile as Profile)) return fail(400, "invalid_profile");
   const archived = url.searchParams.get("archived") === "1";
-  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined) });
+  const factory = url.searchParams.get("factory") === "1";
+  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined, factory) });
 }
 
 /**
@@ -116,7 +120,7 @@ async function handleFactoryDraft(url: URL, host: Host): Promise<Response> {
   return Response.json({ draft: text, source });
 }
 
-/** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first. */
+/** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first, factory tasks left out. */
 async function handleSearch(url: URL, live: LiveSessions, host: Host): Promise<Response> {
   const query = url.searchParams.get("q") ?? "";
   if (!query.trim()) return Response.json({ hits: [] });
@@ -132,7 +136,8 @@ async function handleSearch(url: URL, live: LiveSessions, host: Host): Promise<R
 
 /**
  * `POST /sessions/:id/archive` and `/restore` (C7): a detached idle child is closed first. 409 `live` while a child runs,
- * has a client or asks a question, or a spawning child holds the file; 409 too when the target exists.
+ * has a client or asks a question, or a spawning child holds the file; 409 too when the target exists. 409 `factory`
+ * for a factory-root session, which is never archived.
  */
 async function handleMove(sessionPath: string, toArchive: boolean, live: LiveSessions, host: Host): Promise<Response> {
   const meta = await host.sessionMeta(sessionPath);

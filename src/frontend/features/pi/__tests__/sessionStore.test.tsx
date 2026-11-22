@@ -103,11 +103,33 @@ describe("usePiSessions", () => {
     const { result, unmount } = renderHook(() => usePiSessions({ repo: "alpha" }), { wrapper })
     cleanups.push(unmount)
     await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a1", "a2"]))
-    expect(api.fetchPiSessions).toHaveBeenCalledWith(undefined, { archived: false })
+    expect(api.fetchPiSessions).toHaveBeenCalledWith(undefined, { archived: false, factory: false })
 
     api.sessions = [session("a3", "/home/u/git/alpha"), ...api.sessions]
     socket().emit({ type: "sessions_changed", sessionPaths: ["/sessions/a3.jsonl"] })
     await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a3", "a1", "a2"]))
+  })
+
+  it("keeps factory tasks in the factory list only, which refreshes on sessions_changed too", async () => {
+    const running = { state: "running" as const, round: 1, reason: "", at: "2026-01-01T00:00:00Z" }
+    const listed = (factory: boolean) => [session("p1", "/home/u/git/alpha"), ...(factory ? [{ ...session("t1", "/home/u/git/alpha"), factory: running }] : [])]
+    api.fetchPiSessions.mockImplementation(async (_repo: unknown, options: { factory?: boolean }) => listed(options.factory === true))
+    try {
+      const { result, unmount } = renderHook(() => ({ picker: usePiSessions({ profile: "coding" }), board: usePiSessions({ factory: true }) }), { wrapper })
+      cleanups.push(unmount)
+      await waitFor(() => expect(result.current.board.sessions.map((one) => one.sessionId)).toEqual(["p1", "t1"]))
+      expect(result.current.picker.sessions.map((one) => one.sessionId)).toEqual(["p1"])
+      expect(api.fetchPiSessions).toHaveBeenCalledWith(undefined, { archived: false, factory: true })
+
+      const waiting = { ...running, state: "waiting_approve" as const }
+      api.fetchPiSessions.mockImplementation(async (_repo: unknown, options: { factory?: boolean }) =>
+        options.factory ? [session("p1", "/home/u/git/alpha"), { ...session("t1", "/home/u/git/alpha"), factory: waiting }] : listed(false))
+      socket().emit({ type: "sessions_changed", sessionPaths: ["/factory/sessions/t1.jsonl"] })
+      await waitFor(() => expect(result.current.board.sessions[1]?.factory?.state).toBe("waiting_approve"))
+      expect(result.current.picker.sessions.map((one) => one.sessionId)).toEqual(["p1"])
+    } finally {
+      api.fetchPiSessions.mockImplementation(async () => api.sessions)
+    }
   })
 
   it("lists only coding sessions for profile coding, counting a session without a profile as coding (G5)", async () => {

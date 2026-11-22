@@ -398,9 +398,11 @@ def _with_session(row: TaskRow, session: pi_host.SessionInfo | None) -> Task:
 async def _sessions_of(rows: list[TaskRow], cwd: str | None) -> dict[str, pi_host.SessionInfo]:
     """pi-host's rows of the sessions of *rows*, all in *cwd* when given, by session id, archived or not.
 
-    The archive is listed only when the unarchived listing misses one of them.
+    The unarchived listing covers Pi's normal root (older tasks) and the factory root. The archive is listed only when
+    it misses one of them.
     """
-    sessions = {session.session_id: session for session in await pi_host.list_sessions(cwd, archived=False)}
+    unarchived = await pi_host.list_sessions(cwd, archived=False, factory=True)
+    sessions = {session.session_id: session for session in unarchived}
     if any(row.session_id not in sessions for row in rows):
         sessions.update((session.session_id, session) for session in await pi_host.list_sessions(cwd, archived=True))
     return sessions
@@ -541,7 +543,7 @@ async def create_task(store: FactoryStore, new_task: NewTask) -> Task:
     workspace = await asyncio.to_thread(create_workspace, repo, workspace_name(new_task.title, task_id), branch)
     session_id: str | None = None
     try:
-        session = await pi_host.open_session(str(workspace.path), None)
+        session = await pi_host.open_session(str(workspace.path), None, factory_repo=new_task.repo)
         session_id = session.session_id
         command = start_command(new_task.title, new_task.request, settings, branch)
         disposition = await pi_host.prompt_session(session_id, command)

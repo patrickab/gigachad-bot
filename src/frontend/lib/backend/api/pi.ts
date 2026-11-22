@@ -64,11 +64,12 @@ export async function fetchPiRepositories(): Promise<PiRepository[]> {
   return request<PiRepository[]>("/pi/repos")
 }
 
-/** Sessions newest first: of `repo`, of every repo when omitted, the archived ones with `archived`. */
-export async function fetchPiSessions(repo?: string, options: { archived?: boolean } = {}): Promise<PiSessionInfo[]> {
+/** Sessions newest first: of `repo`, of every repo when omitted, the archived ones with `archived`, factory tasks only with `factory`. */
+export async function fetchPiSessions(repo?: string, options: { archived?: boolean; factory?: boolean } = {}): Promise<PiSessionInfo[]> {
   const query = new URLSearchParams()
   if (repo !== undefined) query.set("repo", repo)
   if (options.archived) query.set("archived", "true")
+  if (options.factory) query.set("factory", "true")
   const search = query.toString()
   const { sessions } = await request<{ sessions: PiSessionInfo[] }>(`/pi/sessions${search ? `?${search}` : ""}`)
   return sessions

@@ -74,7 +74,7 @@ function sessionsSignature(sessions: PiSessionInfo[]): string {
  * - A failed read keeps the last tasks and sets `error`, the next successful one clears it
  */
 export function useFactoryTasks(repo: string): { tasks: FactoryTask[]; error: string | null; refresh: () => Promise<void> } {
-  const { sessions } = usePiSessions()
+  const { sessions } = usePiSessions({ factory: true })
   const signature = useMemo(() => sessionsSignature(sessions), [sessions])
   const list = useSyncExternalStore(subscribe, () => lists.get(repo) ?? EMPTY, () => EMPTY)
 

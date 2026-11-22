@@ -343,9 +343,12 @@ async def health() -> Health:
     return await _request("GET", "/health", Health)
 
 
-async def list_sessions(cwd: str | None, *, archived: bool) -> list[SessionInfo]:
-    """Sessions newest first, of *cwd* when given, from the archive when *archived*."""
+async def list_sessions(cwd: str | None, *, archived: bool, factory: bool = False) -> list[SessionInfo]:
+    """Sessions newest first, of *cwd* when given, from the archive when *archived*, the factory root's too when
+    *factory* (factory task sessions created with `factory_repo`)."""
     params: dict[str, str | int] = {"archived": int(archived)}
+    if factory:
+        params["factory"] = 1
     if cwd is not None:
         params["cwd"] = cwd
     return (await _request("GET", "/sessions", SessionList, params=params)).sessions
@@ -360,6 +363,7 @@ async def open_session(
     profile: Profile = "coding",
     system_prompt: str | None = None,
     tools: list[str] | None = None,
+    factory_repo: str | None = None,
 ) -> SessionInfo:
     """Spawn a *profile* session in *cwd*, or return the live one; a fork writes its file first. A session file held
     elsewhere answers 409 `locked`, an unknown fork source, entry or session id 404, a live session of the other
@@ -367,6 +371,8 @@ async def open_session(
 
     - `document` needs *system_prompt* (sent on every create and resume, Pi keeps it per process), *tools* restricts it
       to those tools and nothing discovered. `coding` takes neither
+    - *factory_repo* (the repository's absolute path) makes a new session a factory task: its file goes into that
+      repository's folder of the factory root, which only `list_sessions(factory=True)` lists
     """
     body: dict[str, object] = {
         "cwd": cwd,
@@ -381,6 +387,8 @@ async def open_session(
         body["model"] = model.model_dump(by_alias=True)
     if thinking is not None:
         body["thinking"] = thinking
+    if factory_repo is not None:
+        body["factoryRepo"] = factory_repo
     return (await _request("POST", "/sessions", SessionAnswer, json=body, timeout=CHILD_TIMEOUT_SECONDS)).session
 
 

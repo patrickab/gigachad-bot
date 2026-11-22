@@ -11,14 +11,14 @@
  * - `lockSession` / `unlockSession`: the M1 lock on a session file
  * - `isDirectory`: check a working directory before the per-cwd operations
  * - `listSessions`, `sessionMeta`, `findSession`: session listing per cwd or across all cwds, header and entry
- *   metadata, lookup by id
+ *   metadata, lookup by id. Factory task sessions get a root of their own, listed only on request
  * - `moveSession`: archive or restore a session file and its sidecar
  * - `deleteSession`: remove a session file and its sidecar
  * - `forkSession`: write a new session file holding one branch of another (D11, Pi's fork and clone)
  * - `readState` / `writeState`: the private state sidecar (M19, M20)
  * - `listFiles`: `@` completion candidates of a cwd (M7)
- * - `searchSessions`: full-text search over live session transcripts (M24)
- * - `watchSessions`: changed session files of the live root, debounced (M25)
+ * - `searchSessions`: full-text search over live session transcripts, factory tasks left out (M24)
+ * - `watchSessions`: changed session files of the live and factory roots, debounced (M25)
  *
  * Inputs and outputs are plain serializable data, so a future `RemoteHost` proxies each operation over a link.
  * Two exceptions: `PiChild`, a narrow stdio stream type a transport can carry as a byte pipe, and the
@@ -38,6 +38,11 @@ export type SpawnRequest = {
   cwd: string;
   /** Arguments after the binary, starting with `--mode rpc`. */
   piArgs: string[];
+  /**
+   * Set for a new factory task (no `--session` in `piArgs`): the absolute path of the task's repository, whose folder in
+   * the factory root gets the session file.
+   */
+  factoryRepo?: string;
 };
 
 /** A Pi child's stdio, exit and signals; a `Bun.Subprocess` locally, a proxied pipe remotely. */
@@ -91,7 +96,7 @@ export type SessionUsage = { input: number; output: number; cost: number };
 /** `profile` marks the profile a session was started with (G5); absent means `coding`. */
 export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile };
 
-export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" };
+export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" | "factory" };
 
 export type DeleteResult = { ok: true } | { ok: false; error: "locked" | "not_found" };
 
@@ -118,15 +123,15 @@ export interface Host {
   lockSession(sessionPath: string): Promise<LockResult>;
   unlockSession(lockId: string): Promise<void>;
   isDirectory(path: string): Promise<boolean>;
-  /** Sessions whose header cwd is `cwd` (every cwd when null), newest first. */
-  listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]>;
+  /** Sessions whose header cwd is `cwd` (every cwd when null), newest first; live ones of the factory root too with `factory`. */
+  listSessions(cwd: string | null, archived: boolean, factory?: boolean): Promise<SessionMeta[]>;
   /** Undefined when the file is missing or not a Pi session. */
   sessionMeta(sessionPath: string): Promise<SessionMeta | undefined>;
-  /** Path of the session with Pi id `sessionId`, live root first. */
+  /** Path of the session with Pi id `sessionId` in any root, live root first. */
   findSession(sessionId: string): Promise<string | undefined>;
   /** Every entry of the session file in append order, the last one the leaf; empty when the file is unreadable. */
   readEntries(sessionPath: string): Promise<SessionEntries>;
-  /** Move between the live and archive roots under the session's lock. */
+  /** Move between the live and archive roots under the session's lock; a factory-root session is refused (`factory`). */
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
   /** Remove the session file and its sidecar under the session's lock. */
   deleteSession(sessionPath: string): Promise<DeleteResult>;
@@ -140,10 +145,13 @@ export interface Host {
   writeState(sessionPath: string, state: PrivateState): Promise<void>;
   /** Relative paths of the cwd's candidate files. */
   listFiles(cwd: string): Promise<string[]>;
-  /** Live sessions whose transcript (user and assistant text) matches `query`, best first, newest first on ties. */
+  /**
+   * Live sessions whose transcript (user and assistant text) matches `query`, best first, newest first on ties. Factory
+   * tasks (a `factory` state, or a file in the factory root) are left out.
+   */
   searchSessions(query: string, limit: number): Promise<SearchMatch[]>;
   /**
-   * Call `onChange` with the session files changed in the live root, at most once per debounce window; an empty
+   * Call `onChange` with the session files changed in the live or factory root, at most once per debounce window; an empty
    * list means the changed files are unknown (the watch overflowed). Returns the function that stops watching.
    */
   watchSessions(onChange: (sessionPaths: string[]) => void): () => void;

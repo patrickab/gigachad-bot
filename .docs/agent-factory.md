@@ -29,6 +29,16 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
     `queue.ts` merge queue, `review.ts` reviewer child, `config.ts` `factory.yaml`, `state.ts` entries and feedback.
 - **pi-host**: spawns and supervises the sessions. Its session list carries each task's `factory` state and `usage`,
   its entries endpoint the timeline (`?customType=factory-&assistant=1`).
+- **Where sessions live**:
+  - A new task's session file goes to `<agent dir>/factory/sessions/<repo dir name>/` (agent dir:
+    `PI_CODING_AGENT_DIR`, default `~/.pi/agent`), one folder per repository, apart from the user's Pi sessions:
+    `pi -r` never looks there. `POST /sessions` with `factoryRepo` (the repo's path) puts it there, the session still
+    runs in the task's worktree.
+  - pi-host lists that root only with `GET /sessions?factory=1` (the backend's task list), finds its sessions by id and
+    never archives them (409 `factory`). Plain listings, `continue` and `/search` leave them out.
+  - Older tasks keep their files in Pi's normal root, the `factory=1` listing covers both. `GET /api/pi/sessions` drops
+    sessions with a `factory` state unless `factory=true` (the factory board's store list), so the session picker and
+    the sidebar never show a task.
 - **Frontend** (`src/frontend/features/factory/`): board, task view, timeline, settings.
 - **Repo** (`factory.yaml`, `.factory/agents/{coder,reviewer}.md`): hooks, gates, protected paths, preview, role
   prompts. Read from the task's base commit, never from the tree the coder edits.

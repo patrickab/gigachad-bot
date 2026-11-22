@@ -433,7 +433,7 @@ describe("factory state", () => {
     expect("factory" in (await listed([user, ...malformed], 5))).toBe(false);
   });
 
-  test("the state follows the file through the summary cache, into single rows and search hits", async () => {
+  test("the state follows the file through the summary cache into single rows, a factory task never into search hits", async () => {
     // Chained by `parentId`: search reads the active branch only
     const running = JSON.stringify({ ...state("s1", "2026-11-18T09:30:00.000Z", { state: "running", round: 1, reason: "" }), parentId: "u1" });
     expect((await listed([user, running], 6)).factory?.state).toBe("running");
@@ -443,8 +443,51 @@ describe("factory state", () => {
 
     const pinned = await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
     expect(pinned.json.session.factory?.state).toBe("done");
-    const search = await call<{ hits: { session: SessionInfo }[] }>("GET", "/search?q=build");
-    expect(search.json.hits.map((hit) => hit.session.factory?.state)).toEqual(["done"]);
+    expect((await call<{ hits: unknown[] }>("GET", "/search?q=build")).json.hits).toEqual([]);
+  });
+});
+
+describe("factory root", () => {
+  const FACTORY_ID = "01a1f3fe-0000-7000-8000-000000000005";
+
+  /** A factory task's session of `projectDir` in the factory folder of another repository. */
+  async function writeFactorySession(): Promise<string> {
+    const dir = join(scratch, "agent", "factory", "sessions", cwdDirName("/git/repo"));
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `2026-11-19T10-00-00-000Z_${FACTORY_ID}.jsonl`);
+    const entries = [{ ...message("u1", "user", "build the factory"), parentId: null }];
+    await writeFile(path, sessionLines(FACTORY_ID, projectDir, "2026-11-19T11:00:00.000Z", entries));
+    await utimes(path, new Date("2026-11-19T11:00:00.000Z"), new Date("2026-11-19T11:00:00.000Z"));
+    return path;
+  }
+
+  test("is listed only with factory=1, by the header's cwd whatever folder holds it, next to the live root", async () => {
+    await writeFixtures();
+    const factoryPath = await writeFactorySession();
+    const ids = async (query: string) => (await call("GET", `/sessions${query}`)).json.sessions.map((session) => session.sessionId);
+    const cwd = encodeURIComponent(projectDir);
+
+    expect(await ids(`?cwd=${cwd}`)).toEqual([NEW_ID, OLD_ID]);
+    expect(await ids("")).not.toContain(FACTORY_ID);
+    expect(await ids(`?cwd=${cwd}&factory=1`)).toEqual([FACTORY_ID, NEW_ID, OLD_ID]);
+    expect(await ids("?factory=1")).toContain(FACTORY_ID);
+    expect(await ids(`?cwd=${encodeURIComponent(scratch)}&factory=1`)).toEqual([]);
+    expect(await ids(`?cwd=${cwd}&archived=1&factory=1`)).toEqual([]);
+    expect((await call("GET", `/sessions?cwd=${cwd}&factory=1`)).json.sessions[0]).toMatchObject({ sessionPath: factoryPath, archived: false });
+  });
+
+  test("lookup by id finds a session in the live, factory and archive roots", async () => {
+    await writeFixtures();
+    await writeFactorySession();
+    expect((await call("POST", `/sessions/${OLD_ID}/archive`)).status).toBe(200);
+    for (const id of [NEW_ID, FACTORY_ID, OLD_ID]) expect((await call("GET", `/sessions/${id}/state`)).status).toBe(200);
+  });
+
+  test("a factory-root session is never archived and never a search hit", async () => {
+    const factoryPath = await writeFactorySession();
+    expect(await call("POST", `/sessions/${FACTORY_ID}/archive`)).toEqual({ status: 409, json: { error: "factory" } as Body });
+    expect(existsSync(factoryPath)).toBe(true);
+    expect((await call<{ hits: unknown[] }>("GET", "/search?q=factory")).json.hits).toEqual([]);
   });
 });
 

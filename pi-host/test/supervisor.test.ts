@@ -153,6 +153,7 @@ beforeAll(async () => {
   delete process.env.PI_CODING_AGENT_SESSION_DIR;
   // The watcher (M25) starts with the supervisor; without a root it would only retry after 5 s.
   mkdirSync(join(agentDir, "sessions"), { recursive: true });
+  mkdirSync(join(agentDir, "factory", "sessions"), { recursive: true });
   supervisor = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, isPinned: async () => false });
   server = startServer({ hostname: "127.0.0.1", port: 0, tokens: TOKENS, supervisor });
 });
@@ -915,6 +916,46 @@ describe("profiles (G1, G5, G6)", () => {
       );
     expect(await listed("document")).toEqual([document.sessionId]);
     expect(await listed("coding")).toEqual([coding.sessionId]);
+  });
+});
+
+describe("factory task sessions", () => {
+  const repo = workdir("factory-repo");
+  const worktree = workdir("factory-worktree");
+  const factoryDir = join(agentDir, "factory", "sessions", cwdDirName(repo));
+
+  test("a factoryRepo create runs in the worktree, writes into the repo's factory folder and reports its writes", async () => {
+    const watching = await client();
+    const response = await startSession({ cwd: worktree, factoryRepo: repo });
+    expect(response.status).toBe(200);
+    const { session } = await response.json();
+    expect(session.cwd).toBe(worktree);
+    const driver = await client();
+    expect((await driver.attach(session.sessionId)).attached.state.argv.slice(0, 4)).toEqual(["--mode", "rpc", "--session-dir", factoryDir]);
+    driver.command(session.sessionId, { type: "prompt", message: "build it" });
+    await driver.pi((record) => record.type === "agent_settled");
+    expect(session.sessionPath.startsWith(`${factoryDir}/`)).toBe(true);
+    expect(existsSync(session.sessionPath)).toBe(true);
+    await until(() => (watching.hostFrames.some((frame) => frame.sessionPaths.includes(session.sessionPath)) ? true : undefined));
+
+    // Resumed by id from the factory root, it stays where it is.
+    await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
+    const resumed = await startSession({ cwd: worktree, resume: { sessionId: session.sessionId } });
+    expect((await resumed.json()).session.sessionPath).toBe(session.sessionPath);
+    await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
+
+    // `continue` reaches the factory root only with the marker.
+    const continued = async (body: object) => (await (await startSession({ cwd: worktree, resume: "continue", ...body })).json()).session;
+    expect((await continued({ factoryRepo: repo })).sessionId).toBe(session.sessionId);
+    expect((await continued({})).sessionId).not.toBe(session.sessionId);
+  });
+
+  test("factoryRepo must be an absolute path to an existing directory", async () => {
+    for (const factoryRepo of ["relative/repo", join(root, "missing-repo"), true]) {
+      const response = await startSession({ cwd: worktree, factoryRepo });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid_factory_repo" });
+    }
   });
 });
 

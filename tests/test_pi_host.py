@@ -147,6 +147,19 @@ def test_sessions_without_a_repo_list_every_cwd(monkeypatch):
     assert dict(host.requests[0].url.params) == {"archived": "0"}
 
 
+def test_sessions_leave_factory_tasks_out_unless_the_factory_asks(monkeypatch):
+    running = {"state": "running", "round": 1, "reason": "", "at": "2026-11-19T10:00:00.000Z"}
+    task = {**SESSION, "sessionId": "task", "factory": running}
+    host = _serve(monkeypatch, {"GET /sessions": (200, {"sessions": [SESSION, task]})})
+
+    picked = _client().get("/api/pi/sessions")
+    board = _client().get("/api/pi/sessions", params={"factory": "true"})
+
+    assert [session["sessionId"] for session in picked.json()["sessions"]] == [SESSION["sessionId"]]
+    assert [session["sessionId"] for session in board.json()["sessions"]] == [SESSION["sessionId"], "task"]
+    assert [dict(request.url.params) for request in host.requests] == [{"archived": "0"}, {"archived": "0", "factory": "1"}]
+
+
 def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     hit = {"session": SESSION, "snippet": "…fix the tests…", "entryId": "a1b2c3d4"}
     host = _serve(monkeypatch, {"GET /search": (200, {"hits": [hit]})})

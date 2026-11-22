@@ -63,7 +63,7 @@ export function TaskView({ repo, taskId, onBack, modelProps, shellCommands }: {
   const { error: tasksError } = useFactoryTasks(repo)
   const task = useFactoryTask(taskId)
   useTabWorkingDirectory(task && (task.worktree ?? task.repo))
-  const { sessions } = usePiSessions()
+  const { sessions } = usePiSessions({ factory: true })
   // The task list is only read again on a state change: the session row moves with every entry appended to the session file
   const session = task && sessions.find((candidate) => candidate.sessionId === task.session_id)
   const timeline = useTaskTimeline(task?.session_id, `${session?.modifiedAt ?? ""}|${task?.factory?.at ?? ""}`)

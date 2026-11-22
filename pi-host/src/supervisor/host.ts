@@ -28,6 +28,8 @@ type StartRequest = {
   resume: Resume;
   model?: ModelRef;
   thinking?: string;
+  /** The task's repository when the session is a factory task (its new file goes into the factory root). */
+  factoryRepo?: string;
 };
 type Failure = { status: number; body: Record<string, unknown> };
 type StartOutcome = { session: LiveSession } | Failure;
@@ -67,7 +69,7 @@ function isRestartable(live: LiveSession, spec: ProfileSpec): boolean {
 /** Validated `POST /sessions` body, or the failure to answer with. */
 async function parseStartRequest(body: unknown, host: Host): Promise<StartRequest | Failure> {
   if (!isRecord(body)) return fail(400, "invalid_body");
-  const { cwd, profile, systemPrompt, tools, resume, model, thinking } = body;
+  const { cwd, profile, systemPrompt, tools, resume, model, thinking, factoryRepo } = body;
   if (typeof cwd !== "string" || !isAbsolute(cwd) || !(await host.isDirectory(cwd))) {
     return fail(400, "invalid_cwd");
   }
@@ -90,12 +92,16 @@ async function parseStartRequest(body: unknown, host: Host): Promise<StartReques
     return fail(400, "invalid_model");
   }
   if (thinking !== undefined && typeof thinking !== "string") return fail(400, "invalid_thinking");
+  if (factoryRepo !== undefined && (typeof factoryRepo !== "string" || !isAbsolute(factoryRepo) || !(await host.isDirectory(factoryRepo)))) {
+    return fail(400, "invalid_factory_repo");
+  }
   return {
     cwd: resolve(cwd),
     spec,
     resume: (resume ?? null) as Resume,
     model: model as StartRequest["model"],
     thinking: thinking as string | undefined,
+    factoryRepo: factoryRepo === undefined ? undefined : resolve(factoryRepo),
   };
 }
 
@@ -289,7 +295,7 @@ export class SupervisorHost implements Supervisor {
     let meta: SessionMeta | undefined;
     let cwd = request.cwd;
     if (resume === "continue") {
-      meta = await this.newestOf(cwd, spec.profile);
+      meta = await this.newestOf(cwd, spec.profile, request.factoryRepo !== undefined);
     } else if (resume && "forkOf" in resume) {
       const { forkOf } = resume;
       if ((await profileOf(this.host, forkOf.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
@@ -342,9 +348,9 @@ export class SupervisorHost implements Supervisor {
     return { session: live };
   }
 
-  /** Newest live-root session of `cwd` started with `profile` (`continue`). */
-  private async newestOf(cwd: string, profile: Profile): Promise<SessionMeta | undefined> {
-    for (const meta of await this.host.listSessions(cwd, false)) {
+  /** Newest live-root session of `cwd` started with `profile` (`continue`), factory-root ones too with `factory`. */
+  private async newestOf(cwd: string, profile: Profile, factory: boolean): Promise<SessionMeta | undefined> {
+    for (const meta of await this.host.listSessions(cwd, false, factory)) {
       if ((await profileOf(this.host, meta.sessionPath)) === profile) return meta;
     }
     return undefined;
@@ -362,7 +368,8 @@ export class SupervisorHost implements Supervisor {
     const piArgs = ["--mode", "rpc", ...profileArgs(request.spec), ...(sessionPath ? ["--session", sessionPath] : [])];
     let session: LiveSession;
     try {
-      const child = await this.host.spawn({ profile: request.spec.profile, cwd, piArgs });
+      const factoryRepo = sessionPath ? undefined : request.factoryRepo;
+      const child = await this.host.spawn({ profile: request.spec.profile, cwd, piArgs, ...(factoryRepo ? { factoryRepo } : {}) });
       session = new LiveSession(child, cwd, request.spec, lock, (exited) => this.forget(exited));
     } catch (error) {
       lock.release();

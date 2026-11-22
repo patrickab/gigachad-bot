@@ -2,7 +2,8 @@
  * Where Pi keeps session files on this machine, resolved the way Pi 1.5.2 does.
  *
  * - Consumes: `PI_CODING_AGENT_DIR` (default `~/.pi/agent`) and `PI_CODING_AGENT_SESSION_DIR`
- * - Provides: the live and archive session roots (C7) and the directory holding one cwd's sessions
+ * - Provides: the live and archive session roots (C7), the factory session root and the directory holding one cwd's
+ *   sessions
  */
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -37,6 +38,15 @@ export function archiveRoot(): string {
   return join(dirname(root), `${basename(root)}-archive`);
 }
 
+/**
+ * Root of the factory task sessions, apart from the live root so `pi -r` and the session picker never list them. Always
+ * under the agent dir and grouped per repository (not per task worktree), also when `PI_CODING_AGENT_SESSION_DIR`
+ * overrides the live root.
+ */
+export function factorySessionsRoot(): string {
+  return join(agentDir(), "factory", "sessions");
+}
+
 /** Pi's per-cwd directory name: leading separator dropped, `/`, `\` and `:` replaced by `-`. */
 export function cwdDirName(cwd: string): string {
   return `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
@@ -45,6 +55,11 @@ export function cwdDirName(cwd: string): string {
 /** Directory holding the sessions of `cwd` under `root` (flat when the session dir is overridden). */
 export function cwdSessionDir(root: string, cwd: string): string {
   return sessionDirOverride() ? root : join(root, cwdDirName(cwd));
+}
+
+/** Directory holding the factory task sessions of the repository at `repo`, named like Pi's per-cwd directories. */
+export function factorySessionDir(repo: string): string {
+  return join(factorySessionsRoot(), cwdDirName(repo));
 }
 
 /** True when `path` lies inside `root`. */
