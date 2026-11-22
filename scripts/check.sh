@@ -4,6 +4,7 @@
 #   scripts/check.sh                      every step
 #   scripts/check.sh STEP...              some of: lint types python frontend pi-host
 #   scripts/check.sh --changed [STEP...]  only the steps (and frontend tests) the change since the target branch reaches
+#   scripts/check.sh --reuse ...          skip a step that passed on this exact tree before (the factory's gates)
 #
 # - Hermetic: the steps run under `env -i` with only HOME, USER, PATH, LANG, TERM and TMPDIR, so nothing a parent
 #   exports (run.sh's GIGACHAD_*, the production unit, a Pi session, the factory engine) changes a result
@@ -12,10 +13,15 @@
 #   factory feeds the end of the output back to the coder)
 # - Exit 0 passed, 1 a step failed, 75 (EX_TEMPFAIL) the environment is broken (missing tools or packages, an empty
 #   submodule): the factory blocks the task as `infra` instead of asking the coder to fix it. Last line: the reason
-# - --changed: the change is the diff from the merge base with the target branch (local `main`, else `master`) to the
-#   working tree, untracked files included. Paths map to steps (`select_steps`); any path no rule knows, and a missing
-#   merge base, run every step. vitest then runs only the tests the changed files reach (`vitest --changed`), unless a
-#   package or config file changed
+# - --changed: the change is the diff from the merge base with the target branch (the repo's default branch, origin's
+#   HEAD, else local `main`, else `master`) to the working tree, untracked files included. Paths map to steps
+#   (`select_steps`); any path no rule knows, and a missing merge base, run every step. Within a step only what the
+#   change reaches: `types` the TypeScript projects it touches, `lint` eslint on the changed frontend files (all of them
+#   when eslint's config or the packages changed), vitest the tests the changed files import (`vitest --changed`,
+#   all when a package or config file changed)
+# - --reuse: a step that passed records the tree it passed on (working tree with untracked files), the step and the
+#   merge base in `<git common dir>/check-passed`. Run again on the same, it is skipped: a factory merge whose rebase
+#   moved nothing does not repeat the lint and types its last round passed
 # - pytest runs on a worker per core but one, each with a database of its own. Flaky tests: failed pytest tests run once more, alone
 #   (`--last-failed`), vitest retries a failed test once. A test that
 #   passes on the rerun passes the step, the output says it was flaky
@@ -25,7 +31,7 @@
 # - A worktree uses its main checkout's .venv (factory worktrees have none). Missing node_modules (a worktree whose
 #   copy is still running) are waited for, an empty submodule is copied from the main checkout
 # - lint checks Python files changed against the merge base with origin/master (the tree predates ruff's rules) and
-#   all frontend files with eslint
+#   the frontend with eslint
 # - pi-extensions/ has no packages of its own: types and pi-host cover it with pi-host's node_modules
 #   (pi-extensions/tsconfig.json)
 set -euo pipefail
@@ -46,10 +52,15 @@ cd -- "$root"
 source deploy/lib.sh
 
 changed_mode=0
-if [[ ${1:-} == --changed ]]; then
-    changed_mode=1
+reuse=0
+while [[ ${1:-} == --* ]]; do
+    case "$1" in
+        --changed) changed_mode=1 ;;
+        --reuse) reuse=1 ;;
+        *) printf 'unknown option %s\n' "$1" >&2; exit 2 ;;
+    esac
     shift
-fi
+done
 steps=("$@")
 [[ ${#steps[@]} -eq 0 ]] && steps=("${all_steps[@]}")
 for step in "${steps[@]}"; do
@@ -60,8 +71,9 @@ primary="$(dirname -- "$(cd -- "$(git rev-parse --git-common-dir)" && pwd)")"
 
 # The merge base with the target branch, empty when there is none.
 change_base() {
-    local branch
-    for branch in main master; do
+    local branch default
+    default="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    for branch in ${default#origin/} main master; do
         if git show-ref --verify --quiet "refs/heads/$branch"; then
             git merge-base HEAD "refs/heads/$branch" 2>/dev/null || true
             return
@@ -90,6 +102,9 @@ select_steps() {
 
 base=""
 frontend_all=1
+# What `types` checks and `lint` hands eslint: everything, unless --changed narrows it below.
+type_projects=(frontend pi-host pi-extensions)
+eslint_files=(.)
 if [[ $changed_mode -eq 1 ]]; then
     base="$(change_base)"
     if [[ -n $base ]]; then
@@ -102,6 +117,20 @@ if [[ $changed_mode -eq 1 ]]; then
         steps=("${selected[@]}")
         # vitest follows imports, not packages or config: a change to those runs every frontend test.
         grep -qE '^src/frontend/([^/]+\.(json|ts|mjs|js)|packages/)' <<<"$paths" || frontend_all=0
+        # A path outside the three projects (a step's "every step" rule) keeps every project and every file.
+        if ! grep -qvE '^(src/frontend/|pi-host/|pi-extensions/|\.docs/|docs/|README\.md$|CONTEXT\.md$|LICENSE$)' <<<"$paths"; then
+            type_projects=()
+            grep -q '^src/frontend/' <<<"$paths" && type_projects+=(frontend)
+            grep -q '^pi-host/' <<<"$paths" && type_projects+=(pi-host)
+            # The extensions compile against pi-host's packages and types.
+            grep -qE '^(pi-host|pi-extensions)/' <<<"$paths" && type_projects+=(pi-extensions)
+            if [[ $frontend_all -eq 0 ]]; then
+                eslint_files=()
+                while IFS= read -r path; do
+                    [[ -f $path ]] && eslint_files+=("${path#src/frontend/}")
+                done < <(grep -E '^src/frontend/.*\.(ts|tsx|js|jsx|mjs|cjs)$' <<<"$paths")
+            fi
+        fi
     fi
     if [[ ${#steps[@]} -eq 0 ]]; then
         printf 'no step reaches the change\n'
@@ -203,17 +232,25 @@ step_lint() {
     if [[ ${#files[@]} -gt 0 ]]; then
         "$python" -m ruff check "${files[@]}" || status=1
     fi
-    (cd src/frontend && node_modules/.bin/eslint .) || status=1
+    if [[ ${#eslint_files[@]} -gt 0 ]]; then
+        (cd src/frontend && node_modules/.bin/eslint --no-warn-ignored "${eslint_files[@]}") || status=1
+    fi
     return "$status"
 }
 
 step_types() {
-    local status=0
-    need_node_modules src/frontend || return
-    need_node_modules pi-host || return
-    (cd src/frontend && node_modules/.bin/tsc --noEmit -p .) || status=1
-    (cd pi-host && node_modules/.bin/tsc --noEmit) || status=1
-    (cd pi-host && node_modules/.bin/tsc --noEmit -p ../pi-extensions) || status=1
+    local status=0 project
+    for project in "${type_projects[@]}"; do
+        case "$project" in
+            frontend) need_node_modules src/frontend || return
+                (cd src/frontend && node_modules/.bin/tsc --noEmit -p .) || status=1 ;;
+            pi-host) need_node_modules pi-host || return
+                (cd pi-host && node_modules/.bin/tsc --noEmit) || status=1 ;;
+            pi-extensions) need_node_modules pi-host || return
+                (cd pi-host && node_modules/.bin/tsc --noEmit -p ../pi-extensions) || status=1 ;;
+        esac
+    done
+    printf 'checked: %s\n' "${type_projects[*]:-nothing}"
     return "$status"
 }
 
@@ -263,11 +300,33 @@ step_pi_host() {
     return "$status"
 }
 
+# The tree the working tree holds now, untracked files included, without touching the real index.
+working_tree() {
+    local index
+    index="$(mktemp)"
+    cp "$(git rev-parse --git-path index)" "$index" 2>/dev/null || true
+    GIT_INDEX_FILE="$index" git add -A >/dev/null 2>&1 && GIT_INDEX_FILE="$index" git write-tree
+    rm -f "$index"
+}
+
+passed_dir="$(git rev-parse --git-common-dir)/check-passed"
+passed_key=""
+if [[ $reuse -eq 1 ]]; then
+    mkdir -p "$passed_dir"
+    find "$passed_dir" -type f -mtime +7 -delete 2>/dev/null || true
+    passed_key="$(working_tree)-${base:-all}"
+fi
+
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
 declare -A pids
 for step in "${steps[@]}"; do
-    ("step_${step//-/_}") >"$logs/$step" 2>&1 &
+    if [[ -n $passed_key && -e $passed_dir/$passed_key-$step ]]; then
+        printf 'passed on this tree before, skipped\n' >"$logs/$step"
+        (exit 0) &
+    else
+        ("step_${step//-/_}") >"$logs/$step" 2>&1 &
+    fi
     pids[$step]=$!
 done
 failed=() broken=() reasons=()
@@ -279,6 +338,8 @@ for step in "${steps[@]}"; do
         reasons+=("$(tail -n 1 "$logs/$step")")
     elif [[ $code -ne 0 ]]; then
         failed+=("$step")
+    elif [[ -n $passed_key ]]; then
+        touch "$passed_dir/$passed_key-$step"
     fi
 done
 for step in "${steps[@]}"; do

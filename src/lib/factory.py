@@ -116,8 +116,9 @@ class FactoryModel(BaseModel):
 class RepoSettings(FactoryModel):
     """How a repo's tasks run. `models` maps a role to a model selector (`provider/id`), a missing role uses Pi's own.
 
-    `source_branch` is the branch a worktree task starts from, None for `main`, else `master`. `target_branch` is the
-    branch it is rebased onto and merges into, None for the source branch. A current-checkout task ignores both.
+    `source_branch` is the branch a worktree task starts from, None for the repo's default branch (origin's `HEAD`), else
+    `main`, else `master`. `target_branch` is the branch it is rebased onto and merges into, None for the source branch.
+    A current-checkout task ignores both.
     """
 
     merge: Literal["auto", "review"] = "review"
