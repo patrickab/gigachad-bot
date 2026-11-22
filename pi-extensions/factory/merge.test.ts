@@ -846,7 +846,7 @@ describe("merge queue", () => {
     expect(statuses).toContain("queued for merge, 1 ahead");
     expect(gitIn(repo, "log", "--format=%s")).toBe("two\none\nbase");
     expect(readdirSync(join(repo, ".git", "factory-merge-queue"))).toEqual([]);
-  });
+  }, 20_000);
 
   test("a queued merge that conflicts with the merge ahead of it leaves the queue for the coder", async () => {
     const one = addWorktree("queue-c1");

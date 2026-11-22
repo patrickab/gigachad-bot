@@ -101,3 +101,21 @@ Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`revie
 `source_branch`, `target_branch`. The new-task dialog shows them all at the repo's values: a model per role (the
 reviewer's only with review on), workspace, review and merge as pills, the branches. A task keeps the settings it
 started with.
+
+## New repo
+
+A repo needs a `factory.yaml` once. Opening its board without one shows a generated draft in an editable text area
+(`GET /api/factory/config?repo=`); Save (`PUT /api/factory/config?repo=`) writes it uncommitted into the main checkout
+and refuses to overwrite an existing file (409). New task stays disabled until the file exists. Review and commit it:
+the factory reads `factory.yaml` from a task's base commit, so tasks pick it up from that commit on.
+
+- **Draft** (`src/lib/factory_draft.py`, pure, no model): `hooks`, `gates` (lint, types, format) and `merge_gates`
+  (everything, tests included). The highest-level source wins: `factory/gates.sh`, Makefile targets (`lint`,
+  `typecheck`, `check`, `test`), `.gitlab-ci.yml` scripts, then `.pre-commit-config.yaml`, `package.json` scripts and
+  `pyproject.toml` (ruff, mypy/pyright, pytest) together. From GitLab CI only lint-like and test-like stages count; jobs
+  that deploy, publish, build images, are manual or need CI-only variables are skipped, and so are install lines.
+  Nothing found: an empty draft with a comment per key.
+- **Contract**: a gate is one argv list, run in the task's worktree, judged by its exit code: 0 pass, 75 infra
+  (the task blocks, no round), anything else fails. On failure the command prints a summary (at most 50 lines) on
+  stdout: that is all the coder gets back. GitLab CI is never executed and there is no merge-request mode.
+- **CI**: call the same script from the repo's CI, so the factory and CI judge the same thing.

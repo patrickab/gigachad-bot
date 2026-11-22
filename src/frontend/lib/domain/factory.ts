@@ -14,6 +14,12 @@ export interface FactoryModels {
   reviewer?: string
 }
 
+/** A repo's `factory.yaml`: present, or the draft the backend generated for it. */
+export interface FactoryConfig {
+  exists: boolean
+  draft: string | null
+}
+
 /** Settings of a repo, a new task may override any of them. */
 export interface FactorySettings {
   merge: FactoryMergeMode

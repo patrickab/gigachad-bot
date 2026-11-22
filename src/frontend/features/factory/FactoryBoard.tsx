@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { motion } from "framer-motion"
 import { Archive, ArchiveRestore, GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
@@ -13,10 +13,13 @@ import { StatusDot } from "@/components/ui/StatusDot"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useStoredJson } from "@/hooks/useStoredJson"
-import { deleteFactoryTask } from "@/lib/backend/api"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
+import { deleteFactoryTask, getFactoryConfig } from "@/lib/backend/api"
+import type { FactoryConfig } from "@/lib/domain/factory"
 import type { FactoryTask } from "@/lib/domain/factory"
 import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
+import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
@@ -145,6 +148,11 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const launches = useFactoryLaunches(repo)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [config, setConfig] = useState<FactoryConfig | null>(null)
+  const loadConfig = useCallback(() => getFactoryConfig(repo), [repo])
+  useLoadWhile(true, loadConfig, setConfig)
+  // Until the repo has a factory.yaml (or while that is unknown) no task starts.
+  const missingConfig = config !== null && !config.exists
   const [showAllFinished, setShowAllFinished] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [archivedIds, updateArchived] = useStoredJson(`gigachad:factory-archived:${repo}`, parseArchived)
@@ -167,14 +175,17 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
             <button type="button" aria-label="Factory settings" onClick={() => setSettingsOpen(true)} className={ICON_BUTTON_CLASS}>
               <Settings className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => setNewTaskOpen(true)} className={cn(PRIMARY_BUTTON_CLASS, "flex items-center gap-1.5")}>
+            <button type="button" disabled={missingConfig} onClick={() => setNewTaskOpen(true)} className={cn(PRIMARY_BUTTON_CLASS, "flex items-center gap-1.5")}>
               <Plus className="h-3.5 w-3.5" />
               New task
             </button>
           </div>
         </InTopBar>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
-        <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin">
+        {missingConfig && config.draft !== null && (
+          <ConfigDraft repo={repo} draft={config.draft} onSaved={() => setConfig({ exists: true, draft: null })} />
+        )}
+        <div className={cn("min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin", missingConfig ? "hidden" : "flex")}>
           {BOARD_COLUMNS.map((column) => {
             const inColumn = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
             const isFinished = column.id === "finished"

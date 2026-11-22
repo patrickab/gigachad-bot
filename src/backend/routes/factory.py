@@ -2,11 +2,13 @@
 
 - Consumes `lib.factory`, which drives each task's Pi session through `lib.pi_host` and keeps the factory's tables
 - `repo` is the absolute path of a registered primary checkout (`RepoInfo.path`), `RepoInfo.name` is for display
-- Provides repos, per-repo settings and local branches, and tasks: start, list, read, diff, approve, retry, cancel, message, delete
+- Provides repos, per-repo settings, local branches, the repo's `factory.yaml` (a draft to write once) and tasks: start,
+  list, read, diff, approve, retry, cancel, message, delete
 - A task's timeline is not served here: the browser reads `GET /api/pi/sessions/{id}/entries?customType=factory-`
 - Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout, an unknown branch or a source
-  branch that does not merge into the target 400, a busy checkout or a task at work 409, a workspace, git, start or
-  preview failure 502 with its message, pi-host unreachable 503, its refusals passed on
+  branch that does not merge into the target 400, a `factory.yaml` that is no config 400, an existing
+  one, a busy checkout or a task at work 409, a workspace, git, start or preview
+  failure 502 with its message, pi-host unreachable 503, its refusals passed on
 
 Host code execution: `host_access_only`.
 """
@@ -46,6 +48,8 @@ async def _call[Result](request: Awaitable[Result]) -> Result:
         (factory.UnknownBranch, 400, None),
         (factory.BranchConflict, 400, None),
         (factory.TaskBusy, 409, None),
+        (factory.ConfigExists, 409, None),
+        (factory.InvalidConfig, 400, None),
         (WorkspaceBusy, 409, None),
         (factory.StartFailed, 502, None),
         (WorkspaceError, 502, None),
@@ -79,6 +83,18 @@ async def get_branches(repo: str, store: Store) -> list[str]:
 @router.put("/settings")
 async def put_settings(repo: str, body: factory.RepoSettings, store: Store) -> factory.RepoSettings:
     return await _call(factory.save_repo_settings(store, repo, body))
+
+
+@router.get("/config")
+async def get_config(repo: str, store: Store) -> factory.RepoConfig:
+    """Whether the repo has a `factory.yaml`, else a generated draft of one (nothing is written)."""
+    return await _call(factory.repo_config(store, repo))
+
+
+@router.put("/config")
+async def put_config(repo: str, body: factory.NewConfig, store: Store) -> factory.RepoConfig:
+    """Write `factory.yaml` into the repo's main checkout, uncommitted. 409 when the file exists, 400 when the text is no config."""
+    return await _call(factory.save_repo_config(store, repo, body.content))
 
 
 @router.get("/tasks")

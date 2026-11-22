@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   listFactoryTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
   fetchModels: vi.fn<() => Promise<never>>(),
   listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+  getFactoryConfig: vi.fn<(repo: string) => Promise<{ exists: boolean; draft: string | null }>>(),
+  putFactoryConfig: vi.fn<(repo: string, content: string) => Promise<unknown>>(),
 }))
 
 vi.mock("@/lib/backend/api", () => api)
@@ -57,6 +59,8 @@ beforeEach(() => {
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.listFactoryTasks.mockReset().mockResolvedValue([])
   api.listFactoryBranches.mockReset().mockResolvedValue(["main"])
+  api.getFactoryConfig.mockReset().mockResolvedValue({ exists: true, draft: null })
+  api.putFactoryConfig.mockReset().mockResolvedValue({ exists: true, draft: null })
 })
 
 describe("FactoryBoard", () => {
@@ -280,5 +284,29 @@ describe("FactoryBoard", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
     fireEvent.click(await view.findByRole("button", { name: "Dismiss Dismissed" }))
     await waitFor(() => expect(view.queryByRole("group", { name: "Dismissed" })).toBeNull())
+  })
+})
+
+describe("a repo without factory.yaml", () => {
+  it("shows the draft, keeps New task disabled and enables it once the draft is saved", async () => {
+    api.getFactoryConfig.mockResolvedValue({ exists: false, draft: "gates: []\n" })
+    const { view } = renderBoard([])
+    const editor = await view.findByLabelText("factory.yaml")
+    expect(editor).toHaveProperty("value", "gates: []\n")
+    const newTask = view.getByRole("button", { name: "New task" })
+    expect(newTask).toHaveProperty("disabled", true)
+
+    fireEvent.change(editor, { target: { value: "gates:\n  - [make, lint]\n" } })
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(api.putFactoryConfig).toHaveBeenCalledWith(REPO, "gates:\n  - [make, lint]\n"))
+    await waitFor(() => expect(view.getByRole("button", { name: "New task" })).toHaveProperty("disabled", false))
+    expect(view.queryByLabelText("factory.yaml")).toBeNull()
+  })
+
+  it("shows no draft for a repo that has the file", async () => {
+    const { view } = renderBoard([])
+    await waitFor(() => expect(api.getFactoryConfig).toHaveBeenCalled())
+    expect(view.queryByLabelText("factory.yaml")).toBeNull()
+    expect(view.getByRole("button", { name: "New task" })).toHaveProperty("disabled", false)
   })
 })

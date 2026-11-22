@@ -31,8 +31,9 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+import yaml
 
-from lib import factory_preview, pi_host
+from lib import factory_draft, factory_preview, pi_host
 from lib.factory_workspace import (
     Workspace,
     WorkspaceBusy,
@@ -50,6 +51,8 @@ Role = Literal["coder", "reviewer"]
 
 # Prefix of every entry the extension writes into a task's session.
 ENTRY_PREFIX = "factory-"
+# The repo file the extension reads its hooks and gates from.
+CONFIG_FILE = "factory.yaml"
 # A task in one of these states has its session at work while a Pi child runs it: it is not deleted.
 BUSY_STATES = ("running", "merging")
 # A task in one of these states no longer holds the checkout it worked in: another task may start there.
@@ -88,6 +91,14 @@ class UnknownBranch(ValueError):
 
 class BranchConflict(ValueError):
     """The task's source branch does not merge cleanly into its target branch."""
+
+
+class ConfigExists(RuntimeError):
+    """The repo already has a `factory.yaml`, which is never overwritten."""
+
+
+class InvalidConfig(ValueError):
+    """The text is no `factory.yaml` the factory can read."""
 
 
 class StartFailed(RuntimeError):
@@ -160,6 +171,17 @@ class NewTask(FactoryModel):
     title: str = Field(min_length=1)
     request: str = Field(min_length=1)
     overrides: SettingsOverrides = SettingsOverrides()
+
+
+class RepoConfig(FactoryModel):
+    """`exists`: the repo has a `factory.yaml`. `draft`: the generated one, None when it exists."""
+
+    exists: bool
+    draft: str | None
+
+
+class NewConfig(FactoryModel):
+    content: str
 
 
 class NewMessage(FactoryModel):
@@ -518,6 +540,49 @@ async def repo_branches(store: FactoryStore, repo: str) -> list[str]:
     await asyncio.to_thread(store.repo_settings, repo)
     names = await asyncio.to_thread(git_text, Path(repo), "for-each-ref", "--format=%(refname:short)", "refs/heads/")
     return sorted(names.split(), key=lambda name: (name.casefold(), name))
+
+
+def _config_path(repo: str) -> Path:
+    return Path(repo) / CONFIG_FILE
+
+
+def _validate_config(content: str) -> None:
+    try:
+        document = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        raise InvalidConfig(f"{CONFIG_FILE} does not parse: {exc}") from exc
+    if not isinstance(document, dict):
+        raise InvalidConfig(f"{CONFIG_FILE} must be a mapping")
+    for key in ("gates", "merge_gates"):
+        gates = document.get(key) or []
+        if not isinstance(gates, list) or not all(
+            isinstance(gate, list) and gate and all(isinstance(item, str) for item in gate) for gate in gates
+        ):
+            raise InvalidConfig(f"{key} must be a list of argv lists of strings")
+
+
+async def repo_config(store: FactoryStore, repo: str) -> RepoConfig:
+    """Whether the registered *repo* has a `factory.yaml`, else a draft of one. `UnknownRepo` when it is not registered."""
+    await asyncio.to_thread(store.repo_settings, repo)
+    if await asyncio.to_thread(_config_path(repo).exists):
+        return RepoConfig(exists=True, draft=None)
+    return RepoConfig(exists=False, draft=await asyncio.to_thread(factory_draft.draft_factory_yaml, Path(repo)))
+
+
+def _write_config(repo: str, content: str) -> None:
+    _validate_config(content)
+    try:
+        with _config_path(repo).open("x", encoding="utf-8") as file:
+            file.write(content)
+    except FileExistsError as exc:
+        raise ConfigExists(f"{repo} already has a {CONFIG_FILE}") from exc
+
+
+async def save_repo_config(store: FactoryStore, repo: str, content: str) -> RepoConfig:
+    """Write *content* as the uncommitted `factory.yaml` of the registered *repo*. `ConfigExists` rather than overwrite."""
+    await asyncio.to_thread(store.repo_settings, repo)
+    await asyncio.to_thread(_write_config, repo, content)
+    return RepoConfig(exists=True, draft=None)
 
 
 async def save_repo_settings(store: FactoryStore, repo: str, settings: RepoSettings) -> RepoSettings:

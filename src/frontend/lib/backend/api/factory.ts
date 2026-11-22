@@ -1,7 +1,7 @@
 // Factory routes (`backend/routes/factory.py`, `factory_preview.py`). `repo` is always the path of the primary checkout.
 import { toQuery } from "../urls"
 import { post, put, request, requestVoid } from "./http"
-import type { FactoryPreview, FactoryRepo, FactorySettings, FactoryTask, FactoryTaskCommand, FactoryTaskCreate, FactoryTaskDiff, FactoryTimelineEntry } from "@/lib/domain/factory"
+import type { FactoryConfig, FactoryPreview, FactoryRepo, FactorySettings, FactoryTask, FactoryTaskCommand, FactoryTaskCreate, FactoryTaskDiff, FactoryTimelineEntry } from "@/lib/domain/factory"
 
 function taskPath(id: string): string {
   return `/factory/tasks/${encodeURIComponent(id)}`
@@ -18,6 +18,16 @@ export function openFactoryRepo(path: string): Promise<FactoryRepo> {
 
 export function getFactorySettings(repo: string): Promise<FactorySettings> {
   return request<FactorySettings>(`/factory/settings${toQuery({ repo })}`)
+}
+
+/** Whether `repo` has a `factory.yaml`, else a generated draft of one. */
+export function getFactoryConfig(repo: string): Promise<FactoryConfig> {
+  return request<FactoryConfig>(`/factory/config${toQuery({ repo })}`)
+}
+
+/** Write `content` as the uncommitted `factory.yaml` of `repo`, refused (409) when the file exists. */
+export function putFactoryConfig(repo: string, content: string): Promise<FactoryConfig> {
+  return put<FactoryConfig>(`/factory/config${toQuery({ repo })}`, { content })
 }
 
 /** Local branches of `repo`, alphabetically. */

@@ -918,3 +918,31 @@ def test_logins_without_host_access_are_refused(store, host):
 
     assert client.get("/api/factory/repos").status_code == 403
     assert client.post("/api/factory/tasks", json={"repo": "/r", "title": "t", "request": "r"}).status_code == 403
+
+
+def test_config_is_a_draft_until_written_once_and_never_overwritten(client, registered, repo):
+    draft = client.get("/api/factory/config", params={"repo": registered}).json()
+    assert draft["exists"] is False
+    assert "gates: []" in draft["draft"]
+
+    content = "gates:\n  - [make, lint]\n"
+    saved = client.put("/api/factory/config", params={"repo": registered}, json={"content": content})
+    assert saved.json() == {"exists": True, "draft": None}
+    assert (repo / "factory.yaml").read_text() == content
+    assert client.get("/api/factory/config", params={"repo": registered}).json() == {"exists": True, "draft": None}
+
+    again = client.put("/api/factory/config", params={"repo": registered}, json={"content": "gates: []\n"})
+    assert again.status_code == 409
+    assert (repo / "factory.yaml").read_text() == content
+
+
+@pytest.mark.parametrize("content", ["gates: [", "- a\n", "gates: [bash]\n", "merge_gates:\n  - [1]\n"])
+def test_config_that_is_no_factory_yaml_is_refused(client, registered, repo, content):
+    refused = client.put("/api/factory/config", params={"repo": registered}, json={"content": content})
+    assert refused.status_code == 400
+    assert not (repo / "factory.yaml").exists()
+
+
+def test_config_of_an_unknown_repo_is_404(client, tmp_path):
+    assert client.get("/api/factory/config", params={"repo": str(tmp_path)}).status_code == 404
+    assert client.put("/api/factory/config", params={"repo": str(tmp_path)}, json={"content": ""}).status_code == 404
