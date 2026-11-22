@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useRef, useState, type RefCallback } from "react"
+import { useCallback, useEffect, useRef, useState, type RefCallback } from "react"
+import { anchorSceneFallback } from "deepfocus-ambient"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -95,13 +96,25 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const registerContentArea = useContentAreaRef()
   const contentAreaRef = useCallback<RefCallback<HTMLElement>>((main) => {
     if (!main) return
+    setMainArea(main)
     const unregister = registerContentArea?.(main)
     const stopMeasuring = measureSidebarInsets(main)
     return () => {
+      setMainArea(null)
       unregister?.()
       stopMeasuring?.()
     }
   }, [registerContentArea])
+  const [mainArea, setMainArea] = useState<HTMLElement | null>(null)
+  // Without a composer anchor the scene sits at the middle of the area between the sidebars, not of the window
+  useEffect(() => {
+    if (!isActive || !mainArea) return
+    return anchorSceneFallback(() => {
+      const box = mainArea.getBoundingClientRect()
+      if (box.height === 0 || box.width === 0) return null
+      return { horizonY: box.top + box.height * 0.6, lightX: box.left + box.width / 2, lightY: box.top + box.height * 0.52 }
+    })
+  }, [isActive, mainArea])
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const openPromptEditor = useCallback(() => setPromptEditorOpen(true), [])
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
