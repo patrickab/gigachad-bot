@@ -332,7 +332,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     factory: () => {
       const factoryItem = itemOf(tab, "factory")
       return {
-        left: <TopBarSlot name="title">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
+        left: null,
         center: <TopBarSlot name="center">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,

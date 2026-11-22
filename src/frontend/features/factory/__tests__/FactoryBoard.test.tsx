@@ -36,10 +36,9 @@ function task(title: string, state: FactoryTaskState | null, extra: Partial<Fact
 function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof FactoryBoard>[0]> = {}) {
   const refresh = vi.fn(async () => {})
   const onOpenTask = vi.fn()
-  // The title and the buttons render into the app's top bar, so the board is mounted under its slots
+  // The buttons render into the app's top bar, so the board is mounted under its slots
   const view = render(
     <TopBarSlotProvider>
-      <TopBarSlot name="title">{(ref) => <div ref={ref} />}</TopBarSlot>
       <TopBarSlot name="center">{(ref) => <div ref={ref} />}</TopBarSlot>
       <FactoryBoard repo={REPO} tasks={tasks} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />
     </TopBarSlotProvider>,
