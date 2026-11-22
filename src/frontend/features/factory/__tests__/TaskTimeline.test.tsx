@@ -24,7 +24,7 @@ describe("TaskTimeline", () => {
   it("shows the totals and each round with its trigger and status", () => {
     const view = render(<TaskTimeline entries={ENTRIES} error="" />)
 
-    expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · review $0.25")
+    expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · review 10 in / 5 out · $0.25")
     const first = within(view.getByLabelText("Round 1"))
     expect(first.getByText("start")).toBeTruthy()
     // Round 1 was ended by round 2: it is not shown as still working
@@ -65,7 +65,7 @@ describe("TaskTimeline", () => {
     const second = within(view.getByLabelText("Round 2"))
 
     expect(second.getByText("rejected")).toBeTruthy()
-    expect(second.getByText("$0.25 · 4.0s")).toBeTruthy()
+    expect(second.getByText("10 in / 5 out · $0.25 · 4.0s")).toBeTruthy()
     expect(second.getByText("src/a.ts:12")).toBeTruthy()
     expect(second.getByText("blocker")).toBeTruthy()
     expect(second.getByText("Leaks the handle").closest("details")!.open).toBe(true)

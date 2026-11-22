@@ -42,6 +42,15 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(cost < 0.1 ? 3 : 2)}`
 }
 
+/** Token count, compact above a thousand: 1.2k. */
+function formatTokens(count: number): string {
+  return count < 1000 ? String(count) : `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k`
+}
+
+function formatUsage(usage: { input: number; output: number }): string {
+  return `${formatTokens(usage.input)} in / ${formatTokens(usage.output)} out`
+}
+
 function Verdict({ ok, children }: { ok: boolean; children: string }) {
   return <span className={cn("shrink-0", ok ? "text-diff-added" : "text-diff-removed")}>{children}</span>
 }
@@ -77,7 +86,7 @@ function ReviewStep({ review, current }: { review: FactoryEntryData["factory-rev
       <div className={ROW_CLASS}>
         <span className={KIND_CLASS}>review</span>
         <span className="min-w-0 flex-1 truncate text-ink-muted">{review.model}</span>
-        <span className={METER_CLASS}>{formatCost(review.usage.cost)} · {formatDuration(review.wallMs)}</span>
+        <span className={METER_CLASS}>{formatUsage(review.usage)} · {formatCost(review.usage.cost)} · {formatDuration(review.wallMs)}</span>
         <Verdict ok={review.approved}>{review.status !== "ok" ? REVIEW_FAILURES[review.status] : review.approved ? "approved" : "rejected"}</Verdict>
       </div>
       {count > 0 && (
@@ -157,14 +166,14 @@ function Round({ round, current }: { round: TimelineRound; current: boolean }) {
  * - Details stay behind disclosures: a failed command's output, a merge error, the findings of earlier rounds
  */
 export function TaskTimeline({ entries, error }: { entries: readonly FactoryEntry[]; error: string }) {
-  const { rounds, reviewCost } = useMemo(() => groupTimeline(entries), [entries])
+  const { rounds, reviewCost, reviewTokens } = useMemo(() => groupTimeline(entries), [entries])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
       <div className="flex flex-col gap-4">
         <ErrorText className="text-[11px]">{error}</ErrorText>
         {rounds.length > 0 && (
           <p aria-label="Totals" className="text-[11px] tabular-nums text-ink-subtle">
-            {rounds.length} {rounds.length === 1 ? "round" : "rounds"} · review {formatCost(reviewCost)}
+            {rounds.length} {rounds.length === 1 ? "round" : "rounds"} · review {formatUsage(reviewTokens)} · {formatCost(reviewCost)}
           </p>
         )}
         <ol aria-label="Rounds" className="flex flex-col gap-4">

@@ -21,6 +21,8 @@ export interface Timeline {
   rounds: TimelineRound[]
   /** Cost of every review, in dollars. */
   reviewCost: number
+  /** Tokens of every review: input and output, cache reads and writes excluded. */
+  reviewTokens: { input: number; output: number }
 }
 
 /**
@@ -40,6 +42,7 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
     return group
   }
   let reviewCost = 0
+  const reviewTokens = { input: 0, output: 0 }
   for (const entry of entries) {
     switch (entry.customType) {
       case "factory-round":
@@ -51,6 +54,8 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
       case "factory-review":
         roundOf(entry.data.round).steps.push(entry)
         reviewCost += entry.data.usage.cost
+        reviewTokens.input += entry.data.usage.input
+        reviewTokens.output += entry.data.usage.output
         break
       case "factory-merge":
         roundOf(rounds.at(-1)?.round ?? 0).steps.push(entry)
@@ -62,7 +67,7 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
         break
     }
   }
-  return { rounds, reviewCost }
+  return { rounds, reviewCost, reviewTokens }
 }
 
 /**
