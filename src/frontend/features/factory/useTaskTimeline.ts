@@ -1,41 +1,40 @@
-// A task's pipeline timeline. Consumes `listFactoryEntries` (the factory entries of the task's Pi session and its coder's
-// answers), provides `useTaskTimeline` (the entries, read incrementally) and `groupTimeline` (the entries by round).
-import { useEffect, useRef, useState } from "react"
-import { listFactoryEntries } from "@/lib/backend/api"
-import type { FactoryAnswer, FactoryEntry, FactoryEntryData, FactoryRoundTrigger, FactoryTimelineEntry, FactoryUsage } from "@/lib/domain/factory"
+// A task's timeline. Consumes the core's `tasks.timeline` (the task's session as entries, read on from a cursor),
+// provides `useTaskTimeline` (the entries, read incrementally) and `groupTimeline` (the entries by round).
+import { useEffect, useState } from "react"
+import { callFactory } from "@/lib/backend/api"
+import type { FactoryRoundTrigger, FactoryTimeline, FactoryTimelineData, FactoryTimelineEntry, FactoryUsage } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
+/** How often the timeline of a task a runner holds is read on: the coder's messages land in its session file. */
+export const TIMELINE_POLL_MS = 2000
+
 /** What ran in a round: a hook or gate, the review, the merge. */
-export type TimelineStep = Extract<FactoryEntry, { customType: "factory-gate" | "factory-review" | "factory-merge" }>
+export type TimelineStep = Extract<FactoryTimelineEntry, { kind: "gate" | "review" | "merge" }>
+
+/** A message of the round's conversation: the user's or the coder's text. */
+export type TimelineMessage = Extract<FactoryTimelineEntry, { kind: "coder" | "user" }>
 
 export interface TimelineRound {
   round: number
-  /** What opened the round, null when its `factory-round` entry was not read. */
+  /** What opened the round, null when its `round` entry was not read. */
   trigger: FactoryRoundTrigger | null
   steps: TimelineStep[]
-  /** What the coder answered in the round's turn, in order. */
-  answers: FactoryAnswer[]
+  /** What the user and the coder wrote in the round, in order. */
+  messages: TimelineMessage[]
   /** The newest state recorded in the round. */
-  state: FactoryEntryData["factory-state"] | null
+  state: FactoryTimelineData["state"] | null
 }
 
 export interface Timeline {
   rounds: TimelineRound[]
-  /** Every coder answer and every review: tokens (input with cache reads and writes) and dollars. */
-  coder: FactoryUsage
+  /** Every review: tokens and dollars. */
   review: FactoryUsage
 }
 
-function addUsage(total: FactoryUsage, usage: FactoryUsage): void {
-  total.input += usage.input
-  total.output += usage.output
-  total.cost += usage.cost
-}
-
 /**
- * Group factory entries in append order by round.
+ * Group timeline entries in append order by round.
  *
- * - Gates, reviews and states join the round they name, a merge and a coder answer (they name none) the newest round:
+ * - Gates, reviews and states join the round they name, a merge and a message (they name none) the newest round:
  *   the extension records a round before the coder turn it opens
  * - A round's `state` is the last one written for it: the approval and the merge of a round stay in its group
  */
@@ -44,73 +43,100 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
   const roundOf = (round: number): TimelineRound => {
     let group = rounds.find((candidate) => candidate.round === round)
     if (!group) {
-      group = { round, trigger: null, steps: [], answers: [], state: null }
+      group = { round, trigger: null, steps: [], messages: [], state: null }
       rounds.push(group)
     }
     return group
   }
-  const coder: FactoryUsage = { input: 0, output: 0, cost: 0 }
   const review: FactoryUsage = { input: 0, output: 0, cost: 0 }
   for (const entry of entries) {
-    if (!("customType" in entry)) {
-      roundOf(rounds.at(-1)?.round ?? 1).answers.push(entry)
-      addUsage(coder, entry.message.usage)
-      continue
-    }
-    switch (entry.customType) {
-      case "factory-round":
+    switch (entry.kind) {
+      case "coder":
+      case "user":
+        roundOf(rounds.at(-1)?.round ?? 1).messages.push(entry)
+        break
+      case "round":
         roundOf(entry.data.round).trigger = entry.data.trigger
         break
-      case "factory-gate":
+      case "gate":
         roundOf(entry.data.round).steps.push(entry)
         break
-      case "factory-review":
+      case "review":
         roundOf(entry.data.round).steps.push(entry)
-        addUsage(review, { input: entry.data.usage.input + entry.data.usage.cacheRead + entry.data.usage.cacheWrite, output: entry.data.usage.output, cost: entry.data.usage.cost })
+        review.input += entry.data.usage.input
+        review.output += entry.data.usage.output
+        review.cost += entry.data.usage.cost
         break
-      case "factory-merge":
+      case "merge":
         roundOf(rounds.at(-1)?.round ?? 0).steps.push(entry)
         break
-      case "factory-state":
+      case "state":
         roundOf(entry.data.round).state = entry.data
         break
-      case "factory-task":
+      case "task":
         break
     }
   }
-  return { rounds, coder, review }
+  return { rounds, review }
+}
+
+interface TimelineReader {
+  /** Reads asked for and not yet done: a poll skips while one is. */
+  queued: () => number
+  /** Read on from the cursor, after the reads asked for before. */
+  read: () => void
+}
+
+/** Reads of task `taskId`'s timeline one after another, each from the `next` the one before answered. */
+function timelineReader(taskId: string, append: (entries: FactoryTimelineEntry[]) => void, report: (error: string) => void): TimelineReader {
+  let next = 0
+  let queued = 0
+  let reads = Promise.resolve()
+  return {
+    queued: () => queued,
+    read: () => {
+      queued += 1
+      reads = reads.then(async () => {
+        try {
+          const answer = await callFactory<FactoryTimeline>("tasks.timeline", { id: taskId, since: next })
+          next = answer.next
+          if (answer.entries.length > 0) append(answer.entries)
+          report("")
+        } catch (cause) {
+          report(errorMessage(cause, "Could not load the timeline"))
+        } finally {
+          queued -= 1
+        }
+      })
+    },
+  }
 }
 
 /**
- * The factory entries of the Pi session `sessionId` and its coder's answers, in append order.
+ * The timeline of task `taskId`, in append order.
  *
- * - Reads all of them once, then only those after the last one it has (`since`) whenever `revision` changes: the owner
- *   passes a value that moves when the session file grows
- * - Reads run one after another, so a change during a read is read after it and no entry arrives twice
- * - `sessionId` is fixed per mount once given: key the owner by task
+ * - Reads all of it once, then on from the last answer's `next` whenever `revision` changes (the owner passes a value
+ *   that moves with the task) and every `TIMELINE_POLL_MS` while `running` and no read is pending
+ * - Reads run one after another, so no entry arrives twice
+ * - `taskId` is fixed per mount: key the owner by task
  * - A failed read keeps the entries and sets `error`, the next successful one clears it
  */
-export function useTaskTimeline(sessionId: string | undefined, revision: string): { entries: FactoryTimelineEntry[]; error: string } {
+export function useTaskTimeline(taskId: string, revision: string, running: boolean): { entries: FactoryTimelineEntry[]; error: string } {
   const [entries, setEntries] = useState<FactoryTimelineEntry[]>([])
   const [error, setError] = useState("")
-  const cursor = useRef<{ last: string | undefined; reads: Promise<void> }>({ last: undefined, reads: Promise.resolve() })
+  const [reader] = useState(() => timelineReader(taskId, (appended) => setEntries((known) => [...known, ...appended]), setError))
 
   useEffect(() => {
-    if (!sessionId) return
-    const state = cursor.current
-    state.reads = state.reads.then(async () => {
-      try {
-        const appended = await listFactoryEntries(sessionId, state.last)
-        if (appended.length > 0) {
-          state.last = appended[appended.length - 1].id
-          setEntries((known) => [...known, ...appended])
-        }
-        setError("")
-      } catch (cause) {
-        setError(errorMessage(cause, "Could not load the timeline"))
-      }
-    })
-  }, [sessionId, revision])
+    reader.read()
+  }, [reader, revision])
+
+  useEffect(() => {
+    if (!running) return
+    const timer = setInterval(() => {
+      if (reader.queued() === 0) reader.read()
+    }, TIMELINE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [reader, running])
 
   return { entries, error }
 }

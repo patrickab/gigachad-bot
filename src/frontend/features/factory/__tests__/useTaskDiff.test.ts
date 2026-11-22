@@ -2,14 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import type { FactoryTaskDiff } from "@/lib/domain/factory"
 
-const api = vi.hoisted(() => {
-  class ApiError extends Error {
-    constructor(message: string, readonly status: number) {
-      super(message)
-    }
-  }
-  return { ApiError, getFactoryTaskDiff: vi.fn<(id: string) => Promise<FactoryTaskDiff>>() }
-})
+const core = vi.hoisted(() => ({ diff: vi.fn<(id: string) => Promise<FactoryTaskDiff>>() }))
+const api = vi.hoisted(() => ({
+  callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
+    if (action !== "tasks.diff") throw new Error(`unexpected ${action}`)
+    return core.diff(params.id as string)
+  }),
+}))
 
 vi.mock("@/lib/backend/api", () => api)
 
@@ -47,38 +46,47 @@ new file mode 100644
 index 0000000..5555555
 Binary files /dev/null and b/img/logo.png differ
 `
-const RENAMED = `diff --git a/src/before.ts b/src/after.ts
-similarity index 100%
-rename from src/before.ts
-rename to src/after.ts
-`
-
 beforeEach(() => {
-  api.getFactoryTaskDiff.mockReset()
+  core.diff.mockReset()
 })
 
+type CoreFile = FactoryTaskDiff["files"][number]
+const counts = (path: string, added: number, removed: number): CoreFile => ({ path, added, removed })
+const A = counts("src/a.ts", 1, 1)
+const NEW = counts("docs/new file.md", 2, 0)
+const OLD = counts("old.py", 0, 1)
+const LOGO = counts("img/logo.png", 0, 0)
+
 describe("parseTaskDiff", () => {
-  it("splits a diff into its files with path, status and line counts", () => {
-    const files = parseTaskDiff(MODIFIED + ADDED + DELETED + BINARY + RENAMED)
+  it("shows the core's files in its order with its counts, each with its section's status and lines", () => {
+    const files = parseTaskDiff({ diff: BINARY + DELETED + ADDED + MODIFIED, files: [A, NEW, OLD, LOGO] })
 
     expect(files.map((file) => [file.path, file.status, file.added, file.removed])).toEqual([
       ["src/a.ts", "modified", 1, 1],
       ["docs/new file.md", "added", 2, 0],
       ["old.py", "deleted", 0, 1],
-      ["img/logo.png", "added", null, null],
-      ["src/after.ts", "renamed", null, null],
+      ["img/logo.png", "added", 0, 0],
     ])
     expect(files[0].patch.lines!.map((line) => line.kind)).toEqual(["hunk", "context", "removed", "added", "context"])
     expect(files[3].patch.lines).toBeNull()
   })
 
-  it("has no files for an empty diff", () => {
-    expect(parseTaskDiff("")).toEqual([])
+  it("keeps a file the diff was cut before, without lines", () => {
+    const files = parseTaskDiff({ diff: MODIFIED, files: [A, counts("package-lock.json", 900, 20)] })
+
+    expect(files.map((file) => [file.path, file.added, file.removed, file.patch.lines])).toEqual([
+      ["src/a.ts", 1, 1, expect.any(Array)],
+      ["package-lock.json", 900, 20, null],
+    ])
   })
 
-  it("keeps the parsed file of an unchanged section", () => {
-    const before = parseTaskDiff(MODIFIED + ADDED)
-    const after = parseTaskDiff(MODIFIED + ADDED.replace("+text", "+more"), before)
+  it("has no files for an empty answer", () => {
+    expect(parseTaskDiff({ diff: "", files: [] })).toEqual([])
+  })
+
+  it("keeps the parsed file of an unchanged one", () => {
+    const before = parseTaskDiff({ diff: MODIFIED + ADDED, files: [A, NEW] })
+    const after = parseTaskDiff({ diff: MODIFIED + ADDED.replace("+text", "+more"), files: [A, NEW] }, before)
 
     expect(after[0]).toBe(before[0])
     expect(after[1]).not.toBe(before[1])
@@ -86,42 +94,50 @@ describe("parseTaskDiff", () => {
   })
 })
 
+/** A core answer with one file per section of `text`. */
+const diff = (text: string): FactoryTaskDiff => ({ base: "abc", diff: text, files: [...text.matchAll(/^diff --git a\/(\S+) /gm)].map(([, path]) => counts(path, 1, 1)) })
+
 describe("useTaskDiff", () => {
   it("reads the diff on mount and again when the revision changes, keeping the shown files meanwhile", async () => {
-    api.getFactoryTaskDiff.mockResolvedValueOnce({ base: "abc", diff: MODIFIED })
-    const hook = renderHook(({ revision }) => useTaskDiff("t1", revision), { initialProps: { revision: 0 } })
+    core.diff.mockResolvedValueOnce(diff(MODIFIED))
+    const hook = renderHook(({ revision }) => useTaskDiff("t1", revision, true), { initialProps: { revision: 0 } })
     expect(hook.result.current.files).toBeUndefined()
     await waitFor(() => expect(hook.result.current.files).toHaveLength(1))
-    expect(api.getFactoryTaskDiff).toHaveBeenCalledTimes(1)
+    expect(api.callFactory).toHaveBeenLastCalledWith("tasks.diff", { id: "t1" })
+    expect(core.diff).toHaveBeenCalledTimes(1)
 
-    let answer: (diff: FactoryTaskDiff) => void = () => {}
-    api.getFactoryTaskDiff.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    let answer: (answered: FactoryTaskDiff) => void = () => {}
+    core.diff.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     hook.rerender({ revision: 4 })
-    expect(api.getFactoryTaskDiff).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(core.diff).toHaveBeenCalledTimes(2))
     expect(hook.result.current.files).toHaveLength(1)
 
-    answer({ base: "abc", diff: MODIFIED + ADDED })
+    answer(diff(MODIFIED + ADDED))
     await waitFor(() => expect(hook.result.current.files).toHaveLength(2))
 
     hook.rerender({ revision: 4 })
-    expect(api.getFactoryTaskDiff).toHaveBeenCalledTimes(2)
+    expect(core.diff).toHaveBeenCalledTimes(2)
   })
 
-  it("has no files and no error for a task without a diff base yet", async () => {
-    api.getFactoryTaskDiff.mockRejectedValue(new api.ApiError("Unknown task", 404))
-    const hook = renderHook(() => useTaskDiff("t1", 0))
+  it("has no files, no read and no error for a task that has not started, and reads once it has", async () => {
+    core.diff.mockResolvedValue(diff(MODIFIED))
+    const hook = renderHook(({ started }) => useTaskDiff("t1", 0, started), { initialProps: { started: false } })
 
-    await waitFor(() => expect(hook.result.current.files).toEqual([]))
+    expect(hook.result.current.files).toEqual([])
     expect(hook.result.current.error).toBe("")
+    expect(core.diff).not.toHaveBeenCalled()
+
+    hook.rerender({ started: true })
+    await waitFor(() => expect(hook.result.current.files).toHaveLength(1))
   })
 
   it("reports a failed read and keeps the files it has", async () => {
-    api.getFactoryTaskDiff.mockResolvedValueOnce({ base: "abc", diff: MODIFIED }).mockRejectedValueOnce(new api.ApiError("git failed", 502))
-    const hook = renderHook(({ revision }) => useTaskDiff("t1", revision), { initialProps: { revision: 0 } })
+    core.diff.mockResolvedValueOnce(diff(MODIFIED)).mockRejectedValueOnce(new Error("the worktree of task t1 is gone (/w/t1)"))
+    const hook = renderHook(({ revision }) => useTaskDiff("t1", revision, true), { initialProps: { revision: 0 } })
     await waitFor(() => expect(hook.result.current.files).toHaveLength(1))
 
     hook.rerender({ revision: 1 })
-    await waitFor(() => expect(hook.result.current.error).toBe("git failed"))
+    await waitFor(() => expect(hook.result.current.error).toBe("the worktree of task t1 is gone (/w/t1)"))
     expect(hook.result.current.files).toHaveLength(1)
   })
 })

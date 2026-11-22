@@ -1,93 +1,156 @@
-// Factory JSON models (snake_case), served unchanged by `/api/factory`, and the factory entries of a task's Pi session.
+// The factory core's JSON shapes (the plugin's `core.ts`) with its field names, as `POST /api/factory/call` answers
+// them, and the backend's task preview.
 
-/** A repo registered with the factory, `path` is its primary checkout and the key every route takes. */
-export interface FactoryRepo {
-  name: string
-  path: string
+/** Every action of the core, called as `callFactory(action, params)`. */
+export type FactoryActionName =
+  | "repos.list" | "repos.add" | "repos.remove"
+  | "branches.list"
+  | "settings.get" | "settings.set"
+  | "config.get" | "config.write"
+  | "tasks.list" | "tasks.get" | "tasks.timeline" | "tasks.diff" | "tasks.start"
+  | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
+
+/** Codes of the core's refusals, in the `detail.code` of a failed call. */
+export type FactoryErrorCode = "invalid" | "not_found" | "busy" | "refused" | "failed" | "factory_plugin_missing"
+
+/** The task actions the core would accept for a task now, as `FactoryTask.actions` lists them. */
+export type FactoryTaskAction = "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
+
+/** A JSON schema of one parameter of an action, the keys the core uses. */
+export interface FactoryParamSchema {
+  type?: string
+  description?: string
+  enum?: string[]
+  minimum?: number
+  maximum?: number
+  properties?: Record<string, FactoryParamSchema>
+}
+
+/** One action of the core's `ACTIONS`: what it does, its parameters, whether it changes anything. */
+export interface FactoryActionSpec {
+  summary: string
+  params: { type: "object"; required: string[]; properties: Record<string, FactoryParamSchema> }
+  mutates: boolean
+  hostOnly: boolean
+}
+
+/** `GET /api/factory/actions`: the core's `ACTIONS`. */
+export interface FactoryActions {
+  actions: Partial<Record<FactoryActionName, FactoryActionSpec>>
+}
+
+/** `repos.add`: the repo it registered (the primary checkout of the path given) and every registered one. */
+export interface FactoryRepoAdd {
+  repo: string
+  repos: string[]
 }
 
 export type FactoryMergeMode = "auto" | "review"
 
-/** Model selectors of the two agents of a task, Pi's default where one is missing. */
+/** Model ids (`provider/model`) of the two agents of a task, Pi's default where one is missing. */
 export interface FactoryModels {
   coder?: string
   reviewer?: string
 }
 
-/** A repo's `factory.yaml`: present, or the draft the backend generated for it. */
-export interface FactoryConfig {
-  exists: boolean
-  draft: string | null
+/** The settings a task runs with (the core's `Settings`): `branch` is the one it starts from and merges into. */
+export interface FactorySettings {
+  branch: string
+  merge: FactoryMergeMode
+  maxRounds: number
+  review: boolean
+  models: FactoryModels
 }
 
-/** Settings of a repo, a new task may override any of them. */
-export interface FactorySettings {
-  merge: FactoryMergeMode
-  max_rounds: number
-  review: boolean
-  preview: boolean
-  models: FactoryModels
-  /** The branch a task's worktree starts from, is rebased onto and merges into; null for the repo's default branch. */
-  branch: string | null
+/** A repo's settings over the defaults, with `preview`, which only gigachad reads (the core's `ResolvedSettings`). */
+export type FactoryResolvedSettings = FactorySettings & { preview: boolean }
+
+/** What a repo's settings file holds: only the keys set (the core's `StoredSettings`). */
+export type FactoryStoredSettings = Partial<Omit<FactorySettings, "models">> & { models?: FactoryModels; preview?: boolean }
+
+/** `settings.get` and `settings.set`. */
+export interface FactoryRepoSettings {
+  stored: FactoryStoredSettings
+  resolved: FactoryResolvedSettings
+  defaults: FactoryResolvedSettings
+}
+
+/** One local branch of `branches.list`. */
+export interface FactoryBranch {
+  name: string
+  default: boolean
+  hasConfig: boolean
+}
+
+/** `config.get`: the repo's `factory.yaml`, or a draft of one with the files it was drawn from. */
+export interface FactoryConfig {
+  exists: boolean
+  text: string | null
+  draft: string | null
+  source: string[]
 }
 
 export type FactoryTaskState = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled"
 
-/** The newest `factory-state` entry of a task's session, `at` is its ISO timestamp. */
-export interface FactoryState {
-  state: FactoryTaskState
-  round: number
-  reason: string
-  at: string
-}
-
-/** Live Pi child of a task's session: whether a run streams, waits on a dialog, and how many clients watch. */
-export interface FactoryLive {
-  running: boolean
-  waiting: boolean
-  attached: number
-}
-
-export interface FactoryTask {
-  id: string
-  /** Path of the repo's primary checkout. */
-  repo: string
-  session_id: string
-  session_path: string
-  /** Worktree path and branch, both null for a task in the current checkout. */
-  worktree: string | null
-  branch: string | null
-  title: string
-  created_at: string
-  /** Null before the first state, or when pi-host no longer knows the session. */
-  factory: FactoryState | null
-  /** Null while the session's Pi child is stopped. */
-  live: FactoryLive | null
-  /** Tokens and dollars of the coder and the reviews, null before a model answered. */
-  usage: FactoryUsage | null
-}
-
-/** What models used: `input` counts cache reads and writes too, `cost` is in dollars. */
+/** Tokens and dollars of the coder and the reviews; `input` is uncached input tokens. */
 export interface FactoryUsage {
   input: number
   output: number
   cost: number
 }
 
-export interface FactoryTaskCreate {
+/** A task as every client sees it (the core's `TaskView`). */
+export interface FactoryTask {
+  id: string
+  /** Path of the repo's primary checkout. */
+  repo: string
+  worktree: string
+  branch: string
+  title: string
+  createdAt: string
+  sessionId: string
+  sessionPath: string | null
+  /** Null before the task's first `factory-state` entry. */
+  state: FactoryTaskState | null
+  round: number | null
+  reason: string | null
+  /** Timestamp of the last `factory-state` entry. */
+  at: string | null
+  /** A live runner holds the task. */
+  running: boolean
+  /** The state is `running` or `merging` but no runner lives. */
+  interrupted: boolean
+  /** The task actions the core would accept now: a client offers exactly these. */
+  actions: FactoryTaskAction[]
+  settings: FactorySettings | null
+  usage: FactoryUsage | null
+}
+
+/** Settings over the repo's stored ones for one new task. */
+export type FactoryTaskOverrides = Partial<Omit<FactorySettings, "models">> & { models?: FactoryModels }
+
+/** The params of `tasks.start`. */
+export interface FactoryTaskStart {
   repo: string
   title: string
   request: string
-  overrides: Partial<FactorySettings>
+  overrides?: FactoryTaskOverrides
 }
 
-/** Task transitions the backend accepts without a body. */
+/** Transitions the core takes with the task id alone (`tasks.<command>`). */
 export type FactoryTaskCommand = "approve" | "retry" | "cancel"
 
-/** Unified diff of a task against its base commit, untracked files as new files. */
+/** `tasks.diff`: the task's worktree against where it branched off its target, untracked files as new files. */
 export interface FactoryTaskDiff {
   base: string
   diff: string
+  files: { path: string; added: number; removed: number }[]
+}
+
+/** `tasks.remove`: the removed id and, under `force`, what work it dropped. */
+export interface FactoryTaskRemoval {
+  removed: string
+  dropped: string | null
 }
 
 export interface FactoryPreview {
@@ -96,7 +159,7 @@ export interface FactoryPreview {
   error: string | null
 }
 
-export type FactoryRoundTrigger = "start" | "hooks" | "gates" | "review" | "protected" | "message" | "retry"
+export type FactoryRoundTrigger = "start" | "hooks" | "gates" | "review" | "protected" | "message" | "retry" | "conflict"
 
 export type FactoryGatePhase = "hooks" | "gates" | "merge_gates" | "after_merge"
 
@@ -117,19 +180,18 @@ export interface FactoryReviewUsage {
   cost: number
 }
 
-/** `data` of each factory entry kind, keyed by its `customType`. */
-export interface FactoryEntryData {
-  "factory-task": {
+/** `data` of each timeline entry kind: the `factory-*` entry's data unchanged, the coder's and the user's text. */
+export interface FactoryTimelineData {
+  task: {
     title: string
     request: string
-    /** The settings in the plugin's shape: `branch` is the one the task starts from and merges into. */
-    settings: { merge: FactoryMergeMode; maxRounds: number; review: boolean; models: FactoryModels; branch: string }
+    settings: FactorySettings
     branch: string
     mainBranch: string
     baseSha: string
   }
-  "factory-round": { round: number; trigger: FactoryRoundTrigger }
-  "factory-gate": {
+  round: { round: number; trigger: FactoryRoundTrigger }
+  gate: {
     round: number
     phase: FactoryGatePhase
     argv: string[]
@@ -138,7 +200,7 @@ export interface FactoryEntryData {
     durationMs: number
     outputTail: string
   }
-  "factory-review": {
+  review: {
     round: number
     status: FactoryReviewStatus
     approved: boolean
@@ -148,39 +210,21 @@ export interface FactoryEntryData {
     usage: FactoryReviewUsage
     wallMs: number
   }
-  "factory-merge": {
-    ok: boolean
-    commit: string
-    error: string
-    depsSynced: boolean
-  }
-  /** Written right before the merge step that cannot be undone, so a resume can tell whether it landed. */
-  "factory-merge-intent": { commit: string; before: string }
-  "factory-state": {
-    state: FactoryTaskState
-    round: number
-    reason: string
-    /** Current-checkout task, a state that ends a run: the working tree it ended on. */
-    tree?: string
-    /** Current-checkout task: the HEAD the task builds on. */
-    head?: string
-    /** Current-checkout task, a run opened on the done task: the diff base from then on. */
-    base?: string
-  }
+  merge: { ok: boolean; commit: string; error: string; depsSynced: boolean }
+  state: { state: FactoryTaskState; round: number; reason: string }
+  coder: { text: string }
+  user: { text: string }
 }
 
-/** One factory entry of a task's Pi session, discriminated on `customType`. */
-export type FactoryEntry = {
-  [Kind in keyof FactoryEntryData]: { id: string; timestamp: string; customType: Kind; data: FactoryEntryData[Kind] }
-}[keyof FactoryEntryData]
+export type FactoryTimelineKind = keyof FactoryTimelineData
 
-/** An answer of the task's coder, cut to what the timeline shows: its text (no tool calls or thinking), model and usage. */
-export interface FactoryAnswer {
-  id: string
-  timestamp: string
-  type: "message"
-  message: { role: "assistant"; text: string; model: string | null; stopReason: string | null; usage: FactoryUsage }
+/** One entry of a task's timeline (the core's `TimelineEntry`), discriminated on `kind`. */
+export type FactoryTimelineEntry = {
+  [Kind in FactoryTimelineKind]: { at: string; kind: Kind; data: FactoryTimelineData[Kind] }
+}[FactoryTimelineKind]
+
+/** `tasks.timeline`: the entries after `since`, `next` the cursor for the following read. */
+export interface FactoryTimeline {
+  entries: FactoryTimelineEntry[]
+  next: number
 }
-
-/** The timeline of a task: its factory entries and the coder's answers, in append order. */
-export type FactoryTimelineEntry = FactoryEntry | FactoryAnswer

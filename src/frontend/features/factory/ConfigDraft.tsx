@@ -3,15 +3,15 @@
 import { useState } from "react"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
-import { putFactoryConfig } from "@/lib/backend/api"
+import { callFactory } from "@/lib/backend/api"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 
-/** The generated `factory.yaml` of a repo that has none, editable. Save writes it uncommitted into the checkout. */
-export function ConfigDraft({ repo, draft, onSaved }: { repo: string; draft: string; onSaved: () => void }) {
+/** The generated `factory.yaml` of a repo that has none, editable. Save writes it uncommitted into the checkout (`config.write`). */
+export function ConfigDraft({ repo, draft, onSaved }: { repo: string; draft: string; onSaved: (text: string) => void }) {
   const [text, setText] = useState(draft)
   const { run: save, pending, error } = useAsyncAction(async () => {
-    await putFactoryConfig(repo, text)
-    onSaved()
+    await callFactory("config.write", { repo, text })
+    onSaved(text)
   }, "Could not save factory.yaml")
   return (
     <form

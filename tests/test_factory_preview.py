@@ -3,10 +3,11 @@
 - The workspace is a throwaway git checkout, the preview process `python -m http.server` or a shell line
 - State goes to a scratch `XDG_STATE_HOME`, ports come from a few free ones instead of 8100-8199, and whatever a test
   leaves running is stopped after it
-- The database and route tests need the test database (`POSTGRES_TEST_DATABASE_URL`), without one they skip
+- The database tests need the test database (`POSTGRES_TEST_DATABASE_URL`), without one they skip; the routes find
+  the task on a fake pi-host's `tasks.get`
 """
 
-from datetime import UTC, datetime
+import json
 import os
 from pathlib import Path
 import shutil
@@ -19,15 +20,15 @@ import urllib.request
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 import psycopg
 import pytest
 import yaml
 
 from backend.identity import get_request_identity
-from backend.routes.factory import get_factory_store
 from backend.routes.factory_preview import router
-from lib import factory, factory_preview
-from lib.factory_preview import Preview, PreviewError, PreviewNotConfigured, get_preview, start_preview, stop_preview
+from lib import factory_preview, pi_host
+from lib.factory_preview import Preview, PreviewError, PreviewNotConfigured, PreviewTask, get_preview, start_preview, stop_preview
 from tests.conftest import git, is_running, request_identity, requires_proc, route_client, still_running
 
 pytestmark = requires_proc
@@ -56,15 +57,12 @@ def previews(tmp_path, monkeypatch) -> Path:
             stop_preview(directory.name)
 
 
-def _task(tmp_path: Path, preview: dict[str, Any] | None, task_id: str = "task0001") -> factory.TaskRow:
+def _task(tmp_path: Path, preview: dict[str, Any] | None, task_id: str = "task0001") -> PreviewTask:
     """A task working in a checkout of its own whose `factory.yaml` has *preview*."""
     checkout = (tmp_path / f"repo-{task_id}").resolve()
     git(tmp_path, "init", "-q", "-b", "main", str(checkout))
     (checkout / "factory.yaml").write_text(yaml.safe_dump({"preview": preview} if preview else {"gates": []}))
-    return factory.TaskRow(
-        id=task_id, repo=str(checkout), session_id=f"session-{task_id}", session_path=f"/sessions/{task_id}.jsonl",
-        worktree=None, branch=None, title="Preview me", created_at=datetime.now(UTC),
-    )
+    return PreviewTask(id=task_id, repo=str(checkout), worktree=str(checkout))
 
 
 def _shell(line: str, **section: Any) -> dict[str, Any]:
@@ -282,29 +280,39 @@ def test_a_preview_with_a_database_gets_an_empty_one_named_after_the_task_and_st
     assert not exists()
 
 
+TASK_ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+PLAIN_ID = "0d1e2f3a-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+
+
 @pytest.fixture
-def store(postgres_pool) -> factory.FactoryStore:
-    with postgres_pool.connection() as connection:
-        connection.execute("TRUNCATE factory_tasks, factory_repo_settings")
-    return factory.FactoryStore(postgres_pool)
+def tasks(tmp_path, monkeypatch) -> dict[str, PreviewTask]:
+    """The core's tasks behind a fake pi-host `tasks.get` (by id prefix, like the core)."""
+    token = tmp_path / "pi-host.token"
+    token.write_text("secret-token\n")
+    monkeypatch.setenv("PI_HOST_TOKEN_FILE", str(token))
+    known: dict[str, PreviewTask] = {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert (request.url.path, body["action"]) == ("/factory/call", "tasks.get")
+        task = next((task for task_id, task in known.items() if task_id.startswith(body["params"]["id"])), None)
+        if task is None:
+            return httpx.Response(404, json={"error": "not_found", "message": "no task has that id"})
+        view = {"id": task.id, "repo": task.repo, "worktree": task.worktree, "branch": "task", "state": "done", "running": False}
+        return httpx.Response(200, json={"result": view})
+
+    monkeypatch.setattr(pi_host, "_transport", httpx.MockTransport(handle))
+    return known
 
 
-def _stored(store: factory.FactoryStore, task: factory.TaskRow) -> factory.TaskRow:
-    store.register_repo(task.repo)
-    return store.insert_task(
-        task_id=task.id, repo=task.repo, session_id=task.session_id, session_path=task.session_path, worktree=None,
-        branch=None, title=task.title,
-    )
+def _client(has_host_access: bool = True) -> TestClient:
+    return route_client(router, overrides={get_request_identity: request_identity(has_host_access)})
 
 
-def _client(store: factory.FactoryStore, has_host_access: bool = True) -> TestClient:
-    return route_client(router, overrides={get_request_identity: request_identity(has_host_access), get_factory_store: store})
-
-
-def test_the_routes_start_show_and_stop_a_tasks_preview(tmp_path, store):
-    task = _stored(store, _task(tmp_path, SERVED))
-    client = _client(store)
-    path = f"/api/factory/tasks/{task.id}/preview"
+def test_the_routes_start_show_and_stop_a_tasks_preview(tmp_path, tasks):
+    task = tasks[TASK_ID] = _task(tmp_path, SERVED, TASK_ID)
+    client = _client()
+    path = "/api/factory/tasks/6f1c2a3b/preview"
     gate_url = f"{factory_preview.preview_gate_url()}/app?x=1"
 
     absent = client.get(path)
@@ -321,18 +329,20 @@ def test_the_routes_start_show_and_stop_a_tasks_preview(tmp_path, store):
     assert client.post(f"{path}/stop").json()["state"] == "stopped"
 
 
-def test_the_routes_refuse_unknown_tasks_missing_previews_and_logins_without_host_access(tmp_path, store):
-    plain = _stored(store, _task(tmp_path, None, "plain001"))
-    client = _client(store)
+def test_the_routes_refuse_unknown_tasks_missing_previews_and_logins_without_host_access(tmp_path, tasks):
+    plain = tasks[PLAIN_ID] = _task(tmp_path, None, PLAIN_ID)
+    client = _client()
 
-    assert client.get("/api/factory/tasks/unknown01/preview").status_code == 404
-    assert client.post("/api/factory/tasks/unknown01/preview/start").status_code == 404
-    assert client.post("/api/factory/tasks/unknown01/preview/stop").status_code == 404
+    unknown = client.get("/api/factory/tasks/abcdef01/preview")
+    assert (unknown.status_code, unknown.json()["detail"]["code"]) == (404, "not_found")
+    assert client.post("/api/factory/tasks/abcdef01/preview/start").status_code == 404
+    assert client.post("/api/factory/tasks/abcdef01/preview/stop").status_code == 404
+    assert client.get("/api/factory/tasks/not-an-id!/preview").status_code == 422
     unconfigured = client.post(f"/api/factory/tasks/{plain.id}/preview/start")
     assert unconfigured.status_code == 409
     assert "has no preview section" in unconfigured.json()["detail"]
 
-    outsider = _client(store, has_host_access=False)
+    outsider = _client(has_host_access=False)
     assert outsider.get(f"/api/factory/tasks/{plain.id}/preview").status_code == 403
     assert outsider.post(f"/api/factory/tasks/{plain.id}/preview/start").status_code == 403
     assert outsider.post(f"/api/factory/tasks/{plain.id}/preview/stop").status_code == 403

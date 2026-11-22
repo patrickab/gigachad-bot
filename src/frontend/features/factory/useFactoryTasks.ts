@@ -1,11 +1,10 @@
 // Task lists of the factory repos, shared by the board and the task view, and the starts still on their way. Consumes
-// `listFactoryTasks`, `createFactoryTask` and the Pi session store, provides `useFactoryTasks`, `useFactoryTask`,
-// `useFactoryLaunches`, `launchTask`, `retryLaunch` and `dismissLaunch`.
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
-import { usePiSessions } from "@/features/pi/sessionStore"
-import { createFactoryTask, listFactoryTasks } from "@/lib/backend/api"
-import type { PiSessionInfo } from "@/lib/backend/api/pi"
-import type { FactoryTask, FactoryTaskCreate } from "@/lib/domain/factory"
+// the core's `tasks.list` and `tasks.start` and pi-host's `sessions_changed` notice, provides `useFactoryTasks`,
+// `useFactoryTask`, `useFactoryLaunches`, `launchTask`, `retryLaunch` and `dismissLaunch`.
+import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { observePiSocket, type HostEvent } from "@/features/pi/piSocket"
+import { callFactory } from "@/lib/backend/api"
+import type { FactoryTask, FactoryTaskStart } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
 interface TaskList {
@@ -25,6 +24,9 @@ interface Read {
 
 const reading = new Map<string, Read>()
 const listeners = new Set<() => void>()
+/** Mounted `useFactoryTasks` hooks per repo path: the repos `sessions_changed` reads again. */
+const watchers = new Map<string, number>()
+let stopLive: (() => void) | null = null
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
@@ -38,7 +40,8 @@ function setList(repo: string, list: TaskList) {
 
 async function fetchList(repo: string): Promise<void> {
   try {
-    setList(repo, { tasks: await listFactoryTasks(repo), error: null })
+    const { tasks } = await callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo })
+    setList(repo, { tasks: [...tasks].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), error: null })
   } catch (cause) {
     setList(repo, { tasks: lists.get(repo)?.tasks ?? [], error: errorMessage(cause, "Factory is unreachable") })
   }
@@ -58,29 +61,60 @@ function readTasks(repo: string): Promise<void> {
   return read.queued
 }
 
-/** What a task row shows of the Pi sessions: which exist, their factory state and whether their child runs. */
-function sessionsSignature(sessions: PiSessionInfo[]): string {
-  return sessions
-    .map((session) => `${session.sessionId}:${session.factory?.state ?? ""}:${session.factory?.round ?? ""}:${session.factory?.at ?? ""}:${session.live ? Number(session.live.running) : ""}`)
-    .join("|")
+function readWatched() {
+  for (const repo of watchers.keys()) void readTasks(repo)
 }
 
 /**
- * Tasks of the repo at path `repo`, newest first.
+ * Whether a `sessions_changed` notice may concern a task: one of its paths lies under a `/factory/` directory (task
+ * records, runner locks, task sessions), or it names none (pi-host could not tell what changed).
+ */
+export function concernsFactory(event: HostEvent): boolean {
+  if (event.type !== "sessions_changed") return false
+  const paths = event.sessionPaths
+  if (!Array.isArray(paths) || paths.length === 0) return true
+  return paths.some((path) => typeof path === "string" && path.includes("/factory/"))
+}
+
+/** pi-host announces a change of a task (its record, lock or session file) as `sessions_changed`, a reopened socket may have missed one. */
+function startLive(): () => void {
+  return observePiSocket({
+    onHostEvent: (event: HostEvent) => {
+      if (concernsFactory(event)) readWatched()
+    },
+    onOpen: readWatched,
+  }, { hold: true })
+}
+
+function watchRepo(repo: string): () => void {
+  watchers.set(repo, (watchers.get(repo) ?? 0) + 1)
+  stopLive ??= startLive()
+  return () => {
+    const left = (watchers.get(repo) ?? 1) - 1
+    if (left > 0) watchers.set(repo, left)
+    else watchers.delete(repo)
+    if (watchers.size > 0) return
+    stopLive?.()
+    stopLive = null
+  }
+}
+
+/**
+ * Tasks of the repo at path `repo`, newest first, every task the core holds for it (started here or from the CLI).
  *
- * - Read on mount, and again whenever the Pi session store reports a change of a session, its factory state or its
- *   live child (the store follows pi-host's `sessions_changed`). No polling of its own
+ * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket. No
+ *   polling
  * - `refresh` reads again, for a change this page made itself
  * - A failed read keeps the last tasks and sets `error`, the next successful one clears it
  */
 export function useFactoryTasks(repo: string): { tasks: FactoryTask[]; error: string | null; refresh: () => Promise<void> } {
-  const { sessions } = usePiSessions({ factory: true })
-  const signature = useMemo(() => sessionsSignature(sessions), [sessions])
   const list = useSyncExternalStore(subscribe, () => lists.get(repo) ?? EMPTY, () => EMPTY)
 
   useEffect(() => {
+    const unwatch = watchRepo(repo)
     void readTasks(repo)
-  }, [repo, signature])
+    return unwatch
+  }, [repo])
 
   const refresh = useCallback(() => readTasks(repo), [repo])
   return { tasks: list.tasks, error: list.error, refresh }
@@ -102,8 +136,8 @@ export function useFactoryTask(id: string): FactoryTask | undefined {
 /** A start the user sent whose task is not in the list yet: on its way, or refused with `error`. */
 export interface FactoryLaunch {
   id: string
-  body: FactoryTaskCreate
-  /** Why the backend refused the start, null while it runs. */
+  body: FactoryTaskStart
+  /** Why the core refused the start, null while it runs. */
   error: string | null
 }
 
@@ -120,7 +154,7 @@ function setLaunches(repo: string, update: (current: FactoryLaunch[]) => Factory
 async function runLaunch(launch: FactoryLaunch): Promise<void> {
   const { repo } = launch.body
   try {
-    await createFactoryTask(launch.body)
+    await callFactory<FactoryTask>("tasks.start", { ...launch.body })
     // The list holds the task before its launch goes, so the card never blinks out.
     await readTasks(repo)
     setLaunches(repo, (current) => current.filter((candidate) => candidate.id !== launch.id))
@@ -132,9 +166,9 @@ async function runLaunch(launch: FactoryLaunch): Promise<void> {
 
 /**
  * Start a task without waiting for it: the start shows as a launch until the task is in its repo's list, or stays
- * with the backend's refusal until it is retried or dismissed.
+ * with the core's refusal until it is retried or dismissed.
  */
-export function launchTask(body: FactoryTaskCreate): Promise<void> {
+export function launchTask(body: FactoryTaskStart): Promise<void> {
   launchCount += 1
   const launch: FactoryLaunch = { id: `launch-${launchCount}`, body, error: null }
   setLaunches(body.repo, (current) => [...current, launch])

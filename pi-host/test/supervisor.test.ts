@@ -1,6 +1,6 @@
 /** Supervisor tests over HTTP and `/ws` against the fake `pi` fixture (no model calls). */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
@@ -921,40 +921,45 @@ describe("profiles (G1, G5, G6)", () => {
 
 describe("factory task sessions", () => {
   const repo = workdir("factory-repo");
-  const worktree = workdir("factory-worktree");
   const factoryDir = join(agentDir, "factory", "sessions", cwdDirName(repo));
+  const FACTORY_ID = "01a1f3fe-0000-7000-8000-0000000000fa";
 
-  test("a factoryRepo create runs in the worktree, writes into the repo's factory folder and reports its writes", async () => {
+  test("session and task record writes under the factory's data reach clients as sessions_changed, other files do not", async () => {
     const watching = await client();
-    const response = await startSession({ cwd: worktree, factoryRepo: repo });
-    expect(response.status).toBe(200);
-    const { session } = await response.json();
-    expect(session.cwd).toBe(worktree);
-    const driver = await client();
-    expect((await driver.attach(session.sessionId)).attached.state.argv.slice(0, 4)).toEqual(["--mode", "rpc", "--session-dir", factoryDir]);
-    driver.command(session.sessionId, { type: "prompt", message: "build it" });
-    await driver.pi((record) => record.type === "agent_settled");
-    expect(session.sessionPath.startsWith(`${factoryDir}/`)).toBe(true);
-    expect(existsSync(session.sessionPath)).toBe(true);
-    await until(() => (watching.hostFrames.some((frame) => frame.sessionPaths.includes(session.sessionPath)) ? true : undefined));
+    const reported = (path: string) => () => (watching.hostFrames.some((frame) => frame.sessionPaths.includes(path)) ? true : undefined);
+    mkdirSync(factoryDir, { recursive: true });
+    const sessionPath = join(factoryDir, `2026-11-19T10-00-00-000Z_${FACTORY_ID}.jsonl`);
+    writeFileSync(sessionPath, `${JSON.stringify({ type: "session", version: 3, id: FACTORY_ID, cwd: repo })}\n`);
+    await until(reported(sessionPath));
 
-    // Resumed by id from the factory root, it stays where it is.
-    await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
-    const resumed = await startSession({ cwd: worktree, resume: { sessionId: session.sessionId } });
-    expect((await resumed.json()).session.sessionPath).toBe(session.sessionPath);
-    await api(`/sessions/${session.sessionId}/close`, { method: "POST" });
+    // A task record is written to a temp file and renamed, and removed by a CLI.
+    const tasks = join(agentDir, "factory", "tasks");
+    mkdirSync(tasks, { recursive: true });
+    const record = join(tasks, "t1.json");
+    writeFileSync(`${record}.1.tmp`, "{}");
+    renameSync(`${record}.1.tmp`, record);
+    await until(reported(record));
+    const before = watching.hostFrames.length;
+    rmSync(record);
+    await until(() => (watching.hostFrames.slice(before).some((frame) => frame.sessionPaths.includes(record)) ? true : undefined));
 
-    // `continue` reaches the factory root only with the marker.
-    const continued = async (body: object) => (await (await startSession({ cwd: worktree, resume: "continue", ...body })).json()).session;
-    expect((await continued({ factoryRepo: repo })).sessionId).toBe(session.sessionId);
-    expect((await continued({})).sessionId).not.toBe(session.sessionId);
+    writeFileSync(join(tasks, "t1.inbox"), "{}\n");
+    writeFileSync(join(agentDir, "factory", "notes.json"), "{}");
+    await Bun.sleep(800);
+    const paths = watching.hostFrames.flatMap((frame) => frame.sessionPaths);
+    expect(paths.every((path) => path.endsWith(".jsonl") || path === record)).toBe(true);
   });
 
-  test("factoryRepo must be an absolute path to an existing directory", async () => {
-    for (const factoryRepo of ["relative/repo", join(root, "missing-repo"), true]) {
-      const response = await startSession({ cwd: worktree, factoryRepo });
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error: "invalid_factory_repo" });
+  test("a factory task is never resumed: the factory plugin's runner holds it", async () => {
+    mkdirSync(factoryDir, { recursive: true });
+    const sessionPath = join(factoryDir, `2026-11-19T10-00-00-000Z_${FACTORY_ID}.jsonl`);
+    const state = { type: "custom", id: "s1", parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType: "factory-state", data: { state: "running", round: 1, reason: "" } };
+    const header = { type: "session", version: 3, id: FACTORY_ID, timestamp: "2026-11-19T10:00:00.000Z", cwd: repo };
+    writeFileSync(sessionPath, `${JSON.stringify(header)}\n${JSON.stringify(state)}\n`);
+    for (const resume of [{ sessionId: FACTORY_ID }, { sessionPath }]) {
+      const response = await startSession({ cwd: repo, resume });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "factory" });
     }
   });
 });

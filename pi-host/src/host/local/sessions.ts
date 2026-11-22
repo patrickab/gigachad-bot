@@ -199,22 +199,16 @@ function newestFirst(a: SessionMeta, b: SessionMeta): number {
 }
 
 /**
- * Sessions of `cwd` (every cwd when null), newest first. Live ones come from the live root, plus the factory root with
- * `factory`. Archived ones come from the archive root, which never holds a factory-root session. The factory root is
- * grouped by repository, not cwd: it is scanned whole and filtered by the header's cwd.
+ * Sessions of `cwd` (every cwd when null), newest first: live ones from the live root, archived ones from the archive
+ * root. Never one of the factory root.
  */
-export async function listSessions(cwd: string | null, archived: boolean, factory = false): Promise<SessionMeta[]> {
-  const withFactory = factory && !archived;
+export async function listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
   if (cwd === null) {
-    const roots = [archived ? archiveRoot() : sessionsRoot(), ...(withFactory ? [factorySessionsRoot()] : [])];
-    const files = (await Promise.all(roots.map((root) => sessionFiles(root, ".jsonl")))).flat();
+    const files = await sessionFiles(archived ? archiveRoot() : sessionsRoot(), ".jsonl");
     const metas = await Promise.all(files.map((path) => sessionMeta(path)));
     return metas.filter((meta): meta is SessionMeta => meta !== undefined).sort(newestFirst);
   }
-  const paths = [
-    ...(await cwdSessionFiles(cwdSessionDir(archived ? archiveRoot() : sessionsRoot(), cwd))),
-    ...(withFactory ? await sessionFiles(factorySessionsRoot(), ".jsonl") : []),
-  ];
+  const paths = await cwdSessionFiles(cwdSessionDir(archived ? archiveRoot() : sessionsRoot(), cwd));
   const metas = await Promise.all(paths.map((path) => sessionMeta(path)));
   const wantedCwd = resolve(cwd);
   return metas

@@ -1,131 +1,155 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
-import type { FactoryAnswer, FactoryEntry } from "@/lib/domain/factory"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, renderHook, waitFor } from "@testing-library/react"
+import type { FactoryTimeline, FactoryTimelineData, FactoryTimelineEntry, FactoryTimelineKind } from "@/lib/domain/factory"
 
+const core = vi.hoisted(() => ({ timeline: vi.fn<(id: string, since: number) => Promise<FactoryTimeline>>() }))
 const api = vi.hoisted(() => ({
-  listFactoryEntries: vi.fn<(sessionId: string, since?: string) => Promise<FactoryEntry[]>>(),
+  callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
+    if (action !== "tasks.timeline") throw new Error(`unexpected ${action}`)
+    return core.timeline(params.id as string, params.since as number)
+  }),
 }))
 
 vi.mock("@/lib/backend/api", () => api)
 
-import { groupTimeline, useTaskTimeline } from "@/features/factory/useTaskTimeline"
+import { groupTimeline, TIMELINE_POLL_MS, useTaskTimeline } from "@/features/factory/useTaskTimeline"
 
-const USAGE = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0.25 }
+const USAGE = { input: 10, output: 5, cacheRead: 3, cacheWrite: 2, cost: 0.25 }
 
-function entry<Kind extends FactoryEntry["customType"]>(id: string, customType: Kind, data: Extract<FactoryEntry, { customType: Kind }>["data"]): FactoryEntry {
-  return { id, timestamp: "2025-01-01T00:00:00Z", customType, data } as FactoryEntry
+function entry<Kind extends FactoryTimelineKind>(kind: Kind, data: FactoryTimelineData[Kind]): FactoryTimelineEntry {
+  return { at: "2025-01-01T00:00:00Z", kind, data } as FactoryTimelineEntry
 }
 
-const gate = (id: string, round: number, exitCode: number) =>
-  entry(id, "factory-gate", { round, phase: "gates", argv: ["factory/gates.sh"], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
+const gate = (round: number, exitCode: number) =>
+  entry("gate", { round, phase: "gates", argv: [`gates-${round}`], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
 
-const ENTRIES: FactoryEntry[] = [
-  entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
-  entry("e2", "factory-round", { round: 1, trigger: "start" }),
-  entry("e3", "factory-state", { state: "running", round: 1, reason: "start" }),
-  gate("e4", 1, 1),
-  entry("e5", "factory-round", { round: 2, trigger: "gates" }),
-  entry("e6", "factory-state", { state: "running", round: 2, reason: "gates" }),
-  gate("e7", 2, 0),
-  entry("e8", "factory-review", { round: 2, status: "ok", approved: true, findings: [], model: "haiku", sessionFile: "/r.jsonl", usage: USAGE, wallMs: 4000 }),
-  entry("e9", "factory-state", { state: "waiting_approve", round: 2, reason: "approved" }),
-  entry("e10", "factory-state", { state: "merging", round: 2, reason: "approved" }),
-  entry("e11", "factory-merge", { ok: true, commit: "0123456789abcdef", error: "", depsSynced: false }),
-  entry("e12", "factory-state", { state: "done", round: 2, reason: "merged" }),
+const ENTRIES: FactoryTimelineEntry[] = [
+  entry("task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
+  entry("round", { round: 1, trigger: "start" }),
+  entry("state", { state: "running", round: 1, reason: "start" }),
+  gate(1, 1),
+  entry("round", { round: 2, trigger: "gates" }),
+  entry("state", { state: "running", round: 2, reason: "gates" }),
+  gate(2, 0),
+  entry("review", { round: 2, status: "ok", approved: true, findings: [], model: "haiku", sessionFile: "/r.jsonl", usage: USAGE, wallMs: 4000 }),
+  entry("state", { state: "waiting_approve", round: 2, reason: "approved" }),
+  entry("state", { state: "merging", round: 2, reason: "approved" }),
+  entry("merge", { ok: true, commit: "0123456789abcdef", error: "", depsSynced: false }),
+  entry("state", { state: "done", round: 2, reason: "merged" }),
 ]
 
+function stepName(step: FactoryTimelineEntry): string {
+  if (step.kind === "gate") return step.data.argv[0]
+  return step.kind
+}
+
 beforeEach(() => {
-  api.listFactoryEntries.mockReset()
+  core.timeline.mockReset()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe("groupTimeline", () => {
   it("groups gates, reviews and the merge under their round with its trigger and newest state", () => {
     const { rounds, review } = groupTimeline(ENTRIES)
 
-    expect(rounds.map((round) => [round.round, round.trigger, round.state?.state, round.steps.map((step) => step.id)])).toEqual([
-      [1, "start", "running", ["e4"]],
-      [2, "gates", "done", ["e7", "e8", "e11"]],
+    expect(rounds.map((round) => [round.round, round.trigger, round.state?.state, round.steps.map(stepName)])).toEqual([
+      [1, "start", "running", ["gates-1"]],
+      [2, "gates", "done", ["gates-2", "review", "merge"]],
     ])
     expect(review.cost).toBe(0.25)
   })
 
-  it("sums the usage of every review, cache reads and writes as input", () => {
-    const review = (id: string, round: number) => entry(id, "factory-review", { round, status: "ok", approved: false, findings: [], model: "haiku", sessionFile: "", usage: USAGE, wallMs: 1 })
-    expect(groupTimeline([review("a", 1), review("b", 2)]).review).toEqual({
-      input: 2 * (USAGE.input + USAGE.cacheRead + USAGE.cacheWrite),
-      output: 2 * USAGE.output,
-      cost: 0.5,
-    })
+  it("sums the usage of every review as the core counts it: uncached input", () => {
+    const review = (round: number) => entry("review", { round, status: "ok", approved: false, findings: [], model: "haiku", sessionFile: "", usage: USAGE, wallMs: 1 })
+    expect(groupTimeline([review(1), review(2)]).review).toEqual({ input: 2 * USAGE.input, output: 2 * USAGE.output, cost: 0.5 })
   })
 
-  it("puts each coder answer in the newest round and sums the coder's usage", () => {
-    const answer = (id: string, text: string, cost: number): FactoryAnswer => ({
-      id, timestamp: "", type: "message", message: { role: "assistant", text, model: "sonnet", stopReason: "stop", usage: { input: 100, output: 10, cost } },
-    })
+  it("puts each coder and user message in the newest round, in order", () => {
     const timeline = groupTimeline([
-      entry("r1", "factory-round", { round: 1, trigger: "start" }),
-      answer("a1", "Looking.", 0.5),
-      answer("a2", "Done.", 0.25),
-      entry("r2", "factory-round", { round: 2, trigger: "gates" }),
-      answer("a3", "Fixed.", 0.25),
+      entry("round", { round: 1, trigger: "start" }),
+      entry("coder", { text: "Looking." }),
+      entry("coder", { text: "Done." }),
+      entry("user", { text: "Also the README." }),
+      entry("round", { round: 2, trigger: "message" }),
+      entry("coder", { text: "Fixed." }),
     ])
 
-    expect(timeline.rounds.map((round) => [round.round, round.answers.map((each) => each.message.text)])).toEqual([[1, ["Looking.", "Done."]], [2, ["Fixed."]]])
-    expect(timeline.coder).toEqual({ input: 300, output: 30, cost: 1 })
+    expect(timeline.rounds.map((round) => [round.round, round.messages.map((message) => `${message.kind}: ${message.data.text}`)])).toEqual([
+      [1, ["coder: Looking.", "coder: Done.", "user: Also the README."]],
+      [2, ["coder: Fixed."]],
+    ])
   })
 
   it("keeps a step whose round entry was not read, without a trigger", () => {
-    expect(groupTimeline([gate("e4", 3, 0)]).rounds).toEqual([{ round: 3, trigger: null, steps: [expect.objectContaining({ id: "e4" })], answers: [], state: null }])
+    expect(groupTimeline([gate(3, 0)]).rounds).toEqual([{ round: 3, trigger: null, steps: [gate(3, 0)], messages: [], state: null }])
   })
 })
 
 describe("useTaskTimeline", () => {
-  it("reads all entries once, then only those after the last one when the revision changes, and appends them", async () => {
-    api.listFactoryEntries.mockResolvedValueOnce(ENTRIES.slice(0, 4)).mockResolvedValueOnce(ENTRIES.slice(4, 7)).mockResolvedValueOnce([])
-    const hook = renderHook(({ revision }) => useTaskTimeline("s1", revision), { initialProps: { revision: "a" } })
+  it("reads from 0 once, then on from the last next when the revision changes, and appends", async () => {
+    core.timeline
+      .mockResolvedValueOnce({ entries: ENTRIES.slice(0, 4), next: 400 })
+      .mockResolvedValueOnce({ entries: ENTRIES.slice(4, 7), next: 700 })
+      .mockResolvedValueOnce({ entries: [], next: 700 })
+    const hook = renderHook(({ revision }) => useTaskTimeline("t1", revision, false), { initialProps: { revision: "a" } })
     await waitFor(() => expect(hook.result.current.entries).toHaveLength(4))
-    expect(api.listFactoryEntries).toHaveBeenCalledTimes(1)
-    expect(api.listFactoryEntries).toHaveBeenLastCalledWith("s1", undefined)
+    expect(core.timeline).toHaveBeenLastCalledWith("t1", 0)
 
     hook.rerender({ revision: "b" })
     await waitFor(() => expect(hook.result.current.entries).toHaveLength(7))
-    expect(api.listFactoryEntries).toHaveBeenLastCalledWith("s1", "e4")
-    expect(hook.result.current.entries.map((item) => item.id)).toEqual(["e1", "e2", "e3", "e4", "e5", "e6", "e7"])
+    expect(core.timeline).toHaveBeenLastCalledWith("t1", 400)
+    expect(hook.result.current.entries).toEqual(ENTRIES.slice(0, 7))
 
     // Nothing new: the cursor and the entries stay
     hook.rerender({ revision: "c" })
-    await waitFor(() => expect(api.listFactoryEntries).toHaveBeenCalledTimes(3))
-    expect(api.listFactoryEntries).toHaveBeenLastCalledWith("s1", "e7")
+    await waitFor(() => expect(core.timeline).toHaveBeenCalledTimes(3))
+    expect(core.timeline).toHaveBeenLastCalledWith("t1", 700)
     expect(hook.result.current.entries).toHaveLength(7)
-  })
 
-  it("does not read again while the revision stays, nor before the session is known", async () => {
-    api.listFactoryEntries.mockResolvedValue([])
-    const hook = renderHook(({ sessionId }: { sessionId?: string }) => useTaskTimeline(sessionId, "a"), { initialProps: {} })
-    expect(api.listFactoryEntries).not.toHaveBeenCalled()
-
-    hook.rerender({ sessionId: "s1" })
-    hook.rerender({ sessionId: "s1" })
-    await waitFor(() => expect(api.listFactoryEntries).toHaveBeenCalledTimes(1))
+    hook.rerender({ revision: "c" })
+    await act(async () => {})
+    expect(core.timeline).toHaveBeenCalledTimes(3)
   })
 
   it("reads a change that arrives during a read after it, from the new cursor", async () => {
-    let answerFirst: (entries: FactoryEntry[]) => void = () => {}
-    api.listFactoryEntries.mockReturnValueOnce(new Promise((resolve) => { answerFirst = resolve })).mockResolvedValueOnce(ENTRIES.slice(2, 4))
-    const hook = renderHook(({ revision }) => useTaskTimeline("s1", revision), { initialProps: { revision: "a" } })
-    await waitFor(() => expect(api.listFactoryEntries).toHaveBeenCalledTimes(1))
+    let answerFirst: (timeline: FactoryTimeline) => void = () => {}
+    core.timeline.mockReturnValueOnce(new Promise((resolve) => { answerFirst = resolve })).mockResolvedValueOnce({ entries: ENTRIES.slice(2, 4), next: 400 })
+    const hook = renderHook(({ revision }) => useTaskTimeline("t1", revision, false), { initialProps: { revision: "a" } })
+    await waitFor(() => expect(core.timeline).toHaveBeenCalledTimes(1))
     hook.rerender({ revision: "b" })
     await Promise.resolve()
-    expect(api.listFactoryEntries).toHaveBeenCalledTimes(1)
+    expect(core.timeline).toHaveBeenCalledTimes(1)
 
-    answerFirst(ENTRIES.slice(0, 2))
+    answerFirst({ entries: ENTRIES.slice(0, 2), next: 200 })
     await waitFor(() => expect(hook.result.current.entries).toHaveLength(4))
-    expect(api.listFactoryEntries).toHaveBeenLastCalledWith("s1", "e2")
+    expect(core.timeline).toHaveBeenLastCalledWith("t1", 200)
+  })
+
+  it("polls only while a runner holds the task", async () => {
+    vi.useFakeTimers()
+    core.timeline.mockResolvedValue({ entries: [], next: 0 })
+    const hook = renderHook(({ running }) => useTaskTimeline("t1", "a", running), { initialProps: { running: false } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * TIMELINE_POLL_MS) })
+    expect(core.timeline).toHaveBeenCalledTimes(1)
+
+    hook.rerender({ running: true })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2 * TIMELINE_POLL_MS) })
+    expect(core.timeline).toHaveBeenCalledTimes(3)
+
+    hook.rerender({ running: false })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * TIMELINE_POLL_MS) })
+    expect(core.timeline).toHaveBeenCalledTimes(3)
   })
 
   it("keeps the entries and reports a failed read, the next read clears the error", async () => {
-    api.listFactoryEntries.mockResolvedValueOnce(ENTRIES.slice(0, 2)).mockRejectedValueOnce(new Error("pi-host is down")).mockResolvedValueOnce([])
-    const hook = renderHook(({ revision }) => useTaskTimeline("s1", revision), { initialProps: { revision: "a" } })
+    core.timeline
+      .mockResolvedValueOnce({ entries: ENTRIES.slice(0, 2), next: 200 })
+      .mockRejectedValueOnce(new Error("pi-host is down"))
+      .mockResolvedValueOnce({ entries: [], next: 200 })
+    const hook = renderHook(({ revision }) => useTaskTimeline("t1", revision, false), { initialProps: { revision: "a" } })
     await waitFor(() => expect(hook.result.current.entries).toHaveLength(2))
 
     hook.rerender({ revision: "b" })
@@ -134,6 +158,6 @@ describe("useTaskTimeline", () => {
 
     hook.rerender({ revision: "c" })
     await waitFor(() => expect(hook.result.current.error).toBe(""))
-    expect(api.listFactoryEntries).toHaveBeenLastCalledWith("s1", "e2")
+    expect(core.timeline).toHaveBeenLastCalledWith("t1", 200)
   })
 })

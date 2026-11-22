@@ -1,6 +1,6 @@
 """On-demand previews of a factory task's workspace, and where the browser reaches them.
 
-- Consumes the `preview` section of the workspace's `factory.yaml` (`lib.factory_workspace.load_factory_config`),
+- Consumes the `preview` section of the task worktree's `factory.yaml` (the factory core owns the rest of the file),
   `GIGACHAD_DATABASE_URL` (the server a preview's throwaway database is made on) and `GIGACHAD_PREVIEW_URL`, where
   the browser reaches the preview gate (default 127.0.0.1:30185)
 - Provides `start_preview`, `get_preview` and `stop_preview`: the processes of one task on loopback ports
@@ -21,6 +21,7 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 import fcntl
 import http.client
 import os
@@ -31,7 +32,7 @@ import signal
 import socket
 import subprocess
 import time
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 import urllib.error
 from urllib.parse import urlsplit
 import urllib.request
@@ -39,15 +40,13 @@ import urllib.request
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+import yaml
 
 from lib.db_schema import database_url
-from lib.factory_workspace import Argv, ConfigModel, load_factory_config
 from lib.upstream import upstream_url
 
-if TYPE_CHECKING:
-    from lib.factory import TaskRow
-
+CONFIG_NAME = "factory.yaml"
 PREVIEW_PORTS = range(8100, 8200)
 DEFAULT_PREVIEW_URL = "http://127.0.0.1:30185"
 LOOPBACK = "127.0.0.1"
@@ -67,11 +66,30 @@ _children: dict[int, subprocess.Popen] = {}
 
 
 class PreviewError(RuntimeError):
-    """A preview could not be started or stopped. The message says why."""
+    """A preview could not be started or stopped, or `factory.yaml` is invalid. The message says why."""
 
 
 class PreviewNotConfigured(LookupError):
     """The workspace's `factory.yaml` has no `preview` section."""
+
+
+@dataclass(frozen=True)
+class PreviewTask:
+    """The factory task a preview runs for, from the core's `tasks.get`: `id` keys its state, `worktree` is where its
+    processes run, `repo` (the primary checkout) fills `{repo_path}`."""
+
+    id: str
+    repo: str
+    worktree: str
+
+
+class ConfigModel(BaseModel):
+    """A part of `factory.yaml`. Keys this module does not know are ignored."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+
+Argv = Annotated[list[str], Field(min_length=1)]
 
 
 class Preview(BaseModel):
@@ -145,13 +163,13 @@ def through_gate(url: str) -> str:
     return f"{preview_gate_url()}{url.removeprefix(f'{parts.scheme}://{parts.netloc}')}"
 
 
-def start_preview(task: "TaskRow") -> Preview:
+def start_preview(task: PreviewTask) -> Preview:
     """Start the preview of *task* in its workspace and answer `starting` at once, `get_preview` tells when it serves.
 
     A preview that already starts or serves is answered as it is, a failed one is torn down and started again.
     `PreviewNotConfigured` without a `preview` section, `PreviewError` when a port, the database or a process fails.
     """
-    config = _preview_config(Path(task.cwd))
+    config = _preview_config(Path(task.worktree))
     with _locked():
         _reap()
         existing = _read_state(task.id)
@@ -184,7 +202,7 @@ def start_preview(task: "TaskRow") -> Preview:
             data_dir.mkdir(parents=True, exist_ok=True)
             _write_state(state)
             for name, argv, ready_url in commands:
-                state.processes.append(_spawn(name, argv, ready_url, Path(task.cwd), environment, directory / f"{name}.log"))
+                state.processes.append(_spawn(name, argv, ready_url, Path(task.worktree), environment, directory / f"{name}.log"))
                 _write_state(state)
         except OSError as exc:
             _tear_down(state)
@@ -217,13 +235,23 @@ def stop_preview(task_id: str) -> None:
 
 
 def _preview_config(workspace: Path) -> PreviewConfig:
-    section = load_factory_config(workspace).preview
+    """The `preview` section of the workspace's `factory.yaml`, placeholders as written."""
+    file = workspace / CONFIG_NAME
+    try:
+        document = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        document = {}
+    except yaml.YAMLError as exc:
+        raise PreviewError(f"{file} is invalid: {exc}") from exc
+    if not isinstance(document, dict):
+        raise PreviewError(f"{file} is invalid: it is not a mapping")
+    section = document.get("preview")
     if not section:
-        raise PreviewNotConfigured(f"{workspace / 'factory.yaml'} has no preview section")
+        raise PreviewNotConfigured(f"{file} has no preview section")
     try:
         return PreviewConfig.model_validate(section)
     except ValidationError as exc:
-        raise PreviewError(f"The preview section of {workspace / 'factory.yaml'} is invalid: {exc}") from exc
+        raise PreviewError(f"The preview section of {file} is invalid: {exc}") from exc
 
 
 def _state_root() -> Path:

@@ -336,7 +336,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         center: <TopBarSlot name="center">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
-        body: factoryItem ? <FactorySurface item={factoryItem} modelProps={modelProps} shellCommands={shellCommands} /> : chatBody,
+        body: factoryItem ? <FactorySurface item={factoryItem} /> : chatBody,
       }
     },
     learn: () => {

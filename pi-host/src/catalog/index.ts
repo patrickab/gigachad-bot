@@ -1,12 +1,11 @@
 /**
- * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, `@` file completion and the factory draft.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
  *   `profileOf` and `markProfile` for the supervisor
  */
-import { isAbsolute, join, resolve } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isAbsolute, resolve } from "node:path";
 import { PROFILES, type Host, type Profile } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
@@ -63,8 +62,8 @@ function limitParam(url: URL, fallback: number, max: number): number {
 }
 
 /**
- * `GET /sessions?cwd=&archived=0|1&profile=&factory=0|1`, every cwd's sessions without `cwd`, every profile's without
- * `profile`. `factory=1` adds the factory root's sessions (the factory's own listing); without it none of them.
+ * `GET /sessions?cwd=&archived=0|1&profile=`, every cwd's sessions without `cwd`, every profile's without `profile`.
+ * Never a factory-root session.
  */
 async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Response> {
   const rawCwd = url.searchParams.get("cwd");
@@ -73,8 +72,7 @@ async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Res
   const profile = url.searchParams.get("profile") ?? undefined;
   if (profile !== undefined && !PROFILES.includes(profile as Profile)) return fail(400, "invalid_profile");
   const archived = url.searchParams.get("archived") === "1";
-  const factory = url.searchParams.get("factory") === "1";
-  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined, factory) });
+  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined) });
 }
 
 /**
@@ -91,33 +89,6 @@ async function handleFiles(url: URL, host: Host): Promise<Response> {
     return Response.json({ files: listed.map((path) => ({ path, score: 0 })) });
   }
   return Response.json({ files: rankFiles(candidates, query, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) });
-}
-
-/** Where the factory plugin comes from. It is a Pi user extension, not part of this repo. */
-export const FACTORY_PLUGIN_SOURCE = "https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory";
-
-/** The factory plugin's generator module in Pi's user extensions. Loaded on first use, so a pi-host started without the plugin finds it once installed. */
-function factoryPluginPath(): string {
-  return join(getAgentDir(), "extensions", "factory", "draft.ts");
-}
-
-/**
- * `GET /factory/draft?cwd=`: the factory plugin's draft `factory.yaml` for the checkout at `cwd`, nothing is written.
- * 503 `factory_plugin_missing` with a `message` naming the plugin's source when it is not installed.
- */
-async function handleFactoryDraft(url: URL, host: Host): Promise<Response> {
-  const cwd = await validCwd(host, url.searchParams.get("cwd"));
-  if (!cwd) return fail(400, "invalid_cwd");
-  const path = factoryPluginPath();
-  let plugin: { initDraft: (root: string) => { text: string; source: string } };
-  try {
-    plugin = await import(path);
-  } catch {
-    const message = `The factory plugin is not installed (${path}). Install it from ${FACTORY_PLUGIN_SOURCE}`;
-    return Response.json({ error: "factory_plugin_missing", message }, { status: 503 });
-  }
-  const { text, source } = plugin.initDraft(cwd);
-  return Response.json({ draft: text, source });
 }
 
 /** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first, factory tasks left out. */
@@ -207,7 +178,6 @@ async function handleEntries(url: URL, sessionPath: string, host: Host): Promise
 export async function handleCatalog(request: Request, url: URL, live: LiveSessions, host: Host): Promise<Response | undefined> {
   if (url.pathname === "/sessions" && request.method === "GET") return handleList(url, live, host);
   if (url.pathname === "/files" && request.method === "GET") return handleFiles(url, host);
-  if (url.pathname === "/factory/draft" && request.method === "GET") return handleFactoryDraft(url, host);
   if (url.pathname === "/search" && request.method === "GET") return handleSearch(url, live, host);
   const match = SESSION_ACTION.exec(url.pathname);
   if (!match) return undefined;

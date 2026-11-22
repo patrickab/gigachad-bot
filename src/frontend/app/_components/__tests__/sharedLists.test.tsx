@@ -22,7 +22,7 @@ const api = vi.hoisted(() => ({
   loadTemplateSets: vi.fn(async () => [{ name: "deck-set", label: "Deck" }]),
   fileRootTree: vi.fn<() => Promise<RootTree>>(),
   fetchWorktrees: vi.fn(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
-  fetchFactoryRepos: vi.fn(async () => []),
+  callFactory: vi.fn(async () => ({ repos: [] })),
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), ...api }))
 vi.mock("@/lib/backend/syncStream", () => ({

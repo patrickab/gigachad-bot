@@ -4,18 +4,23 @@ import { deviceHeaders } from "../deviceId"
 import { createSSEStream } from "../sse"
 import type { SSEStreamResult } from "../sse"
 
-/** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
+/**
+ * Carries the HTTP status so callers can tell a stale-revision rejection from a real failure, and the `code` and
+ * `detail` of a `{detail: {code, message, detail?}}` body (the factory core's refusals).
+ */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly detail?: Record<string, unknown>) {
     super(message)
     this.name = "ApiError"
   }
 }
 
-/** Throws ApiError, preferring FastAPI's `detail` (string or validation list) over the status text. */
+/** Throws ApiError, preferring FastAPI's `detail` (string, validation list or `{code, message}`) over the status text. */
 async function ensureOk(res: Response): Promise<Response> {
   if (!res.ok) {
     let message = res.statusText
+    let code: string | undefined
+    let extra: Record<string, unknown> | undefined
     try {
       const body = await res.json()
       if (body && typeof body === "object" && "detail" in body) {
@@ -24,6 +29,10 @@ async function ensureOk(res: Response): Promise<Response> {
           message = detail.map((d: { msg?: string }) => d.msg || String(d)).join("; ")
         } else if (typeof detail === "string") {
           message = detail
+        } else if (detail && typeof detail === "object" && typeof detail.message === "string") {
+          message = detail.message
+          if (typeof detail.code === "string") code = detail.code
+          if (detail.detail && typeof detail.detail === "object" && !Array.isArray(detail.detail)) extra = detail.detail
         } else {
           message = String(detail)
         }
@@ -31,7 +40,7 @@ async function ensureOk(res: Response): Promise<Response> {
     } catch {
       // not json, use status text
     }
-    throw new ApiError(message, res.status)
+    throw new ApiError(message, res.status, code, extra)
   }
   return res
 }

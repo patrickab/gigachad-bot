@@ -64,9 +64,8 @@ const api = vi.hoisted(() => ({
   deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
   deletePiSession: vi.fn<typeof import("@/lib/backend/api").deletePiSession>(async () => {}),
   pinPiSession: vi.fn<typeof import("@/lib/backend/api").pinPiSession>(),
-  listFactoryRepos: vi.fn<typeof import("@/lib/backend/api").listFactoryRepos>(async () => []),
+  callFactory: vi.fn<(action: string, params?: Record<string, unknown>) => Promise<unknown>>(async () => ({ repos: [] })),
   exportLearnSession: vi.fn<typeof import("@/lib/backend/api").exportLearnSession>(),
-  openFactoryRepo: vi.fn<typeof import("@/lib/backend/api").openFactoryRepo>(),
   createTexProjectFile: vi.fn<typeof import("@/lib/backend/api").createTexProjectFile>(),
   promoteToTexProject: vi.fn<typeof import("@/lib/backend/api").promoteToTexProject>(),
 }))
@@ -902,28 +901,34 @@ describe("Project navigation", () => {
     pi.repositories = piRepositories("known", "fresh", "broken")
     pi.sessions = [piSession("a", "/git/known"), piSession("b", "/git/fresh"), piSession("c", "/git/broken")]
     login.hostAccess = true
-    api.listFactoryRepos.mockResolvedValue([{ name: "known-repo", path: "/git/known" }])
-    api.openFactoryRepo.mockResolvedValueOnce({ name: "fresh", path: "/git/fresh" }).mockRejectedValueOnce(new Error("Not a git checkout: /git/broken"))
+    let added = 0
+    api.callFactory.mockImplementation(async (action, params) => {
+      if (action === "repos.list") return { repos: ["/git/known"] }
+      added += 1
+      if (params?.repo === "/git/broken") throw new Error("/git/broken is not inside a git repository")
+      return { repo: "/git/fresh", repos: ["/git/known", "/git/fresh"] }
+    })
+    const adds = () => api.callFactory.mock.calls.filter(([action]) => action === "repos.add")
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      await waitFor(() => expect(api.listFactoryRepos).toHaveBeenCalled())
+      await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("repos.list"))
       await act(async () => {})
 
       fireEvent.click(view.getByRole("button", { name: "Open factory for known" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "/git/known", projectSlug: null }))
-      expect(api.openFactoryRepo).not.toHaveBeenCalled()
+      expect(added).toBe(0)
 
       fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "/git/fresh", projectSlug: null }))
-      expect(api.openFactoryRepo).toHaveBeenCalledWith("/git/fresh")
+      expect(adds()).toEqual([["repos.add", { repo: "/git/fresh" }]])
 
       fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenCalledTimes(3))
-      expect(api.openFactoryRepo).toHaveBeenCalledTimes(1)
+      expect(adds()).toHaveLength(1)
 
       fireEvent.click(view.getByRole("button", { name: "Open factory for broken" }))
-      expect(await view.findByRole("alert")).toHaveTextContent("Not a git checkout: /git/broken")
+      expect(await view.findByRole("alert")).toHaveTextContent("/git/broken is not inside a git repository")
       expect(onItemOpen).toHaveBeenCalledTimes(3)
 
       login.hostAccess = false

@@ -1,7 +1,9 @@
-// A task's changes. Consumes `getFactoryTaskDiff` (one unified diff of the task against its base), provides
-// `parseTaskDiff` (the diff as files the diff components render) and `useTaskDiff` (the files, refetched on demand).
+// A task's changes. Consumes the core's `tasks.diff` (its changed files with line counts and one unified diff against
+// its base), provides `parseTaskDiff` (the core's files with their diff sections, as the diff components render them)
+// and `useTaskDiff` (the files, refetched on demand).
 import { useEffect, useState } from "react"
-import { ApiError, getFactoryTaskDiff } from "@/lib/backend/api"
+import { callFactory } from "@/lib/backend/api"
+import type { FactoryTaskDiff } from "@/lib/domain/factory"
 import type { FilePatch } from "@/features/editor/diff/useRootDiff"
 import type { DiffStatus } from "@/lib/domain/files"
 import { parsePatch } from "@/lib/diff"
@@ -11,17 +13,17 @@ import { errorMessage } from "@/lib/utils"
 export interface TaskDiffFile {
   path: string
   status: DiffStatus
-  /** Line counts, null for a file without a text diff (binary, mode change). */
+  /** Line counts as the core counts them (0 for a binary file). */
   added: number | null
   removed: number | null
-  /** The file's section of the diff text: an unchanged section keeps its parsed lines across refetches. */
+  /** The file's section of the diff text, "" when the diff was cut before it: an unchanged file keeps its parsed lines across refetches. */
   stamp: string
   patch: FilePatch
 }
 
 const FILE_HEADER = "diff --git "
 
-/** Path after an `a/` or `b/` prefix of a `---`, `+++` or rename line, undefined for `/dev/null`. */
+/** Path after an `a/` or `b/` prefix of a `---` or `+++` line, undefined for `/dev/null`. */
 function headerPath(section: string, prefix: string): string | undefined {
   const line = section.split("\n").find((candidate) => candidate.startsWith(prefix))
   const path = line?.slice(prefix.length).split("\t")[0]
@@ -30,7 +32,7 @@ function headerPath(section: string, prefix: string): string | undefined {
 
 /** A section's path: the new side, else the old one, else one half of `diff --git a/<path> b/<path>` (a binary file names no sides). */
 function sectionPath(section: string): string {
-  const named = headerPath(section, "+++ ") ?? headerPath(section, "--- ") ?? headerPath(section, "rename to ")
+  const named = headerPath(section, "+++ ") ?? headerPath(section, "--- ")
   if (named !== undefined) return named
   const both = section.split("\n", 1)[0].slice(FILE_HEADER.length)
   return both.slice("a/".length, (both.length - 1) / 2)
@@ -41,57 +43,65 @@ function sectionStatus(section: string): DiffStatus {
   const header = section.split("\n@@", 1)[0]
   if (/^new file mode /m.test(header)) return "added"
   if (/^deleted file mode /m.test(header)) return "deleted"
-  if (/^rename from /m.test(header)) return "renamed"
   return "modified"
 }
 
-function parseSection(section: string): TaskDiffFile {
-  const parsed = parsePatch(section)
+function fileOf({ path, added, removed }: FactoryTaskDiff["files"][number], section: string | undefined): TaskDiffFile {
+  const parsed = section === undefined ? [] : parsePatch(section)
   const lines = parsed.length > 0 ? parsed : null
-  const count = (kind: "added" | "removed") => lines ? lines.filter((line) => line.kind === kind).length : null
-  return { path: sectionPath(section), status: sectionStatus(section), added: count("added"), removed: count("removed"), stamp: section, patch: { lines, failed: false, stamp: section } }
+  const stamp = section ?? ""
+  return { path, status: section === undefined ? "modified" : sectionStatus(section), added, removed, stamp, patch: { lines, failed: false, stamp } }
 }
 
 /**
- * The files of a `git diff` text, in its order. A file whose section equals the one in `previous` is that same object,
- * so its rendered lines are not rebuilt.
+ * The core's `files` of a `tasks.diff` answer, in its order, each with its section of the diff (the core takes the
+ * diff without renames, so one path names one section). A file equal to one in `previous` (path, counts, section) is
+ * that same object, so its rendered lines are not rebuilt.
  */
-export function parseTaskDiff(diff: string, previous: readonly TaskDiffFile[] = []): TaskDiffFile[] {
-  const known = new Map(previous.map((file) => [file.stamp, file]))
-  return diff
+export function parseTaskDiff({ diff, files }: Pick<FactoryTaskDiff, "diff" | "files">, previous: readonly TaskDiffFile[] = []): TaskDiffFile[] {
+  const sections = new Map(diff
     .split(/^(?=diff --git )/m)
     .filter((section) => section.startsWith(FILE_HEADER))
-    .map((section) => known.get(section) ?? parseSection(section))
+    .map((section) => [sectionPath(section), section]))
+  const known = new Map(previous.map((file) => [file.path, file]))
+  return files.map((file) => {
+    const section = sections.get(file.path)
+    const shown = known.get(file.path)
+    const same = shown && shown.stamp === (section ?? "") && shown.added === file.added && shown.removed === file.removed
+    return same ? shown : fileOf(file, section)
+  })
 }
 
 /**
  * The files of task `taskId`'s diff, undefined until the first answer.
  *
  * - Read on mount and again whenever `revision` changes, the shown files stay until the new ones arrive
- * - A task without a diff base yet (404, it is still starting) has no files and no error
+ * - A task that has not `started` (no factory state yet) has no diff base: no files, no read, no error
  */
-export function useTaskDiff(taskId: string, revision: number): { files: TaskDiffFile[] | undefined; error: string } {
+export function useTaskDiff(taskId: string, revision: number, started: boolean): { files: TaskDiffFile[] | undefined; error: string } {
   const [files, setFiles] = useState<TaskDiffFile[]>()
   const [error, setError] = useState("")
+  if (!started && files === undefined) setFiles([])
 
   useEffect(() => {
+    if (!started) return
     let cancelled = false
-    getFactoryTaskDiff(taskId).then(
-      ({ diff }) => {
+    callFactory<FactoryTaskDiff>("tasks.diff", { id: taskId }).then(
+      (answer) => {
         if (cancelled) return
-        setFiles((shown) => parseTaskDiff(diff, shown))
+        setFiles((shown) => parseTaskDiff(answer, shown))
         setError("")
       },
       (cause: unknown) => {
         if (cancelled) return
         setFiles((shown) => shown ?? [])
-        setError(cause instanceof ApiError && cause.status === 404 ? "" : errorMessage(cause, "Could not load the changes"))
+        setError(errorMessage(cause, "Could not load the changes"))
       },
     )
     return () => {
       cancelled = true
     }
-  }, [taskId, revision])
+  }, [taskId, revision, started])
 
   return { files, error }
 }

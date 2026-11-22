@@ -1,7 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
 import { fileForm, post, request, requestVoid } from "./http"
-import type { FactoryState } from "@/lib/domain/factory"
 
 export interface PiRepository {
   name: string
@@ -33,8 +32,6 @@ export interface PiSessionInfo {
   archived: boolean
   /** Session profile (G5): coding tabs, or a workbench `document` chat. Sessions written before profiles are `coding`. */
   profile?: PiProfile
-  /** Newest factory state of a factory task's session, null for any other session. */
-  factory?: FactoryState | null
 }
 
 /** What a session runs as: a coding agent in a repo, or a workbench chat about one document. */
@@ -64,12 +61,11 @@ export async function fetchPiRepositories(): Promise<PiRepository[]> {
   return request<PiRepository[]>("/pi/repos")
 }
 
-/** Sessions newest first: of `repo`, of every repo when omitted, the archived ones with `archived`, factory tasks only with `factory`. */
-export async function fetchPiSessions(repo?: string, options: { archived?: boolean; factory?: boolean } = {}): Promise<PiSessionInfo[]> {
+/** Sessions newest first: of `repo`, of every repo when omitted, the archived ones with `archived`. */
+export async function fetchPiSessions(repo?: string, options: { archived?: boolean } = {}): Promise<PiSessionInfo[]> {
   const query = new URLSearchParams()
   if (repo !== undefined) query.set("repo", repo)
   if (options.archived) query.set("archived", "true")
-  if (options.factory) query.set("factory", "true")
   const search = query.toString()
   const { sessions } = await request<{ sessions: PiSessionInfo[] }>(`/pi/sessions${search ? `?${search}` : ""}`)
   return sessions

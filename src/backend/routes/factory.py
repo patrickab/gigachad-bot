@@ -1,144 +1,82 @@
-"""`/api/factory/*`: the agent factory for logins with host access (`backend.identity.HOST_CAPABILITY`).
+"""`/api/factory/*`: the factory core's actions for logins with host access (`backend.identity.HOST_CAPABILITY`).
 
-- Consumes `lib.factory`, which drives each task's Pi session through `lib.pi_host` and keeps the factory's tables
-- `repo` is the absolute path of a registered primary checkout (`RepoInfo.path`), `RepoInfo.name` is for display
-- Provides repos, per-repo settings, local branches, the repo's `factory.yaml` (a draft to write once) and tasks: start,
-  list, read, diff, approve, retry, cancel, message, delete
-- A task's timeline is not served here: the browser reads `GET /api/pi/sessions/{id}/entries?customType=factory-`
-- Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout or an unknown branch 400, a
-  `factory.yaml` that is no config 400, an existing one or a task at work 409, a workspace, git, start or preview
-  failure 502 with its message, pi-host unreachable or the factory plugin missing 503, pi-host's refusals passed on
+- Consumes `lib.pi_host.factory_call`/`factory_actions`: pi-host runs the action in the factory plugin's core, which owns
+  repos, settings, `factory.yaml`, tasks and their runners. This backend keeps no factory state
+- Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
+- The one behaviour of its own: after a successful `tasks.remove` it stops the removed task's preview
+  (`lib.factory_preview`, keyed by the result's `removed`), so a refused removal keeps the preview
+- A core refusal answers `{"detail": {"code", "message", "detail"?}}` (`detail` the core's hint, e.g. `{"force": true}`)
+  with 400 `invalid`, 404 `not_found`, 409 `busy`/`refused`, 500 `failed`; 503 `factory_plugin_missing`; a preview that
+  does not stop after the removal 502 `failed`. pi-host unreachable 503, an unknown answer 502 (`call_upstream`)
 
 Host code execution: `host_access_only`.
 """
 
+import asyncio
 from collections.abc import Awaitable
-from typing import Annotated
+from typing import Any
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict
 
-from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
 from backend.routes.upstream import call_upstream
-from lib import factory, factory_preview, pi_host
-from lib.factory_workspace import WorkspaceError
-from lib.git import GitError
-from lib.postgres_pool import get_postgres_pool
+from lib import factory_preview, pi_host
 
 router = APIRouter(prefix="/api/factory", tags=["factory"], dependencies=[host_access_only("the factory")])
 
-# Task ids are lowercase alphanumerics.
-TaskId = Annotated[str, Path(pattern=r"^[a-z0-9]{8,32}$")]
+FACTORY_ERROR_STATUS: dict[pi_host.FactoryErrorCode, int] = {
+    "invalid": 400,
+    "not_found": 404,
+    "busy": 409,
+    "refused": 409,
+    "failed": 500,
+}
 
 
-def get_factory_store() -> factory.FactoryStore:
-    return factory.FactoryStore(get_postgres_pool())
+class FactoryCall(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    action: str
+    params: dict[str, Any] = {}
 
 
-Store = Annotated[factory.FactoryStore, Depends(get_factory_store)]
+def _error(status: int, code: str, message: str, detail: dict[str, Any] | None = None) -> HTTPException:
+    body: dict[str, Any] = {"code": code, "message": message}
+    if detail is not None:
+        body["detail"] = detail
+    return HTTPException(status_code=status, detail=body)
 
 
-async def _call[Result](request: Awaitable[Result]) -> Result:
-    """Await a `lib.factory` call, mapping its failures and pi-host's (`call_upstream`) to HTTP."""
-    with http_errors(
-        (factory.UnknownRepo, 404, None),
-        (factory.UnknownTask, 404, None),
-        (factory.NotACheckout, 400, None),
-        (factory.UnknownBranch, 400, None),
-        (factory.TaskBusy, 409, None),
-        (factory.ConfigExists, 409, None),
-        (factory.InvalidConfig, 400, None),
-        (factory.StartFailed, 502, None),
-        (pi_host.FactoryPluginMissing, 503, None),
-        (WorkspaceError, 502, None),
-        (GitError, 502, None),
-        (factory_preview.PreviewError, 502, None),
-    ):
+async def factory_result[Result](request: Awaitable[Result]) -> Result:
+    """Await a factory call, its refusals as `{"detail": {"code", "message", "detail"?}}`, pi-host's failures as
+    `call_upstream` maps them."""
+    try:
         return await call_upstream(request)
+    except pi_host.FactoryCallError as exc:
+        raise _error(FACTORY_ERROR_STATUS[exc.code], exc.code, exc.message, exc.detail) from exc
+    except pi_host.FactoryPluginMissing as exc:
+        raise _error(503, "factory_plugin_missing", str(exc)) from exc
 
 
-@router.get("/repos")
-async def get_repos(store: Store) -> list[factory.RepoInfo]:
-    return await _call(factory.list_repos(store))
+async def _stop_removed_preview(task_id: str) -> None:
+    """Stop the preview of the task the core just removed."""
+    try:
+        await asyncio.to_thread(factory_preview.stop_preview, task_id)
+    except factory_preview.PreviewError as exc:
+        raise _error(502, "failed", f"Task {task_id} was removed, its preview did not stop: {exc}") from exc
 
 
-@router.post("/repos")
-async def post_repo(body: factory.NewRepo, store: Store) -> factory.RepoInfo:
-    """Register the primary git checkout at `path`, repeating a known path answers the same repo."""
-    return await _call(factory.register_repo(store, body.path))
+@router.post("/call")
+async def post_call(body: FactoryCall) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
+    """Run the core action *action* with *params*; the answer is its result."""
+    result = await factory_result(pi_host.factory_call(body.action, body.params))
+    if body.action == "tasks.remove":
+        await _stop_removed_preview(result["removed"])
+    return result
 
 
-@router.get("/settings")
-async def get_settings(repo: str, store: Store) -> factory.RepoSettings:
-    return await _call(factory.repo_settings(store, repo))
-
-
-@router.get("/branches")
-async def get_branches(repo: str, store: Store) -> list[str]:
-    return await _call(factory.repo_branches(store, repo))
-
-
-@router.put("/settings")
-async def put_settings(repo: str, body: factory.RepoSettings, store: Store) -> factory.RepoSettings:
-    return await _call(factory.save_repo_settings(store, repo, body))
-
-
-@router.get("/config")
-async def get_config(repo: str, store: Store) -> factory.RepoConfig:
-    """Whether the repo has a `factory.yaml`, else a generated draft of one (nothing is written)."""
-    return await _call(factory.repo_config(store, repo))
-
-
-@router.put("/config")
-async def put_config(repo: str, body: factory.NewConfig, store: Store) -> factory.RepoConfig:
-    """Write `factory.yaml` into the repo's main checkout, uncommitted. 409 when the file exists, 400 when the text is no config."""
-    return await _call(factory.save_repo_config(store, repo, body.content))
-
-
-@router.get("/tasks")
-async def get_tasks(repo: str, store: Store) -> list[factory.Task]:
-    """The tasks of *repo*, newest first, each with its `factory` state and `live` status."""
-    return await _call(factory.list_tasks(store, repo))
-
-
-@router.post("/tasks")
-async def post_task(body: factory.NewTask, store: Store) -> factory.Task:
-    """Start a task: its workspace, a coding session in it and `/factory start`. A start the session does not take
-    answers 502 and leaves nothing behind."""
-    return await _call(factory.create_task(store, body))
-
-
-@router.get("/tasks/{task_id}")
-async def get_task(task_id: TaskId, store: Store) -> factory.Task:
-    return await _call(factory.read_task(store, task_id))
-
-
-@router.get("/tasks/{task_id}/diff")
-async def get_diff(task_id: TaskId, store: Store) -> factory.TaskDiff:
-    """The task's changes as a unified diff against its diff base, untracked files included."""
-    return await _call(factory.task_diff(store, task_id))
-
-
-@router.post("/tasks/{task_id}/messages")
-async def post_message(task_id: TaskId, body: factory.NewMessage, store: Store) -> factory.Task:
-    """Hand a message to the task's coder. 409 while the task merges."""
-    return await _call(factory.message_task(store, task_id, body.text))
-
-
-@router.post("/tasks/{task_id}/session")
-async def post_session(task_id: TaskId, store: Store) -> factory.Task:
-    """Open the task's Pi session when it is not live, without a prompt, so the client can attach to it."""
-    return await _call(factory.open_task_session(store, task_id))
-
-
-@router.post("/tasks/{task_id}/{command}")
-async def post_command(task_id: TaskId, command: factory.TaskCommand, store: Store) -> factory.Task:
-    """Approve, retry or cancel the task."""
-    return await _call(factory.command_task(store, task_id, command))
-
-
-@router.delete("/tasks/{task_id}", status_code=204)
-async def delete_task(task_id: TaskId, store: Store) -> None:
-    """Remove the task with its preview, session, worktree and branch. 409 while it is running or merging (interrupted
-    is removed), 502 when its preview does not stop."""
-    await _call(factory.delete_task(store, task_id))
+@router.get("/actions")
+async def get_actions() -> dict[str, Any]:
+    """The core's actions: name -> `{summary, params (JSON schema), mutates}`."""
+    return {"actions": await factory_result(pi_host.factory_actions())}

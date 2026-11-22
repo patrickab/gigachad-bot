@@ -6,32 +6,52 @@ import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
-import { fetchModels, getFactorySettings, listFactoryBranches } from "@/lib/backend/api"
+import { fetchModels } from "@/lib/backend/api"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { AGENTS, BRANCH_DEFAULT, BranchSelect, branchOrDefault, factoryModelIds, MERGE_OPTIONS, PillChoice, SwitchChoice } from "./FactorySettingsDialog"
+import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, loadBranchNames, loadRepoSettings, MERGE_OPTIONS, PillChoice, SwitchChoice } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
+import type { FactoryMergeMode, FactoryModels, FactoryResolvedSettings, FactoryTaskOverrides } from "@/lib/domain/factory"
 import type { ModelsResponse } from "@/lib/domain/types"
 
 const INHERIT = ""
+
+/** What the user picked in the dialog, null (or a missing model) where the repo's setting applies. */
+interface TaskChoices {
+  branch: string | null
+  merge: FactoryMergeMode | null
+  review: boolean | null
+  models: FactoryModels
+}
+
+/** The overrides of a new task: only the choices that differ from the repo's `settings`. */
+export function changedOverrides(settings: FactoryResolvedSettings, choices: TaskChoices): FactoryTaskOverrides {
+  const models = Object.fromEntries(Object.entries(choices.models).filter(([agent, model]) => model !== settings.models[agent as keyof FactoryModels]))
+  return {
+    ...(choices.branch !== null && choices.branch !== settings.branch ? { branch: choices.branch } : {}),
+    ...(choices.merge !== null && choices.merge !== settings.merge ? { merge: choices.merge } : {}),
+    ...(choices.review !== null && choices.review !== settings.review ? { review: choices.review } : {}),
+    ...(Object.keys(models).length > 0 ? { models } : {}),
+  }
+}
 
 /**
  * Modal that starts a factory task in the repo at path `repo` from a title and a request, in a worktree off a branch
  * it also merges into.
  *
  * - Start closes the dialog at once: the start runs on as a launch on the board (`launchTask`), which shows a refusal
- * - Everything starts at the repo's settings. The branch and models are sent only when picked ("Repo default" names
- *   the setting), the merge mode only when changed
+ * - Everything starts at the repo's settings. Only a choice that differs from them is sent as an override ("Repo
+ *   default" names the setting)
  */
 export function NewTaskDialog({ repo, open, onClose }: {
   repo: string
   open: boolean
   onClose: () => void
 }) {
-  const [settings, setSettings] = useState<FactorySettings | null>(null)
+  /** The repo's settings over the defaults: what the task runs with where the dialog sends nothing. */
+  const [settings, setSettings] = useState<FactoryResolvedSettings | null>(null)
   const [title, setTitle] = useState("")
   const [request, setRequest] = useState("")
   /** The branch the user picked, empty for the repo's setting. */
@@ -60,22 +80,17 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setError("")
   })
 
-  const loadSettings = useCallback(() => getFactorySettings(repo), [repo])
+  const loadSettings = useCallback(async () => (await loadRepoSettings(repo)).resolved, [repo])
   useLoadWhile(open, loadSettings, setSettings, (cause) => setError(errorMessage(cause, "Could not load the settings")))
-  const loadBranches = useCallback(() => listFactoryBranches(repo), [repo])
+  const loadBranches = useCallback(() => loadBranchNames(repo), [repo])
   useLoadWhile(open, loadBranches, setBranches, (cause) => setError(errorMessage(cause, "Could not load the branches")))
   useLoadWhile(open, fetchModels, setCatalog, (cause) => setError(errorMessage(cause, "Could not load Pi models")))
 
   const canSubmit = settings !== null && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
-    if (!canSubmit) return
-    const picked = branchOrDefault(branch)
-    void launchTask({ repo, title: title.trim(), request: request.trim(), overrides: {
-      review,
-      ...(picked ? { branch: picked } : {}),
-      ...(mergeChoice !== null ? { merge: mergeChoice } : {}),
-      ...(Object.keys(models).length > 0 ? { models } : {}),
-    } })
+    if (!canSubmit || settings === null) return
+    const overrides = changedOverrides(settings, { branch: branchOrDefault(branch), merge: mergeChoice, review: reviewChoice, models })
+    void launchTask({ repo, title: title.trim(), request: request.trim(), ...(Object.keys(overrides).length > 0 ? { overrides } : {}) })
     onClose()
   }
 
@@ -136,7 +151,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
           <BranchSelect
             label="Branch"
             value={branch}
-            fallback={`Repo default (${settings?.branch ?? BRANCH_DEFAULT})`}
+            fallback={`Repo default${settings ? ` (${settings.branch})` : ""}`}
             branches={branches}
             disabled={settings === null}
             onChange={setBranch}

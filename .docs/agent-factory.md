@@ -8,45 +8,48 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 - **Not in this repo.** The factory plugin is a Pi user extension in the owner's dotfiles:
   [`~/.os/chezmoi/dot_pi/agent/extensions/factory/`](https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory), deployed by chezmoi to
   `~/.pi/agent/extensions/factory/`. Edit the source in `~/.os`, never the deployed copy.
-- **Why**: it runs in any Pi session on any repo (`/factory init`, `/factory start`), with or without gigachad.
-  gigachad only starts and monitors tasks on top of it.
+- **Why**: it runs in any Pi session on any repo (the `factory` tool, `/factory` commands), with or without gigachad.
+  It is the factory core: repos, settings, `factory.yaml`, tasks, their runners and files. gigachad is a thin client.
 - **Factory tasks of this repo cannot change it.** A plugin change is a commit in `~/.os` (tests: `bun test` and
   `bun run types` in the plugin's directory), then `chezmoi apply`. A change to the contract below needs a commit in
   both repos.
-- **Contract with gigachad**: the commands (`/factory start|approve|retry|cancel|init`), the `factory-*` session
-  entries (`.docs/architecture.md`, "Agent factory") and `draft.ts`'s `initDraft(root)`, which pi-host imports from
-  the installed plugin.
+- **Contract with gigachad**: the core's actions (`core.ts`: `ACTIONS`, `callAction`, `TaskView`, `TimelineEntry`,
+  see the plugin's README), which pi-host imports from the installed plugin, and the `preview` setting the core stores
+  for gigachad without acting on it.
 - **Not installed**: pi-host answers `factory_plugin_missing`, the board and a failed start name the link above.
 
 ## Parts
 
-- **Backend** (`src/lib/factory.py`, `routes/factory.py`): repos and their settings, a task's start (workspace, session,
-  `/factory start`), list, diff, commands, messages, deletion. Stores no state: a task's state is its session's last
-  `factory-state` entry, which pi-host reports.
+- **Core** (the plugin's `core.ts`): every factory feature as an action over plain JSON (`repos.*`, `branches.list`,
+  `settings.get|set`, `config.get|write`, `tasks.list|get|timeline|diff|start|approve|retry|cancel|remove|message`,
+  host-only `tasks.import`). A detached runner (`bun runner.ts`, `pi --mode rpc`) holds every task, whoever started it.
+  State: `<agent dir>/factory/` (task records, per-repo settings files, task sessions).
+- **pi-host**: `POST /factory/call {action, params}` and `GET /factory/actions` run the core in-process (imported
+  again when `core.ts`'s mtime changes; a change in another plugin module needs a pi-host restart). A runner it starts
+  inherits pi-host's environment, as a terminal-started task inherits the shell's. It never opens or prompts a factory
+  session; a change of a task session, record or runner lock under `<agent dir>/factory/` sends `sessions_changed`.
+- **Runners and restarts**: under systemd the plugin starts a runner through `systemd-run --user --scope`, outside
+  pi-host's unit, so a pi-host restart leaves it running. `redeploy.sh` still counts live runners as running
+  sessions and does not restart pi-host while one runs.
+- **Backend** (`routes/factory.py`, `lib/pi_host.py`): `POST /api/factory/call` and `GET /api/factory/actions`, a pass
+  through (a refusal keeps the core's `detail`). Its own parts: previews (stopped after a successful `tasks.remove`)
+  and the one-time move of the old Postgres rows (`lib/factory_migration.py`). It stores no factory state.
 - **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.
   - `index.ts` session hooks and commands, `pipeline.ts` round and merge control flow, `merge.ts` rebase and merge,
     `queue.ts` merge queue, `review.ts` reviewer child, `config.ts` `factory.yaml`, `state.ts` entries and feedback.
-- **pi-host**: spawns and supervises the sessions. Its session list carries each task's `factory` state and `usage`,
-  its entries endpoint the timeline (`?customType=factory-&assistant=1`).
-- **Where sessions live**:
-  - A new task's session file goes to `<agent dir>/factory/sessions/<repo dir name>/` (agent dir:
-    `PI_CODING_AGENT_DIR`, default `~/.pi/agent`), one folder per repository, apart from the user's Pi sessions:
-    `pi -r` never looks there. `POST /sessions` with `factoryRepo` (the repo's path) puts it there, the session still
-    runs in the task's worktree.
-  - pi-host lists that root only with `GET /sessions?factory=1` (the backend's task list), finds its sessions by id and
-    never archives them (409 `factory`). Plain listings, `continue` and `/search` leave them out.
-  - Older tasks keep their files in Pi's normal root, the `factory=1` listing covers both. `GET /api/pi/sessions` drops
-    sessions with a `factory` state unless `factory=true` (the factory board's store list), so the session picker and
-    the sidebar never show a task.
-- **Frontend** (`src/frontend/features/factory/`): board, task view, timeline, settings.
+- **Where sessions live**: `<agent dir>/factory/sessions/<repo dir name>/` (agent dir: `PI_CODING_AGENT_DIR`, default
+  `~/.pi/agent`), apart from the user's Pi sessions. Older tasks keep their files in Pi's normal root;
+  `GET /api/pi/sessions` drops every session with a `factory` state, so the session picker and sidebar never show a task.
+- **Frontend** (`src/frontend/features/factory/`): board, task view (timeline plus a message box: `tasks.message`),
+  settings; all through `callFactory(action, params)`.
 - **Repo** (`factory.yaml`, `.factory/agents/{coder,reviewer}.md`): hooks, gates, protected paths, preview, role
   prompts. Read from the task's base commit, never from the tree the coder edits.
 
 ## Lifecycle
 
-1. **Start**: a worktree (`agent-worktree`, branch `<title-slug>-<id8>`) off the task's branch, which it also merges
-   into. The session opens there and gets `/factory start`. A task never runs in the repo's main checkout.
+1. **Start** (`tasks.start`): the core makes a worktree off the task's branch, which it also merges into, runs
+   `hooks.after_create` and spawns the task's runner. A task never runs in the repo's main checkout.
 2. **Rounds**: coder turn → `hooks.after_code` → `gates` → protected-path check → review (when on, off by default).
    A problem goes back to the coder as feedback and opens the next round, up to `maxRounds`. The tests run only after
    that, in the merge queue: a round the reviewer rejects costs no test run.
@@ -120,11 +123,18 @@ One per repository, shared by every task's session through ticket files in `<git
 
 ## Settings
 
-Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`review`, default `review`), `max_rounds`
-(default 3), `review` (default off), `preview`, `models` per role (`coder`, `reviewer`), `branch` (the one a task
-starts from and merges into, unset: the repo's default branch, origin's `HEAD`, else `main`, else `master`). The
-new-task dialog shows them at the repo's values: a model per role (the reviewer's only with review on), merge, review,
-the branch. A task keeps the settings it started with.
+Per repo in the core (`settings.get|set`, one file per repo, which also registers it), overridable per task:
+`merge`, `maxRounds`, `review`, `models` per role (`coder`, `reviewer`), `branch`; defaults and resolution are the
+core's (`settings.get` answers `{stored, resolved, defaults}`). `preview` (boolean) is stored there for gigachad only.
+A task keeps the settings it started with.
+
+- **Moved from Postgres**: at backend start, each row of `factory_repo_settings` / `factory_tasks` not yet marked in
+  `migrated_at` moves: a repo's settings go to `settings.set`, starting from the old defaults (merge `review`, 3
+  rounds) with its stored keys over them, only when the core stores none (else logged and kept); a task goes to
+  `tasks.import` (its id as a dashed UUID, its old-id preview stopped). Each row is marked once it moved or never can
+  (a task without a worktree of its own, a repo gone from disk: logged), so a task removed in the core never comes
+  back. A failed row stays unmarked for the next start (retried 5 times, 30 s apart). The tables stay, unmarked rows
+  readable.
 
 ## New repo
 
@@ -133,10 +143,8 @@ A repo needs a `factory.yaml` once, in either of two ways, both from the same ge
 - **Plain Pi**: `/factory init` in a session of the repo (any session, no task needed) writes the draft into the repo's
   main checkout, uncommitted, and reports which file the gates were detected from. It refuses to overwrite an existing
   `factory.yaml`.
-- **gigachad**: opening the board of a repo without one shows the draft in an editable text area
-  (`GET /api/factory/config?repo=`, the draft comes from pi-host's `GET /factory/draft?cwd=`, which calls the plugin's
-  `initDraft` directly: no session). Save (`PUT /api/factory/config?repo=`) writes it uncommitted into the main
-  checkout and refuses to overwrite an existing file (409). New task stays disabled until the file exists.
+- **gigachad**: opening the board of a repo without one shows the draft (`config.get`) in an editable text area.
+  Save (`config.write`) writes it uncommitted into the main checkout. New task stays disabled until the file exists.
 
 Review and commit it: the factory reads `factory.yaml` from a task's base commit, so tasks pick it up from that commit on.
 

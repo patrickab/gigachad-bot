@@ -1,12 +1,12 @@
-// Review comments on a task's diff. Consumes the editor diff's review session (notes, drafts, delivery) and
-// `sendFactoryTaskMessage`, provides `formatTaskReview` (the message a review sends) and `useTaskReview` (the pending
+// Review comments on a task's diff. Consumes the editor diff's review session (notes, drafts, delivery) and the core's
+// `tasks.message`, provides `formatTaskReview` (the message a review sends) and `useTaskReview` (the pending
 // comments of one task, sent as one message that opens a round).
 import { useEffect, useMemo, useRef } from "react"
 import type { ReviewNote } from "@/features/editor/diff/review"
 import { useReviewSession, type ReviewTarget } from "@/features/editor/diff/useReviewSession"
 import type { FilePatch } from "@/features/editor/diff/useRootDiff"
-import { sendFactoryTaskMessage } from "@/lib/backend/api"
-import { allowedActions, FINISHED_STATES, type FactoryShownState } from "./states"
+import { callFactory } from "@/lib/backend/api"
+import { FINISHED_STATES, type FactoryShownState } from "./states"
 import type { TaskDiffFile } from "./useTaskDiff"
 
 /** A fence longer than any backtick run in `text`, so the quoted line cannot close it. */
@@ -37,18 +37,18 @@ const reviewKey = (taskId: string) => `factory-task:${taskId}`
 /**
  * Pending review comments of task `taskId` on its diff `files`, shown as `state`.
  *
- * - Sendable unless the task merges (the backend refuses a message then) or is still starting
+ * - Sendable while `canSend`: the core accepts `tasks.message` for the task
  * - A sent review clears the comments it sent, a failed one keeps them and reports the error
  * - Comments are discarded when the task finishes while it is shown, as its diff then no longer moves
  */
-export function useTaskReview(taskId: string, state: FactoryShownState | undefined, files: TaskDiffFile[] | undefined) {
+export function useTaskReview(taskId: string, state: FactoryShownState | undefined, canSend: boolean, files: TaskDiffFile[] | undefined) {
   const shownFiles = files ?? NO_FILES
   const patches = useMemo<Record<string, FilePatch>>(() => Object.fromEntries(shownFiles.map((file) => [file.path, file.patch])), [shownFiles])
   const target: ReviewTarget = {
-    canSend: state !== undefined && state !== "merging" && allowedActions(state).message,
+    canSend,
     format: formatTaskReview,
     send: async (text) => {
-      await sendFactoryTaskMessage(taskId, text)
+      await callFactory("tasks.message", { id: taskId, text })
     },
   }
   const session = useReviewSession(reviewKey(taskId), target, shownFiles, patches)

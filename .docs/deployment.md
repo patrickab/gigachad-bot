@@ -191,8 +191,8 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 - `redeploy.sh` restarts pi-host before the backend, only when `pi-host/` changed
   (code, its manifest, the lockfile), the installed `pi --version` differs from the
   one `/health` reports, or pi-host is down (M14). It never restarts while a Pi
-  session is live (a `pi` child in the unit's cgroup: pi-host stops idle, unattached,
-  unpinned ones after `PI_HOST_IDLE_MINUTES`, 15, pinned ones stay) and prints the
+  session runs a turn (`/health`; an older pi-host: a `pi` child in the unit's cgroup) or a
+  factory runner is alive (`pgrep -f /extensions/factory/runner.ts`), and prints the
   restart command instead (M4). Without any `pi` on `PATH` the redeploy stops before a restart.
   The installer stops, disables and removes the retired `gigachad-bot-omp.service`, and the omp-web units once
   no omp session runs (see "Retire omp-web").
@@ -275,8 +275,9 @@ Units, environment, gate, backup and restore: `.docs/integration-learnharness.md
 
 ### Provision the agent factory
 
-Factory tasks are sessions of the production pi-host, run by the factory plugin of the service user's Pi, and rows in
-the production database. The only factory unit is the preview gate.
+Factory tasks belong to the factory plugin of the service user's Pi: each runs in a detached runner (`bun runner.ts`,
+under systemd in its own `systemd-run --user --scope`, so a pi-host restart leaves it running), its files under
+`~/.pi/agent/factory/`. pi-host only calls the plugin's core. The only factory unit is the preview gate.
 
 The factory needs two things this repo does not ship. Both come from the owner's dotfiles
 ([patrickab/.os](https://github.com/patrickab/.os), applied with `./setup.sh` or `chezmoi apply`) and must be current
@@ -289,8 +290,9 @@ for the service user on every host that runs factory tasks:
 
 Without chezmoi: copy the plugin directory to `~/.pi/agent/extensions/factory/` (the `*.test.ts`, `tsconfig.json` and
 `bun.lock` files are for development only) and the script to a directory on the service's `PATH`. The other Pi plugins
-of that repo are optional: `chezmoi/dot_pi/README.md` there lists them. A plugin update reaches a task when its session
-next starts, the draft generator when pi-host restarts.
+of that repo are optional: `chezmoi/dot_pi/README.md` there lists them. A plugin update reaches a task when its runner
+next starts; pi-host imports `core.ts` again when its mtime changes, a change only in another plugin module reaches
+pi-host when it restarts.
 
 | Concern | Contract |
 | --- | --- |

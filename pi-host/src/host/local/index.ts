@@ -38,7 +38,6 @@ import { childEnv, gatewayEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
 import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
-import { factorySessionDir } from "./paths.ts";
 import { spawnSandboxed } from "./sandbox.ts";
 import { searchSessions } from "./search.ts";
 import { deleteSession, findSession, listSessions, readEntries, moveSession, sessionMeta } from "./sessions.ts";
@@ -140,15 +139,14 @@ export class LocalHost implements Host {
     return output.trim().split(/\s+/).pop() ?? "";
   }
 
-  async spawn({ profile, cwd, piArgs, factoryRepo }: SpawnRequest): Promise<PiChild> {
-    if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs, factoryRepo);
-    const sessionDirArgs = factoryRepo && !piArgs.includes("--session") ? ["--session-dir", factorySessionDir(factoryRepo)] : [];
+  async spawn({ profile, cwd, piArgs }: SpawnRequest): Promise<PiChild> {
+    if (profile === "sandboxed") return spawnSandboxed(this.options, cwd, piArgs);
     const restricted = piArgs.includes("--no-extensions");
     const excluded = restricted ? new Set<string>() : await excludedNames(this.options.extensionsDir);
     const extensions = restricted ? [] : await extensionArgs(this.options.extensionsDir);
     if (excluded.size > 0) extensions.unshift(...(await filteredExtensionArgs(cwd, excluded)));
     const gateway = gatewayEnv(this.options.gatewayPort, await loadToken(this.options.gatewayTokenPath));
-    return Bun.spawn([this.options.piBin, ...piArgs, ...sessionDirArgs, "-e", GATEWAY_EXTENSION, ...extensions], {
+    return Bun.spawn([this.options.piBin, ...piArgs, "-e", GATEWAY_EXTENSION, ...extensions], {
       cwd,
       env: { ...childEnv(this.options.extraChildEnv), ...gateway },
       stdin: "pipe",
@@ -180,8 +178,8 @@ export class LocalHost implements Host {
     return (await stat(path).catch(() => undefined))?.isDirectory() ?? false;
   }
 
-  listSessions(cwd: string | null, archived: boolean, factory = false): Promise<SessionMeta[]> {
-    return listSessions(cwd, archived, factory);
+  listSessions(cwd: string | null, archived: boolean): Promise<SessionMeta[]> {
+    return listSessions(cwd, archived);
   }
 
   sessionMeta(sessionPath: string): Promise<SessionMeta | undefined> {

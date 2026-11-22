@@ -11,18 +11,16 @@ import { IconButton } from "@/components/ui/IconButton"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { StatusDot } from "@/components/ui/StatusDot"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
-import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useStoredJson } from "@/hooks/useStoredJson"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
-import { deleteFactoryTask, getFactoryConfig } from "@/lib/backend/api"
-import type { FactoryConfig } from "@/lib/domain/factory"
-import type { FactoryTask } from "@/lib/domain/factory"
+import { ApiError, callFactory } from "@/lib/backend/api"
+import type { FactoryConfig, FactoryTask, FactoryTaskRemoval } from "@/lib/domain/factory"
 import { baseName } from "@/lib/paths"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
 import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
-import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
+import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, shownState, taskStatusLine, taskTone } from "./states"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 import { formatCost, formatTokens } from "./usage"
@@ -33,7 +31,7 @@ const FINISHED_LIMIT = 10
 /** Column order of two tasks: by state as the board orders them, then the one whose state changed last. */
 function boardOrder(left: FactoryTask, right: FactoryTask): number {
   const byState = STATE_ORDER.indexOf(shownState(left)) - STATE_ORDER.indexOf(shownState(right))
-  return byState || (right.factory?.at ?? right.created_at).localeCompare(left.factory?.at ?? left.created_at)
+  return byState || (right.at ?? right.createdAt).localeCompare(left.at ?? left.createdAt)
 }
 
 /** The ids in `raw`, empty when it is not a list of strings. */
@@ -41,23 +39,50 @@ function parseArchived(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : []
 }
 
-function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
+/** Whether `cause` is the core's refusal of a removal that `force` would allow. */
+function forceWouldAllow(cause: unknown): boolean {
+  return cause instanceof ApiError && cause.code === "refused" && cause.detail?.force === true
+}
+
+/**
+ * One task on the board. Delete shows while the core accepts `tasks.remove` and asks first; a refusal that `force`
+ * would allow (unmerged work) then shows with a second question that deletes it anyway, any other shows its message.
+ */
+function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }: {
   task: FactoryTask
   /** Whether the task is archived, null when it cannot be (not finished). */
   archived: boolean | null
   onArchive: () => void
   onOpen: () => void
-  onDelete: () => Promise<unknown>
+  /** Delete the task, dropping its unmerged work with `force`. Throws the core's refusal. */
+  onDelete: (force: boolean) => Promise<unknown>
+  onDeleteError: (message: string) => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  /** The core's refusal of a delete without `force`, null until one. */
+  const [refusal, setRefusal] = useState<string | null>(null)
   const state = shownState(task)
   const failed = state === "blocked" || state === "interrupted"
-  const remove = async () => {
-    setDeleting(true)
-    await onDelete()
-    setDeleting(false)
+  const close = () => {
     setConfirming(false)
+    setRefusal(null)
+  }
+  const remove = async (force: boolean) => {
+    setDeleting(true)
+    onDeleteError("")
+    try {
+      await onDelete(force)
+      close()
+    } catch (cause) {
+      if (!force && forceWouldAllow(cause)) setRefusal(errorMessage(cause, "Could not delete the task"))
+      else {
+        onDeleteError(errorMessage(cause, "Could not delete the task"))
+        close()
+      }
+    } finally {
+      setDeleting(false)
+    }
   }
   return (
     <ElevatedContainer hoverLift className="group relative rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
@@ -71,11 +96,12 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
           <StatusDot tone={taskTone(task)} />
           <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
         </span>
-        {state === "blocked" && task.factory?.reason && <span className="truncate text-[11px] text-ink-subtle">{task.factory.reason}</span>}
+        {state === "blocked" && task.reason && <span className="truncate text-[11px] text-ink-subtle">{task.reason}</span>}
+        {refusal !== null && <span className="line-clamp-3 text-[11px] text-ink-subtle">{refusal}</span>}
         {/* The delete question covers this row, so asking never resizes the card. */}
         <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
-          {task.branch !== null && <GitBranch aria-hidden className="h-3 w-3 shrink-0" />}
-          <span className="min-w-0 flex-1 truncate">{task.branch ?? "Current checkout"}</span>
+          <GitBranch aria-hidden className="h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{task.branch}</span>
           {task.usage && (
             <span aria-label="Tokens and cost" className="shrink-0 tabular-nums">
               {formatTokens(task.usage.input + task.usage.output)} tok · {formatCost(task.usage.cost)}
@@ -92,14 +118,16 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
               onClick={onArchive}
             />
           )}
-          {allowedActions(state, task.created_at).delete && (
+          {task.actions.includes("tasks.remove") && (
             <IconButton icon={Trash2} label={`Delete ${task.title}`} onClick={() => setConfirming(true)} />
           )}
         </div>
       )}
       {confirming && (
         <div className="absolute inset-x-4 bottom-4 grid h-6 items-center">
-          <InlineConfirm question="Delete this task?" busy={deleting} onYes={() => void remove()} onNo={() => setConfirming(false)} />
+          {refusal === null
+            ? <InlineConfirm question="Delete this task?" busy={deleting} onYes={() => void remove(false)} onNo={close} />
+            : <InlineConfirm question="Delete anyway?" busy={deleting} onYes={() => void remove(true)} onNo={close} />}
         </div>
       )}
     </ElevatedContainer>
@@ -149,7 +177,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   const launches = useFactoryLaunches(repo)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [config, setConfig] = useState<FactoryConfig | null>(null)
-  const loadConfig = useCallback(() => getFactoryConfig(repo), [repo])
+  const loadConfig = useCallback(() => callFactory<FactoryConfig>("config.get", { repo }), [repo])
   useLoadWhile(true, loadConfig, setConfig)
   // Until the repo has a factory.yaml (or while that is unknown) no task starts.
   const missingConfig = config !== null && !config.exists
@@ -157,10 +185,11 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   const [showArchived, setShowArchived] = useState(false)
   const [archivedIds, updateArchived] = useStoredJson(`gigachad:factory-archived:${repo}`, parseArchived)
   const toggleArchived = (id: string) => updateArchived((ids) => (ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id]))
-  const { run: deleteTask, error: deleteError } = useAsyncAction(async (id: string) => {
-    await deleteFactoryTask(id)
+  const [deleteError, setDeleteError] = useState("")
+  const deleteTask = async (id: string, force: boolean) => {
+    await callFactory<FactoryTaskRemoval>("tasks.remove", force ? { id, force } : { id })
     await refresh()
-  }, "Could not delete the task")
+  }
 
   return (
     // Lanes start at --surface, the level of the sidebar beside them
@@ -183,7 +212,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
         </InTopBar>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
         {missingConfig && config.draft !== null && (
-          <ConfigDraft repo={repo} draft={config.draft} onSaved={() => setConfig({ exists: true, draft: null })} />
+          <ConfigDraft repo={repo} draft={config.draft} onSaved={(text) => setConfig({ exists: true, text, draft: null, source: [] })} />
         )}
         <div className={cn("min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin", missingConfig ? "hidden" : "flex")}>
           {BOARD_COLUMNS.map((column) => {
@@ -263,7 +292,9 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                       task={task}
                       archived={isFinished ? archivedIds.includes(task.id) : null}
                       onArchive={() => toggleArchived(task.id)}
-                      onOpen={() => onOpenTask(task.id)} onDelete={() => deleteTask(task.id)}
+                      onOpen={() => onOpenTask(task.id)}
+                      onDelete={(force) => deleteTask(task.id, force)}
+                      onDeleteError={setDeleteError}
                     />
                   </motion.div>
                 ))}

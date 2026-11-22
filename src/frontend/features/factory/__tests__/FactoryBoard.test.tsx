@@ -1,38 +1,57 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor, within } from "@testing-library/react"
-import type { FactoryLive, FactorySettings, FactoryTask, FactoryTaskState } from "@/lib/domain/factory"
+import type { FactoryRepoSettings, FactoryTask, FactoryTaskState } from "@/lib/domain/factory"
 
-const api = vi.hoisted(() => ({
-  deleteFactoryTask: vi.fn<(id: string) => Promise<void>>(),
-  getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
-  createFactoryTask: vi.fn<(body: unknown) => Promise<unknown>>(),
-  listFactoryTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
-  fetchModels: vi.fn<() => Promise<never>>(),
-  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
-  getFactoryConfig: vi.fn<(repo: string) => Promise<{ exists: boolean; draft: string | null }>>(),
-  putFactoryConfig: vi.fn<(repo: string, content: string) => Promise<unknown>>(),
-}))
+type Handler = (params: Record<string, unknown>) => Promise<unknown>
+
+const api = vi.hoisted(() => {
+  class ApiError extends Error {
+    constructor(message: string, readonly status: number, readonly code?: string, readonly detail?: Record<string, unknown>) {
+      super(message)
+    }
+  }
+  const handlers: Record<string, Handler> = {}
+  return {
+    ApiError,
+    handlers,
+    callFactory: vi.fn(async (action: string, params: Record<string, unknown> = {}) => {
+      const handler = handlers[action]
+      if (!handler) throw new Error(`unexpected ${action}`)
+      return handler(params)
+    }),
+    fetchModels: vi.fn<() => Promise<never>>(),
+    getFactoryActions: vi.fn(async () => ({ actions: {} })),
+  }
+})
 
 vi.mock("@/lib/backend/api", () => api)
 
 import { FactoryBoard } from "@/features/factory/FactoryBoard"
 import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
+import { factoryTask } from "./factoryTask"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const IDLE: FactoryLive = { running: false, waiting: false, attached: 0 }
+const SETTINGS: FactoryRepoSettings = {
+  stored: {},
+  resolved: { merge: "review", maxRounds: 3, review: true, preview: false, models: {}, branch: "main" },
+  defaults: { merge: "auto", maxRounds: 2, review: false, preview: false, models: {}, branch: "main" },
+}
 
 let minute = 0
 
-/** A task named after its state, each one's state newer than the one made before it. */
-function task(title: string, state: FactoryTaskState | null, extra: Partial<FactoryTask> & { reason?: string; round?: number } = {}): FactoryTask {
-  const { reason = "", round = 1, ...fields } = extra
+/** A task named after its state, each one's state newer than the one made before it; the core accepts its removal. */
+function task(title: string, state: FactoryTaskState | null, extra: Partial<FactoryTask> = {}): FactoryTask {
   minute += 1
   const at = `2026-01-01T00:${String(minute).padStart(2, "0")}:00Z`
-  return {
-    id: `id${title.toLowerCase().replace(/[^a-z0-9]/g, "")}000000`, repo: REPO, session_id: `session-${title}`, session_path: "", worktree: null, branch: null,
-    title, created_at: at, factory: state === null ? null : { state, round, reason, at }, live: IDLE, usage: null, ...fields,
-  }
+  return factoryTask(`id${title.toLowerCase().replace(/[^a-z0-9]/g, "")}000000`, {
+    repo: REPO, title, createdAt: at, state, round: state === null ? null : 1, at: state === null ? null : at, running: false, actions: ["tasks.remove"], ...extra,
+  })
+}
+
+/** Calls of `action` to the core, their params. */
+function called(action: string): unknown[] {
+  return api.callFactory.mock.calls.filter(([name]) => name === action).map(([, params]) => params)
 }
 
 function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof FactoryBoard>[0]> = {}) {
@@ -53,14 +72,18 @@ function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof Fact
 
 beforeEach(() => {
   minute = 0
-  api.deleteFactoryTask.mockReset().mockResolvedValue()
-  api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, preview: false, models: {}, branch: null })
+  api.callFactory.mockClear()
+  for (const action of Object.keys(api.handlers)) delete api.handlers[action]
+  Object.assign(api.handlers, {
+    "tasks.remove": async (params: Record<string, unknown>) => ({ removed: params.id, dropped: null }),
+    "settings.get": async () => SETTINGS,
+    "tasks.start": async () => ({}),
+    "tasks.list": async () => ({ tasks: [] }),
+    "branches.list": async () => ({ branches: [{ name: "main", default: true, hasConfig: true }] }),
+    "config.get": async () => ({ exists: true, text: "gates: []\n", draft: null, source: [] }),
+    "config.write": async () => ({ path: `${REPO}/factory.yaml` }),
+  } satisfies Record<string, Handler>)
   api.fetchModels.mockReset().mockReturnValue(new Promise(() => {}))
-  api.createFactoryTask.mockReset().mockResolvedValue({})
-  api.listFactoryTasks.mockReset().mockResolvedValue([])
-  api.listFactoryBranches.mockReset().mockResolvedValue(["main"])
-  api.getFactoryConfig.mockReset().mockResolvedValue({ exists: true, draft: null })
-  api.putFactoryConfig.mockReset().mockResolvedValue({ exists: true, draft: null })
 })
 
 describe("FactoryBoard", () => {
@@ -76,9 +99,9 @@ describe("FactoryBoard", () => {
       task("Task done", "done"),
       task("Task merging", "merging"),
       task("Task running", "running"),
-      task("Task starting", null, { live: null }),
-      task("Task lost child", "running", { live: null }),
-      task("Task lost merge", "merging", { live: null }),
+      task("Task starting", null),
+      task("Task lost child", "running", { interrupted: true }),
+      task("Task lost merge", "merging", { interrupted: true }),
       task("Task blocked", "blocked"),
       task("Task waiting old", "waiting_approve"),
       task("Task waiting new", "waiting_approve"),
@@ -90,21 +113,20 @@ describe("FactoryBoard", () => {
     expect(titles("Finished")).toEqual(["Task done", "Task cancelled"])
   })
 
-  it("shows a card's title, state and round, the reason of a blocked task only, and the branch or the current checkout", () => {
+  it("shows a card's title, state and round, the reason of a blocked task only, and the branch", () => {
     const { card } = renderBoard([
       task("Task blocked", "blocked", { reason: "merge_failed", round: 4, branch: "factory/fix-header", worktree: "/worktrees/fix-header" }),
-      task("Task cancelled", "cancelled", { reason: "cancelled by the user", round: 2 }),
-      task("Task starting", null, { live: null }),
-      task("Task lost child", "running", { live: null, round: 3 }),
+      task("Task cancelled", "cancelled", { reason: "cancelled by the user", round: 2, branch: "factory/other" }),
+      task("Task starting", null),
+      task("Task lost child", "running", { interrupted: true, round: 3 }),
     ])
 
     expect(card("Task blocked")).toHaveTextContent("Blocked · round 4")
     expect(card("Task blocked")).toHaveTextContent("merge_failed")
     expect(card("Task blocked")).toHaveTextContent("factory/fix-header")
-    expect(card("Task blocked")).not.toHaveTextContent("Current checkout")
     expect(card("Task cancelled")).toHaveTextContent("Cancelled · round 2")
     expect(card("Task cancelled")).not.toHaveTextContent("cancelled by the user")
-    expect(card("Task cancelled")).toHaveTextContent("Current checkout")
+    expect(card("Task cancelled")).toHaveTextContent("factory/other")
     expect(card("Task starting")).toHaveTextContent("Launching session")
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
   })
@@ -119,36 +141,34 @@ describe("FactoryBoard", () => {
     expect(within(card("Task fresh")).queryByLabelText("Tokens and cost")).toBeNull()
   })
 
-  it("pulses a card's dot only while its Pi child runs a turn", () => {
+  it("pulses a card's dot only while a runner holds the task", () => {
     const { card } = renderBoard([
-      task("Task streaming", "running", { live: { ...IDLE, running: true } }),
-      task("Task between turns", "running"),
+      task("Task held", "running", { running: true }),
+      task("Task lost child", "running", { interrupted: true }),
       task("Task waiting", "waiting_approve"),
     ])
     const pulsing = (title: string) => card(title).querySelector(".animate-pulse") !== null
 
-    expect(pulsing("Task streaming")).toBe(true)
-    expect(pulsing("Task between turns")).toBe(false)
+    expect(pulsing("Task held")).toBe(true)
+    expect(pulsing("Task lost child")).toBe(false)
     expect(pulsing("Task waiting")).toBe(false)
   })
 
   it("opens a task from its card", () => {
     const tasks = [task("Task running", "running")]
     const { view, onOpenTask } = renderBoard(tasks)
-    fireEvent.click(view.getByRole("button", { name: /Task running/ }))
+    fireEvent.click(view.getByRole("button", { name: /^Task running/ }))
     expect(onOpenTask).toHaveBeenCalledWith(tasks[0].id)
   })
 
-  it("offers delete on finished, blocked, interrupted and lost cards only", () => {
+  it("offers delete exactly on the cards whose task the core would remove now", () => {
     const { view } = renderBoard([
-      task("Task blocked", "blocked"), task("Task done", "done"), task("Task cancelled", "cancelled"),
-      task("Task waiting", "waiting_approve"), task("Task running", "running"), task("Task merging", "merging"),
-      task("Task starting", null, { live: null, created_at: new Date().toISOString() }),
-      task("Task lost", null, { live: null, created_at: new Date(Date.now() - 2 * 60_000).toISOString() }),
-      task("Task lost child", "running", { live: null }),
+      task("Task blocked", "blocked"), task("Task waiting", "waiting_approve"), task("Task lost child", "running", { interrupted: true }),
+      task("Task running", "running", { running: true, actions: ["tasks.cancel", "tasks.message"] }),
+      task("Task ending", "done", { running: true, actions: [] }),
     ])
     expect(view.getAllByRole("button", { name: /^Delete / }).map((button) => button.getAttribute("aria-label")).sort()).toEqual([
-      "Delete Task blocked", "Delete Task cancelled", "Delete Task done", "Delete Task lost", "Delete Task lost child",
+      "Delete Task blocked", "Delete Task lost child", "Delete Task waiting",
     ])
   })
 
@@ -157,12 +177,11 @@ describe("FactoryBoard", () => {
     const { view, refresh, onOpenTask } = renderBoard(tasks)
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
-    expect(api.deleteFactoryTask).not.toHaveBeenCalled()
+    expect(called("tasks.remove")).toEqual([])
     fireEvent.click(within(view.getByRole("group", { name: "Delete this task?" })).getByRole("button", { name: "Yes" }))
 
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-    expect(api.deleteFactoryTask).toHaveBeenCalledTimes(1)
-    expect(api.deleteFactoryTask).toHaveBeenCalledWith(tasks[0].id)
+    expect(called("tasks.remove")).toEqual([{ id: tasks[0].id }])
     expect(onOpenTask).not.toHaveBeenCalled()
     await waitFor(() => expect(view.queryByRole("group", { name: "Delete this task?" })).toBeNull())
   })
@@ -175,13 +194,13 @@ describe("FactoryBoard", () => {
 
     expect(view.queryByRole("group", { name: "Delete this task?" })).toBeNull()
     expect(view.getByRole("button", { name: "Delete Task done" })).toBeInTheDocument()
-    expect(api.deleteFactoryTask).not.toHaveBeenCalled()
+    expect(called("tasks.remove")).toEqual([])
     expect(refresh).not.toHaveBeenCalled()
   })
 
   it("asks in place of the card's last row, so the card keeps its rows", () => {
-    const { view, card } = renderBoard([task("Task done", "done")])
-    const marker = view.getByText("Current checkout").parentElement!
+    const { view, card } = renderBoard([task("Task done", "done", { branch: "factory/done" })])
+    const marker = view.getByText("factory/done").parentElement!
     expect(marker).not.toHaveClass("invisible")
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
@@ -191,14 +210,63 @@ describe("FactoryBoard", () => {
     expect(view.getByRole("group", { name: "Delete this task?" }).parentElement).toHaveClass("absolute")
   })
 
-  it("shows the backend's refusal to delete and keeps the card", async () => {
-    api.deleteFactoryTask.mockRejectedValueOnce(new Error("The task is running"))
+  it("shows the core's refusal of a task with unmerged work and deletes it with force once confirmed again", async () => {
+    const refusal = "task idtaskbl has 1 unmerged commit (not on main), give force: true to remove it anyway"
+    api.handlers["tasks.remove"] = async (params) => {
+      if (params.force !== true) throw new api.ApiError(refusal, 409, "refused", { force: true })
+      return { removed: params.id, dropped: "1 unmerged commit (not on main)" }
+    }
+    const tasks = [task("Task blocked", "blocked")]
+    const { view, refresh, card } = renderBoard(tasks)
+
+    fireEvent.click(view.getByRole("button", { name: "Delete Task blocked" }))
+    fireEvent.click(view.getByRole("button", { name: "Yes" }))
+
+    const again = await view.findByRole("group", { name: "Delete anyway?" })
+    expect(card("Task blocked")).toHaveTextContent(refusal)
+    expect(refresh).not.toHaveBeenCalled()
+
+    fireEvent.click(within(again).getByRole("button", { name: "Yes" }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(called("tasks.remove")).toEqual([{ id: tasks[0].id }, { id: tasks[0].id, force: true }])
+    expect(card("Task blocked")).not.toHaveTextContent(refusal)
+  })
+
+  it("keeps a task whose forced delete is declined", async () => {
+    api.handlers["tasks.remove"] = async () => { throw new api.ApiError("task x has uncommitted changes", 409, "refused", { force: true }) }
+    const { view, refresh } = renderBoard([task("Task blocked", "blocked")])
+
+    fireEvent.click(view.getByRole("button", { name: "Delete Task blocked" }))
+    fireEvent.click(view.getByRole("button", { name: "Yes" }))
+    fireEvent.click(within(await view.findByRole("group", { name: "Delete anyway?" })).getByRole("button", { name: "No" }))
+
+    expect(view.queryByText("task x has uncommitted changes")).toBeNull()
+    expect(called("tasks.remove")).toHaveLength(1)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("shows a refusal that force would not lift as an error, without asking to delete anyway", async () => {
+    api.handlers["tasks.remove"] = async () => { throw new api.ApiError("task x is running, cancel it first", 409, "refused") }
     const { view, refresh } = renderBoard([task("Task blocked", "blocked")])
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task blocked" }))
     fireEvent.click(view.getByRole("button", { name: "Yes" }))
 
-    expect(await view.findByRole("alert")).toHaveTextContent("The task is running")
+    expect(await view.findByRole("alert")).toHaveTextContent("task x is running, cancel it first")
+    expect(view.queryByRole("group", { name: "Delete anyway?" })).toBeNull()
+    expect(called("tasks.remove")).toHaveLength(1)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("shows any other failure to delete and keeps the card", async () => {
+    api.handlers["tasks.remove"] = async () => { throw new api.ApiError("the runner of task x is still ending, try again in a few seconds", 409, "busy") }
+    const { view, refresh } = renderBoard([task("Task blocked", "blocked")])
+
+    fireEvent.click(view.getByRole("button", { name: "Delete Task blocked" }))
+    fireEvent.click(view.getByRole("button", { name: "Yes" }))
+
+    expect(await view.findByRole("alert")).toHaveTextContent("the runner of task x is still ending")
+    expect(view.queryByRole("group", { name: "Delete anyway?" })).toBeNull()
     expect(refresh).not.toHaveBeenCalled()
     expect(view.getByText("Task blocked")).toBeInTheDocument()
   })
@@ -241,7 +309,7 @@ describe("FactoryBoard", () => {
 
   it("closes the dialog at once and shows the start as launching until its task is listed", async () => {
     let answer: (task: unknown) => void = () => {}
-    api.createFactoryTask.mockReturnValue(new Promise((resolve) => { answer = resolve }))
+    api.handlers["tasks.start"] = () => new Promise((resolve) => { answer = resolve })
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
@@ -250,17 +318,22 @@ describe("FactoryBoard", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(view.queryByLabelText("Title")).toBeNull())
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { review: true } })
+    expect(called("tasks.start")).toEqual([{ repo: REPO, title: "Fix", request: "Fix it" }])
     const launch = within(view.getByRole("region", { name: "Working" })).getByRole("group", { name: "Fix" })
     expect(launch).toHaveTextContent("Launching session")
 
     answer({})
     await waitFor(() => expect(view.queryByRole("group", { name: "Fix" })).toBeNull())
-    expect(api.listFactoryTasks).toHaveBeenCalledWith(REPO)
+    expect(called("tasks.list")).toContainEqual({ repo: REPO })
   })
 
   it("moves a refused start to Needs you with its reason, to retry or dismiss", async () => {
-    api.createFactoryTask.mockRejectedValueOnce(new Error("The checkout already has a task"))
+    let refusals = ["the checkout already has a task"]
+    api.handlers["tasks.start"] = async () => {
+      const refusal = refusals.shift()
+      if (refusal) throw new Error(refusal)
+      return {}
+    }
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
@@ -270,13 +343,13 @@ describe("FactoryBoard", () => {
 
     const needsYou = view.getByRole("region", { name: "Needs you" })
     await waitFor(() => expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("Could not start"))
-    expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("The checkout already has a task")
+    expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("the checkout already has a task")
 
     fireEvent.click(view.getByRole("button", { name: "Retry Refused" }))
     await waitFor(() => expect(view.queryByRole("group", { name: "Refused" })).toBeNull())
-    expect(api.createFactoryTask).toHaveBeenCalledTimes(2)
+    expect(called("tasks.start")).toHaveLength(2)
 
-    api.createFactoryTask.mockRejectedValueOnce(new Error("No"))
+    refusals = ["No"]
     fireEvent.click(view.getByRole("button", { name: "New task" }))
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Dismissed" } })
@@ -289,7 +362,7 @@ describe("FactoryBoard", () => {
 
 describe("a repo without factory.yaml", () => {
   it("shows the draft, keeps New task disabled and enables it once the draft is saved", async () => {
-    api.getFactoryConfig.mockResolvedValue({ exists: false, draft: "gates: []\n" })
+    api.handlers["config.get"] = async () => ({ exists: false, text: null, draft: "gates: []\n", source: ["package.json"] })
     const { view } = renderBoard([])
     const editor = await view.findByLabelText("factory.yaml")
     expect(editor).toHaveProperty("value", "gates: []\n")
@@ -298,14 +371,14 @@ describe("a repo without factory.yaml", () => {
 
     fireEvent.change(editor, { target: { value: "gates:\n  - [make, lint]\n" } })
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(api.putFactoryConfig).toHaveBeenCalledWith(REPO, "gates:\n  - [make, lint]\n"))
+    await waitFor(() => expect(called("config.write")).toEqual([{ repo: REPO, text: "gates:\n  - [make, lint]\n" }]))
     await waitFor(() => expect(view.getByRole("button", { name: "New task" })).toHaveProperty("disabled", false))
     expect(view.queryByLabelText("factory.yaml")).toBeNull()
   })
 
   it("shows no draft for a repo that has the file", async () => {
     const { view } = renderBoard([])
-    await waitFor(() => expect(api.getFactoryConfig).toHaveBeenCalled())
+    await waitFor(() => expect(called("config.get")).toEqual([{ repo: REPO }]))
     expect(view.queryByLabelText("factory.yaml")).toBeNull()
     expect(view.getByRole("button", { name: "New task" })).toHaveProperty("disabled", false)
   })

@@ -4,8 +4,9 @@
 - Consumes pi-host's HTTP API (`.docs/pi-migration-contracts.md`, "pi-host HTTP") and the token file pi-host creates on start
 - Provides the session, file and private-state calls of `/api/pi/*` and the workbench chats (`document` profile with the
   backend's system prompt, P3), a WebSocket opener for the `/ws` proxy and the gateway URL
-- Provides what the factory drives a task's session with: a prompt without an attached client, its `factory-` entries,
-  its removal, and `SessionInfo.factory`
+- Provides the factory core's actions (`factory_call`, `factory_actions`): pi-host runs them in the factory plugin's
+  `core.ts`, a refusal is `FactoryCallError` with the core's code, a missing plugin `FactoryPluginMissing`
+- `SessionInfo.factory`: a session that is a factory task carries its state, so the session picker can hide it
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
 - Failures are `PiHostUnavailable` (503), `PiHostBadResponse` (502) or `PiHostRejected` (pi-host's own status and body)
 - Also scans the disk for the repositories a session may start in (`scan_repositories`, stored by `repository_index`)
@@ -16,7 +17,7 @@ import logging
 import os
 from pathlib import Path
 import time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 from pydantic import BaseModel, ConfigDict
@@ -79,6 +80,23 @@ FACTORY_PLUGIN_HINT = f"Install the factory plugin to ~/.pi/agent/extensions/fac
 
 class FactoryPluginMissing(RuntimeError):
     """Pi has no factory plugin: the message names where it comes from."""
+
+
+FactoryErrorCode = Literal["invalid", "not_found", "busy", "refused", "failed"]
+FACTORY_ERROR_CODES: tuple[FactoryErrorCode, ...] = ("invalid", "not_found", "busy", "refused", "failed")
+# `tasks.start` creates a worktree and runs its `after_create` hooks (10 min each in the plugin) before it answers.
+FACTORY_CALL_TIMEOUT_SECONDS = 900.0
+
+
+class FactoryCallError(RuntimeError):
+    """The factory core refused an action: `code` is the core's (`FACTORY_ERROR_CODES`), the message one sentence,
+    `detail` the core's structured hint when it gives one (`{"force": true}`: `force` would allow the refused removal)."""
+
+    def __init__(self, code: FactoryErrorCode, message: str, detail: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.detail = detail
 
 
 class ContractModel(BaseModel):
@@ -195,13 +213,6 @@ class FileMatch(ContractModel):
 
 class FileList(ContractModel):
     files: list[FileMatch]
-
-
-class FactoryDraft(ContractModel):
-    """The factory plugin's draft `factory.yaml` of a checkout and the files its gates come from (empty: none found)."""
-
-    draft: str
-    source: str
 
 
 class SearchHit(ContractModel):
@@ -343,12 +354,9 @@ async def health() -> Health:
     return await _request("GET", "/health", Health)
 
 
-async def list_sessions(cwd: str | None, *, archived: bool, factory: bool = False) -> list[SessionInfo]:
-    """Sessions newest first, of *cwd* when given, from the archive when *archived*, the factory root's too when
-    *factory* (factory task sessions created with `factory_repo`)."""
+async def list_sessions(cwd: str | None, *, archived: bool) -> list[SessionInfo]:
+    """Sessions newest first, of *cwd* when given, from the archive when *archived*."""
     params: dict[str, str | int] = {"archived": int(archived)}
-    if factory:
-        params["factory"] = 1
     if cwd is not None:
         params["cwd"] = cwd
     return (await _request("GET", "/sessions", SessionList, params=params)).sessions
@@ -363,7 +371,6 @@ async def open_session(
     profile: Profile = "coding",
     system_prompt: str | None = None,
     tools: list[str] | None = None,
-    factory_repo: str | None = None,
 ) -> SessionInfo:
     """Spawn a *profile* session in *cwd*, or return the live one; a fork writes its file first. A session file held
     elsewhere answers 409 `locked`, an unknown fork source, entry or session id 404, a live session of the other
@@ -371,8 +378,6 @@ async def open_session(
 
     - `document` needs *system_prompt* (sent on every create and resume, Pi keeps it per process), *tools* restricts it
       to those tools and nothing discovered. `coding` takes neither
-    - *factory_repo* (the repository's absolute path) makes a new session a factory task: its file goes into that
-      repository's folder of the factory root, which only `list_sessions(factory=True)` lists
     """
     body: dict[str, object] = {
         "cwd": cwd,
@@ -387,8 +392,6 @@ async def open_session(
         body["model"] = model.model_dump(by_alias=True)
     if thinking is not None:
         body["thinking"] = thinking
-    if factory_repo is not None:
-        body["factoryRepo"] = factory_repo
     return (await _request("POST", "/sessions", SessionAnswer, json=body, timeout=CHILD_TIMEOUT_SECONDS)).session
 
 
@@ -430,14 +433,49 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
     return (await _request("GET", "/files", FileList, params=params)).files
 
 
-async def factory_draft(cwd: str) -> str:
-    """The draft `factory.yaml` of the checkout at *cwd*, from the factory plugin's generator. Writes nothing."""
+def _factory_failure(exc: PiHostRejected) -> Exception:
+    """pi-host's refusal of a factory call as the core's error, a missing plugin as `FactoryPluginMissing`; any other
+    refusal stays as it is."""
+    body = exc.body if isinstance(exc.body, dict) else {}
+    code, message = body.get("error"), str(body.get("message") or exc)
+    if code == "factory_plugin_missing":
+        return FactoryPluginMissing(str(body.get("message") or FACTORY_PLUGIN_HINT))
+    if code in FACTORY_ERROR_CODES:
+        detail = body.get("detail")
+        return FactoryCallError(cast("FactoryErrorCode", code), message, detail if isinstance(detail, dict) else None)
+    return exc
+
+
+async def _factory_answer(method: str, path: str, key: str, *, json: object = None, timeout: float = TIMEOUT_SECONDS) -> Any:  # noqa: ANN401 - core JSON
+    """The value under *key* of pi-host's answer to a factory call."""
     try:
-        return (await _request("GET", "/factory/draft", FactoryDraft, params={"cwd": cwd})).draft
+        response = await _send(method, path, json=json, timeout=timeout)
     except PiHostRejected as exc:
-        if isinstance(exc.body, dict) and exc.body.get("error") == "factory_plugin_missing":
-            raise FactoryPluginMissing(str(exc.body.get("message") or FACTORY_PLUGIN_HINT)) from exc
-        raise
+        raise _factory_failure(exc) from exc
+    try:
+        answer = response.json()
+    except ValueError as exc:
+        raise PiHostBadResponse(f"{LABEL} {path} answered no JSON") from exc
+    if not isinstance(answer, dict) or key not in answer:
+        raise PiHostBadResponse(f"{LABEL} {path} answered without {key!r}")
+    return answer[key]
+
+
+async def factory_call(action: str, params: dict[str, Any]) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
+    """Run the factory core's *action* with *params* and return its result, plain JSON as the core gives it.
+
+    `FactoryCallError` when the core refuses, `FactoryPluginMissing` when Pi has no factory plugin.
+    """
+    body = {"action": action, "params": params}
+    return await _factory_answer("POST", "/factory/call", "result", json=body, timeout=FACTORY_CALL_TIMEOUT_SECONDS)
+
+
+async def factory_actions() -> dict[str, Any]:
+    """The factory core's `ACTIONS`: each action's summary, JSON schema of its params and whether it changes anything."""
+    actions = await _factory_answer("GET", "/factory/actions", "actions")
+    if not isinstance(actions, dict):
+        raise PiHostBadResponse(f"{LABEL} /factory/actions answered actions that are no object")
+    return actions
 
 
 async def session_entries(

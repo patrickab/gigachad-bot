@@ -11,17 +11,15 @@ import { errorMessage } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
-import { fetchModels, getFactorySettings, listFactoryBranches, putFactorySettings } from "@/lib/backend/api"
+import { callFactory, fetchModels, getFactoryActions } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
-import type { FactoryModels, FactorySettings } from "@/lib/domain/factory"
+import type { FactoryActions, FactoryBranch, FactoryMergeMode, FactoryModels, FactoryParamSchema, FactoryRepoSettings, FactoryStoredSettings } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
 import { COMPACT_FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
 /** The merge mode as pills: merge on its own, or wait for the user's approve. */
 export const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review", label: "Approve" }] as const
-
-const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 
 /** The two agents of a task, in pipeline order. */
 export const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
@@ -39,8 +37,16 @@ export function branchOrDefault(branch: string | null): string | null {
   return branch?.trim() || null
 }
 
-/** What an unset branch falls back to, named by the first option of its select. */
-export const BRANCH_DEFAULT = "origin HEAD"
+/** The repo's settings through the core. */
+export function loadRepoSettings(repo: string): Promise<FactoryRepoSettings> {
+  return callFactory<FactoryRepoSettings>("settings.get", { repo })
+}
+
+/** The names of the repo's local branches through the core. */
+export async function loadBranchNames(repo: string): Promise<string[]> {
+  const { branches } = await callFactory<{ branches: FactoryBranch[] }>("branches.list", { repo })
+  return branches.map((branch) => branch.name)
+}
 
 /**
  * Options of a branch select: `fallback` for no branch (the value ""), then `branches`. A `value` that is not among
@@ -68,17 +74,59 @@ export function BranchSelect({ label, value, fallback, branches, disabled, onCha
   )
 }
 
-/** Models the user filled in; an empty selector means the agent runs on Pi's default model. An empty branch is the default one. */
-function withoutEmpty(settings: FactorySettings): FactorySettings {
+/** The bounds of `maxRounds` the core's `settings.set` declares, none while unknown. */
+export function maxRoundsLimits(actions: FactoryActions | null): { min?: number; max?: number } {
+  const schema: FactoryParamSchema | undefined = actions?.actions["settings.set"]?.params.properties.settings?.properties?.maxRounds
+  return { min: schema?.minimum, max: schema?.maximum }
+}
+
+/** What the dialog edits: every setting at its resolved value, the models and branch only as stored ("" for none). */
+interface SettingsDraft {
+  merge: FactoryMergeMode
+  maxRounds: number
+  review: boolean
+  preview: boolean
+  models: FactoryModels
+  branch: string
+  /** The branch an unset one falls back to (the repo's default). */
+  defaultBranch: string
+  /** The settings as loaded: what the file holds and what they resolve to. */
+  loaded: FactoryRepoSettings
+}
+
+function draftOf({ stored, resolved, defaults }: FactoryRepoSettings): SettingsDraft {
   return {
-    ...settings,
-    models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")),
-    branch: branchOrDefault(settings.branch),
+    merge: resolved.merge,
+    maxRounds: resolved.maxRounds,
+    review: resolved.review,
+    preview: resolved.preview,
+    models: stored.models ?? {},
+    branch: stored.branch ?? "",
+    defaultBranch: defaults.branch,
+    loaded: { stored, resolved, defaults },
   }
 }
 
-function validRounds(rounds: number): boolean {
-  return Number.isInteger(rounds) && rounds >= MAX_ROUNDS_LIMITS.min && rounds <= MAX_ROUNDS_LIMITS.max
+/** Keys the dialog shows at their resolved value. */
+const RESOLVED_KEYS = ["merge", "maxRounds", "review", "preview"] as const
+
+/**
+ * The settings file `draft` saves: a setting the file held or the user changed (one left at its default stays unset,
+ * so it follows the defaults), models the user filled in (an empty one runs Pi's default), a branch only when picked.
+ */
+function storedOf(draft: SettingsDraft): FactoryStoredSettings {
+  const { stored, resolved } = draft.loaded
+  const branch = branchOrDefault(draft.branch)
+  const kept = RESOLVED_KEYS.filter((key) => stored[key] !== undefined || draft[key] !== resolved[key])
+  return {
+    ...Object.fromEntries(kept.map((key) => [key, draft[key]])),
+    models: Object.fromEntries(Object.entries(draft.models).filter(([, selector]) => selector !== undefined && selector.trim() !== "")),
+    ...(branch ? { branch } : {}),
+  }
+}
+
+function validRounds(rounds: number, { min, max }: { min?: number; max?: number }): boolean {
+  return Number.isInteger(rounds) && (min === undefined || rounds >= min) && (max === undefined || rounds <= max)
 }
 
 /** The label of a choice row: one width, so the pills and switches of a column line up. */
@@ -112,14 +160,15 @@ export function SwitchChoice({ label, checked, disabled, onChange }: { label: st
 
 /** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, branch, review, preview and a model per agent. */
 export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
-  const [draft, setDraft] = useState<FactorySettings | null>(null)
+  const [draft, setDraft] = useState<SettingsDraft | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
   const [modelError, setModelError] = useState("")
   const [branches, setBranches] = useState<string[] | null>(null)
   const [branchError, setBranchError] = useState("")
+  const [actions, setActions] = useState<FactoryActions | null>(null)
   const { run: persist, pending: busy, error, setError } = useAsyncAction(async () => {
     if (!draft) return
-    await putFactorySettings(repo, withoutEmpty(draft))
+    await callFactory<FactoryRepoSettings>("settings.set", { repo, settings: storedOf(draft) })
     onClose()
   }, "Could not save the settings")
 
@@ -133,13 +182,15 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
     setError("")
   })
 
-  const loadSettings = useCallback(() => getFactorySettings(repo), [repo])
+  const loadSettings = useCallback(async () => draftOf(await loadRepoSettings(repo)), [repo])
   useLoadWhile(open, loadSettings, setDraft, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
-  const loadBranches = useCallback(() => listFactoryBranches(repo), [repo])
+  useLoadWhile(open, getFactoryActions, setActions)
+  const roundsLimits = maxRoundsLimits(actions)
+  const loadBranches = useCallback(() => loadBranchNames(repo), [repo])
   useLoadWhile(open, loadBranches, setBranches, (cause) => setBranchError(errorMessage(cause, "Could not load the branches")))
 
-  const change = (changed: Partial<FactorySettings>) => setDraft((current) => current && { ...current, ...changed })
+  const change = (changed: Partial<SettingsDraft>) => setDraft((current) => current && { ...current, ...changed })
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
     setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
 
@@ -148,7 +199,7 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
     ...factoryModelIds(catalog).map((model) => ({ value: model, label: model })),
   ]
 
-  const canSave = draft !== null && !busy && validRounds(draft.max_rounds)
+  const canSave = draft !== null && !busy && validRounds(draft.maxRounds, roundsLimits)
   const save = () => {
     if (canSave) void persist()
   }
@@ -186,8 +237,8 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
             <div className="grid grid-cols-2 gap-3">
               <BranchSelect
                 label="Branch"
-                value={draft.branch ?? ""}
-                fallback={`Default (${BRANCH_DEFAULT})`}
+                value={draft.branch}
+                fallback={`Default (${draft.defaultBranch})`}
                 branches={branches}
                 onChange={(branch) => change({ branch })}
               />
@@ -195,10 +246,10 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                 <input
                   type="number"
                   aria-label="Max rounds"
-                  min={MAX_ROUNDS_LIMITS.min}
-                  max={MAX_ROUNDS_LIMITS.max}
-                  value={Number.isNaN(draft.max_rounds) ? "" : draft.max_rounds}
-                  onChange={(event) => change({ max_rounds: event.target.valueAsNumber })}
+                  min={roundsLimits.min}
+                  max={roundsLimits.max}
+                  value={Number.isNaN(draft.maxRounds) ? "" : draft.maxRounds}
+                  onChange={(event) => change({ maxRounds: event.target.valueAsNumber })}
                   className={COMPACT_FIELD_CLASS}
                 />
               </Field>

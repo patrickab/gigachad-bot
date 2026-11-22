@@ -461,19 +461,17 @@ describe("factory root", () => {
     return path;
   }
 
-  test("is listed only with factory=1, by the header's cwd whatever folder holds it, next to the live root", async () => {
+  test("is never listed, whatever the query", async () => {
     await writeFixtures();
-    const factoryPath = await writeFactorySession();
+    await writeFactorySession();
     const ids = async (query: string) => (await call("GET", `/sessions${query}`)).json.sessions.map((session) => session.sessionId);
     const cwd = encodeURIComponent(projectDir);
 
     expect(await ids(`?cwd=${cwd}`)).toEqual([NEW_ID, OLD_ID]);
+    expect(await ids(`?cwd=${cwd}&factory=1`)).toEqual([NEW_ID, OLD_ID]);
     expect(await ids("")).not.toContain(FACTORY_ID);
-    expect(await ids(`?cwd=${cwd}&factory=1`)).toEqual([FACTORY_ID, NEW_ID, OLD_ID]);
-    expect(await ids("?factory=1")).toContain(FACTORY_ID);
-    expect(await ids(`?cwd=${encodeURIComponent(scratch)}&factory=1`)).toEqual([]);
-    expect(await ids(`?cwd=${cwd}&archived=1&factory=1`)).toEqual([]);
-    expect((await call("GET", `/sessions?cwd=${cwd}&factory=1`)).json.sessions[0]).toMatchObject({ sessionPath: factoryPath, archived: false });
+    expect(await ids("?factory=1")).not.toContain(FACTORY_ID);
+    expect(await ids(`?cwd=${cwd}&archived=1`)).toEqual([]);
   });
 
   test("lookup by id finds a session in the live, factory and archive roots", async () => {
@@ -632,32 +630,6 @@ describe("private state", () => {
 
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "other" }));
     expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID, OLD_ID]);
-  });
-});
-
-describe("factory draft", () => {
-  test("asks the installed factory plugin, and names its source when it is missing", async () => {
-    const repo = join(scratch, "draft-repo");
-    await mkdir(repo, { recursive: true });
-    const draftUrl = `/factory/draft?cwd=${encodeURIComponent(repo)}`;
-    const missing = await call<{ error: string; message: string }>("GET", draftUrl);
-    expect(missing.status).toBe(503);
-    expect(missing.json.error).toBe("factory_plugin_missing");
-    expect(missing.json.message).toContain("github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory");
-
-    // The plugin is a Pi user extension: a stand-in in the agent dir is what pi-host loads.
-    const plugin = join(scratch, "agent", "extensions", "factory");
-    await mkdir(plugin, { recursive: true });
-    await writeFile(
-      join(plugin, "draft.ts"),
-      'export const initDraft = (root: string) => ({ text: "gates:\\n  - [make, lint]\\n", source: "Makefile" });\n',
-    );
-    const { status, json } = await call<{ draft: string; source: string }>("GET", `/factory/draft?cwd=${encodeURIComponent(repo)}`);
-    expect(status).toBe(200);
-    expect(json.source).toBe("Makefile");
-    expect(json.draft).toContain("gates:\n  - [make, lint]");
-    expect(existsSync(join(repo, "factory.yaml"))).toBe(false);
-    expect((await call("GET", "/factory/draft?cwd=relative")).status).toBe(400);
   });
 });
 

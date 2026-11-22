@@ -147,17 +147,15 @@ def test_sessions_without_a_repo_list_every_cwd(monkeypatch):
     assert dict(host.requests[0].url.params) == {"archived": "0"}
 
 
-def test_sessions_leave_factory_tasks_out_unless_the_factory_asks(monkeypatch):
+def test_sessions_leave_factory_tasks_out(monkeypatch):
     running = {"state": "running", "round": 1, "reason": "", "at": "2026-11-19T10:00:00.000Z"}
     task = {**SESSION, "sessionId": "task", "factory": running}
     host = _serve(monkeypatch, {"GET /sessions": (200, {"sessions": [SESSION, task]})})
 
     picked = _client().get("/api/pi/sessions")
-    board = _client().get("/api/pi/sessions", params={"factory": "true"})
 
     assert [session["sessionId"] for session in picked.json()["sessions"]] == [SESSION["sessionId"]]
-    assert [session["sessionId"] for session in board.json()["sessions"]] == [SESSION["sessionId"], "task"]
-    assert [dict(request.url.params) for request in host.requests] == [{"archived": "0"}, {"archived": "0", "factory": "1"}]
+    assert [dict(request.url.params) for request in host.requests] == [{"archived": "0"}]
 
 
 def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
@@ -243,12 +241,29 @@ async def test_a_prompt_to_a_stopped_session_is_refused_with_pi_hosts_status(mon
 
 async def test_a_missing_factory_plugin_is_reported_with_where_it_comes_from(monkeypatch):
     message = f"The factory plugin is not installed. Install it from {pi_host.FACTORY_PLUGIN_SOURCE}"
-    _serve(monkeypatch, {"GET /factory/draft": (503, {"error": "factory_plugin_missing", "message": message})})
+    _serve(monkeypatch, {"POST /factory/call": (503, {"error": "factory_plugin_missing", "message": message})})
 
     with pytest.raises(pi_host.FactoryPluginMissing) as missing:
-        await pi_host.factory_draft("/repo")
+        await pi_host.factory_call("repos.list", {})
 
     assert "patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory" in str(missing.value)
+
+
+async def test_a_factory_call_answers_the_result_and_a_refusal_its_code(monkeypatch):
+    host = _serve(monkeypatch, {"POST /factory/call": (200, {"result": {"repos": ["/repo"]}})})
+
+    assert await pi_host.factory_call("repos.list", {}) == {"repos": ["/repo"]}
+    assert json.loads(host.requests[0].content) == {"action": "repos.list", "params": {}}
+    assert host.requests[0].extensions["timeout"]["read"] == pi_host.FACTORY_CALL_TIMEOUT_SECONDS
+
+    _serve(monkeypatch, {"POST /factory/call": (409, {"error": "refused", "message": "task 6f1c2a3b is running, cancel it first"})})
+    with pytest.raises(pi_host.FactoryCallError) as refused:
+        await pi_host.factory_call("tasks.remove", {"id": "6f1c"})
+    assert (refused.value.code, str(refused.value)) == ("refused", "task 6f1c2a3b is running, cancel it first")
+
+    _serve(monkeypatch, {"POST /factory/call": (200, {"answer": 1})})
+    with pytest.raises(pi_host.PiHostBadResponse):
+        await pi_host.factory_call("repos.list", {})
 
 
 async def test_delete_removes_the_session_and_an_unknown_one_is_refused(monkeypatch):

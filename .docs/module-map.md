@@ -72,7 +72,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, the session WebSocket relay to pi-host (host access)
-|   |       |-- factory.py            `/api/factory`: repos, settings, tasks, commands, diff (host access)
+|   |       |-- factory.py            `/api/factory/call`, `/api/factory/actions`: factory core pass-through, preview stop after `tasks.remove` (host access)
 |   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
 |   |       `-- upstream.py           Host-access dependency and adapter error mapping
@@ -129,12 +129,11 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- agent_sandbox_adapter.py  Native sandbox runner adapter
 |   |   |-- fake_sandbox_runner.py    Docker-free runner (selected by env in `routes/deps.py`)
 |   |   |-- sandbox_plot.py           Plot generation
-|   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token
+|   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token, factory core calls
 |   |   |-- pi_models.py              Pi model catalog for local chats, stored selector -> gateway id (`gateway_model_id`)
 |   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
-|   |   |-- factory.py                Factory tasks: models, `FactoryStore` (`factory_tasks`, `factory_repo_settings`), settings chain, branch resolution, diff, task life over pi-host
-|   |   |-- factory_workspace.py      Task worktrees through `agent-worktree`, `factory.yaml` reader
+|   |   |-- factory_migration.py      One-time move of the old `factory_repo_settings`/`factory_tasks` rows into the factory core, per row (`migrated_at`)
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
@@ -412,7 +411,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Use `data_store.py` / `postgres_data_store.py` for app-owned text (`json_docs.py` for JSON values) and `asset_store.py` for bytes; use domain stores for chat/project/memory operations. Keep logical namespaces and key builders in `storage_namespace.py`. Postgres stores take a `changes.UserScope` and record change-log rows through it. `lib/canvas_store.py` is the explicit transactional canvas authority, not a generic document-store helper.
 - Route mounted-file work through `lib/file_roots.py` (listing in `file_walk.py`, host-access policy in `host_access.py`, wiki links in `wiki_links.py`); use `git_diff.py` and `git_worktree.py` for git operations, both over `git.py` (`GitError`, `git_text`, `git_ok`; `WorktreeError` is a `GitError`). Keep host paths distinct from database keys and client URLs.
 - Split architecture changes by ownership: `architecture_workspace.py` reads/commits sources; `architecture_service.py` runs validated writes and the commit-conflict retry; `c4_service.py` calls the service; `src/c4/` parses, lays out and edits source in memory; `features/editor/architecture/` handles browser interaction. The C4 service does not own persistence.
-- Keep pi-host contract knowledge in `lib/pi_host.py`, factory contracts in `lib/factory.py`, and shared request/validation plumbing (`request_json`, `UpstreamClient`) in `lib/upstream.py`. Their route adapters map failures; `backend/learnharness_gate.py` and `backend/preview_gate.py` are identity proxies, not upstream API adapters.
+- Keep pi-host contract knowledge in `lib/pi_host.py`, the factory core's call contract in `lib/pi_host.py` (`factory_call`), and shared request/validation plumbing (`request_json`, `UpstreamClient`) in `lib/upstream.py`. Their route adapters map failures; `backend/learnharness_gate.py` and `backend/preview_gate.py` are identity proxies, not upstream API adapters.
 - Treat Pi and the native sandbox implementation (Agents-in-a-box) as external dependencies. This repository owns their integration surfaces (pi-host and `pi-extensions/` included), not their internal session/execution engines.
 - Keep sandbox execution and persistence distinct: `sandbox_service.py` stages workspace state, `routes/histories.py` checkpoints it after a successful chat save, and `sandbox_store.py` records durable manifests/runs. See [architecture](architecture.md#sandbox-checkpoint-boundary).
 - Add a new numbered SQL migration under `db/schema/` for schema changes; `lib/db_schema.py` records checksums, so applied migration files are not editable history.
@@ -427,7 +426,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | `factory.yaml`, `.factory/agents/`, `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory.py`, `src/lib/factory_workspace.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
+| Factory integration | `factory.yaml`, `.factory/agents/`, `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory_migration.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 
@@ -456,7 +455,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
 | Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
-| Factory pipeline, tasks or preview UI | `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_workspace.py`, `src/lib/factory_preview.py`, `factory.yaml`; the plugin's own tests in `~/.os`, `tests/test_factory*.py`, factory `__tests__/` |
+| Factory pipeline, tasks or preview UI | `~/.pi/agent/extensions/factory/` (source in `~/.os`, `core.ts` is the API), `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `src/lib/factory_migration.py`, `factory.yaml`; the plugin's own tests in `~/.os`, `tests/test_factory*.py`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |

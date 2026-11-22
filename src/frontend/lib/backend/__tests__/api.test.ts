@@ -81,6 +81,33 @@ describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {
   })
 })
 
+describe("api.ts — callFactory", () => {
+  it("posts the action and its params and answers the result as is", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      return new Response(JSON.stringify({ repos: ["/git/a"] }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }))
+
+    await expect(api.callFactory("repos.list")).resolves.toEqual({ repos: ["/git/a"] })
+    const { url, init } = lastCall(calls)
+    expect(url).toContain("/factory/call")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual({ action: "repos.list", params: {} })
+  })
+
+  it("fails with the core's message and code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "refused", message: "task abc has 1 unmerged commit" } }), { status: 409 })))
+
+    await expect(api.callFactory("tasks.remove", { id: "abc" })).rejects.toMatchObject({ name: "ApiError", status: 409, code: "refused", message: "task abc has 1 unmerged commit" })
+  })
+
+  it("carries the core's detail of a refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "refused", message: "task abc has 1 unmerged commit", detail: { force: true } } }), { status: 409 })))
+    await expect(api.callFactory("tasks.remove", { id: "abc" })).rejects.toMatchObject({ code: "refused", detail: { force: true } })
+  })
+})
+
 describe("api.ts — saveChat", () => {
   it("saves a chat of the open project through its project tab", async () => {
     const calls: Call[] = []

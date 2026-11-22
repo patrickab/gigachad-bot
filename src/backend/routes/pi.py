@@ -118,12 +118,12 @@ async def get_repositories() -> list[RepositoryOut]:
 
 
 @http_router.get("/sessions")
-async def get_sessions(repo: str | None = None, archived: bool = False, factory: bool = False) -> pi_host.SessionList:
-    """Sessions newest first, of *repo* when given. Factory tasks only with *factory* (the factory board's list), so
-    the session picker and sidebar never show one, also an older task whose file sits in Pi's normal root."""
+async def get_sessions(repo: str | None = None, archived: bool = False) -> pi_host.SessionList:
+    """Sessions newest first, of *repo* when given, factory tasks left out (the factory core lists those), so the
+    session picker and sidebar never show one, also an older task whose file sits in Pi's normal root."""
     cwd = None if repo is None else await asyncio.to_thread(_cwd, repo)
-    sessions = await _call(pi_host.list_sessions(cwd, archived=archived, factory=factory))
-    return pi_host.SessionList(sessions=sessions if factory else [session for session in sessions if session.factory is None])
+    sessions = await _call(pi_host.list_sessions(cwd, archived=archived))
+    return pi_host.SessionList(sessions=[session for session in sessions if session.factory is None])
 
 
 @http_router.post("/sessions")

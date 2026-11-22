@@ -1,13 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react"
-import type { FactorySettings, FactoryTaskCreate } from "@/lib/domain/factory"
+import type { FactoryResolvedSettings, FactoryTaskStart } from "@/lib/domain/factory"
 import type { ModelsResponse } from "@/lib/domain/types"
 
+const core = vi.hoisted(() => ({
+  startTask: vi.fn<(body: FactoryTaskStart) => Promise<unknown>>(),
+  listTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
+  getSettings: vi.fn<(repo: string) => Promise<FactoryResolvedSettings>>(),
+  listBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+}))
 const api = vi.hoisted(() => ({
-  createFactoryTask: vi.fn<(body: FactoryTaskCreate) => Promise<unknown>>(),
-  listFactoryTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
-  getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
-  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+  callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
+    const repo = params.repo as string
+    if (action === "tasks.start") return core.startTask(params as unknown as FactoryTaskStart)
+    if (action === "tasks.list") return { tasks: await core.listTasks(repo) }
+    if (action === "settings.get") {
+      const resolved = await core.getSettings(repo)
+      return { stored: {}, resolved, defaults: { ...resolved, branch: "main" } }
+    }
+    if (action === "branches.list") return { branches: (await core.listBranches(repo)).map((name) => ({ name, default: name === "main", hasConfig: true })) }
+    throw new Error(`unexpected ${action}`)
+  }),
   fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
 }))
 
@@ -24,13 +37,13 @@ import { NewTaskDialog } from "@/features/factory/NewTaskDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, preview: false, models: {}, branch: null }
+const SETTINGS: FactoryResolvedSettings = { merge: "review", maxRounds: 3, review: true, preview: false, models: {}, branch: "main" }
 
 beforeEach(() => {
-  api.createFactoryTask.mockReset().mockResolvedValue({})
-  api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
-  api.listFactoryTasks.mockReset().mockResolvedValue([])
-  api.listFactoryBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
+  core.startTask.mockReset().mockResolvedValue({})
+  core.getSettings.mockReset().mockResolvedValue(SETTINGS)
+  core.listTasks.mockReset().mockResolvedValue([])
+  core.listBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
   api.fetchModels.mockReset().mockResolvedValue(CATALOG)
 })
 
@@ -49,13 +62,31 @@ describe("NewTaskDialog", () => {
     const onClose = vi.fn()
     const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeChecked())
-    expect(api.getFactorySettings).toHaveBeenCalledWith(REPO)
+    expect(core.getSettings).toHaveBeenCalledWith(REPO)
 
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     expect(onClose).toHaveBeenCalled()
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { review: true } })
+    expect(core.startTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky" })
+  })
+
+  it("sends no choice that equals the repo's setting", async () => {
+    const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
+    const review = view.getByRole("switch", { name: "Review" })
+    await waitFor(() => expect(review).toBeEnabled())
+
+    fill(view)
+    fireEvent.click(review)
+    fireEvent.click(review)
+    fireEvent.click(pill(view, "Merge", "Auto"))
+    fireEvent.click(pill(view, "Merge", "Approve"))
+    fireEvent.click(view.getByLabelText("Branch"))
+    fireEvent.click(view.getByRole("option", { name: "main" }))
+    fireEvent.click(view.getByRole("button", { name: "Start" }))
+
+    await waitFor(() => expect(core.startTask).toHaveBeenCalled())
+    expect(core.startTask.mock.calls[0][0]).not.toHaveProperty("overrides")
   })
 
   it("sends the user's review choice and merge override", async () => {
@@ -69,12 +100,12 @@ describe("NewTaskDialog", () => {
     fireEvent.click(pill(view, "Merge", "Auto"))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ review: false, merge: "auto" })
+    await waitFor(() => expect(core.startTask).toHaveBeenCalled())
+    expect(core.startTask.mock.calls[0][0].overrides).toEqual({ review: false, merge: "auto" })
   })
 
   it("sends the model picked per role, the others stay the repo's; the reviewer's only matters with review on", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, review: false, models: { coder: "anthropic/claude-sonnet-5-5" } })
+    core.getSettings.mockResolvedValue({ ...SETTINGS, review: false, models: { coder: "anthropic/claude-sonnet-5-5" } })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
@@ -87,8 +118,8 @@ describe("NewTaskDialog", () => {
     fireEvent.click(await view.findByRole("option", { name: "anthropic/claude-opus-5-5" }))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides.models).toEqual({ coder: "anthropic/claude-opus-5-5" })
+    await waitFor(() => expect(core.startTask).toHaveBeenCalled())
+    expect(core.startTask.mock.calls[0][0].overrides?.models).toEqual({ coder: "anthropic/claude-opus-5-5" })
   })
 
   it("offers no workflow, image, sandbox or backlog control", async () => {
@@ -102,8 +133,8 @@ describe("NewTaskDialog", () => {
   })
 
   it("does not start a task before the title, the request and the repo's settings are there", async () => {
-    let deliver: (settings: FactorySettings) => void = () => {}
-    api.getFactorySettings.mockReturnValue(new Promise((resolve) => { deliver = resolve }))
+    let deliver: (settings: FactoryResolvedSettings) => void = () => {}
+    core.getSettings.mockReturnValue(new Promise((resolve) => { deliver = resolve }))
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     const start = view.getByRole("button", { name: "Start" })
 
@@ -119,7 +150,7 @@ describe("NewTaskDialog", () => {
   })
 
   it("closes at once, before the backend answered the start", async () => {
-    api.createFactoryTask.mockReturnValue(new Promise(() => {}))
+    core.startTask.mockReturnValue(new Promise(() => {}))
     const onClose = vi.fn()
     const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
@@ -128,14 +159,14 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(api.createFactoryTask).toHaveBeenCalledTimes(1)
+    expect(core.startTask).toHaveBeenCalledTimes(1)
   })
 
   it("offers the repo's branches alphabetically after its default, and sends the branch only when picked", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
+    core.getSettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByLabelText("Branch")).toHaveTextContent("Repo default (develop)"))
-    expect(api.listFactoryBranches).toHaveBeenCalledWith(REPO)
+    expect(core.listBranches).toHaveBeenCalledWith(REPO)
     fill(view)
 
     fireEvent.click(view.getByLabelText("Branch"))
@@ -143,7 +174,7 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("option", { name: "feature/x" }))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ review: true, branch: "feature/x" })
+    await waitFor(() => expect(core.startTask).toHaveBeenCalled())
+    expect(core.startTask.mock.calls[0][0].overrides).toEqual({ branch: "feature/x" })
   })
 })

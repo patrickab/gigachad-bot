@@ -46,7 +46,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
       onClick: async () => {
         reportError("")
         try {
-          onItemOpen?.(factoryItem((await openFactoryRepo(directory)).path))
+          onItemOpen?.(factoryItem(await openFactoryRepo(directory)))
         } catch (cause) {
           reportError(errorMessage(cause, "Could not open the factory"))
         }

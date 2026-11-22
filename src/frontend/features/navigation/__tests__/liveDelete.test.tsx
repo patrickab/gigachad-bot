@@ -25,7 +25,7 @@ const api = vi.hoisted(() => ({
   removeDocument: vi.fn<(slug: string, path: string) => Promise<string[]>>(),
   fileRootTree: vi.fn(async () => ({ enabled: true, tree: [] })),
   fetchWorktrees: vi.fn(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
-  fetchFactoryRepos: vi.fn(async () => []),
+  callFactory: vi.fn(async () => ({ repos: [] })),
   fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/backend/api")>(), ...api }))

@@ -87,16 +87,25 @@ pi_host_up() {
     systemctl --user is-active --quiet "$pi_host_unit" && [[ -n $(pi_host_version 2>/dev/null) ]]
 }
 
-# Pi sessions running a turn per pi-host's /health; a restart ends them. A pi-host that predates
-# the session list in /health falls back to counting its `pi` children (every live session).
+# Live factory runners (`bun .../extensions/factory/runner.ts`), one per task at work. The factory
+# plugin starts them outside pi-host's control group, but one started without systemd-run would
+# end with a restart, so they count as running sessions.
+factory_runners() {
+    pgrep -cf '/extensions/factory/runner\.ts' || true
+}
+
+# Pi sessions running a turn per pi-host's /health plus the live factory runners; a restart ends
+# them. A pi-host that predates the session list in /health falls back to counting its `pi`
+# children (every live session).
 running_pi_sessions() {
-    local answer running cgroup pid count=0
+    local answer running cgroup pid count
+    count="$(factory_runners)"
     answer="$(curl -sf -H "Authorization: Bearer $(cat "$pi_host_token_file")" "$pi_host_url/health" 2>/dev/null || true)"
     running="$(printf '%s' "$answer" | python3 -c 'import json, sys
 sessions = json.load(sys.stdin).get("sessions")
 print("" if sessions is None else sum(1 for session in sessions if session.get("running")))' 2>/dev/null || true)"
     if [[ -n $running ]]; then
-        printf '%s\n' "$running"
+        printf '%s\n' "$((running + count))"
         return
     fi
     cgroup="$(systemctl --user show -p ControlGroup --value "$pi_host_unit")"

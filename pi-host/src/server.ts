@@ -6,11 +6,13 @@
  * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token (C1: the gateway
  *   token opens `/v1/*` only)
  *
- * One `Host` (M23, `LocalHost` for this machine) serves the supervisor and the catalog.
+ * One `Host` (M23, `LocalHost` for this machine) serves the supervisor and the catalog. The factory routes only call
+ * the factory plugin's core.
  */
 import type { Server } from "bun";
 import { authorize, loadToken, type Tokens } from "./auth.ts";
 import { handleCatalog } from "./catalog/index.ts";
+import { handleFactory } from "./factory.ts";
 import { handleGateway } from "./gateway/index.ts";
 import { stopOmp } from "./gateway/omp.ts";
 import { LocalHost } from "./host/local/index.ts";
@@ -62,6 +64,7 @@ export function startServer({ hostname, port, tokens, supervisor }: ServerOption
         (await handleGateway(request, url)) ??
         (await supervisor.handle(request, url)) ??
         (await handleCatalog(request, url, supervisor, supervisor.host)) ??
+        (await handleFactory(request, url)) ??
         new Response("not found", { status: 404 });
       const elapsed = performance.now() - started;
       if (elapsed > SLOW_REQUEST_MS) console.warn(`pi-host: ${request.method} ${url.pathname} took ${(elapsed / 1000).toFixed(1)} s (${response.status})`);

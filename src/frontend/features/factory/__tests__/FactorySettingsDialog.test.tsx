@@ -1,14 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor, within } from "@testing-library/react"
 import type { ModelsResponse } from "@/lib/domain/types"
-import type { FactorySettings } from "@/lib/domain/factory"
+import type { FactoryActions, FactoryRepoSettings, FactoryStoredSettings } from "@/lib/domain/factory"
 
-const api = vi.hoisted(() => ({
-  getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
-  fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
-  putFactorySettings: vi.fn<(repo: string, settings: FactorySettings) => Promise<FactorySettings>>(),
-  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+const core = vi.hoisted(() => ({
+  getSettings: vi.fn<(repo: string) => Promise<FactoryRepoSettings>>(),
+  setSettings: vi.fn<(repo: string, settings: FactoryStoredSettings) => Promise<unknown>>(),
+  listBranches: vi.fn<(repo: string) => Promise<string[]>>(),
 }))
+const api = vi.hoisted(() => ({
+  callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
+    const repo = params.repo as string
+    if (action === "settings.get") return core.getSettings(repo)
+    if (action === "settings.set") return core.setSettings(repo, params.settings as FactoryStoredSettings)
+    if (action === "branches.list") return { branches: (await core.listBranches(repo)).map((name) => ({ name, default: name === "main", hasConfig: true })) }
+    throw new Error(`unexpected ${action}`)
+  }),
+  fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
+  getFactoryActions: vi.fn<() => Promise<FactoryActions>>(),
+}))
+
+/** The part of the core's `ACTIONS` the dialog reads: the bounds of `maxRounds`. */
+const ACTIONS: FactoryActions = {
+  actions: {
+    "settings.set": {
+      summary: "Replace the repository's stored settings",
+      params: { type: "object", required: ["repo", "settings"], properties: { settings: { type: "object", properties: { maxRounds: { type: "integer", minimum: 1, maximum: 12 } } } } },
+      mutates: true,
+      hostOnly: false,
+    },
+  },
+}
 
 vi.mock("@/lib/backend/api", () => api)
 
@@ -16,7 +38,15 @@ import { FactorySettingsDialog } from "@/features/factory/FactorySettingsDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, preview: true, models: { coder: "old-model" }, branch: null }
+const STORED: FactoryStoredSettings = { merge: "review", maxRounds: 3, review: true, preview: true, models: { coder: "old-model" } }
+
+function settings(stored: FactoryStoredSettings): FactoryRepoSettings {
+  return {
+    stored,
+    resolved: { merge: "auto", maxRounds: 2, review: false, preview: false, branch: "main", ...stored, models: stored.models ?? {} },
+    defaults: { merge: "auto", maxRounds: 2, review: false, preview: false, models: {}, branch: "main" },
+  }
+}
 
 const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
@@ -31,10 +61,11 @@ const CATALOG: ModelsResponse = {
 }
 
 beforeEach(() => {
-  api.listFactoryBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
-  api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
+  core.listBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
+  core.getSettings.mockReset().mockResolvedValue(settings(STORED))
   api.fetchModels.mockReset().mockResolvedValue(CATALOG)
-  api.putFactorySettings.mockReset().mockImplementation(async (_repo, saved) => saved)
+  api.getFactoryActions.mockReset().mockResolvedValue(ACTIONS)
+  core.setSettings.mockReset().mockImplementation(async (_repo, saved) => settings(saved))
 })
 
 describe("FactorySettingsDialog", () => {
@@ -42,7 +73,7 @@ describe("FactorySettingsDialog", () => {
     const onClose = vi.fn()
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
     const rounds = await view.findByLabelText("Max rounds")
-    expect(api.getFactorySettings).toHaveBeenCalledWith(REPO)
+    expect(core.getSettings).toHaveBeenCalledWith(REPO)
 
     const pill = (group: string, name: string) => within(view.getByRole("group", { name: group })).getByRole("button", { name })
     fireEvent.change(rounds, { target: { value: "5" } })
@@ -58,9 +89,7 @@ describe("FactorySettingsDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, {
-      merge: "auto", max_rounds: 5, review: false, preview: false, models: { reviewer: "openai-codex/fast" }, branch: null,
-    })
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, { merge: "auto", maxRounds: 5, review: false, preview: false, models: { reviewer: "openai-codex/fast" } })
   })
 
   it("edits nothing of the old engine: no sandbox, timeouts, scout, planner or agent markdown", async () => {
@@ -72,28 +101,43 @@ describe("FactorySettingsDialog", () => {
     expect(view.getAllByRole("spinbutton")).toHaveLength(1)
   })
 
-  it("does not save a round count outside 1 to 20", async () => {
+  it("does not save a round count outside the bounds the core declares", async () => {
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     const rounds = await view.findByLabelText("Max rounds")
+    await waitFor(() => expect(rounds).toHaveAttribute("max", "12"))
+    expect(rounds).toHaveAttribute("min", "1")
     const save = view.getByRole("button", { name: "Save" })
 
-    for (const value of ["", "0", "21", "2.5"]) {
+    for (const value of ["", "0", "13", "2.5"]) {
       fireEvent.change(rounds, { target: { value } })
       expect(save).toBeDisabled()
     }
-    fireEvent.change(rounds, { target: { value: "20" } })
+    fireEvent.change(rounds, { target: { value: "12" } })
     expect(save).toBeEnabled()
   })
 
-  it("shows the backend's refusal inline and stays open", async () => {
-    api.putFactorySettings.mockRejectedValueOnce(new Error("Unknown repo"))
+  it("leaves a setting the file does not hold unset unless the user changes it, so it follows the defaults", async () => {
+    core.getSettings.mockResolvedValue(settings({}))
+    const onClose = vi.fn()
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    await view.findByLabelText("Max rounds")
+
+    fireEvent.click(view.getByRole("switch", { name: "Preview" }))
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, { preview: true, models: {} })
+  })
+
+  it("shows the core's refusal inline and stays open", async () => {
+    core.setSettings.mockRejectedValueOnce(new Error("settings.maxRounds must be at most 20"))
     const onClose = vi.fn()
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
     await view.findByLabelText("Max rounds")
 
     fireEvent.click(view.getByRole("button", { name: "Save" }))
 
-    expect(await view.findByRole("alert")).toHaveTextContent("Unknown repo")
+    expect(await view.findByRole("alert")).toHaveTextContent("settings.maxRounds must be at most 20")
     expect(onClose).not.toHaveBeenCalled()
   })
 
@@ -108,7 +152,7 @@ describe("FactorySettingsDialog", () => {
     expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "openrouter/vendor/model" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, { ...SETTINGS, models: { coder: "openrouter/vendor/model" } }))
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { coder: "openrouter/vendor/model" } }))
   })
 
   it("keeps saved selections when loading models fails and permits clearing them", async () => {
@@ -119,32 +163,32 @@ describe("FactorySettingsDialog", () => {
     expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, { ...SETTINGS, models: {} }))
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: {} }))
   })
 
-  it("picks the branch from the repo's branches, the default saved as null", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
+  it("picks the branch from the repo's branches, the default saved as no branch", async () => {
+    core.getSettings.mockResolvedValue(settings({ ...STORED, branch: "develop" }))
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     const branch = await view.findByLabelText("Branch")
     expect(branch).toHaveTextContent("develop")
-    expect(api.listFactoryBranches).toHaveBeenCalledWith(REPO)
+    expect(core.listBranches).toHaveBeenCalledWith(REPO)
 
     fireEvent.click(branch)
-    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (origin HEAD)", "develop", "feature/x", "main", "release"]))
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (main)", "develop", "feature/x", "main", "release"]))
     fireEvent.click(view.getByRole("option", { name: "release" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(1))
-    expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ branch: "release" })
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledTimes(1))
+    expect(core.setSettings.mock.calls[0][1]).toMatchObject({ branch: "release" })
 
     fireEvent.click(branch)
-    fireEvent.click(view.getByRole("option", { name: "Default (origin HEAD)" }))
+    fireEvent.click(view.getByRole("option", { name: "Default (main)" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(2))
-    expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ branch: null })
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledTimes(2))
+    expect(core.setSettings.mock.calls[1][1]).not.toHaveProperty("branch")
   })
 
   it("keeps a saved branch that no longer exists selectable, marked missing", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "gone" })
+    core.getSettings.mockResolvedValue(settings({ ...STORED, branch: "gone" }))
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     const branch = await view.findByLabelText("Branch")
     await waitFor(() => expect(branch).toHaveTextContent("gone (missing)"))
