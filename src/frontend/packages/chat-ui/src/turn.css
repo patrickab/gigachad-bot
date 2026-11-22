@@ -1,7 +1,9 @@
 /* Q&A turn cards (`Turn.tsx`), the one definition gigachad-bot's chat renders.
 
    Reads the host's role tokens: --paper, --surface, --surface-elevated, --ink, --ink-muted, --ink-subtle,
-   --ink-faint, --divider-strong, --danger, --shadow-sm. A host with other token names maps them on `.gc-turn`. */
+   --ink-faint, --divider-strong, --danger, --shadow-sm. A host with other token names maps them on `.gc-turn`.
+   A host may make the cards glass: --gc-turn-fill and --gc-turn-inset-fill replace the card's and its insets'
+   fills, --gc-turn-backdrop is the card's `backdrop-filter`. */
 
 .gc-turn {
   position: relative;
@@ -9,7 +11,8 @@
   border: 1px solid transparent;
   border-radius: 24px;
   overflow: hidden;
-  background-color: color-mix(in oklab, var(--surface) 65%, var(--paper));
+  background-color: var(--gc-turn-fill, color-mix(in oklab, var(--surface) 65%, var(--paper)));
+  backdrop-filter: var(--gc-turn-backdrop, none);
   box-shadow: var(--shadow-sm);
   color: var(--ink);
   font-size: 16px;
@@ -98,7 +101,7 @@
   padding: 14px;
   border: 1px solid transparent;
   border-radius: 18px;
-  background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
+  background-color: var(--gc-turn-inset-fill, color-mix(in oklab, var(--surface-elevated) 45%, var(--surface)));
   color: var(--ink-subtle);
   font-size: 12px;
   line-height: 16px;
@@ -118,7 +121,7 @@
   border: 1px solid transparent;
   border-radius: 18px;
   overflow: hidden;
-  background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
+  background-color: var(--gc-turn-inset-fill, color-mix(in oklab, var(--surface-elevated) 45%, var(--surface)));
 }
 .gc-turn-region {
   position: relative;

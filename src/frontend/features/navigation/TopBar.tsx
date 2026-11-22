@@ -37,7 +37,7 @@ export function TopBar({ left, center, right, raised = false }: { left?: ReactNo
  * A `raised` bar lifts every pill off busy content (`chip-raised`), `raised` on the pill lifts only this one.
  */
 export function TopBarPill({ children, ref, raised = false }: { children?: ReactNode; ref?: Ref<HTMLDivElement>; raised?: boolean }) {
-  return <div ref={ref} className={`pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1 empty:hidden before:pointer-events-none before:absolute before:-inset-x-2 before:inset-y-0 before:-z-10 before:rounded-full ${raised ? "before:chip-raised" : "before:bg-paper group-data-[raised=true]/topbar:before:chip-raised"}`}>
+  return <div ref={ref} className={`pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1 empty:hidden before:pointer-events-none before:absolute before:-inset-x-2 before:inset-y-0 before:-z-10 before:rounded-full ${raised ? "before:chip-raised" : "before:bg-paper before:glass-blur-paper group-data-[raised=true]/topbar:before:chip-raised"}`}>
     {children}
   </div>
 }

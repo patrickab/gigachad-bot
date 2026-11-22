@@ -94,10 +94,11 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   }, "Could not delete the task")
 
   return (
-    <ElevationProvider>
+    // Lanes start at --surface, the level of the sidebar beside them
+    <ElevationProvider base={1}>
       <div className="flex h-full flex-col">
-        <div className="flex shrink-0 items-center justify-between border-b border-divider/20 px-8 pb-4 pt-6 select-none">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Factory · {baseName(repo)}</h2>
+        <div className="flex shrink-0 items-center justify-between px-8 pb-2 pt-6 select-none">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
           <div className="flex items-center gap-2">
             <button type="button" aria-label="Factory settings" onClick={() => setSettingsOpen(true)} className={ICON_BUTTON_CLASS}>
               <Settings className="h-4 w-4" />
@@ -109,7 +110,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
           </div>
         </div>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
-        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-6 scrollbar-thin">
+        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-4 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
             const columnTasks = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
             const capped = column.id === "finished" && !showAllFinished && columnTasks.length > FINISHED_LIMIT
@@ -122,12 +123,10 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                 title={column.title}
                 titleAs="h3"
                 count={columnTasks.length}
-                className="min-w-[15rem] border-divider/40"
+                marker={<StatusDot tone={columnTasks.length === 0 ? "idle" : column.tone} />}
+                className={cn("min-w-[15rem] border-divider/30", column.id === "finished" && "opacity-60 hover:opacity-100 focus-within:opacity-100")}
                 bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
                 footer={<>
-                  {columnTasks.length === 0 && (
-                    <div className="rounded-xl border border-dashed border-divider/60 px-4 py-6 text-center text-[11px] text-ink-faint">No tasks</div>
-                  )}
                   {capped && (
                     <button
                       type="button"

@@ -36,14 +36,16 @@ interface BoardColumn {
   id: string
   title: string
   states: readonly FactoryShownState[]
+  /** Tone of the column's dot while it holds a task. */
+  tone: StatusTone
 }
 
 /** Board columns in display order, every shown state belongs to exactly one. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = [
-  { id: "needs-you", title: "Needs you", states: ["waiting_approve", "blocked", "interrupted"] },
-  { id: "working", title: "Working", states: ["starting", "running"] },
-  { id: "merging", title: "Merging", states: ["merging"] },
-  { id: "finished", title: "Finished", states: ["done", "cancelled"] },
+  { id: "needs-you", title: "Needs you", states: ["waiting_approve", "blocked", "interrupted"], tone: "attention" },
+  { id: "working", title: "Working", states: ["starting", "running"], tone: "ready" },
+  { id: "merging", title: "Merging", states: ["merging"], tone: "ready" },
+  { id: "finished", title: "Finished", states: ["done", "cancelled"], tone: "done" },
 ]
 
 /** States no command but a retry or a message leaves. */

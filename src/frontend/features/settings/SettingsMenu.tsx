@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
+import { Blend, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { setGlassMode, useGlassMode } from "@/hooks/useGlassMode"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { useHostAccess, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 import { startRedeploy } from "@/lib/backend/api"
@@ -75,6 +76,7 @@ export function SettingsMenu({
   const [researchOpen, setResearchOpen] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
   const neovim = useNeovimSetting()
+  const glass = useGlassMode()
   const hostAccess = useHostAccess()
   const [redeployStarted, setRedeployStarted] = useState(false)
   const redeploy = useAsyncAction(async () => {
@@ -231,6 +233,14 @@ export function SettingsMenu({
                   Downscale images
                 </div>
                 <Switch label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
+              </div>
+
+              <div className={ROW_CLASS}>
+                <div className={ROW_LABEL_CLASS}>
+                  <Blend className="h-3.5 w-3.5" />
+                  Glass
+                </div>
+                <Switch label="Glass" checked={glass} onToggle={() => setGlassMode(!glass)} />
               </div>
 
               {neovim.available && (

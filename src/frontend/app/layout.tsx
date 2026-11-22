@@ -46,13 +46,14 @@ export const metadata: Metadata = {
   },
 }
 
-// Runs before hydration so the saved theme applies without a flash. Default is dark.
+// Runs before hydration so the saved theme and glass mode apply without a flash. Default is dark, without glass.
 const THEME_SCRIPT = `
   (function() {
     try {
       var stored = localStorage.getItem('theme')
       var theme = stored === 'light' ? 'light' : 'dark'
       document.documentElement.classList.toggle('light', theme === 'light')
+      document.documentElement.classList.toggle('glass', localStorage.getItem('glass') === 'on')
     } catch(e) {
       document.documentElement.classList.toggle('light', false)
     }
@@ -76,7 +77,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_TOUCH_CONTEXTMENU_SCRIPT }} />
       </head>
-      <body spellCheck={false} className="bg-paper text-ink antialiased">
+      <body spellCheck={false} className="bg-[var(--paper)] text-ink antialiased">
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:rounded-md focus:bg-surface focus:px-3 focus:py-1 focus:text-ink focus:text-sm">Skip to content</a>
         {children}
       </body>

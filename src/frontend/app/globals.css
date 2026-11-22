@@ -126,6 +126,11 @@
   --color-surface-elevated: var(--surface-elevated);
   --color-page:             var(--page);
   --color-overlay:          var(--overlay);
+  /* Fills turn to glass in glass mode (see GLASS below), the --color-* above stay opaque for text, borders and gradients */
+  --background-color-paper:            var(--glass-paper);
+  --background-color-surface:          var(--glass-surface);
+  --background-color-surface-elevated: var(--glass-surface-elevated);
+  --background-color-overlay:          var(--glass-overlay);
 
   /* Text */
   --color-ink:        var(--ink);
@@ -167,8 +172,59 @@
 
 /* Chip of a raised top bar: its own fill and a soft shadow stand it off canvas and PDF pages */
 @utility chip-raised {
-  background-color: var(--chip-raised);
+  background-color: var(--glass-chip-raised);
+  backdrop-filter: var(--glass-blur-surface);
   box-shadow: var(--shadow-sm);
+}
+
+/* GLASS
+   Glass mode (`.glass` on <html>, the Glass switch in settings) turns every surface fill into frosted glass:
+   its role color see-through over a blur of what lies behind. Without it the fills are the opaque role colors.
+   - Four levels, darkest first: --overlay, --paper, --surface, --surface-elevated. The darker the level,
+     the denser its tint and the stronger its blur
+   - `bg-overlay`, `bg-paper`, `bg-surface` and `bg-surface-elevated` take their fill from
+     --background-color-* in @theme, variants (`hover:`, `before:`) and opacity modifiers included
+   - Only the plain classes blur. A variant or pseudo-element that must blur adds `glass-blur-*` itself
+   - A glass surface inside another shows the outer one's blur through its own tint
+   - Text, borders and inline fills keep the opaque role tokens (--paper, `text-paper`, ...) */
+:root {
+  --glass-overlay:          var(--overlay);
+  --glass-paper:            var(--paper);
+  --glass-surface:          var(--surface);
+  --glass-surface-elevated: var(--surface-elevated);
+  --glass-chip-raised:      var(--chip-raised);
+  --glass-blur-overlay:          none;
+  --glass-blur-paper:            none;
+  --glass-blur-surface:          none;
+  --glass-blur-surface-elevated: none;
+}
+.glass {
+  --glass-overlay:          color-mix(in oklab, var(--overlay) 65%, transparent);
+  --glass-paper:            color-mix(in oklab, var(--paper) 60%, transparent);
+  --glass-surface:          color-mix(in oklab, var(--surface) 55%, transparent);
+  --glass-surface-elevated: color-mix(in oklab, var(--surface-elevated) 50%, transparent);
+  --glass-chip-raised:      color-mix(in oklab, var(--chip-raised) 55%, transparent);
+  --glass-blur-overlay:          blur(32px);
+  --glass-blur-paper:            blur(24px);
+  --glass-blur-surface:          blur(16px);
+  --glass-blur-surface-elevated: blur(10px);
+
+  /* Q&A turn cards (packages/chat-ui/src/turn.css): the card, and with it the question, is dark glass between
+     --paper and --surface. The answer's inset is a thin, lighter tint on it, so it stays the lighter of the two */
+  --gc-turn-fill:       color-mix(in oklab, color-mix(in oklab, var(--surface) 65%, var(--paper)) 55%, transparent);
+  --gc-turn-backdrop:   var(--glass-blur-surface);
+  --gc-turn-inset-fill: color-mix(in oklab, var(--surface-elevated) 40%, transparent);
+}
+
+@utility glass-blur-paper {
+  backdrop-filter: var(--glass-blur-paper);
+}
+
+@layer utilities {
+  .bg-overlay          { backdrop-filter: var(--glass-blur-overlay); }
+  .bg-paper            { backdrop-filter: var(--glass-blur-paper); }
+  .bg-surface          { backdrop-filter: var(--glass-blur-surface); }
+  .bg-surface-elevated { backdrop-filter: var(--glass-blur-surface-elevated); }
 }
 
 @keyframes shimmer {
