@@ -329,13 +329,22 @@ def _local_branch(repo: Path, branch: str) -> bool:
     return git_ok(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
 
 
+def _default_branch(repo: Path) -> str | None:
+    """The branch origin's `HEAD` names, the repo's default branch; None without one."""
+    try:
+        return git_text(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip().removeprefix("origin/") or None
+    except GitError:
+        return None
+
+
 def resolve_branches(repo: Path, source: str | None, target: str | None) -> tuple[str, str]:
-    """The source and target branch of a worktree task. The source: *source*, unset `main`, else `master`. The target:
-    *target*, unset the source. Each must be a local branch of *repo*, `UnknownBranch` otherwise."""
+    """The source and target branch of a worktree task. The source: *source*, unset the repo's default branch (origin's
+    `HEAD`), else `main`, else `master`. The target: *target*, unset the source. Each must be a local branch of *repo*,
+    `UnknownBranch` otherwise."""
     if source is None:
-        source = next((name for name in ("main", "master") if _local_branch(repo, name)), None)
+        source = next((name for name in (_default_branch(repo), "main", "master") if name and _local_branch(repo, name)), None)
         if source is None:
-            raise UnknownBranch("the repo has neither main nor master, set a source branch")
+            raise UnknownBranch("the repo has no default branch, main or master, set a source branch")
     elif not _local_branch(repo, source):
         raise UnknownBranch(f"the source branch {source} is not a local branch of {repo}")
     if target is None:

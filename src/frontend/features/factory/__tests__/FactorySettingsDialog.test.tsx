@@ -138,7 +138,7 @@ describe("FactorySettingsDialog", () => {
     expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ source_branch: "develop", target_branch: "release" })
 
     fireEvent.click(source)
-    fireEvent.click(view.getByRole("option", { name: "Default (main, else master)" }))
+    fireEvent.click(view.getByRole("option", { name: "Default (origin HEAD)" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(2))
     expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ source_branch: null, target_branch: "release" })

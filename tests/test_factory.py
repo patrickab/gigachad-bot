@@ -241,11 +241,11 @@ def test_the_start_command_carries_the_settings_in_the_extensions_shape():
     }
 
 
-def test_branches_resolve_to_local_ones_the_source_else_main_then_master_the_target_else_the_source(tmp_path):
+def test_branches_resolve_to_local_ones_the_source_else_the_default_branch_then_main_then_master_the_target_else_the_source(tmp_path):
     repo = (tmp_path / "repo").resolve()
     git(tmp_path, "init", "-q", "-b", "trunk", str(repo))
     git(repo, "commit", "-q", "--allow-empty", "-m", "first")
-    with pytest.raises(factory.UnknownBranch, match="the repo has neither main nor master, set a source branch"):
+    with pytest.raises(factory.UnknownBranch, match="the repo has no default branch, main or master, set a source branch"):
         factory.resolve_branches(repo, None, None)
     assert factory.resolve_branches(repo, "trunk", None) == ("trunk", "trunk")
     with pytest.raises(factory.UnknownBranch, match="the source branch release is not a local branch"):
@@ -258,6 +258,10 @@ def test_branches_resolve_to_local_ones_the_source_else_main_then_master_the_tar
     git(repo, "branch", "main")
     assert factory.resolve_branches(repo, None, None) == ("main", "main")
     assert factory.resolve_branches(repo, "trunk", "main") == ("trunk", "main")
+    # The repo's default branch (origin's HEAD) wins over both names.
+    git(repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    assert factory.resolve_branches(repo, None, None) == ("trunk", "trunk")
 
 
 def test_a_worktree_is_named_after_the_title_and_the_short_id():

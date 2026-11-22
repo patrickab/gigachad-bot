@@ -32,7 +32,7 @@ export function branchOrDefault(branch: string | null): string | null {
 }
 
 /** What an unset branch falls back to, named by the first option of its select. */
-export const SOURCE_BRANCH_DEFAULT = "main, else master"
+export const SOURCE_BRANCH_DEFAULT = "origin HEAD"
 export const TARGET_BRANCH_DEFAULT = "same as source"
 
 /**
