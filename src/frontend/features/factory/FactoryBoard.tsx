@@ -158,7 +158,10 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
     // Lanes start at --surface, the level of the sidebar beside them
     <ElevationProvider base={1}>
       <div className="flex h-full flex-col">
-        <h2 className="shrink-0 truncate px-8 pt-6 text-lg font-semibold tracking-tight text-ink select-none">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
+        <InTopBar name="title">
+          {/* Larger than a top-bar control, and set lower: the title of the page */}
+          <h2 className="truncate pl-5 pt-3 text-xl font-semibold tracking-tight text-ink select-none">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
+        </InTopBar>
         <InTopBar name="center">
           <div className="flex items-center gap-2">
             <button type="button" aria-label="Factory settings" onClick={() => setSettingsOpen(true)} className={ICON_BUTTON_CLASS}>
