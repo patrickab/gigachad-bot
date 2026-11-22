@@ -4,6 +4,7 @@ import { useCallback, useState } from "react"
 import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { PillTabs } from "@/components/ui/PillTabs"
+import { Switch } from "@/components/ui/Switch"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { errorMessage } from "@/lib/utils"
@@ -82,6 +83,9 @@ function validRounds(rounds: number): boolean {
   return Number.isInteger(rounds) && rounds >= MAX_ROUNDS_LIMITS.min && rounds <= MAX_ROUNDS_LIMITS.max
 }
 
+/** The label of a choice row: one width, so the pills and switches of a column line up. */
+const CHOICE_LABEL_CLASS = "w-20 shrink-0 text-[11px] text-ink-subtle"
+
 /** A labelled row of pills of the factory dialogs, one of `options` selected. */
 export function PillChoice<T extends string>({ label, options, value, disabled, onChange }: {
   label: string
@@ -91,14 +95,23 @@ export function PillChoice<T extends string>({ label, options, value, disabled, 
   onChange: (value: T) => void
 }) {
   return (
-    <div role="group" aria-label={label} className="flex items-center gap-1.5">
-      <span className="text-[11px] text-ink-subtle">{label}</span>
+    <div role="group" aria-label={label} className="flex h-7 items-center">
+      <span className={CHOICE_LABEL_CLASS}>{label}</span>
       <PillTabs quiet options={options} value={value} onChange={onChange} disabled={disabled} />
     </div>
   )
 }
 
-export const REVIEW_OPTIONS = [{ value: "off", label: "Off" }, { value: "on", label: "On" }] as const
+/** A labelled on/off choice of the factory dialogs, the app's `Switch`. */
+export function SwitchChoice({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex h-7 items-center">
+      <span aria-hidden className={CHOICE_LABEL_CLASS}>{label}</span>
+      <Switch label={label} checked={checked} disabled={disabled} onToggle={() => onChange(!checked)} />
+    </div>
+  )
+}
+
 export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Checkout" }] as const
 
 /** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, source and target branch, review, worktree, preview and a model per agent. */
@@ -171,9 +184,9 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
               <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={draft.worktree ? "worktree" : "checkout"} onChange={(workspace) => change({ worktree: workspace === "worktree" })} />
-              <PillChoice label="Review" options={REVIEW_OPTIONS} value={draft.review ? "on" : "off"} onChange={(review) => change({ review: review === "on" })} />
+              <SwitchChoice label="Review" checked={draft.review} onChange={(review) => change({ review })} />
               <PillChoice label="Merge" options={MERGE_OPTIONS} value={draft.merge} onChange={(merge) => change({ merge })} />
-              <PillChoice label="Preview" options={REVIEW_OPTIONS} value={draft.preview ? "on" : "off"} onChange={(preview) => change({ preview: preview === "on" })} />
+              <SwitchChoice label="Preview" checked={draft.preview} onChange={(preview) => change({ preview })} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <BranchSelect

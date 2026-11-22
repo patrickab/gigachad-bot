@@ -67,7 +67,7 @@ describe("NewTaskDialog", () => {
 
     fill(view)
     fireEvent.click(worktree)
-    fireEvent.click(pill(view, "Review", "Off"))
+    fireEvent.click(view.getByRole("switch", { name: "Review" }))
     expect(pill(view, "Merge", "Approve")).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(pill(view, "Merge", "Auto"))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
@@ -81,7 +81,7 @@ describe("NewTaskDialog", () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
     expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
-    fireEvent.click(pill(view, "Review", "On"))
+    fireEvent.click(view.getByRole("switch", { name: "Review" }))
     expect(view.getByLabelText("Model of reviewer")).toBeEnabled()
 
     fill(view)
@@ -113,7 +113,7 @@ describe("NewTaskDialog", () => {
     fill(view)
     expect(start).toBeDisabled()
     expect(pill(view, "Workspace", "Worktree")).toBeDisabled()
-    expect(pill(view, "Review", "On")).toBeDisabled()
+    expect(view.getByRole("switch", { name: "Review" })).toBeDisabled()
     deliver(SETTINGS)
     await waitFor(() => expect(start).toBeEnabled())
 

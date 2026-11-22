@@ -11,7 +11,7 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, MERGE_OPTIONS, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
+import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, MERGE_OPTIONS, PillChoice, SOURCE_BRANCH_DEFAULT, SwitchChoice, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
 import type { ModelsResponse } from "@/lib/domain/types"
@@ -144,7 +144,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
         </div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-2">
           <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={worktree ? "worktree" : "checkout"} disabled={settings === null} onChange={(workspace) => setWorktreeChoice(workspace === "worktree")} />
-          <PillChoice label="Review" options={REVIEW_OPTIONS} value={review ? "on" : "off"} disabled={settings === null} onChange={(choice) => setReviewChoice(choice === "on")} />
+          <SwitchChoice label="Review" checked={review} disabled={settings === null} onChange={setReviewChoice} />
           <PillChoice label="Merge" options={MERGE_OPTIONS} value={merge} disabled={settings === null} onChange={setMergeChoice} />
         </div>
         <div className="grid grid-cols-2 gap-3">

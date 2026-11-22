@@ -16,6 +16,7 @@ import { setGlassMode, useGlassMode } from "@/hooks/useGlassMode"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { useAnimatedBackground, useHostAccess, useSetAnimatedBackground, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 import { startRedeploy } from "@/lib/backend/api"
+import { Switch } from "@/components/ui/Switch"
 
 interface SettingsMenuProps {
   prompts: Record<string, string>
@@ -39,24 +40,6 @@ function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open:
       className="p-0.5 rounded text-ink-faint hover:bg-hover hover:text-ink transition-colors"
     >
       <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
-    </button>
-  )
-}
-
-/** Off: a recessed track (paper under surface-elevated). On: a filled ink track with a paper knob, readable in both themes. */
-function Switch({ label, checked, onToggle }: { label: string; checked: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-label={label}
-      aria-checked={checked}
-      onClick={onToggle}
-      className={cn("relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200 ease-out focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted motion-reduce:transition-none",
-        checked ? "border-ink-muted bg-ink-muted" : "border-divider bg-paper shadow-[var(--inner-highlight)]")}
-    >
-      <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-transform duration-200 ease-out motion-reduce:transition-none",
-        checked ? "translate-x-4 bg-paper" : "translate-x-0 bg-ink-faint")} />
     </button>
   )
 }

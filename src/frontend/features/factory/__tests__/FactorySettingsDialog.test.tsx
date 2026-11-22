@@ -50,10 +50,10 @@ describe("FactorySettingsDialog", () => {
     // The reviewer's model is picked while review is on: off, its select is disabled.
     fireEvent.click(view.getByLabelText("Model of reviewer"))
     fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))
-    fireEvent.click(pill("Review", "Off"))
+    fireEvent.click(view.getByRole("switch", { name: "Review" }))
     expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
     fireEvent.click(pill("Workspace", "Checkout"))
-    fireEvent.click(pill("Preview", "Off"))
+    fireEvent.click(view.getByRole("switch", { name: "Preview" }))
     fireEvent.click(view.getByLabelText("Model of coder"))
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
