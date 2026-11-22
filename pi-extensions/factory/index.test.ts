@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import factory from "./index.ts";
-import { MERGE_GRACE_ROUNDS } from "./pipeline.ts";
 import type { Draft, Settings } from "./state.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -472,7 +471,7 @@ describe("a worktree task on its target branch (B7)", () => {
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("main version\ntask version\n");
   });
 
-  test("a rebase conflict at merge merges nothing and opens a conflict round, past maxRounds by the merge grace, then blocks; retry opens one again", async () => {
+  test("a rebase conflict at merge merges nothing and opens a conflict round within maxRounds, then blocks; retry opens one again", async () => {
     const { pi } = await conflicting(2);
     const main = gitIn(repo, "rev-parse", "main");
     await pi.command("approve");
@@ -483,9 +482,8 @@ describe("a worktree task on its target branch (B7)", () => {
     expect(pi.sent[0].message.content).toContain("- README.md");
     expect(pi.of("factory-merge")).toEqual([]);
 
-    // The coder ignores it: each round passes and the merge conflicts again, until the run's two rounds and the
-    // merge grace are used up.
-    const rounds = 2 + MERGE_GRACE_ROUNDS;
+    // The coder ignores it: the round passes and the merge conflicts again, until the run's two rounds are used up.
+    const rounds = 2;
     for (let sent = 1; sent < rounds; sent++) {
       await pi.boundary();
       await pi.settled();

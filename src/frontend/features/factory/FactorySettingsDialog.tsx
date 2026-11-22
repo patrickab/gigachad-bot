@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
+import { PillTabs } from "@/components/ui/PillTabs"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { errorMessage } from "@/lib/utils"
@@ -74,6 +75,25 @@ function withoutEmpty(settings: FactorySettings): FactorySettings {
 function validRounds(rounds: number): boolean {
   return Number.isInteger(rounds) && rounds >= MAX_ROUNDS_LIMITS.min && rounds <= MAX_ROUNDS_LIMITS.max
 }
+
+/** A labelled row of pills of the factory dialogs, one of `options` selected. */
+export function PillChoice<T extends string>({ label, options, value, disabled, onChange }: {
+  label: string
+  options: readonly { value: T; label: string }[]
+  value: T
+  disabled?: boolean
+  onChange: (value: T) => void
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex items-center gap-2 text-sm">
+      <span className="text-ink-muted">{label}</span>
+      <PillTabs options={options} value={value} onChange={onChange} disabled={disabled} />
+    </div>
+  )
+}
+
+export const REVIEW_OPTIONS = [{ value: "off", label: "Off" }, { value: "on", label: "On" }] as const
+export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Current checkout" }] as const
 
 /** Labelled checkbox of the factory dialogs. */
 export function Toggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
@@ -168,8 +188,8 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
               />
             </div>
             <div className="flex gap-6">
-              <Toggle label="Review" checked={draft.review} onChange={(review) => change({ review })} />
-              <Toggle label="Worktree" checked={draft.worktree} onChange={(worktree) => change({ worktree })} />
+              <PillChoice label="Review" options={REVIEW_OPTIONS} value={draft.review ? "on" : "off"} onChange={(review) => change({ review: review === "on" })} />
+              <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={draft.worktree ? "worktree" : "checkout"} onChange={(workspace) => change({ worktree: workspace === "worktree" })} />
               <Toggle label="Preview" checked={draft.preview} onChange={(preview) => change({ preview })} />
             </div>
             <div className="grid grid-cols-2 gap-3">

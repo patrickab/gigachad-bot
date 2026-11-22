@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_PROTECTED, type FactoryConfig } from "./config.ts";
-import { MERGE_GRACE_ROUNDS, runMerge, runRound, type PipelineSteps } from "./pipeline.ts";
+import { runMerge, runRound, type PipelineSteps } from "./pipeline.ts";
 import type { CommandResult } from "./run.ts";
 import { stateDraft, type Draft, type MergeData, type ReviewData, type ReviewStatus, type Settings, type Snapshot } from "./state.ts";
 
@@ -306,27 +306,27 @@ describe("runMerge", () => {
     expect(lastState(entries)).toEqual({ state: "blocked", round: 1, reason: "merge_failed" });
   });
 
-  test("a rebase conflict merges nothing and opens a conflict round, past maxRounds by the merge grace, then blocks with max_rounds: conflict", async () => {
+  test("a rebase conflict merges nothing and opens a conflict round within the budget, then blocks with max_rounds: conflict", async () => {
     const conflicting = fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: ["notes.txt"], failedGate: null }) });
-    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 3, 1, true), config, conflicting);
+    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1, true), config, conflicting);
     expect(kinds(entries)).toEqual(["factory-round", "custom_message", "factory-state"]);
-    expect(entries[0]).toMatchObject({ data: { round: 4, trigger: "conflict" } });
-    expect(entries[1]).toMatchObject({ details: { round: 3, trigger: "conflict" } });
+    expect(entries[0]).toMatchObject({ data: { round: 3, trigger: "conflict" } });
+    expect(entries[1]).toMatchObject({ details: { round: 2, trigger: "conflict" } });
     expect((entries[1] as { content: string }).content).toContain("- notes.txt\nRun `git rebase refs/heads/main`, resolve the conflicts");
-    expect(lastState(entries)).toEqual({ state: "running", round: 4, reason: "conflict" });
+    expect(lastState(entries)).toEqual({ state: "running", round: 3, reason: "conflict" });
 
-    const last = await runMerge(snapshotOf({ maxRounds: 3 }, 3 + MERGE_GRACE_ROUNDS, 1, true), config, conflicting);
+    const last = await runMerge(snapshotOf({ maxRounds: 3 }, 3, 1, true), config, conflicting);
     expect(kinds(last)).toEqual(["custom_message", "factory-state"]);
-    expect(lastState(last)).toEqual({ state: "blocked", round: 6, reason: "max_rounds: conflict" });
+    expect(lastState(last)).toEqual({ state: "blocked", round: 3, reason: "max_rounds: conflict" });
   });
 
   test("a merge gate that fails on the rebased branch goes back to the coder as a gates round, nothing merged", async () => {
     const failedGate = { argv: ["test"], result: commandResult(1, "FAILED test_new_thing") };
-    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 3, 1, true), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
+    const entries = await runMerge(snapshotOf({ maxRounds: 3 }, 2, 1, true), config, fakeSteps({ merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate }) }));
     expect(kinds(entries)).toEqual(["factory-round", "custom_message", "factory-state"]);
     expect((entries[1] as { content: string }).content).toContain("After the rebase onto main");
     expect((entries[1] as { content: string }).content).toContain("FAILED test_new_thing");
-    expect(lastState(entries)).toEqual({ state: "running", round: 4, reason: "gates" });
+    expect(lastState(entries)).toEqual({ state: "running", round: 3, reason: "gates" });
   });
 
   test("a merge gate that exits 75 blocks the task as infra", async () => {
@@ -335,12 +335,6 @@ describe("runMerge", () => {
     expect(lastState(entries)).toEqual({ state: "blocked", round: 1, reason: "infra: pi-host/node_modules is missing" });
   });
 
-  test("a round after a merge's grace round keeps the grace budget", async () => {
-    const steps = fakeSteps({ runCommand: async (argv) => commandResult(argv[0] === "lint" ? 1 : 0) });
-    const result = await runRound(snapshotOf({ maxRounds: 3 }, 4, 1, true), steps);
-    expect(result.continue).toBe(true);
-    expect(result.entries.at(-2)).toMatchObject({ data: { round: 5, trigger: "gates" } });
-  });
 
   test("a merge that fails under a cancel ends cancelled", async () => {
     const entries = await runMerge(snapshotOf(), config, fakeSteps({ cancelled: () => true, merge: async () => ({ gates: [], merge: failed, conflicts: null, failedGate: null }) }));

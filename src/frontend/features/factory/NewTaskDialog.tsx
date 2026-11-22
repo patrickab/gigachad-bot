@@ -11,7 +11,7 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { BranchSelect, branchOrDefault, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, Toggle } from "./FactorySettingsDialog"
+import { BranchSelect, branchOrDefault, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMergeMode, FactorySettings } from "@/lib/domain/factory"
 
@@ -53,6 +53,8 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
   const worktree = worktreeChoice ?? settings?.worktree ?? false
+  const [reviewChoice, setReviewChoice] = useState<boolean | null>(null)
+  const review = reviewChoice ?? settings?.review ?? false
 
   // Every opening starts from an empty form and the repo's saved settings.
   useResetOnOpen(open, () => {
@@ -60,6 +62,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setTitle("")
     setRequest("")
     setWorktreeChoice(null)
+    setReviewChoice(null)
     setSourceBranch("")
     setTargetBranch("")
     setBranches(null)
@@ -78,6 +81,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
     if (!canSubmit) return
     void launchTask({ repo, title: title.trim(), request: request.trim(), overrides: {
       worktree,
+      review,
       ...(worktree ? branchOverrides(sourceBranch, targetBranch) : {}),
       ...(merge !== INHERIT ? { merge } : {}),
     } })
@@ -115,7 +119,10 @@ export function NewTaskDialog({ repo, open, onClose }: {
           rows={6}
           className={cn(FIELD_CLASS, "resize-none")}
         />
-        <Toggle label="Worktree" checked={worktree} disabled={settings === null} onChange={setWorktreeChoice} />
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={worktree ? "worktree" : "checkout"} disabled={settings === null} onChange={(workspace) => setWorktreeChoice(workspace === "worktree")} />
+          <PillChoice label="Review" options={REVIEW_OPTIONS} value={review ? "on" : "off"} disabled={settings === null} onChange={(choice) => setReviewChoice(choice === "on")} />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <BranchSelect
             label="Source branch"

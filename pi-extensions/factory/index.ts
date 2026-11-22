@@ -304,7 +304,7 @@ export default function (pi: ExtensionAPI) {
   /**
    * The merge of a task in `merging`, with the entries it ends in. Started without being awaited, from `agent_settled`
    * after a passed `auto` round and from `/factory approve`. A rebase that conflicts, or a merge gate that fails on the
-   * rebased branch, sends its feedback, which starts the coder's round unless the merge grace is used up too.
+   * rebased branch, sends its feedback, which starts the coder's round unless the run's rounds are used up.
    */
   const finishMerge = async (current: Snapshot, ctx: ExtensionContext) => {
     let drafts: Draft[];

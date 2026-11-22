@@ -9,8 +9,10 @@
 # - Hermetic: the steps run under `env -i` with only HOME, USER, PATH, LANG, TERM and TMPDIR, so nothing a parent
 #   exports (run.sh's GIGACHAD_*, the production unit, a Pi session, the factory engine) changes a result
 # - Steps run in parallel (vitest on half the cores then), at low priority (`nice`): the app, its backend and pi-host
-#   stay responsive while a check runs. Each step's output is printed whole once all ended, failed steps last (the
-#   factory feeds the end of the output back to the coder)
+#   stay responsive while a check runs
+# - Output, once all ended: a passed step is one line, a failed one the summary of its failures (`summary`: failing
+#   tests with their error, type and lint errors), at most 50 lines, and the path of its full log, kept in
+#   `<git common dir>/check-logs/` (the last 20 runs). The factory hands this output to the coder
 # - Exit 0 passed, 1 a step failed, 75 (EX_TEMPFAIL) the environment is broken (missing tools or packages, an empty
 #   submodule): the factory blocks the task as `infra` instead of asking the coder to fix it. Last line: the reason
 # - --changed: the change is the diff from the merge base with the target branch (the repo's default branch, origin's
@@ -317,8 +319,22 @@ if [[ $reuse -eq 1 ]]; then
     passed_key="$(working_tree)-${base:-all}"
 fi
 
+# The failures in step $1's log $2: the lines that name them, each once, at most 50. The log's end when none match.
+summary() {
+    local pattern
+    case "$1" in
+        python) pattern='^(FAILED|ERROR) |^[0-9]+ (failed|passed|error)' ;;
+        frontend) pattern='^ FAIL |AssertionError|^(Type|Reference|Syntax)?Error:|^Expected|^Received|Tests +[0-9]' ;;
+        types) pattern='error TS[0-9]+' ;;
+        lint) pattern='^[A-Z]+[0-9]+ |^ +--> |^/.*\.(ts|tsx|js|mjs)$|^ +[0-9]+:[0-9]+ +error ' ;;
+        pi-host) pattern='^\(fail\)|^error:|^Expected|^Received|^ *[0-9]+ fail$' ;;
+    esac
+    { grep -E "$pattern" "$2" || tail -n 30 "$2"; } | awk '!seen[$0]++' | head -n 50
+}
+
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
+kept="$(git rev-parse --git-common-dir)/check-logs/$(date +%Y%m%d-%H%M%S)-$$"
 declare -A pids
 for step in "${steps[@]}"; do
     if [[ -n $passed_key && -e $passed_dir/$passed_key-$step ]]; then
@@ -342,11 +358,17 @@ for step in "${steps[@]}"; do
         touch "$passed_dir/$passed_key-$step"
     fi
 done
+mkdir -p "$kept" && cp "$logs"/* "$kept"/ 2>/dev/null || true
+# Keep the last 20 runs' logs.
+ls -1dt "$(dirname "$kept")"/*/ 2>/dev/null | tail -n +21 | xargs -r rm -rf
 for step in "${steps[@]}"; do
-    [[ " ${failed[*]} ${broken[*]} " == *" $step "* ]] || printf '\n== %s\n%s\n' "$step" "$(cat "$logs/$step")"
+    [[ " ${failed[*]} ${broken[*]} " == *" $step "* ]] || printf '== %s: %s\n' "$step" "$(tail -n 1 "$logs/$step" | grep -q 'passed on this tree before' && echo 'passed before on this tree' || echo passed)"
 done
-for step in "${failed[@]}" "${broken[@]}"; do
-    printf '\n== %s\n%s\n' "$step" "$(cat "$logs/$step")"
+for step in "${failed[@]}"; do
+    printf '\n== %s: failed\n%s\n(full log: %s)\n' "$step" "$(summary "$step" "$logs/$step")" "$kept/$step"
+done
+for step in "${broken[@]}"; do
+    printf '\n== %s: broken environment\n%s\n' "$step" "$(tail -n 20 "$logs/$step")"
 done
 if [[ ${#broken[@]} -gt 0 ]]; then
     printf '\nbroken environment: %s\n%s\n' "${broken[*]}" "${reasons[-1]}" >&2

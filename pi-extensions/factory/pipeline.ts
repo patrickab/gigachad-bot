@@ -7,8 +7,6 @@
  * - Provides `runMerge`: the entries of a merge, used after a passed `auto` round and by `/factory approve`. A worktree
  *   task is rebased onto its target branch first. A rebase that conflicts gets a `conflict` round, a merge gate that
  *   fails on the rebased branch a `gates` round: the coder resolves it and the task merges once that round passes
- * - Rounds a merge opens may go `MERGE_GRACE_ROUNDS` beyond `maxRounds`, so do the rounds after them: a task that
- *   passed is not blocked for what the target branch moved meanwhile
  * - A rebase the coder left open in a worktree task goes back to the coder as a `conflict` round before anything runs
  * - A hook or gate that exits `INFRA_EXIT` (75, EX_TEMPFAIL) says the environment is broken, not the change: the task
  *   ends `blocked`, `infra: <last output line>`, without feedback to the coder. A retry starts the next round once it is fixed
@@ -77,19 +75,13 @@ export function messageRoundDrafts(round: number): Draft[] {
   return [customDraft("factory-round", { round: round + 1, trigger: "message" }), stateDraft("running", round + 1, "message")];
 }
 
-/** Rounds a merge's conflict or gate failure may take beyond `maxRounds`. */
-export const MERGE_GRACE_ROUNDS = 3;
-
 /**
  * A problem found in the snapshot's round: the next coder round and the feedback, or only the feedback when the run
- * used up its `maxRounds` (the caller ends it `blocked`, `max_rounds: <trigger>`). `grace` (a merge's problem, or a
- * round already past `maxRounds`, which only a merge opens) extends the budget by `MERGE_GRACE_ROUNDS`.
+ * used up its `maxRounds` (the caller ends it `blocked`, `max_rounds: <trigger>`).
  */
-function nextRound(snapshot: Snapshot, trigger: Trigger, text: string, grace = false): RoundResult {
+function nextRound(snapshot: Snapshot, trigger: Trigger, text: string): RoundResult {
   const feedback = feedbackDraft(snapshot.round, trigger, text);
-  const { maxRounds } = snapshot.task.settings;
-  const budget = grace || roundsUsed(snapshot) > maxRounds ? maxRounds + MERGE_GRACE_ROUNDS : maxRounds;
-  if (roundsUsed(snapshot) >= budget) return { entries: [feedback], continue: false };
+  if (roundsUsed(snapshot) >= snapshot.task.settings.maxRounds) return { entries: [feedback], continue: false };
   return { entries: [customDraft("factory-round", { round: snapshot.round + 1, trigger }), feedback], continue: true };
 }
 
@@ -108,7 +100,7 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
       ? { trigger: "gates" as const, text: `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, failedGate.argv, failedGate.result)}` }
       : null;
   if (problem) {
-    const next = nextRound(snapshot, problem.trigger, problem.text, true);
+    const next = nextRound(snapshot, problem.trigger, problem.text);
     const state = next.continue ? stateDraft("running", round + 1, problem.trigger) : stateDraft("blocked", round, `max_rounds: ${problem.trigger}`);
     return [...drafts, ...next.entries, state];
   }

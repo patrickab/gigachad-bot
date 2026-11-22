@@ -21,7 +21,7 @@ interface TabSemantics {
  * - With `tabs` the row is a `tablist` of focus-ringed `tab`s controlling one panel
  * - Without it the pills are plain buttons
  */
-export function PillTabs<T extends string>({ options, value, onChange, tabs, className, pillClassName }: {
+export function PillTabs<T extends string>({ options, value, onChange, tabs, className, pillClassName, disabled }: {
   /** `ariaLabel` names an icon-only option. */
   options: readonly { value: T; label: ReactNode; ariaLabel?: string }[]
   value: T
@@ -30,6 +30,7 @@ export function PillTabs<T extends string>({ options, value, onChange, tabs, cla
   className?: string
   /** Overrides the pill padding, e.g. `px-2` for icon pills. */
   pillClassName?: string
+  disabled?: boolean
 }) {
   return (
     <div role={tabs && "tablist"} aria-label={tabs?.label} className={cn("flex gap-1", className)}>
@@ -46,12 +47,14 @@ export function PillTabs<T extends string>({ options, value, onChange, tabs, cla
               "aria-selected": selected,
               "aria-controls": tabs.panelId,
             } : { "aria-pressed": selected }}
+            disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
               PILL_CLASS,
               PILL_FOCUS_CLASS,
               pillClassName,
               selected ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface/50 hover:text-ink",
+              "disabled:pointer-events-none disabled:opacity-50",
             )}
           >
             {option.label}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { fireEvent, render, waitFor, within } from "@testing-library/react"
 import type { ModelsResponse } from "@/lib/domain/types"
 import type { FactorySettings } from "@/lib/domain/factory"
 
@@ -47,8 +47,8 @@ describe("FactorySettingsDialog", () => {
     fireEvent.change(rounds, { target: { value: "5" } })
     fireEvent.click(view.getByLabelText("Merge"))
     fireEvent.click(view.getByRole("option", { name: "Auto" }))
-    fireEvent.click(view.getByLabelText("Review"))
-    fireEvent.click(view.getByLabelText("Worktree"))
+    fireEvent.click(within(view.getByRole("group", { name: "Review" })).getByRole("button", { name: "Off" }))
+    fireEvent.click(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Current checkout" }))
     fireEvent.click(view.getByLabelText("Preview"))
     fireEvent.click(view.getByLabelText("Model of reviewer"))
     fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))

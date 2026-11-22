@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react"
 import type { FactorySettings, FactoryTaskCreate } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({
@@ -29,29 +29,35 @@ function fill(view: ReturnType<typeof render>) {
   fireEvent.change(view.getByLabelText("Request"), { target: { value: " Make it sticky " } })
 }
 
+/** The pill `name` of the dialog's pill row `group`. */
+function pill(view: RenderResult, group: string, name: string): HTMLElement {
+  return within(view.getByRole("group", { name: group })).getByRole("button", { name })
+}
+
 describe("NewTaskDialog", () => {
   it("starts a task in the repo by path, in a worktree when the repo's settings say so", async () => {
     const onClose = vi.fn()
     const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeChecked())
+    await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toHaveAttribute("aria-pressed", "true"))
     expect(api.getFactorySettings).toHaveBeenCalledWith(REPO)
 
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     expect(onClose).toHaveBeenCalled()
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { worktree: true } })
+    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { worktree: true, review: true } })
   })
 
   it("defaults to the current checkout for a repo without worktrees, and sends the user's choice and merge override", async () => {
     api.getFactorySettings.mockResolvedValue({ ...SETTINGS, worktree: false })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
-    const worktree = view.getByLabelText("Worktree")
+    const worktree = pill(view, "Workspace", "Worktree")
     await waitFor(() => expect(worktree).toBeEnabled())
-    expect(worktree).not.toBeChecked()
+    expect(worktree).toHaveAttribute("aria-pressed", "false")
 
     fill(view)
     fireEvent.click(worktree)
+    fireEvent.click(pill(view, "Review", "Off"))
     fireEvent.click(view.getByRole("button", { name: "Overrides" }))
     fireEvent.click(view.getByLabelText("Merge"))
     expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Repo default (review)", "Review", "Auto"])
@@ -59,12 +65,12 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, merge: "auto" })
+    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, review: false, merge: "auto" })
   })
 
   it("offers no workflow, image, sandbox or backlog control", async () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
     fireEvent.click(view.getByRole("button", { name: "Overrides" }))
 
     expect(view.queryByLabelText("Workflow")).toBeNull()
@@ -81,7 +87,8 @@ describe("NewTaskDialog", () => {
 
     fill(view)
     expect(start).toBeDisabled()
-    expect(view.getByLabelText("Worktree")).toBeDisabled()
+    expect(pill(view, "Workspace", "Worktree")).toBeDisabled()
+    expect(pill(view, "Review", "On")).toBeDisabled()
     deliver(SETTINGS)
     await waitFor(() => expect(start).toBeEnabled())
 
@@ -93,7 +100,7 @@ describe("NewTaskDialog", () => {
     api.createFactoryTask.mockReturnValue(new Promise(() => {}))
     const onClose = vi.fn()
     const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    await waitFor(() => expect(pill(view, "Workspace", "Worktree")).toBeEnabled())
 
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
@@ -118,7 +125,7 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, source_branch: "feature/x", target_branch: "release" })
+    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, review: true, source_branch: "feature/x", target_branch: "release" })
   })
 
   it("disables the branches for a task in the current checkout and does not send them", async () => {
@@ -127,12 +134,12 @@ describe("NewTaskDialog", () => {
     await waitFor(() => expect(source).toBeEnabled())
     fireEvent.click(source)
     fireEvent.click(await view.findByRole("option", { name: "develop" }))
-    fireEvent.click(view.getByLabelText("Worktree"))
+    fireEvent.click(pill(view, "Workspace", "Current checkout"))
     expect(source).toBeDisabled()
     expect(view.getByLabelText("Target branch")).toBeDisabled()
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: false })
+    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: false, review: true })
   })
 })

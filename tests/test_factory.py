@@ -208,14 +208,14 @@ def _branches(repo: Path) -> list[str]:
 
 def test_settings_chain_is_defaults_then_repo_then_task():
     assert factory.resolve_settings({}) == factory.RepoSettings(
-        merge="review", max_rounds=3, review=True, worktree=True, preview=False, models={}
+        merge="review", max_rounds=3, review=False, worktree=True, preview=False, models={}
     )
 
     stored = {"merge": "auto", "max_rounds": 5, "models": {"coder": "anthropic/a", "reviewer": "anthropic/b"}}
     overrides = factory.SettingsOverrides(max_rounds=1, worktree=False, models={"reviewer": "openai/c"})
     settings = factory.resolve_settings(stored, overrides)
 
-    assert (settings.merge, settings.max_rounds, settings.review, settings.worktree) == ("auto", 1, True, False)
+    assert (settings.merge, settings.max_rounds, settings.review, settings.worktree) == ("auto", 1, False, False)
     assert settings.models == {"coder": "anthropic/a", "reviewer": "openai/c"}
 
 
@@ -351,7 +351,7 @@ def test_repos_are_registered_once_by_the_path_of_a_primary_checkout(client, rep
 
 def test_settings_of_a_repo_are_the_defaults_until_saved(client, registered):
     defaults = {
-        "merge": "review", "max_rounds": 3, "review": True, "worktree": True, "preview": False, "models": {},
+        "merge": "review", "max_rounds": 3, "review": False, "worktree": True, "preview": False, "models": {},
         "source_branch": None, "target_branch": None,
     }
     saved = {**defaults, "merge": "auto", "max_rounds": 7, "models": {"reviewer": "anthropic/b"}}
@@ -399,7 +399,7 @@ def test_a_task_starts_in_a_worktree_with_a_coding_session_and_the_start_command
         "request": "Call it Library",
         "title": "Rename the sidebar!",
         "settings": {
-            "merge": "auto", "maxRounds": 1, "review": True, "models": {"coder": "anthropic/a"}, "branch": "main",
+            "merge": "auto", "maxRounds": 1, "review": False, "models": {"coder": "anthropic/a"}, "branch": "main",
             "sourceBranch": "main",
         },
     }

@@ -22,8 +22,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 
 1. **Start**: a worktree (`agent-worktree`, branch `<title-slug>-<id8>`) off the source branch, or the current checkout.
    The session opens there and gets `/factory start`.
-2. **Rounds**: coder turn → `hooks.after_code` → `gates` → protected-path check → review. A problem goes back to the
-   coder as feedback and opens the next round, up to `maxRounds`.
+2. **Rounds**: coder turn → `hooks.after_code` → `gates` → protected-path check → review (when on, off by default).
+   A problem goes back to the coder as feedback and opens the next round, up to `maxRounds`. The tests run only after
+   that, in the merge queue: a round the reviewer rejects costs no test run.
 3. **Pass**: `merge: auto` merges, `merge: review` waits for approve.
 4. **Merge** (worktree task): the merge queue below. Current-checkout task: one commit of the task's paths onto `HEAD`.
 5. **End**: `done` (merged, committed, or `no_changes` when the diff is empty), else `blocked` with a reason.
@@ -49,6 +50,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   - `--reuse`: a step that passed on the same tree (working tree with untracked files) and merge base is skipped.
   - Steps run in parallel at `nice 10`. pytest on `cpu_count - 1` workers, each with its own throwaway database.
   - A failed test is rerun once: passing then, the step passes and says `flaky`.
+  - Output: a passed step is one line, a failed one a summary of its failures (failing tests with their error, type
+    and lint errors, at most 50 lines) and the path of its full log (`<git common dir>/check-logs/`, last 20 runs).
+    That is all the coder gets back.
   - Exit 75: the environment is broken (missing packages or tools, an empty submodule). Before failing it waits for
     `node_modules` still being copied and refills an empty submodule from the main checkout.
 
@@ -65,8 +69,7 @@ One per repository, shared by every task's session through ticket files in `<git
 5. Leave the queue. After a merge that changed a lockfile, `hooks.after_merge` run in the main checkout.
 
 - A ticket whose Pi process ended is dropped by the next reader: a crashed session cannot block the queue.
-- Rounds a merge opens may go 3 beyond `maxRounds` (`MERGE_GRACE_ROUNDS`): a passed task is not blocked for what the
-  target did meanwhile.
+- Rounds a merge opens count against `maxRounds` like any other.
 
 ## Failures
 
@@ -93,6 +96,7 @@ One per repository, shared by every task's session through ticket files in `<git
 
 ## Settings
 
-Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`review`), `max_rounds` (default 3), `review`,
-`worktree`, `preview`, `models` per role (`coder`, `reviewer`), `source_branch`, `target_branch`. A task keeps the
-settings it started with.
+Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`review`, default `review`), `max_rounds`
+(default 3), `review` (default off), `worktree` (default on), `preview`, `models` per role (`coder`, `reviewer`),
+`source_branch`, `target_branch`. Review and workspace are pill choices in the settings and the new-task dialog. A task
+keeps the settings it started with.

@@ -123,7 +123,7 @@ class RepoSettings(FactoryModel):
 
     merge: Literal["auto", "review"] = "review"
     max_rounds: int = Field(default=3, ge=1, le=20)
-    review: bool = True
+    review: bool = False
     worktree: bool = True
     preview: bool = False
     models: dict[Role, str] = {}

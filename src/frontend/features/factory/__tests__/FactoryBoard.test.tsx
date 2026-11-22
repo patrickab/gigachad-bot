@@ -231,13 +231,13 @@ describe("FactoryBoard", () => {
     api.createFactoryTask.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Fix" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(view.queryByLabelText("Title")).toBeNull())
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true } })
+    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true, review: true } })
     const launch = within(view.getByRole("region", { name: "Working" })).getByRole("group", { name: "Fix" })
     expect(launch).toHaveTextContent("Launching session")
 
@@ -250,7 +250,7 @@ describe("FactoryBoard", () => {
     api.createFactoryTask.mockRejectedValueOnce(new Error("The checkout already has a task"))
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Refused" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
@@ -265,7 +265,7 @@ describe("FactoryBoard", () => {
 
     api.createFactoryTask.mockRejectedValueOnce(new Error("No"))
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Dismissed" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
