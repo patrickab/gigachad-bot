@@ -1,13 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Bot } from "lucide-react"
-import { CommandPicker, isRemoveRowKey, neighbourKey, type PickerGroup } from "@/components/ui/CommandPicker"
+import { FloatingPicker, isRemoveRowKey, neighbourKey, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { usePillPopover } from "@/components/ui/PillPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { archivePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
 import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
 import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
@@ -97,7 +96,7 @@ function SessionRow({ session, snippet, repositories, now }: { session: PiSessio
 }
 
 /**
- * Top bar panel over every Pi coding session (Alt+A, G5), the most recently used first; a hovered session previews its transcript.
+ * Panel over every Pi coding session, opened by Alt+A (G5) and docked under the top bar, the most recently used first; a hovered session previews its transcript.
  *
  * - Typing filters by title and directory and searches the transcripts, matches show the text they matched
  * - Picking a session opens it, or switches to the tab already showing it; Delete at the search's end archives the highlighted one
@@ -111,7 +110,8 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   const [archiving, setArchiving] = useState<ReadonlySet<string>>(() => new Set())
   const [archiveError, setArchiveError] = useState("")
   const search = useSearchHits(query)
-  const popover = usePillPopover(useCallback(() => setQuery(""), []))
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => { setOpen(false); setQuery("") }, [])
   const tabActive = useTabActive()
   const sessionList = useMemo(() => newestFirst(listed), [listed])
   // The recent sessions' previews are read ahead after load and whenever the list changes, so hovering shows them at once
@@ -120,10 +120,12 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   useEventListener("window", "keydown", (event) => {
     if (!isAltOnly(event) || event.key.toLowerCase() !== "a" || isTerminalKeyEvent(event)) return
     event.preventDefault()
-    if (popover.open) popover.close()
-    else popover.show()
+    if (open) close()
+    else setOpen(true)
   }, { active: tabActive && Boolean(hostAccess), capture: true })
-  if (!hostAccess) return null
+  // The list lies in a portal, a tab sent to the background takes its open list along
+  useResetOnChange(tabActive, (active) => { if (!active) close() })
+  if (!hostAccess || !open) return null
 
   const sessions = sessionList.filter((session) => !archiving.has(session.sessionId))
   const archive = async (session: PiSessionInfo) => {
@@ -139,8 +141,7 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   }
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const runningCount = sessions.filter((session) => session.live?.running || session.live?.waiting).length
-  const groups: PickerGroup<Entry>[] = []
+    const groups: PickerGroup<Entry>[] = []
   if (words.length > 0) {
     const named = sessions.filter((session) => {
       const text = [piSessionTitle(session), session.cwd].join(" ").toLowerCase()
@@ -157,15 +158,9 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   }
   const error = archiveError || search.error || listError
 
-  return <CommandPicker<Entry>
-    triggerLabel={`Agents, ${runningCount} running`}
-    triggerContent={<span className="relative">
-      <Bot aria-hidden className="block h-4 w-4" />
-      {runningCount > 0 && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-ink" />}
-    </span>}
-    triggerClassName={cn("h-7 w-7 justify-center rounded-md px-0 hover:text-ink", runningCount > 0 ? "text-ink" : "text-ink-subtle")}
+  return <FloatingPicker<Entry>
     label="Agents"
-    popover={popover}
+    onClose={close}
     groups={groups}
     itemKey={(entry) => (entry.session.sessionId)}
     searchPlaceholder="Search sessions…"
@@ -188,6 +183,5 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
       onOpenItem(piSessionItem(session, piSessionRepository(session, repositories)?.name ?? baseName(session.cwd), null))
       return true
     }}
-    placement="below"
   />
 }
