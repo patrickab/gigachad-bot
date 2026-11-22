@@ -20,6 +20,7 @@ import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
+import { formatCost, formatTokens } from "./usage"
 
 /** Finished tasks shown before "Show all", the column otherwise grows without bound. */
 const FINISHED_LIMIT = 10
@@ -69,7 +70,12 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
         {/* The delete question covers this row, so asking never resizes the card. */}
         <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
           {task.branch !== null && <GitBranch aria-hidden className="h-3 w-3 shrink-0" />}
-          <span className="truncate">{task.branch ?? "Current checkout"}</span>
+          <span className="min-w-0 flex-1 truncate">{task.branch ?? "Current checkout"}</span>
+          {task.usage && (
+            <span aria-label="Tokens and cost" className="shrink-0 tabular-nums">
+              {formatTokens(task.usage.input + task.usage.output)} tok · {formatCost(task.usage.cost)}
+            </span>
+          )}
         </span>
       </button>
       {!confirming && (

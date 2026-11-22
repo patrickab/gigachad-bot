@@ -171,6 +171,34 @@ describe("session listing", () => {
     expect(json.sessions[1].parentSession).toBeUndefined();
   });
 
+  test("usage sums the assistant answers and the reviews a factory task recorded, absent before any answer", async () => {
+    const answered = (id: string, input: number, output: number, cacheRead: number, total: number) => ({
+      type: "message",
+      id,
+      parentId: null,
+      timestamp: "2026-11-19T10:00:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input, output, cacheRead, cacheWrite: 1, totalTokens: input + output + cacheRead + 1, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } },
+      },
+    });
+    const review = { type: "custom", id: "r1", parentId: null, timestamp: "2026-11-19T10:00:00.000Z", customType: "factory-review", data: { usage: { input: 5, output: 7, cacheRead: 20, cacheWrite: 0, cost: 0.5 } } };
+    await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      message("u1", "user", "go"),
+      answered("a1", 2, 30, 100, 0.25),
+      review,
+      answered("a2", 3, 40, 200, 0.125),
+    ]), new Date("2026-11-18T09:05:00.000Z"));
+    await writeSession(NEW_ID, sessionLines(NEW_ID, projectDir, "2026-11-19T08:00:00.000Z", [message("u1", "user", "go")]), new Date("2026-11-19T08:00:00.000Z"));
+
+    const { json } = await call("GET", `/sessions?cwd=${encodeURIComponent(projectDir)}`);
+
+    const byId = new Map(json.sessions.map((session) => [session.sessionId, session]));
+    expect(byId.get(OLD_ID)!.usage).toEqual({ input: 2 + 100 + 1 + 5 + 20 + 3 + 200 + 1, output: 30 + 7 + 40, cost: 0.875 });
+    expect(byId.get(NEW_ID)!.usage).toBeUndefined();
+  });
+
   test("honours a flat PI_CODING_AGENT_SESSION_DIR", async () => {
     const flatDir = join(scratch, "flat");
     await mkdir(flatDir, { recursive: true });
@@ -290,6 +318,39 @@ describe("filtered session entries", () => {
     expect((await entries("customType=factory-&since=u1")).json.entries.map((entry) => entry.id)).toEqual(["c2", "c4"]);
     expect((await entries("since=c3")).json.entries.map((entry) => entry.id)).toEqual(["f1", "c4", "a1"]);
     expect((await entries("customType=factory-&since=a1")).json).toEqual({ entries: [], leafId: "a1" });
+  });
+
+  test("assistant adds each assistant answer cut to its text, model and usage, without tool calls or thinking", async () => {
+    await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      custom("c1", "factory-round", { round: 1 }),
+      message("u1", "user", "go"),
+      {
+        type: "message",
+        id: "a1",
+        parentId: null,
+        timestamp: "2026-11-19T10:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "hmm" }, { type: "text", text: "Done." }, { type: "toolCall", id: "t", name: "bash", arguments: {} }],
+          model: "claude-sonnet-5-5",
+          stopReason: "stop",
+          usage: { input: 2, output: 30, cacheRead: 100, cacheWrite: 8, totalTokens: 140, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.25 } },
+        },
+      },
+      message("r1", "toolResult", "ok"),
+    ]), new Date("2026-11-18T09:07:00.000Z"));
+
+    const { json } = await entries("customType=factory-&assistant=1");
+
+    expect(json.entries.map((entry) => entry.id)).toEqual(["c1", "a1"]);
+    expect(json.entries[1] as unknown).toEqual({
+      type: "message",
+      id: "a1",
+      timestamp: "2026-11-19T10:00:00.000Z",
+      message: { role: "assistant", text: "Done.", model: "claude-sonnet-5-5", stopReason: "stop", usage: { input: 110, output: 30, cost: 0.25 } },
+    });
+    expect((await entries("customType=factory-")).json.entries.map((entry) => entry.id)).toEqual(["c1"]);
+    expect((await entries("turns=1&assistant=1")).json.error).toBe("invalid_query");
   });
 
   test("an unknown since is 400 invalid_since, turns takes neither parameter", async () => {

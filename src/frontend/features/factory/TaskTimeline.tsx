@@ -5,9 +5,10 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { SidePanelScroll } from "@/components/ui/SidePanel"
 import { StatusDot } from "@/components/ui/StatusDot"
 import { formatDuration } from "@/features/pi/tools/format"
-import type { FactoryEntry, FactoryEntryData, FactoryRoundTrigger } from "@/lib/domain/factory"
+import type { FactoryAnswer, FactoryEntryData, FactoryRoundTrigger, FactoryTimelineEntry } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
 import { STATE_LABELS, statusTone } from "./states"
+import { formatCost, formatUsage, sumUsage } from "./usage"
 import { groupTimeline, type TimelineRound, type TimelineStep } from "./useTaskTimeline"
 
 const TRIGGER_LABELS: Record<FactoryRoundTrigger, string> = {
@@ -36,23 +37,38 @@ const KIND_CLASS = "w-16 shrink-0 text-ink-subtle"
 const METER_CLASS = "shrink-0 tabular-nums text-ink-faint"
 const SUMMARY_CLASS = "cursor-pointer text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 const OUTPUT_CLASS = "mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-elevated p-2 font-mono text-[10px] text-ink-muted scrollbar-thin"
-
-/** Dollars, to the tenth of a cent below ten cents: a review on a small model costs less than one cent. */
-function formatCost(cost: number): string {
-  return `$${cost.toFixed(cost < 0.1 ? 3 : 2)}`
-}
-
-/** Token count, compact above a thousand: 1.2k. */
-function formatTokens(count: number): string {
-  return count < 1000 ? String(count) : `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k`
-}
-
-function formatUsage(usage: { input: number; output: number }): string {
-  return `${formatTokens(usage.input)} in / ${formatTokens(usage.output)} out`
-}
+const SAID_CLASS = "whitespace-pre-wrap break-words text-ink-muted"
 
 function Verdict({ ok, children }: { ok: boolean; children: string }) {
   return <span className={cn("shrink-0", ok ? "text-diff-added" : "text-diff-removed")}>{children}</span>
+}
+
+/**
+ * The coder's turn: model, tokens and cost, then what it said last (what a Pi session shows when the turn ends), the
+ * earlier messages of the turn behind a disclosure. Tool calls and thinking are not part of the answers.
+ */
+function CoderStep({ answers }: { answers: readonly FactoryAnswer[] }) {
+  const usage = sumUsage(answers.map((answer) => answer.message.usage))
+  const said = answers.map((answer) => answer.message.text.trim()).filter(Boolean)
+  const earlier = said.length - 1
+  return (
+    <li>
+      <div className={ROW_CLASS}>
+        <span className={KIND_CLASS}>coder</span>
+        <span className="min-w-0 flex-1 truncate text-ink-muted">{answers.at(-1)?.message.model ?? ""}</span>
+        <span className={METER_CLASS}>{formatUsage(usage)} · {formatCost(usage.cost)}</span>
+      </div>
+      {said.length > 0 && <p className={cn(SAID_CLASS, "mt-1 max-h-60 overflow-auto scrollbar-thin")}>{said[earlier]}</p>}
+      {earlier > 0 && (
+        <details className="mt-1">
+          <summary className={SUMMARY_CLASS}>{earlier} earlier {earlier === 1 ? "message" : "messages"}</summary>
+          <div className="mt-1 flex flex-col gap-2">
+            {said.slice(0, earlier).map((text, index) => <p key={index} className={SAID_CLASS}>{text}</p>)}
+          </div>
+        </details>
+      )}
+    </li>
+  )
 }
 
 /** A hook or gate: its command, duration and result, the output tail behind a disclosure when it failed. */
@@ -154,26 +170,33 @@ function Round({ round, current }: { round: TimelineRound; current: boolean }) {
           </span>
         )}
       </div>
-      {round.steps.length > 0 && <ul className="mt-1.5 flex flex-col gap-1.5 text-[11px]">{round.steps.map((step) => <Step key={step.id} step={step} current={current} />)}</ul>}
+      {(round.answers.length > 0 || round.steps.length > 0) && (
+        <ul className="mt-1.5 flex flex-col gap-1.5 text-[11px]">
+          {round.answers.length > 0 && <CoderStep answers={round.answers} />}
+          {round.steps.map((step) => <Step key={step.id} step={step} current={current} />)}
+        </ul>
+      )}
     </li>
   )
 }
 
 /**
- * A task's pipeline, compact: totals, then each round with its trigger, status, gates, review and merge.
+ * A task's pipeline, compact: totals, then each round with its trigger, status, the coder's turn, gates, review and merge.
  *
- * - `entries` are the factory entries of the task's session in append order (`useTaskTimeline`)
+ * - `entries` are the factory entries of the task's session and its coder's answers in append order (`useTaskTimeline`)
  * - Details stay behind disclosures: a failed command's output, a merge error, the findings of earlier rounds
  */
-export function TaskTimeline({ entries, error }: { entries: readonly FactoryEntry[]; error: string }) {
-  const { rounds, reviewCost, reviewTokens } = useMemo(() => groupTimeline(entries), [entries])
+export function TaskTimeline({ entries, error }: { entries: readonly FactoryTimelineEntry[]; error: string }) {
+  const { rounds, coder, review } = useMemo(() => groupTimeline(entries), [entries])
+  const total = sumUsage([coder, review])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
       <div className="flex flex-col gap-4">
         <ErrorText className="text-[11px]">{error}</ErrorText>
         {rounds.length > 0 && (
           <p aria-label="Totals" className="text-[11px] tabular-nums text-ink-subtle">
-            {rounds.length} {rounds.length === 1 ? "round" : "rounds"} · review {formatUsage(reviewTokens)} · {formatCost(reviewCost)}
+            {rounds.length} {rounds.length === 1 ? "round" : "rounds"} · {formatUsage(total)} · {formatCost(total.cost)}
+            {review.cost > 0 && ` (review ${formatCost(review.cost)})`}
           </p>
         )}
         <ol aria-label="Rounds" className="flex flex-col gap-4">

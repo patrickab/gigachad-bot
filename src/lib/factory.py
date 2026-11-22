@@ -189,10 +189,11 @@ class TaskRow(FactoryModel):
 
 class Task(TaskRow):
     """A task with what pi-host says about its session: `factory` its state (None before one is written or with the
-    session gone), `live` its Pi child (None when stopped)."""
+    session gone), `live` its Pi child (None when stopped), `usage` the tokens and dollars of its coder and reviews."""
 
     factory: pi_host.FactoryState | None
     live: pi_host.LiveStatus | None
+    usage: pi_host.SessionUsage | None = None
 
 
 class TaskDiff(FactoryModel):
@@ -465,7 +466,9 @@ def workspace_diff(workspace: Path, base: str) -> str:
 
 
 def _with_session(row: TaskRow, session: pi_host.SessionInfo | None) -> Task:
-    return Task(**row.model_dump(), factory=session and session.factory, live=session and session.live)
+    if session is None:
+        return Task(**row.model_dump(), factory=None, live=None)
+    return Task(**row.model_dump(), factory=session.factory, live=session.live, usage=session.usage)
 
 
 async def _sessions_of(rows: list[TaskRow], cwd: str | None) -> dict[str, pi_host.SessionInfo]:

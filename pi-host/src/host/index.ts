@@ -78,7 +78,15 @@ export type SessionMeta = {
   archived: boolean;
   /** Present when the session is a factory task: its last `factory-state` entry in file order. */
   factory?: FactoryState;
+  /** What the session's models used, present once one answered: see `SessionUsage`. */
+  usage?: SessionUsage;
 };
+
+/**
+ * Tokens and dollars of a session's assistant answers plus the reviews a factory task recorded (`factory-review`, run
+ * in a child of its own). `input` counts cache reads and writes too: everything the models read.
+ */
+export type SessionUsage = { input: number; output: number; cost: number };
 
 /** `profile` marks the profile a session was started with (G5); absent means `coding`. */
 export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile };

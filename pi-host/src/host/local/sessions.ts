@@ -8,14 +8,14 @@
  */
 import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { FACTORY_STATES, type DeleteResult, type FactoryState, type MoveResult, type SessionEntries, type SessionMeta } from "../index.ts";
+import { FACTORY_STATES, type DeleteResult, type FactoryState, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { archiveRoot, cwdSessionDir, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar, removeSidecar } from "./state.ts";
 
 type Summary = Pick<
   SessionMeta,
-  "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession" | "factory"
+  "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession" | "factory" | "usage"
 >;
 type Header = Pick<Summary, "sessionId" | "cwd" | "createdAt" | "parentSession">;
 
@@ -24,6 +24,9 @@ const MESSAGE_LINE_PREFIX = '{"type":"message"';
 /** Pi writes entries with `JSON.stringify`, so a `factory-state` line holds exactly these two substrings. */
 const CUSTOM_LINE_PREFIX = '{"type":"custom",';
 const FACTORY_STATE_MARK = '"customType":"factory-state"';
+const FACTORY_REVIEW_MARK = '"customType":"factory-review"';
+/** An assistant line's usage as Pi writes it (`JSON.stringify`, fixed key order): tokens, then `cost.total`. */
+const USAGE_PATTERN = /"usage":\{"input":(\d+),"output":(\d+),"cacheRead":(\d+),"cacheWrite":(\d+),[^{}]*"cost":\{[^{}]*"total":([0-9.eE+-]+)/;
 const summaryCache = new Map<string, { mtimeMs: number; size: number; summary: Summary }>();
 
 /** Text of a user message's content (string or text blocks). */
@@ -51,6 +54,25 @@ function userText(line: string): string {
 function lastTotalTokens(line: string): number | undefined {
   const found = [...line.matchAll(/"totalTokens":(\d+)/g)].pop();
   return found ? Number(found[1]) : undefined;
+}
+
+/** The usage of an assistant message line, undefined when it reports none. */
+function answerUsage(line: string): SessionUsage | undefined {
+  const found = USAGE_PATTERN.exec(line);
+  if (!found) return undefined;
+  const [, input, output, cacheRead, cacheWrite, cost] = found.map(Number);
+  return { input: input + cacheRead + cacheWrite, output, cost };
+}
+
+/** The usage a `factory-review` line records for its reviewer child, undefined when the line is not one. */
+function reviewUsage(line: string): SessionUsage | undefined {
+  try {
+    const usage = JSON.parse(line)?.data?.usage;
+    if (typeof usage?.input !== "number" || typeof usage.output !== "number" || typeof usage.cost !== "number") return undefined;
+    return { input: usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0), output: usage.output, cost: usage.cost };
+  } catch {
+    return undefined;
+  }
 }
 
 /** The state a `factory-state` line records, undefined when the line is not one or lacks a field. */
@@ -93,6 +115,13 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
   let firstMessage = "";
   let messageCount = 0;
   let tokens = 0;
+  const usage: SessionUsage = { input: 0, output: 0, cost: 0 };
+  const add = (more: SessionUsage | undefined) => {
+    if (!more) return;
+    usage.input += more.input;
+    usage.output += more.output;
+    usage.cost += more.cost;
+  };
   let pending = "";
   const consume = (line: string): boolean => {
     if (!header) {
@@ -101,10 +130,14 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     }
     if (!line.startsWith(MESSAGE_LINE_PREFIX)) {
       if (line.startsWith(CUSTOM_LINE_PREFIX) && line.includes(FACTORY_STATE_MARK)) factory = factoryState(line) ?? factory;
+      if (line.startsWith(CUSTOM_LINE_PREFIX) && line.includes(FACTORY_REVIEW_MARK)) add(reviewUsage(line));
       return true;
     }
     messageCount++;
-    if (line.includes('"role":"assistant"')) tokens = lastTotalTokens(line) ?? tokens;
+    if (line.includes('"role":"assistant"')) {
+      tokens = lastTotalTokens(line) ?? tokens;
+      add(answerUsage(line));
+    }
     if (!firstMessage && line.includes('"role":"user"')) firstMessage = userText(line);
     return true;
   };
@@ -123,6 +156,7 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     messageCount,
     tokens,
     ...(factory ? { factory } : {}),
+    ...(usage.input + usage.output > 0 ? { usage } : {}),
   };
 }
 

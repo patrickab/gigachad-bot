@@ -6,7 +6,7 @@ import { PillTabs } from "@/components/ui/PillTabs"
 import { FilePanel } from "@/features/editor/FilePanel"
 import type { PiShellCommands } from "@/features/pi/PiTab"
 import type { PiCatalogProps } from "@/features/pi/PiTopBar"
-import type { FactoryEntry, FactoryTask } from "@/lib/domain/factory"
+import type { FactoryTask, FactoryTimelineEntry } from "@/lib/domain/factory"
 import { TaskPiChat } from "./TaskPiChat"
 import { TaskTimeline } from "./TaskTimeline"
 
@@ -27,7 +27,7 @@ const MODES: readonly { value: PanelMode; label: React.ReactNode; ariaLabel: str
  */
 export function AgentPanel({ task, entries, timelineError, onClose, modelProps, shellCommands }: {
   task: FactoryTask
-  entries: readonly FactoryEntry[]
+  entries: readonly FactoryTimelineEntry[]
   timelineError: string
   onClose: () => void
   modelProps: PiCatalogProps

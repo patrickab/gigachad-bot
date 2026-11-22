@@ -27,7 +27,7 @@ function task(title: string, state: FactoryTaskState | null, extra: Partial<Fact
   const at = `2026-01-01T00:${String(minute).padStart(2, "0")}:00Z`
   return {
     id: `id${title.toLowerCase().replace(/[^a-z0-9]/g, "")}000000`, repo: REPO, session_id: `session-${title}`, session_path: "", worktree: null, branch: null,
-    title, created_at: at, factory: state === null ? null : { state, round, reason, at }, live: IDLE, ...fields,
+    title, created_at: at, factory: state === null ? null : { state, round, reason, at }, live: IDLE, usage: null, ...fields,
   }
 }
 
@@ -92,6 +92,16 @@ describe("FactoryBoard", () => {
     expect(card("Task cancelled")).toHaveTextContent("Current checkout")
     expect(card("Task starting")).toHaveTextContent("Launching session")
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
+  })
+
+  it("shows a card's tokens and cost once a model answered", () => {
+    const { card } = renderBoard([
+      task("Task used", "running", { usage: { input: 3_000_000, output: 21_000, cost: 2.903 } }),
+      task("Task fresh", "running"),
+    ])
+
+    expect(within(card("Task used")).getByLabelText("Tokens and cost")).toHaveTextContent("3.0M tok · $2.90")
+    expect(within(card("Task fresh")).queryByLabelText("Tokens and cost")).toBeNull()
   })
 
   it("pulses a card's dot only while its Pi child runs a turn", () => {

@@ -21,10 +21,28 @@ const ENTRIES = [
 ] as unknown as FactoryEntry[]
 
 describe("TaskTimeline", () => {
+  it("shows the coder's turn in its round: model, usage and its last message, the earlier ones collapsed", () => {
+    const answer = (id: string, text: string) => ({
+      id, timestamp: "", type: "message", message: { role: "assistant", text, model: "claude-sonnet-5-5", stopReason: "stop", usage: { input: 1500, output: 200, cost: 0.5 } },
+    })
+    const entries = [ENTRIES[0], answer("a1", "Reading the code."), answer("a2", ""), answer("a3", "Added the toggle and a test."), ...ENTRIES.slice(1)] as unknown as FactoryEntry[]
+
+    const view = render(<TaskTimeline entries={entries} error="" />)
+
+    const first = within(view.getByLabelText("Round 1"))
+    expect(first.getByText("coder")).toBeTruthy()
+    expect(first.getByText("claude-sonnet-5-5")).toBeTruthy()
+    expect(first.getByText("4.5k in / 600 out · $1.50")).toBeTruthy()
+    expect(first.getByText("Added the toggle and a test.")).toBeTruthy()
+    // An answer with only tool calls says nothing: one earlier message, not two
+    expect(first.getByText("1 earlier message")).toBeTruthy()
+    expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · 4.5k in / 605 out · $1.75 (review $0.25)")
+  })
+
   it("shows the totals and each round with its trigger and status", () => {
     const view = render(<TaskTimeline entries={ENTRIES} error="" />)
 
-    expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · review 10 in / 5 out · $0.25")
+    expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · 10 in / 5 out · $0.25 (review $0.25)")
     const first = within(view.getByLabelText("Round 1"))
     expect(first.getByText("start")).toBeTruthy()
     // Round 1 was ended by round 2: it is not shown as still working

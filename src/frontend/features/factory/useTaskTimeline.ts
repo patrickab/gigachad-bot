@@ -1,8 +1,8 @@
-// A task's pipeline timeline. Consumes `listFactoryEntries` (the factory entries of the task's Pi session), provides
-// `useTaskTimeline` (the entries, read incrementally) and `groupTimeline` (the entries by round).
+// A task's pipeline timeline. Consumes `listFactoryEntries` (the factory entries of the task's Pi session and its coder's
+// answers), provides `useTaskTimeline` (the entries, read incrementally) and `groupTimeline` (the entries by round).
 import { useEffect, useRef, useState } from "react"
 import { listFactoryEntries } from "@/lib/backend/api"
-import type { FactoryEntry, FactoryEntryData, FactoryRoundTrigger } from "@/lib/domain/factory"
+import type { FactoryAnswer, FactoryEntry, FactoryEntryData, FactoryRoundTrigger, FactoryTimelineEntry, FactoryUsage } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
 /** What ran in a round: a hook or gate, the review, the merge. */
@@ -13,37 +13,50 @@ export interface TimelineRound {
   /** What opened the round, null when its `factory-round` entry was not read. */
   trigger: FactoryRoundTrigger | null
   steps: TimelineStep[]
+  /** What the coder answered in the round's turn, in order. */
+  answers: FactoryAnswer[]
   /** The newest state recorded in the round. */
   state: FactoryEntryData["factory-state"] | null
 }
 
 export interface Timeline {
   rounds: TimelineRound[]
-  /** Cost of every review, in dollars. */
-  reviewCost: number
-  /** Tokens of every review: input and output, cache reads and writes excluded. */
-  reviewTokens: { input: number; output: number }
+  /** Every coder answer and every review: tokens (input with cache reads and writes) and dollars. */
+  coder: FactoryUsage
+  review: FactoryUsage
+}
+
+function addUsage(total: FactoryUsage, usage: FactoryUsage): void {
+  total.input += usage.input
+  total.output += usage.output
+  total.cost += usage.cost
 }
 
 /**
  * Group factory entries in append order by round.
  *
- * - Gates, reviews and states join the round they name, a merge (it names none) the newest round
+ * - Gates, reviews and states join the round they name, a merge and a coder answer (they name none) the newest round:
+ *   the extension records a round before the coder turn it opens
  * - A round's `state` is the last one written for it: the approval and the merge of a round stay in its group
  */
-export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
+export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timeline {
   const rounds: TimelineRound[] = []
   const roundOf = (round: number): TimelineRound => {
     let group = rounds.find((candidate) => candidate.round === round)
     if (!group) {
-      group = { round, trigger: null, steps: [], state: null }
+      group = { round, trigger: null, steps: [], answers: [], state: null }
       rounds.push(group)
     }
     return group
   }
-  let reviewCost = 0
-  const reviewTokens = { input: 0, output: 0 }
+  const coder: FactoryUsage = { input: 0, output: 0, cost: 0 }
+  const review: FactoryUsage = { input: 0, output: 0, cost: 0 }
   for (const entry of entries) {
+    if (!("customType" in entry)) {
+      roundOf(rounds.at(-1)?.round ?? 1).answers.push(entry)
+      addUsage(coder, entry.message.usage)
+      continue
+    }
     switch (entry.customType) {
       case "factory-round":
         roundOf(entry.data.round).trigger = entry.data.trigger
@@ -53,9 +66,7 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
         break
       case "factory-review":
         roundOf(entry.data.round).steps.push(entry)
-        reviewCost += entry.data.usage.cost
-        reviewTokens.input += entry.data.usage.input
-        reviewTokens.output += entry.data.usage.output
+        addUsage(review, { input: entry.data.usage.input + entry.data.usage.cacheRead + entry.data.usage.cacheWrite, output: entry.data.usage.output, cost: entry.data.usage.cost })
         break
       case "factory-merge":
         roundOf(rounds.at(-1)?.round ?? 0).steps.push(entry)
@@ -67,11 +78,11 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
         break
     }
   }
-  return { rounds, reviewCost, reviewTokens }
+  return { rounds, coder, review }
 }
 
 /**
- * The factory entries of the Pi session `sessionId`, in append order.
+ * The factory entries of the Pi session `sessionId` and its coder's answers, in append order.
  *
  * - Reads all of them once, then only those after the last one it has (`since`) whenever `revision` changes: the owner
  *   passes a value that moves when the session file grows
@@ -79,8 +90,8 @@ export function groupTimeline(entries: readonly FactoryEntry[]): Timeline {
  * - `sessionId` is fixed per mount once given: key the owner by task
  * - A failed read keeps the entries and sets `error`, the next successful one clears it
  */
-export function useTaskTimeline(sessionId: string | undefined, revision: string): { entries: FactoryEntry[]; error: string } {
-  const [entries, setEntries] = useState<FactoryEntry[]>([])
+export function useTaskTimeline(sessionId: string | undefined, revision: string): { entries: FactoryTimelineEntry[]; error: string } {
+  const [entries, setEntries] = useState<FactoryTimelineEntry[]>([])
   const [error, setError] = useState("")
   const cursor = useRef<{ last: string | undefined; reads: Promise<void> }>({ last: undefined, reads: Promise.resolve() })
 

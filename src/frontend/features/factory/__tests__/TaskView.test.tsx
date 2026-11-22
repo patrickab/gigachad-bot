@@ -51,6 +51,7 @@ function task(state: FactoryTaskState | null, overrides: Partial<FactoryTask> = 
     title: "Fix the header", created_at: "2025-01-01T00:00:00Z",
     factory: state && { state, round: 2, reason: "", at: "2025-01-01T00:01:00Z" },
     live: LIVE,
+    usage: null,
     ...overrides,
   }
 }

@@ -175,14 +175,16 @@ async def get_entries(
     turns: int | None = Query(default=None, ge=1),
     custom_type: str | None = Query(default=None, alias="customType"),
     since: str | None = None,
+    assistant: bool = False,
 ) -> pi_host.SessionEntries:
     """The session's persisted entries, for a preview of a session that is not open; *turns* keeps only the last ones.
 
     *customType* keeps the `custom` entries whose type starts with it and *since* those after that entry id: the
     timeline of a factory task. pi-host refuses them together with *turns* (400 `invalid_query`) and a *since* it
-    does not know (400 `invalid_since`).
+    does not know (400 `invalid_since`). *assistant* adds the assistant answers among them (text, model, usage): what
+    the coder said in each round.
     """
-    return await _call(pi_host.session_entries(session_id, turns, custom_type=custom_type, since=since))
+    return await _call(pi_host.session_entries(session_id, turns, custom_type=custom_type, since=since, assistant=assistant))
 
 
 @http_router.get("/search")

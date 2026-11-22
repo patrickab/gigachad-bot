@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
-import type { FactoryEntry } from "@/lib/domain/factory"
+import type { FactoryAnswer, FactoryEntry } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({
   listFactoryEntries: vi.fn<(sessionId: string, since?: string) => Promise<FactoryEntry[]>>(),
@@ -40,22 +40,42 @@ beforeEach(() => {
 
 describe("groupTimeline", () => {
   it("groups gates, reviews and the merge under their round with its trigger and newest state", () => {
-    const { rounds, reviewCost } = groupTimeline(ENTRIES)
+    const { rounds, review } = groupTimeline(ENTRIES)
 
     expect(rounds.map((round) => [round.round, round.trigger, round.state?.state, round.steps.map((step) => step.id)])).toEqual([
       [1, "start", "running", ["e4"]],
       [2, "gates", "done", ["e7", "e8", "e11"]],
     ])
-    expect(reviewCost).toBe(0.25)
+    expect(review.cost).toBe(0.25)
   })
 
-  it("sums the cost of every review", () => {
+  it("sums the usage of every review, cache reads and writes as input", () => {
     const review = (id: string, round: number) => entry(id, "factory-review", { round, status: "ok", approved: false, findings: [], model: "haiku", sessionFile: "", usage: USAGE, wallMs: 1 })
-    expect(groupTimeline([review("a", 1), review("b", 2)]).reviewCost).toBe(0.5)
+    expect(groupTimeline([review("a", 1), review("b", 2)]).review).toEqual({
+      input: 2 * (USAGE.input + USAGE.cacheRead + USAGE.cacheWrite),
+      output: 2 * USAGE.output,
+      cost: 0.5,
+    })
+  })
+
+  it("puts each coder answer in the newest round and sums the coder's usage", () => {
+    const answer = (id: string, text: string, cost: number): FactoryAnswer => ({
+      id, timestamp: "", type: "message", message: { role: "assistant", text, model: "sonnet", stopReason: "stop", usage: { input: 100, output: 10, cost } },
+    })
+    const timeline = groupTimeline([
+      entry("r1", "factory-round", { round: 1, trigger: "start" }),
+      answer("a1", "Looking.", 0.5),
+      answer("a2", "Done.", 0.25),
+      entry("r2", "factory-round", { round: 2, trigger: "gates" }),
+      answer("a3", "Fixed.", 0.25),
+    ])
+
+    expect(timeline.rounds.map((round) => [round.round, round.answers.map((each) => each.message.text)])).toEqual([[1, ["Looking.", "Done."]], [2, ["Fixed."]]])
+    expect(timeline.coder).toEqual({ input: 300, output: 30, cost: 1 })
   })
 
   it("keeps a step whose round entry was not read, without a trigger", () => {
-    expect(groupTimeline([gate("e4", 3, 0)]).rounds).toEqual([{ round: 3, trigger: null, steps: [expect.objectContaining({ id: "e4" })], state: null }])
+    expect(groupTimeline([gate("e4", 3, 0)]).rounds).toEqual([{ round: 3, trigger: null, steps: [expect.objectContaining({ id: "e4" })], answers: [], state: null }])
   })
 })
 

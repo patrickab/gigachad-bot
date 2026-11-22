@@ -61,6 +61,15 @@ export interface FactoryTask {
   factory: FactoryState | null
   /** Null while the session's Pi child is stopped. */
   live: FactoryLive | null
+  /** Tokens and dollars of the coder and the reviews, null before a model answered. */
+  usage: FactoryUsage | null
+}
+
+/** What models used: `input` counts cache reads and writes too, `cost` is in dollars. */
+export interface FactoryUsage {
+  input: number
+  output: number
+  cost: number
 }
 
 export interface FactoryTaskCreate {
@@ -168,3 +177,14 @@ export interface FactoryEntryData {
 export type FactoryEntry = {
   [Kind in keyof FactoryEntryData]: { id: string; timestamp: string; customType: Kind; data: FactoryEntryData[Kind] }
 }[keyof FactoryEntryData]
+
+/** An answer of the task's coder, cut to what the timeline shows: its text (no tool calls or thinking), model and usage. */
+export interface FactoryAnswer {
+  id: string
+  timestamp: string
+  type: "message"
+  message: { role: "assistant"; text: string; model: string | null; stopReason: string | null; usage: FactoryUsage }
+}
+
+/** The timeline of a task: its factory entries and the coder's answers, in append order. */
+export type FactoryTimelineEntry = FactoryEntry | FactoryAnswer

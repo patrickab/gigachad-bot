@@ -23,7 +23,7 @@ function session(sessionId: string, factory: FactoryState | null = null, running
 }
 
 function task(id: string, factory: FactoryState | null = RUNNING): FactoryTask {
-  return { id, repo: "/git/repo", session_id: `s-${id}`, session_path: "", worktree: null, branch: null, title: id, created_at: "2026-01-01T00:00:00Z", factory, live: null }
+  return { id, repo: "/git/repo", session_id: `s-${id}`, session_path: "", worktree: null, branch: null, title: id, created_at: "2026-01-01T00:00:00Z", factory, live: null, usage: null }
 }
 
 /** Each test reads its own repo: the task lists outlive a hook. */

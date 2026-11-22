@@ -154,7 +154,8 @@ async function handlePutState(request: Request, sessionPath: string, host: Host)
 /**
  * `GET /sessions/:id/entries`: the session file's entries. `?turns=N` answers a preview of the active branch's last N
  * turns. `?customType=<prefix>&since=<entryId>` answers only the `custom` entries whose `customType` starts with the
- * prefix and only those appended after the entry, 400 `invalid_since` when the file has no such entry. `turns` takes
+ * prefix and only those appended after the entry, 400 `invalid_since` when the file has no such entry. `&assistant=1`
+ * adds the assistant answers among them, cut to text, model and usage (`assistantAnswer`). `turns` takes
  * neither of the two.
  */
 async function handleEntries(url: URL, sessionPath: string, host: Host): Promise<Response> {
@@ -163,8 +164,9 @@ async function handleEntries(url: URL, sessionPath: string, host: Host): Promise
   if (turns !== undefined && !(Number.isInteger(turns) && turns > 0)) return fail(400, "invalid_turns");
   const customType = url.searchParams.get("customType") ?? undefined;
   const since = url.searchParams.get("since") ?? undefined;
-  if (turns !== undefined && (customType !== undefined || since !== undefined)) return fail(400, "invalid_query");
-  const answer = await sessionEntries(host, sessionPath, { turns, customType, since });
+  const assistant = url.searchParams.get("assistant") === "1";
+  if (turns !== undefined && (customType !== undefined || since !== undefined || assistant)) return fail(400, "invalid_query");
+  const answer = await sessionEntries(host, sessionPath, { turns, customType, since, assistant });
   return answer ? Response.json(answer) : fail(400, "invalid_since");
 }
 

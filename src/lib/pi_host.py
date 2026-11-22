@@ -99,6 +99,15 @@ class FactoryState(ContractModel):
     at: str
 
 
+class SessionUsage(ContractModel):
+    """What a session's models used: its assistant answers plus the reviews a factory task recorded. `input` counts cache
+    reads and writes too, `cost` is in dollars."""
+
+    input: int
+    output: int
+    cost: float
+
+
 class SessionInfo(ContractModel):
     session_id: str
     session_path: str
@@ -118,6 +127,8 @@ class SessionInfo(ContractModel):
     profile: Profile = "coding"
     # Set when the session is a factory task.
     factory: FactoryState | None = None
+    # Set once a model answered.
+    usage: SessionUsage | None = None
 
 
 class SessionList(ContractModel):
@@ -396,15 +407,21 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
 
 
 async def session_entries(
-    session_id: str, turns: int | None = None, *, custom_type: str | None = None, since: str | None = None
+    session_id: str,
+    turns: int | None = None,
+    *,
+    custom_type: str | None = None,
+    since: str | None = None,
+    assistant: bool = False,
 ) -> SessionEntries:
     """Every persisted entry of the session in append order, read from its file; with *turns* only the active branch's
     last *turns* turns.
 
     - *custom_type* keeps only the `custom` entries whose `customType` starts with it, *since* those after that entry
       id (400 `invalid_since` for an unknown one). `leaf_id` is then the file's last entry. Neither goes with *turns*
+    - *assistant* adds the assistant answers among them, cut to `text`, `model`, `stopReason` and `usage`
     """
-    given = {"turns": turns, "customType": custom_type, "since": since}
+    given = {"turns": turns, "customType": custom_type, "since": since, "assistant": "1" if assistant else None}
     params: dict[str, str | int] = {name: value for name, value in given.items() if value is not None}
     return await _request("GET", f"/sessions/{session_id}/entries", SessionEntries, params=params or None)
 

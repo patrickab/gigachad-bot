@@ -1,7 +1,7 @@
 // Factory routes (`backend/routes/factory.py`, `factory_preview.py`). `repo` is always the path of the primary checkout.
 import { toQuery } from "../urls"
 import { post, put, request, requestVoid } from "./http"
-import type { FactoryEntry, FactoryPreview, FactoryRepo, FactorySettings, FactoryTask, FactoryTaskCommand, FactoryTaskCreate, FactoryTaskDiff } from "@/lib/domain/factory"
+import type { FactoryPreview, FactoryRepo, FactorySettings, FactoryTask, FactoryTaskCommand, FactoryTaskCreate, FactoryTaskDiff, FactoryTimelineEntry } from "@/lib/domain/factory"
 
 function taskPath(id: string): string {
   return `/factory/tasks/${encodeURIComponent(id)}`
@@ -75,7 +75,8 @@ export function stopFactoryPreview(id: string): Promise<FactoryPreview> {
 }
 
 /** The factory entries of a task's Pi session in append order, only those after the entry `since` when given. */
-export async function listFactoryEntries(sessionId: string, since?: string): Promise<FactoryEntry[]> {
-  const { entries } = await request<{ entries: FactoryEntry[] }>(`/pi/sessions/${encodeURIComponent(sessionId)}/entries${toQuery({ customType: "factory-", since })}`)
+/** The factory entries of a task's Pi session and its coder's answers, those after the entry `since` when given. */
+export async function listFactoryEntries(sessionId: string, since?: string): Promise<FactoryTimelineEntry[]> {
+  const { entries } = await request<{ entries: FactoryTimelineEntry[] }>(`/pi/sessions/${encodeURIComponent(sessionId)}/entries${toQuery({ customType: "factory-", since, assistant: "1" })}`)
   return entries
 }

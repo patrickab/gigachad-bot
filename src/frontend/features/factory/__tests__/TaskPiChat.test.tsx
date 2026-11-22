@@ -15,7 +15,7 @@ import { TaskPiChat } from "@/features/factory/TaskPiChat"
 
 const TASK: FactoryTask = {
   id: "t1", repo: "/home/u/git/demo", session_id: "s1", session_path: "/sessions/s1.jsonl", worktree: "/home/u/git/worktrees/demo/t1", branch: "factory/t1",
-  title: "T", created_at: "", factory: { state: "blocked", round: 1, reason: "", at: "" }, live: { running: false, waiting: false, attached: 0 },
+  title: "T", created_at: "", factory: { state: "blocked", round: 1, reason: "", at: "" }, live: { running: false, waiting: false, attached: 0 }, usage: null,
 }
 
 const chat = (task: FactoryTask) => <TaskPiChat task={task} bar={null} modelProps={{} as PiCatalogProps} />
