@@ -13,14 +13,12 @@ import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { fetchModels, getFactorySettings, listFactoryBranches, putFactorySettings } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
-import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
+import type { FactoryModels, FactorySettings } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
-import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
+import { COMPACT_FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
-const MERGE_OPTIONS = [
-  { value: "review", label: "Review" },
-  { value: "auto", label: "Auto" },
-]
+/** The merge mode as pills: merge on its own, or wait for the user's approve. */
+export const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review", label: "Approve" }] as const
 
 const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 
@@ -65,7 +63,7 @@ export function BranchSelect({ label, value, fallback, branches, disabled, onCha
 }) {
   return (
     <Field label={label}>
-      <StyledSelect ariaLabel={label} value={value} options={branchOptions(fallback, branches, value)} disabled={disabled} onChange={onChange} />
+      <StyledSelect quiet ariaLabel={label} value={value} options={branchOptions(fallback, branches, value)} disabled={disabled} onChange={onChange} />
     </Field>
   )
 }
@@ -95,23 +93,13 @@ export function PillChoice<T extends string>({ label, options, value, disabled, 
   return (
     <div role="group" aria-label={label} className="flex items-center gap-1.5">
       <span className="text-[11px] text-ink-subtle">{label}</span>
-      <PillTabs options={options} value={value} onChange={onChange} disabled={disabled} />
+      <PillTabs quiet options={options} value={value} onChange={onChange} disabled={disabled} />
     </div>
   )
 }
 
 export const REVIEW_OPTIONS = [{ value: "off", label: "Off" }, { value: "on", label: "On" }] as const
 export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Checkout" }] as const
-
-/** Labelled checkbox of the factory dialogs. */
-export function Toggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2 text-sm text-ink">
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="h-3.5 w-3.5 accent-ink" />
-      {label}
-    </label>
-  )
-}
 
 /** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, source and target branch, review, worktree, preview and a model per agent. */
 export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
@@ -162,20 +150,32 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
         {draft ? (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Merge">
-                <StyledSelect ariaLabel="Merge" value={draft.merge} onChange={(value) => change({ merge: value as FactoryMergeMode })} options={MERGE_OPTIONS} />
-              </Field>
-              <Field label="Max rounds">
-                <input
-                  type="number"
-                  aria-label="Max rounds"
-                  min={MAX_ROUNDS_LIMITS.min}
-                  max={MAX_ROUNDS_LIMITS.max}
-                  value={Number.isNaN(draft.max_rounds) ? "" : draft.max_rounds}
-                  onChange={(event) => change({ max_rounds: event.target.valueAsNumber })}
-                  className={FIELD_CLASS}
-                />
-              </Field>
+              {AGENTS.map((agent) => {
+                const selected = draft.models[agent] ?? ""
+                const options = modelOptions.some((option) => option.value === selected)
+                  ? modelOptions
+                  : [...modelOptions, { value: selected, label: `${selected} (saved, not added)` }]
+                return (
+                  <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
+                    <StyledSelect
+                      quiet
+                      ariaLabel={`Model of ${agent}`}
+                      value={selected}
+                      disabled={agent === "reviewer" && !draft.review}
+                      onChange={(value) => changeModel(agent, value)}
+                      options={options}
+                    />
+                  </Field>
+                )
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={draft.worktree ? "worktree" : "checkout"} onChange={(workspace) => change({ worktree: workspace === "worktree" })} />
+              <PillChoice label="Review" options={REVIEW_OPTIONS} value={draft.review ? "on" : "off"} onChange={(review) => change({ review: review === "on" })} />
+              <PillChoice label="Merge" options={MERGE_OPTIONS} value={draft.merge} onChange={(merge) => change({ merge })} />
+              <PillChoice label="Preview" options={REVIEW_OPTIONS} value={draft.preview ? "on" : "off"} onChange={(preview) => change({ preview: preview === "on" })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <BranchSelect
                 label="Source branch"
                 value={draft.source_branch ?? ""}
@@ -190,24 +190,17 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                 branches={branches}
                 onChange={(target_branch) => change({ target_branch })}
               />
-            </div>
-            <div className="flex gap-6">
-              <PillChoice label="Review" options={REVIEW_OPTIONS} value={draft.review ? "on" : "off"} onChange={(review) => change({ review: review === "on" })} />
-              <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={draft.worktree ? "worktree" : "checkout"} onChange={(workspace) => change({ worktree: workspace === "worktree" })} />
-              <Toggle label="Preview" checked={draft.preview} onChange={(preview) => change({ preview })} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {AGENTS.map((agent) => {
-                const selected = draft.models[agent] ?? ""
-                const options = modelOptions.some((option) => option.value === selected)
-                  ? modelOptions
-                  : [...modelOptions, { value: selected, label: `${selected} (saved, not added)` }]
-                return (
-                  <Field key={agent} label={`Model of ${agent}`}>
-                    <StyledSelect ariaLabel={`Model of ${agent}`} value={selected} onChange={(value) => changeModel(agent, value)} options={options} />
-                  </Field>
-                )
-              })}
+              <Field label="Max rounds">
+                <input
+                  type="number"
+                  aria-label="Max rounds"
+                  min={MAX_ROUNDS_LIMITS.min}
+                  max={MAX_ROUNDS_LIMITS.max}
+                  value={Number.isNaN(draft.max_rounds) ? "" : draft.max_rounds}
+                  onChange={(event) => change({ max_rounds: event.target.valueAsNumber })}
+                  className={COMPACT_FIELD_CLASS}
+                />
+              </Field>
             </div>
             <ErrorText>{branchError}</ErrorText>
             <ErrorText>{modelError}</ErrorText>

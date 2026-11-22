@@ -11,7 +11,7 @@ import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
+import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, MERGE_OPTIONS, PillChoice, REVIEW_OPTIONS, SOURCE_BRANCH_DEFAULT, TARGET_BRANCH_DEFAULT, WORKSPACE_OPTIONS } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
 import type { ModelsResponse } from "@/lib/domain/types"
@@ -25,7 +25,6 @@ function branchOverrides(source: string, target: string): Partial<FactorySetting
   return { ...(source_branch ? { source_branch } : {}), ...(target_branch ? { target_branch } : {}) }
 }
 
-const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review", label: "Approve" }] as const
 
 /**
  * Modal that starts a factory task in the repo at path `repo` from a title and a request, in a worktree off a source
@@ -125,6 +124,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
           {AGENTS.map((agent) => (
             <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
               <StyledSelect
+                quiet
                 ariaLabel={`Model of ${agent}`}
                 value={models[agent] ?? INHERIT}
                 disabled={settings === null || (agent === "reviewer" && !review)}

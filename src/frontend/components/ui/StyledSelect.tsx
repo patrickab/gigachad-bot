@@ -14,10 +14,12 @@ interface StyledSelectProps {
   variant?: "box" | "inline"
   className?: string
   disabled?: boolean
+  /** A box trigger in muted text, for forms of many selects side by side. */
+  quiet?: boolean
 }
 
 /** Custom listbox with arrow, Home, and End key navigation. Arrows change the value directly, so the list need not be open. */
-export function StyledSelect({ options, value, onChange, ariaLabel = "Select option", variant = "box", className, disabled = false }: StyledSelectProps) {
+export function StyledSelect({ options, value, onChange, ariaLabel = "Select option", variant = "box", className, disabled = false, quiet = false }: StyledSelectProps) {
   const inline = variant === "inline"
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -48,7 +50,7 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
       action()
     }} className={inline
       ? cn("cursor-pointer border-0 bg-transparent p-0 focus:outline-none", className)
-      : "flex w-full items-center gap-2 rounded-lg border border-divider bg-paper px-2.5 py-2 text-left text-xs text-ink shadow-[var(--inner-highlight)] transition-colors hover:bg-surface-elevated focus:outline-none focus-visible:border-divider-strong disabled:pointer-events-none disabled:opacity-40"}>
+      : cn("flex w-full items-center gap-2 rounded-lg border border-divider bg-paper px-2.5 py-2 text-left text-xs shadow-[var(--inner-highlight)] transition-colors hover:bg-surface-elevated focus:outline-none focus-visible:border-divider-strong disabled:pointer-events-none disabled:opacity-40", quiet ? "text-ink-muted hover:text-ink" : "text-ink")}>
       {inline ? selected?.label ?? value : <>
         <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-ink-subtle transition-transform", open && "rotate-180")} />
