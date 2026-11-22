@@ -63,7 +63,7 @@ describe("allowedActions", () => {
 
 describe("task status", () => {
   it("names the state, and the round once one started", () => {
-    expect(taskStatusLine(task(null, null))).toBe("Starting")
+    expect(taskStatusLine(task(null, null))).toBe("Launching session")
     expect(taskStatusLine(task("running", LIVE, 0))).toBe("Working")
     expect(taskStatusLine(task("waiting_approve", LIVE, 2))).toBe("Ready for review · round 2")
     expect(taskStatusLine(task("merging", null, 3))).toBe("Interrupted · round 3")

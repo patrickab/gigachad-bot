@@ -4,6 +4,7 @@ import type { FactorySettings, FactoryTaskCreate } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({
   createFactoryTask: vi.fn<(body: FactoryTaskCreate) => Promise<unknown>>(),
+  listFactoryTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
   getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
 }))
 
@@ -18,6 +19,7 @@ const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true
 beforeEach(() => {
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
+  api.listFactoryTasks.mockReset().mockResolvedValue([])
 })
 
 function fill(view: ReturnType<typeof render>) {
@@ -28,17 +30,15 @@ function fill(view: ReturnType<typeof render>) {
 describe("NewTaskDialog", () => {
   it("starts a task in the repo by path, in a worktree when the repo's settings say so", async () => {
     const onClose = vi.fn()
-    const onCreated = vi.fn()
-    const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} onCreated={onCreated} />)
+    const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
     await waitFor(() => expect(view.getByLabelText("Worktree")).toBeChecked())
     expect(api.getFactorySettings).toHaveBeenCalledWith(REPO)
 
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
     expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { worktree: true, branch: null } })
-    expect(onCreated).toHaveBeenCalledTimes(1)
   })
 
   it("defaults to the current checkout for a repo without worktrees, and sends the user's choice and merge override", async () => {
@@ -87,19 +87,17 @@ describe("NewTaskDialog", () => {
     expect(start).toBeDisabled()
   })
 
-  it("shows the backend's refusal inline and stays open", async () => {
-    api.createFactoryTask.mockRejectedValueOnce(new Error("The checkout already has a task"))
+  it("closes at once, before the backend answered the start", async () => {
+    api.createFactoryTask.mockReturnValue(new Promise(() => {}))
     const onClose = vi.fn()
-    const onCreated = vi.fn()
-    const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} onCreated={onCreated} />)
+    const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
     await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
 
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    expect(await view.findByRole("alert")).toHaveTextContent("The checkout already has a task")
-    expect(onClose).not.toHaveBeenCalled()
-    expect(onCreated).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(api.createFactoryTask).toHaveBeenCalledTimes(1)
   })
 
   it("prefills the branch from the repo's setting, sends the user's branch, and null for an empty field", async () => {

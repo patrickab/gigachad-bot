@@ -9,7 +9,7 @@ export type FactoryShownState = FactoryTaskState | "starting" | "interrupted"
 /**
  * The state the screens show for `task`.
  *
- * - `starting`: its session has no factory state yet
+ * - `starting`: its session has no factory state yet, shown as "Launching session" until the agent works
  * - `interrupted`: the state says running or merging, but no Pi child runs the session
  */
 export function shownState(task: Pick<FactoryTask, "factory" | "live">): FactoryShownState {
@@ -19,7 +19,7 @@ export function shownState(task: Pick<FactoryTask, "factory" | "live">): Factory
 }
 
 export const STATE_LABELS: Record<FactoryShownState, string> = {
-  starting: "Starting",
+  starting: "Launching session",
   running: "Working",
   waiting_approve: "Ready for review",
   blocked: "Blocked",

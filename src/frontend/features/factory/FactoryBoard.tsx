@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { GitBranch, Plus, Settings, Trash2 } from "lucide-react"
+import { GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
 import { BoardColumn } from "@/components/ui/BoardColumn"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -16,7 +16,8 @@ import { baseName } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
-import { BOARD_COLUMNS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
+import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, allowedActions, shownState, taskStatusLine, taskTone } from "./states"
+import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 
 /** Finished tasks shown before "Show all", the column otherwise grows without bound. */
@@ -75,6 +76,34 @@ function TaskCard({ task, onOpen, onDelete }: { task: FactoryTask; onOpen: () =>
   )
 }
 
+/** A start on its way, "Launching session" in Working, or refused, with its reason, in Needs you. */
+function LaunchCard({ launch }: { launch: FactoryLaunch }) {
+  const { repo, title, overrides } = launch.body
+  const failed = launch.error !== null
+  return (
+    <ElevatedContainer className="relative rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
+      <div role="group" aria-label={title} className="flex w-full flex-col gap-2 rounded-xl p-4">
+        <span className="line-clamp-2 pr-14 text-sm font-semibold text-ink">{title}</span>
+        <span role="status" className="flex min-w-0 items-center gap-2 text-[11px]">
+          <StatusDot tone={failed ? "error" : "active"} />
+          <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{failed ? "Could not start" : STATE_LABELS.starting}</span>
+        </span>
+        {failed && <span className="line-clamp-3 text-[11px] text-ink-subtle">{launch.error}</span>}
+        <span className="flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint">
+          {overrides.worktree && <GitBranch aria-hidden className="h-3 w-3 shrink-0" />}
+          <span className="truncate">{overrides.worktree ? "New worktree" : "Current checkout"}</span>
+        </span>
+      </div>
+      {failed && (
+        <div className="absolute right-2 top-2 flex">
+          <IconButton icon={RotateCcw} label={`Retry ${title}`} onClick={() => void retryLaunch(repo, launch.id)} />
+          <IconButton icon={X} label={`Dismiss ${title}`} onClick={() => dismissLaunch(repo, launch.id)} />
+        </div>
+      )}
+    </ElevatedContainer>
+  )
+}
+
 /** Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is finished. */
 export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   repo: string
@@ -86,6 +115,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   onOpenTask: (taskId: string) => void
 }) {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  const launches = useFactoryLaunches(repo)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showAllFinished, setShowAllFinished] = useState(false)
   const { run: deleteTask, error: deleteError } = useAsyncAction(async (id: string) => {
@@ -113,6 +143,9 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-4 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
             const columnTasks = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            // Newest first, like the tasks: a refused start waits on the user, one on its way works.
+            const columnLaunches = launches.filter((launch) => column.id === (launch.error === null ? "working" : "needs-you")).reverse()
+            const count = columnTasks.length + columnLaunches.length
             const capped = column.id === "finished" && !showAllFinished && columnTasks.length > FINISHED_LIMIT
             const shown = capped ? columnTasks.slice(0, FINISHED_LIMIT) : columnTasks
             return (
@@ -122,8 +155,8 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                 aria-label={column.title}
                 title={column.title}
                 titleAs="h3"
-                count={columnTasks.length}
-                marker={<StatusDot tone={columnTasks.length === 0 ? "idle" : column.tone} />}
+                count={count}
+                marker={<StatusDot tone={count === 0 ? "idle" : column.tone} />}
                 className="min-w-[15rem] border-divider/30"
                 bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
                 footer={<>
@@ -138,6 +171,18 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                   )}
                 </>}
               >
+                {columnLaunches.map((launch) => (
+                  <motion.div
+                    key={launch.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <LaunchCard launch={launch} />
+                  </motion.div>
+                ))}
                 {shown.map((task) => (
                   <motion.div
                     key={task.id}
@@ -156,7 +201,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
           })}
         </div>
       </div>
-      <NewTaskDialog repo={repo} open={newTaskOpen} onClose={() => setNewTaskOpen(false)} onCreated={() => void refresh()} />
+      <NewTaskDialog repo={repo} open={newTaskOpen} onClose={() => setNewTaskOpen(false)} />
       <FactorySettingsDialog repo={repo} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </ElevationProvider>
   )

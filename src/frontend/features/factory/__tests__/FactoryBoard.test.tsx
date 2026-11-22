@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   deleteFactoryTask: vi.fn<(id: string) => Promise<void>>(),
   getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
   createFactoryTask: vi.fn<(body: unknown) => Promise<unknown>>(),
+  listFactoryTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
   fetchModels: vi.fn<() => Promise<never>>(),
 }))
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   api.deleteFactoryTask.mockReset().mockResolvedValue()
   api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, branch: null })
   api.createFactoryTask.mockReset().mockResolvedValue({})
+  api.listFactoryTasks.mockReset().mockResolvedValue([])
 })
 
 describe("FactoryBoard", () => {
@@ -88,7 +90,7 @@ describe("FactoryBoard", () => {
     expect(card("Task cancelled")).toHaveTextContent("Cancelled · round 2")
     expect(card("Task cancelled")).not.toHaveTextContent("cancelled by the user")
     expect(card("Task cancelled")).toHaveTextContent("Current checkout")
-    expect(card("Task starting")).toHaveTextContent("Starting")
+    expect(card("Task starting")).toHaveTextContent("Launching session")
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
   })
 
@@ -189,15 +191,50 @@ describe("FactoryBoard", () => {
     expect(titles("Finished")).toHaveLength(12)
   })
 
-  it("reads the tasks again once a new task was created", async () => {
-    const { view, refresh } = renderBoard([])
+  it("closes the dialog at once and shows the start as launching until its task is listed", async () => {
+    let answer: (task: unknown) => void = () => {}
+    api.createFactoryTask.mockReturnValue(new Promise((resolve) => { answer = resolve }))
+    const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
     await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Fix" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(view.queryByLabelText("Title")).toBeNull())
     expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true, branch: null } })
+    const launch = within(view.getByRole("region", { name: "Working" })).getByRole("group", { name: "Fix" })
+    expect(launch).toHaveTextContent("Launching session")
+
+    answer({})
+    await waitFor(() => expect(view.queryByRole("group", { name: "Fix" })).toBeNull())
+    expect(api.listFactoryTasks).toHaveBeenCalledWith(REPO)
+  })
+
+  it("moves a refused start to Needs you with its reason, to retry or dismiss", async () => {
+    api.createFactoryTask.mockRejectedValueOnce(new Error("The checkout already has a task"))
+    const { view } = renderBoard([])
+    fireEvent.click(view.getByRole("button", { name: "New task" }))
+    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    fireEvent.change(view.getByLabelText("Title"), { target: { value: "Refused" } })
+    fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
+    fireEvent.click(view.getByRole("button", { name: "Start" }))
+
+    const needsYou = view.getByRole("region", { name: "Needs you" })
+    await waitFor(() => expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("Could not start"))
+    expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("The checkout already has a task")
+
+    fireEvent.click(view.getByRole("button", { name: "Retry Refused" }))
+    await waitFor(() => expect(view.queryByRole("group", { name: "Refused" })).toBeNull())
+    expect(api.createFactoryTask).toHaveBeenCalledTimes(2)
+
+    api.createFactoryTask.mockRejectedValueOnce(new Error("No"))
+    fireEvent.click(view.getByRole("button", { name: "New task" }))
+    await waitFor(() => expect(view.getByLabelText("Worktree")).toBeEnabled())
+    fireEvent.change(view.getByLabelText("Title"), { target: { value: "Dismissed" } })
+    fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
+    fireEvent.click(view.getByRole("button", { name: "Start" }))
+    fireEvent.click(await view.findByRole("button", { name: "Dismiss Dismissed" }))
+    await waitFor(() => expect(view.queryByRole("group", { name: "Dismissed" })).toBeNull())
   })
 })

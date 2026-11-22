@@ -54,7 +54,8 @@ describe("FileMountPicker", () => {
     await waitFor(() => expect(input).toHaveValue("/home/noob/"))
 
     fireEvent.change(input, { target: { value: "/home/noob/gt" } })
-    expect(screen.getByRole("button", { name: "git" })).toBeVisible()
+    // The dialog may still be fading in: visible once its entrance ends.
+    await waitFor(() => expect(screen.getByRole("button", { name: "git" })).toBeVisible())
     expect(screen.queryByRole("button", { name: ".config" })).toBeNull()
 
     fireEvent.keyDown(input, { key: "Tab" })

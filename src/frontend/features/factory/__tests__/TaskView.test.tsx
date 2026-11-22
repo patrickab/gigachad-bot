@@ -182,7 +182,7 @@ describe("TaskView", () => {
     render(view())
 
     expect(shownState(store.task)).toBe("starting")
-    expect(screen.getByLabelText("Task state").textContent).toBe("Starting · factory/fix-header")
+    expect(screen.getByLabelText("Task state").textContent).toBe("Launching session · factory/fix-header")
     expect(buttons()).toEqual([])
   })
 

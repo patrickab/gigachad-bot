@@ -6,11 +6,11 @@ import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
-import { createFactoryTask, getFactorySettings } from "@/lib/backend/api"
-import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { getFactorySettings } from "@/lib/backend/api"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
+import { launchTask } from "./useFactoryTasks"
 import { branchOrDefault, Toggle } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMergeMode, FactorySettings } from "@/lib/domain/factory"
@@ -23,14 +23,13 @@ type MergeChoice = FactoryMergeMode | typeof INHERIT
  * Modal that starts a factory task in the repo at path `repo` from a title and a request, in a worktree off a branch or
  * in the current checkout.
  *
+ * - Start closes the dialog at once: the start runs on as a launch on the board (`launchTask`), which shows a refusal
  * - The branch is sent only for a worktree task (a current-checkout task works on what is checked out), null when empty
  */
-export function NewTaskDialog({ repo, open, onClose, onCreated }: {
+export function NewTaskDialog({ repo, open, onClose }: {
   repo: string
   open: boolean
   onClose: () => void
-  /** Called once the task exists, before the dialog closes. */
-  onCreated?: () => void
 }) {
   const [settings, setSettings] = useState<FactorySettings | null>(null)
   const [title, setTitle] = useState("")
@@ -41,18 +40,10 @@ export function NewTaskDialog({ repo, open, onClose, onCreated }: {
   const [branchChoice, setBranchChoice] = useState<string | null>(null)
   const [merge, setMerge] = useState<MergeChoice>(INHERIT)
   const [overridesOpen, setOverridesOpen] = useState(false)
+  const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
   const worktree = worktreeChoice ?? settings?.worktree ?? false
   const branch = branchChoice ?? settings?.branch ?? ""
-  const { run: create, pending: busy, error, setError } = useAsyncAction(async () => {
-    await createFactoryTask({ repo, title: title.trim(), request: request.trim(), overrides: {
-      worktree,
-      ...(worktree ? { branch: branchOrDefault(branch) } : {}),
-      ...(merge !== INHERIT ? { merge } : {}),
-    } })
-    onCreated?.()
-    onClose()
-  }, "Could not create the task")
 
   // Every opening starts from an empty form and the repo's saved settings.
   useResetOnOpen(open, () => {
@@ -69,9 +60,15 @@ export function NewTaskDialog({ repo, open, onClose, onCreated }: {
   const loadSettings = useCallback(() => getFactorySettings(repo), [repo])
   useLoadWhile(open, loadSettings, setSettings, (cause) => setError(errorMessage(cause, "Could not load the settings")))
 
-  const canSubmit = !busy && settings !== null && title.trim() !== "" && request.trim() !== ""
+  const canSubmit = settings !== null && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
-    if (canSubmit) void create()
+    if (!canSubmit) return
+    void launchTask({ repo, title: title.trim(), request: request.trim(), overrides: {
+      worktree,
+      ...(worktree ? { branch: branchOrDefault(branch) } : {}),
+      ...(merge !== INHERIT ? { merge } : {}),
+    } })
+    onClose()
   }
 
   const mergeOptions = [
