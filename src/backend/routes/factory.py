@@ -2,7 +2,7 @@
 
 - Consumes `lib.factory`, which drives each task's Pi session through `lib.pi_host` and keeps the factory's tables
 - `repo` is the absolute path of a registered primary checkout (`RepoInfo.path`), `RepoInfo.name` is for display
-- Provides repos, per-repo settings and tasks: start, list, read, diff, approve, retry, cancel, message, delete
+- Provides repos, per-repo settings and local branches, and tasks: start, list, read, diff, approve, retry, cancel, message, delete
 - A task's timeline is not served here: the browser reads `GET /api/pi/sessions/{id}/entries?customType=factory-`
 - Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout, an unknown branch or a source
   branch that does not merge into the target 400, a busy checkout or a task at work 409, a workspace, git, start or
@@ -69,6 +69,11 @@ async def post_repo(body: factory.NewRepo, store: Store) -> factory.RepoInfo:
 @router.get("/settings")
 async def get_settings(repo: str, store: Store) -> factory.RepoSettings:
     return await _call(factory.repo_settings(store, repo))
+
+
+@router.get("/branches")
+async def get_branches(repo: str, store: Store) -> list[str]:
+    return await _call(factory.repo_branches(store, repo))
 
 
 @router.put("/settings")

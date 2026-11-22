@@ -13,10 +13,11 @@ interface StyledSelectProps {
   /** "inline": the trigger is plain text styled by `className` (e.g. a label on a diagram node), and the list grows to fit. */
   variant?: "box" | "inline"
   className?: string
+  disabled?: boolean
 }
 
 /** Custom listbox with arrow, Home, and End key navigation. Arrows change the value directly, so the list need not be open. */
-export function StyledSelect({ options, value, onChange, ariaLabel = "Select option", variant = "box", className }: StyledSelectProps) {
+export function StyledSelect({ options, value, onChange, ariaLabel = "Select option", variant = "box", className, disabled = false }: StyledSelectProps) {
   const inline = variant === "inline"
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -40,20 +41,20 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
   }
 
   return <div ref={ref} className={cn("relative", inline && "inline-block")}>
-    <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={toggle} onKeyDown={(event) => {
+    <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={toggle} onKeyDown={(event) => {
       const action = keyActions[event.key]
-      if (!action) return
+      if (!action || disabled) return
       event.preventDefault()
       action()
     }} className={inline
       ? cn("cursor-pointer border-0 bg-transparent p-0 focus:outline-none", className)
-      : "flex w-full items-center gap-2 rounded-lg border border-divider bg-paper px-2.5 py-2 text-left text-xs text-ink shadow-[var(--inner-highlight)] transition-colors hover:bg-surface-elevated focus:outline-none focus-visible:border-divider-strong"}>
+      : "flex w-full items-center gap-2 rounded-lg border border-divider bg-paper px-2.5 py-2 text-left text-xs text-ink shadow-[var(--inner-highlight)] transition-colors hover:bg-surface-elevated focus:outline-none focus-visible:border-divider-strong disabled:pointer-events-none disabled:opacity-40"}>
       {inline ? selected?.label ?? value : <>
         <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-ink-subtle transition-transform", open && "rotate-180")} />
       </>}
     </button>
-    {open && <div role="listbox" aria-label={ariaLabel} className={cn("absolute z-50 mt-1 max-h-52 overflow-y-auto rounded-lg border border-divider bg-surface p-1 shadow-[var(--shadow-lg)]", inline ? "left-0 w-max" : "w-full")}>
+    {open && !disabled && <div role="listbox" aria-label={ariaLabel} className={cn("absolute z-50 mt-1 max-h-52 overflow-y-auto rounded-lg border border-divider bg-surface p-1 shadow-[var(--shadow-lg)]", inline ? "left-0 w-max" : "w-full")}>
       {options.map((option) => <button key={option.value} type="button" role="option" aria-selected={option.value === value} onClick={() => select(option.value)} className={cn("flex w-full items-center gap-2 rounded-md text-left transition-colors", inline ? "px-2 py-1 text-[11px]" : "px-2 py-1.5 text-xs", option.value === value ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface-elevated hover:text-ink")}>
         <span className="min-w-0 flex-1 truncate">{option.label}</span>
         {option.value === value && <Check className={cn("shrink-0", inline ? "h-3 w-3" : "h-3.5 w-3.5")} />}

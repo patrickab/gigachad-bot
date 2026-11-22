@@ -25,4 +25,17 @@ describe("StyledSelect", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     expect(onChange).not.toHaveBeenCalled()
   })
+
+  it("a disabled select neither opens nor changes its value", () => {
+    const onChange = vi.fn()
+    render(<StyledSelect ariaLabel="Model" value="fast" disabled onChange={onChange} options={[{ value: "fast", label: "Fast" }, { value: "smart", label: "Smart" }]} />)
+
+    const trigger = screen.getByRole("button", { name: "Model" })
+    expect(trigger).toBeDisabled()
+    fireEvent.click(trigger)
+    fireEvent.keyDown(trigger, { key: "ArrowDown" })
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

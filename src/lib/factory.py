@@ -3,7 +3,7 @@
 - Consumes `lib.pi_host` (the task's session: opened, prompted with `/factory <command>`, its `factory-` entries, its
   removal), `lib.factory_workspace` (worktree or current checkout), `lib.factory_preview` (a deleted task's preview is
   stopped), git for the diff, and the tables `factory_repo_settings` and `factory_tasks` (`db/schema/0017_factory_tasks.sql`)
-- Provides the repos with their settings, and a task's life: start, list, read, diff, command, message, delete
+- Provides the repos with their settings and local branches, and a task's life: start, list, read, diff, command, message, delete
 - A repo is the absolute path of a primary git checkout, its name the folder's, for display only
 - The extension (`pi-extensions/factory`) runs the rounds, gates, review and merge inside the session. A task's state is
   the session's last `factory-state` entry, which pi-host reports as `SessionInfo.factory`: no state is stored here
@@ -501,6 +501,13 @@ async def register_repo(store: FactoryStore, path: str) -> RepoInfo:
 async def repo_settings(store: FactoryStore, repo: str) -> RepoSettings:
     """The settings new tasks of *repo* start with: the defaults under what was saved for it."""
     return resolve_settings(await asyncio.to_thread(store.repo_settings, repo))
+
+
+async def repo_branches(store: FactoryStore, repo: str) -> list[str]:
+    """The local branches of the registered *repo*, alphabetically (case-insensitive). `UnknownRepo` when it is not registered."""
+    await asyncio.to_thread(store.repo_settings, repo)
+    names = await asyncio.to_thread(git_text, Path(repo), "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    return sorted(names.split(), key=lambda name: (name.casefold(), name))
 
 
 async def save_repo_settings(store: FactoryStore, repo: str, settings: RepoSettings) -> RepoSettings:

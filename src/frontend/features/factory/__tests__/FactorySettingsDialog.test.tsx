@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
   fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
   putFactorySettings: vi.fn<(repo: string, settings: FactorySettings) => Promise<FactorySettings>>(),
+  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
 }))
 
 vi.mock("@/lib/backend/api", () => api)
@@ -30,6 +31,7 @@ const CATALOG: ModelsResponse = {
 }
 
 beforeEach(() => {
+  api.listFactoryBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
   api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
   api.fetchModels.mockReset().mockResolvedValue(CATALOG)
   api.putFactorySettings.mockReset().mockImplementation(async (_repo, saved) => saved)
@@ -119,23 +121,33 @@ describe("FactorySettingsDialog", () => {
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, { ...SETTINGS, models: {} }))
   })
 
-  it("saves the source and target branch the user typed, and null for an empty field", async () => {
+  it("picks the source and target branch from the repo's branches, the default saved as null", async () => {
     api.getFactorySettings.mockResolvedValue({ ...SETTINGS, source_branch: "develop" })
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     const source = await view.findByLabelText("Source branch")
     const target = view.getByLabelText("Target branch")
-    expect(source).toHaveValue("develop")
-    expect(target).toHaveValue("")
-    expect(target).toHaveAttribute("placeholder", "Same as source")
+    expect(source).toHaveTextContent("develop")
+    expect(target).toHaveTextContent("Default (same as source)")
+    expect(api.listFactoryBranches).toHaveBeenCalledWith(REPO)
 
-    fireEvent.change(target, { target: { value: " release " } })
+    fireEvent.click(target)
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (same as source)", "develop", "feature/x", "main", "release"]))
+    fireEvent.click(view.getByRole("option", { name: "release" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(1))
     expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ source_branch: "develop", target_branch: "release" })
 
-    fireEvent.change(source, { target: { value: "  " } })
+    fireEvent.click(source)
+    fireEvent.click(view.getByRole("option", { name: "Default (main, else master)" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(2))
     expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ source_branch: null, target_branch: "release" })
+  })
+
+  it("keeps a saved branch that no longer exists selectable, marked missing", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, target_branch: "gone" })
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
+    const target = await view.findByLabelText("Target branch")
+    await waitFor(() => expect(target).toHaveTextContent("gone (missing)"))
   })
 })

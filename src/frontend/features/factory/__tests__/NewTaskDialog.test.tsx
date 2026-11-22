@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   createFactoryTask: vi.fn<(body: FactoryTaskCreate) => Promise<unknown>>(),
   listFactoryTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
   getFactorySettings: vi.fn<(repo: string) => Promise<FactorySettings>>(),
+  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
 }))
 
 vi.mock("@/lib/backend/api", () => api)
@@ -20,6 +21,7 @@ beforeEach(() => {
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.getFactorySettings.mockReset().mockResolvedValue(SETTINGS)
   api.listFactoryTasks.mockReset().mockResolvedValue([])
+  api.listFactoryBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
 })
 
 function fill(view: ReturnType<typeof render>) {
@@ -100,18 +102,21 @@ describe("NewTaskDialog", () => {
     expect(api.createFactoryTask).toHaveBeenCalledTimes(1)
   })
 
-  it("names the repo's branches as placeholders and sends only the branches the user typed", async () => {
+  it("offers the repo's branches alphabetically after its default, and sends only the branches the user picked", async () => {
     api.getFactorySettings.mockResolvedValue({ ...SETTINGS, source_branch: "develop" })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
-    const source = view.getByLabelText("Source branch")
-    const target = view.getByLabelText("Target branch")
-    await waitFor(() => expect(source).toHaveAttribute("placeholder", "develop"))
-    expect(source).toHaveValue("")
-    expect(target).toHaveAttribute("placeholder", "Same as source")
+    await waitFor(() => expect(view.getByLabelText("Source branch")).toHaveTextContent("Repo default (develop)"))
+    expect(view.getByLabelText("Target branch")).toHaveTextContent("Repo default (same as source)")
+    expect(api.listFactoryBranches).toHaveBeenCalledWith(REPO)
     fill(view)
-    fireEvent.change(source, { target: { value: " feature/x " } })
-    fireEvent.change(target, { target: { value: "release" } })
+
+    fireEvent.click(view.getByLabelText("Source branch"))
+    expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Repo default (develop)", "develop", "feature/x", "main", "release"])
+    fireEvent.click(view.getByRole("option", { name: "feature/x" }))
+    fireEvent.click(view.getByLabelText("Target branch"))
+    fireEvent.click(view.getByRole("option", { name: "release" }))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
+
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
     expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, source_branch: "feature/x", target_branch: "release" })
   })
@@ -120,7 +125,8 @@ describe("NewTaskDialog", () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     const source = view.getByLabelText("Source branch")
     await waitFor(() => expect(source).toBeEnabled())
-    fireEvent.change(source, { target: { value: "develop" } })
+    fireEvent.click(source)
+    fireEvent.click(await view.findByRole("option", { name: "develop" }))
     fireEvent.click(view.getByLabelText("Worktree"))
     expect(source).toBeDisabled()
     expect(view.getByLabelText("Target branch")).toBeDisabled()

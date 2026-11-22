@@ -20,6 +20,11 @@ export function getFactorySettings(repo: string): Promise<FactorySettings> {
   return request<FactorySettings>(`/factory/settings${toQuery({ repo })}`)
 }
 
+/** Local branches of `repo`, alphabetically. */
+export function listFactoryBranches(repo: string): Promise<string[]> {
+  return request<string[]>(`/factory/branches${toQuery({ repo })}`)
+}
+
 export function putFactorySettings(repo: string, settings: FactorySettings): Promise<FactorySettings> {
   return put<FactorySettings>(`/factory/settings${toQuery({ repo })}`, settings)
 }

@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   createFactoryTask: vi.fn<(body: unknown) => Promise<unknown>>(),
   listFactoryTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
   fetchModels: vi.fn<() => Promise<never>>(),
+  listFactoryBranches: vi.fn<(repo: string) => Promise<string[]>>(),
 }))
 
 vi.mock("@/lib/backend/api", () => api)
@@ -46,6 +47,7 @@ beforeEach(() => {
   api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, source_branch: null, target_branch: null })
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.listFactoryTasks.mockReset().mockResolvedValue([])
+  api.listFactoryBranches.mockReset().mockResolvedValue(["main"])
 })
 
 describe("FactoryBoard", () => {

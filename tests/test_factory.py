@@ -367,6 +367,14 @@ def test_settings_of_a_repo_are_the_defaults_until_saved(client, registered):
     assert client.put("/api/factory/settings", params={"repo": "/absent"}, json=saved).status_code == 404
 
 
+def test_the_branches_of_a_repo_are_its_local_branches_alphabetically(client, registered, repo):
+    for name in ("release", "Feature/b", "feature/a"):
+        git(repo, "branch", name)
+
+    assert client.get("/api/factory/branches", params={"repo": registered}).json() == ["feature/a", "Feature/b", "main", "release"]
+    assert client.get("/api/factory/branches", params={"repo": "/absent"}).status_code == 404
+
+
 def test_a_task_starts_in_a_worktree_with_a_coding_session_and_the_start_command(client, host, registered, repo, tmp_path):
     client.put("/api/factory/settings", params={"repo": registered}, json={"merge": "auto", "models": {"coder": "anthropic/a"}})
 

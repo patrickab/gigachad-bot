@@ -5,11 +5,11 @@ import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { cn, errorMessage } from "@/lib/utils"
+import { errorMessage } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
-import { fetchModels, getFactorySettings, putFactorySettings } from "@/lib/backend/api"
+import { fetchModels, getFactorySettings, listFactoryBranches, putFactorySettings } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
 import type { FactoryMergeMode, FactoryModels, FactorySettings } from "@/lib/domain/factory"
@@ -31,31 +31,32 @@ export function branchOrDefault(branch: string | null): string | null {
   return branch?.trim() || null
 }
 
-/** Placeholders of the branch fields, naming what an empty field falls back to. */
-export const SOURCE_BRANCH_PLACEHOLDER = "main, else master"
-export const TARGET_BRANCH_PLACEHOLDER = "Same as source"
+/** What an unset branch falls back to, named by the first option of its select. */
+export const SOURCE_BRANCH_DEFAULT = "main, else master"
+export const TARGET_BRANCH_DEFAULT = "same as source"
 
-/** Labelled text field of a branch name. */
-export function BranchField({ label, value, placeholder, disabled, onChange }: {
+/**
+ * Options of a branch select: `fallback` for no branch (the value ""), then `branches`. A `value` that is not among
+ * the loaded branches stays selectable, marked missing; while they load (null) it is shown as it is.
+ */
+export function branchOptions(fallback: string, branches: string[] | null, value: string): { value: string; label: string }[] {
+  const options = [{ value: "", label: fallback }, ...(branches ?? []).map((branch) => ({ value: branch, label: branch }))]
+  if (value === "" || branches?.includes(value)) return options
+  return [...options, { value, label: branches ? `${value} (missing)` : value }]
+}
+
+/** Labelled select of a branch of the repo, "" for the fallback. */
+export function BranchSelect({ label, value, fallback, branches, disabled, onChange }: {
   label: string
   value: string
-  placeholder: string
+  fallback: string
+  branches: string[] | null
   disabled?: boolean
   onChange: (value: string) => void
 }) {
   return (
     <Field label={label}>
-      <input
-        type="text"
-        aria-label={label}
-        value={value}
-        placeholder={placeholder}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className={cn(FIELD_CLASS, "disabled:opacity-40")}
-        autoComplete="off"
-        spellCheck={false}
-      />
+      <StyledSelect ariaLabel={label} value={value} options={branchOptions(fallback, branches, value)} disabled={disabled} onChange={onChange} />
     </Field>
   )
 }
@@ -89,6 +90,8 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const [draft, setDraft] = useState<FactorySettings | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
   const [modelError, setModelError] = useState("")
+  const [branches, setBranches] = useState<string[] | null>(null)
+  const [branchError, setBranchError] = useState("")
   const { run: persist, pending: busy, error, setError } = useAsyncAction(async () => {
     if (!draft) return
     await putFactorySettings(repo, withoutEmpty(draft))
@@ -100,12 +103,16 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
     setDraft(null)
     setCatalog(null)
     setModelError("")
+    setBranches(null)
+    setBranchError("")
     setError("")
   })
 
   const loadSettings = useCallback(() => getFactorySettings(repo), [repo])
   useLoadWhile(open, loadSettings, setDraft, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
+  const loadBranches = useCallback(() => listFactoryBranches(repo), [repo])
+  useLoadWhile(open, loadBranches, setBranches, (cause) => setBranchError(errorMessage(cause, "Could not load the branches")))
 
   const change = (changed: Partial<FactorySettings>) => setDraft((current) => current && { ...current, ...changed })
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
@@ -145,16 +152,18 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                   className={FIELD_CLASS}
                 />
               </Field>
-              <BranchField
+              <BranchSelect
                 label="Source branch"
                 value={draft.source_branch ?? ""}
-                placeholder={SOURCE_BRANCH_PLACEHOLDER}
+                fallback={`Default (${SOURCE_BRANCH_DEFAULT})`}
+                branches={branches}
                 onChange={(source_branch) => change({ source_branch })}
               />
-              <BranchField
+              <BranchSelect
                 label="Target branch"
                 value={draft.target_branch ?? ""}
-                placeholder={TARGET_BRANCH_PLACEHOLDER}
+                fallback={`Default (${TARGET_BRANCH_DEFAULT})`}
+                branches={branches}
                 onChange={(target_branch) => change({ target_branch })}
               />
             </div>
@@ -176,6 +185,7 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                 )
               })}
             </div>
+            <ErrorText>{branchError}</ErrorText>
             <ErrorText>{modelError}</ErrorText>
           </>
         ) : (
