@@ -33,7 +33,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 import yaml
 
-from lib import factory_draft, factory_preview, pi_host
+from lib import factory_preview, pi_host
 from lib.factory_workspace import (
     Workspace,
     WorkspaceBusy,
@@ -566,7 +566,7 @@ async def repo_config(store: FactoryStore, repo: str) -> RepoConfig:
     await asyncio.to_thread(store.repo_settings, repo)
     if await asyncio.to_thread(_config_path(repo).exists):
         return RepoConfig(exists=True, draft=None)
-    return RepoConfig(exists=False, draft=await asyncio.to_thread(factory_draft.draft_factory_yaml, Path(repo)))
+    return RepoConfig(exists=False, draft=await pi_host.factory_draft(repo))
 
 
 def _write_config(repo: str, content: str) -> None:

@@ -83,6 +83,8 @@ class FakePiHost:
                     if body.get("cwd") in (None, session["cwd"]) and session["archived"] == archived
                 ]
                 return httpx.Response(200, json={"sessions": sessions})
+            case ("GET", "factory", "draft"):
+                return httpx.Response(200, json={"draft": "gates: []\nmerge_gates: []\n", "source": ""})
             case ("POST", "sessions"):
                 return self._open(body)
             case ("POST", "sessions", session_id, "prompt"):
@@ -920,10 +922,11 @@ def test_logins_without_host_access_are_refused(store, host):
     assert client.post("/api/factory/tasks", json={"repo": "/r", "title": "t", "request": "r"}).status_code == 403
 
 
-def test_config_is_a_draft_until_written_once_and_never_overwritten(client, registered, repo):
+def test_config_is_a_draft_until_written_once_and_never_overwritten(client, host, registered, repo):
     draft = client.get("/api/factory/config", params={"repo": registered}).json()
     assert draft["exists"] is False
-    assert "gates: []" in draft["draft"]
+    assert draft["draft"] == "gates: []\nmerge_gates: []\n"
+    assert host.sent("GET", "/factory/draft") == [{"cwd": registered}]
 
     content = "gates:\n  - [make, lint]\n"
     saved = client.put("/api/factory/config", params={"repo": registered}, json={"content": content})

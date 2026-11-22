@@ -1,6 +1,7 @@
 /**
  * Agent factory: the pipeline of a factory task, run inside the task's own coding session.
  *
+ *   /factory init                                     write a draft factory.yaml into the main checkout (any session)
  *   /factory start {"request", "title", "settings"}   record the task and start the coder
  *   /factory approve                                  merge a task that waits for approve
  *   /factory retry                                    another coder turn on a blocked or cancelled task
@@ -33,10 +34,12 @@
  * - A plain message to a waiting, blocked, cancelled or done task starts new rounds
  * - Loaded into every coding session: without a `factory-task` entry no handler does anything
  */
+import { existsSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadTaskFiles, type TaskFiles } from "./config.ts";
 import { abortLeftoverRebase, diffBase, git, keepTree, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, taskBase, taskDiff, taskGit, treeWithPathsOf } from "./git.ts";
+import { initDraft } from "./draft.ts";
 import { mergeTask, rebaseWorktree } from "./merge.ts";
 import { messageRoundDrafts, runMerge, runRound, type PipelineSteps, type RoundResult } from "./pipeline.ts";
 import { runReview } from "./review.ts";
@@ -366,10 +369,22 @@ export default function (pi: ExtensionAPI) {
     await endState(ctx, current, "blocked", "interrupted");
   };
 
+  /** `/factory init`: the draft `factory.yaml` into the repo's main checkout, uncommitted. Needs no task. */
+  const init = async (ctx: ExtensionCommandContext) => {
+    const { primary } = await primaryCheckout(runner.cleanup, ctx.cwd);
+    const path = join(primary, "factory.yaml");
+    if (existsSync(path)) throw new Error(`${path} exists already, init does not overwrite it`);
+    const draft = initDraft(primary);
+    writeFileSync(path, draft.text, { flag: "wx" });
+    const found = draft.source ? `gates detected from ${draft.source}` : "nothing detected, fill the gates in";
+    ctx.ui.notify(`factory: wrote ${path} (${found}). Review it, then commit it.`, "info");
+  };
+
   const command = async (args: string, ctx: ExtensionCommandContext) => {
     const text = args.trim();
     const verb = text.split(/\s+/, 1)[0];
     if (verb === "start") return start(text.slice(verb.length).trim(), ctx);
+    if (verb === "init") return init(ctx);
     const current = snapshot;
     if (!current) throw new Error("this session holds no task");
     const { state } = current;
@@ -409,7 +424,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("factory", {
-    description: "Agent factory task: start <json> | approve | retry | cancel",
+    description: "Agent factory: init (draft factory.yaml) | task: start <json> | approve | retry | cancel",
     handler: async (args, ctx) => {
       try {
         await command(args, ctx);

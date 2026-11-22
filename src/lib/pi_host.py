@@ -188,6 +188,13 @@ class FileList(ContractModel):
     files: list[FileMatch]
 
 
+class FactoryDraft(ContractModel):
+    """The factory plugin's draft `factory.yaml` of a checkout and the files its gates come from (empty: none found)."""
+
+    draft: str
+    source: str
+
+
 class SearchHit(ContractModel):
     """A session matching a transcript search (M24): the text around the hit and the entry holding it."""
 
@@ -404,6 +411,11 @@ async def find_files(cwd: str, query: str, limit: int | None = None) -> list[Fil
     if limit is not None:
         params["limit"] = limit
     return (await _request("GET", "/files", FileList, params=params)).files
+
+
+async def factory_draft(cwd: str) -> str:
+    """The draft `factory.yaml` of the checkout at *cwd*, from the factory plugin's generator. Writes nothing."""
+    return (await _request("GET", "/factory/draft", FactoryDraft, params={"cwd": cwd})).draft
 
 
 async def session_entries(

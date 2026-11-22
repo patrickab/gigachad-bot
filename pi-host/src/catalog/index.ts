@@ -1,11 +1,12 @@
 /**
- * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries and `@` file completion.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, `@` file completion and the factory draft.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
  *   `profileOf` and `markProfile` for the supervisor
  */
 import { isAbsolute, resolve } from "node:path";
+import { initDraft } from "../../../pi-extensions/factory/draft.ts";
 import { PROFILES, type Host, type Profile } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
@@ -86,6 +87,14 @@ async function handleFiles(url: URL, host: Host): Promise<Response> {
     return Response.json({ files: listed.map((path) => ({ path, score: 0 })) });
   }
   return Response.json({ files: rankFiles(candidates, query, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) });
+}
+
+/** `GET /factory/draft?cwd=`: the factory plugin's draft `factory.yaml` for the checkout at `cwd`, nothing is written. */
+async function handleFactoryDraft(url: URL, host: Host): Promise<Response> {
+  const cwd = await validCwd(host, url.searchParams.get("cwd"));
+  if (!cwd) return fail(400, "invalid_cwd");
+  const { text, source } = initDraft(cwd);
+  return Response.json({ draft: text, source });
 }
 
 /** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first. */
@@ -174,6 +183,7 @@ async function handleEntries(url: URL, sessionPath: string, host: Host): Promise
 export async function handleCatalog(request: Request, url: URL, live: LiveSessions, host: Host): Promise<Response | undefined> {
   if (url.pathname === "/sessions" && request.method === "GET") return handleList(url, live, host);
   if (url.pathname === "/files" && request.method === "GET") return handleFiles(url, host);
+  if (url.pathname === "/factory/draft" && request.method === "GET") return handleFactoryDraft(url, host);
   if (url.pathname === "/search" && request.method === "GET") return handleSearch(url, live, host);
   const match = SESSION_ACTION.exec(url.pathname);
   if (!match) return undefined;

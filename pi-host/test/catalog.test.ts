@@ -592,6 +592,20 @@ describe("private state", () => {
   });
 });
 
+describe("factory draft", () => {
+  test("drafts a factory.yaml for a checkout and writes nothing", async () => {
+    const repo = join(scratch, "draft-repo");
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(repo, "Makefile"), "lint:\n\truff\n");
+    const { status, json } = await call<{ draft: string; source: string }>("GET", `/factory/draft?cwd=${encodeURIComponent(repo)}`);
+    expect(status).toBe(200);
+    expect(json.source).toBe("Makefile");
+    expect(json.draft).toContain("gates:\n  - [make, lint]");
+    expect(existsSync(join(repo, "factory.yaml"))).toBe(false);
+    expect((await call("GET", "/factory/draft?cwd=relative")).status).toBe(400);
+  });
+});
+
 describe("file completion", () => {
   test("ranks git files by fuzzy match, basename first", async () => {
     const repo = join(scratch, "repo");

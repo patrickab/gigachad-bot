@@ -110,6 +110,33 @@ function session(cwd: string, branch: Entry[] = []) {
   };
 }
 
+describe("/factory init", () => {
+  test("writes the draft into the main checkout, uncommitted, from a worktree too, and never overwrites", async () => {
+    rmSync(join(repo, "factory.yaml"));
+    writeFileSync(join(repo, "Makefile"), "test:\n\ttrue\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "makefile");
+    const worktree = join(scratch, `worktree-${counter}`);
+    gitIn(repo, "worktree", "add", "--quiet", "-b", "side", worktree);
+    const pi = session(worktree);
+    await pi.command("init");
+    expect(readFileSync(join(repo, "factory.yaml"), "utf8")).toContain("merge_gates:\n  - [make, test]");
+    expect(pi.notes).toEqual([`info: factory: wrote ${join(repo, "factory.yaml")} (gates detected from Makefile). Review it, then commit it.`]);
+    expect(gitIn(repo, "status", "--porcelain")).toBe("?? factory.yaml");
+    await pi.command("init");
+    expect(pi.notes[1]).toContain("exists already");
+    expect(pi.entries).toEqual([]);
+  });
+
+  test("a repo with nothing to detect gets the template", async () => {
+    rmSync(join(repo, "factory.yaml"));
+    const pi = session(repo);
+    await pi.command("init");
+    expect(readFileSync(join(repo, "factory.yaml"), "utf8")).toBe(readFileSync(join(import.meta.dir, "factory.template.yaml"), "utf8"));
+    expect(pi.notes[0]).toContain("nothing detected");
+  });
+});
+
 describe("/factory start", () => {
   test("a start that fails leaves no task: no entries, no prompt, later commands find nothing", async () => {
     const outside = session(scratch);
