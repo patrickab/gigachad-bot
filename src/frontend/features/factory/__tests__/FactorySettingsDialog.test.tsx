@@ -15,7 +15,7 @@ import { FactorySettingsDialog } from "@/features/factory/FactorySettingsDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, worktree: true, preview: true, models: { coder: "old-model" }, branch: null }
+const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, worktree: true, preview: true, models: { coder: "old-model" }, source_branch: null, target_branch: null }
 
 const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
@@ -56,7 +56,7 @@ describe("FactorySettingsDialog", () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, {
-      merge: "auto", max_rounds: 5, review: false, worktree: false, preview: false, models: { reviewer: "openai-codex/fast" }, branch: null,
+      merge: "auto", max_rounds: 5, review: false, worktree: false, preview: false, models: { reviewer: "openai-codex/fast" }, source_branch: null, target_branch: null,
     })
   })
 
@@ -119,20 +119,23 @@ describe("FactorySettingsDialog", () => {
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, { ...SETTINGS, models: {} }))
   })
 
-  it("saves the branch the user typed, and null for an empty field", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
+  it("saves the source and target branch the user typed, and null for an empty field", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, source_branch: "develop" })
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    const branch = await view.findByLabelText("Branch")
-    expect(branch).toHaveValue("develop")
+    const source = await view.findByLabelText("Source branch")
+    const target = view.getByLabelText("Target branch")
+    expect(source).toHaveValue("develop")
+    expect(target).toHaveValue("")
+    expect(target).toHaveAttribute("placeholder", "Same as source")
 
-    fireEvent.change(branch, { target: { value: " release " } })
+    fireEvent.change(target, { target: { value: " release " } })
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(1))
-    expect(api.putFactorySettings.mock.calls[0][1].branch).toBe("release")
+    expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ source_branch: "develop", target_branch: "release" })
 
-    fireEvent.change(branch, { target: { value: "  " } })
+    fireEvent.change(source, { target: { value: "  " } })
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(2))
-    expect(api.putFactorySettings.mock.calls[1][1].branch).toBeNull()
+    expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ source_branch: null, target_branch: "release" })
   })
 })

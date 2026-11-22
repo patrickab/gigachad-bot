@@ -7,8 +7,9 @@
 - A repo is the absolute path of a primary git checkout, its name the folder's, for display only
 - The extension (`pi-extensions/factory`) runs the rounds, gates, review and merge inside the session. A task's state is
   the session's last `factory-state` entry, which pi-host reports as `SessionInfo.factory`: no state is stored here
-- Settings chain: the defaults of `RepoSettings`, the repo's stored settings, a task's overrides. `branch` resolves at
-  a worktree task's start (`resolve_branch`): the worktree starts at that local branch's tip
+- Settings chain: the defaults of `RepoSettings`, the repo's stored settings, a task's overrides. `source_branch` and
+  `target_branch` resolve at a worktree task's start (`resolve_branches`): the worktree starts at the source branch's
+  tip, and is rebased onto and merged into the target branch
 - One task at a time works in a repo's checkout: a start, a retry and a message there take the checkout first, under a
   lock all backend workers share (`FactoryStore.checkout_lock`)
 - pi-host failures are `lib.pi_host`'s own, workspace failures `WorkspaceError` and `WorkspaceBusy`, git failures `GitError`
@@ -60,6 +61,8 @@ START_WAIT_SECONDS = 4.0
 START_POLL_SECONDS = 0.2
 DIFF_TIMEOUT_SECONDS = 30.0
 _DIFF_OPTIONS = ("--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
+# The extension's upstream refs of a task with its own source branch: `<prefix>/<task branch>/{base,next}`.
+UPSTREAM_REFS = "refs/factory-upstream"
 _TASK_COLUMNS = "id, repo, session_id, session_path, worktree, branch, title, created_at"
 
 
@@ -80,7 +83,11 @@ class TaskBusy(RuntimeError):
 
 
 class UnknownBranch(ValueError):
-    """The task's branch is not a local branch of the repo, or the repo has neither `main` nor `master`."""
+    """The task's source or target branch is not a local branch of the repo, or the repo has neither `main` nor `master`."""
+
+
+class BranchConflict(ValueError):
+    """The task's source branch does not merge cleanly into its target branch."""
 
 
 class StartFailed(RuntimeError):
@@ -107,7 +114,11 @@ class FactoryModel(BaseModel):
 
 
 class RepoSettings(FactoryModel):
-    """How a repo's tasks run. `models` maps a role to a model selector (`provider/id`), a missing role uses Pi's own."""
+    """How a repo's tasks run. `models` maps a role to a model selector (`provider/id`), a missing role uses Pi's own.
+
+    `source_branch` is the branch a worktree task starts from, None for `main`, else `master`. `target_branch` is the
+    branch it is rebased onto and merges into, None for the source branch. A current-checkout task ignores both.
+    """
 
     merge: Literal["auto", "review"] = "review"
     max_rounds: int = Field(default=3, ge=1, le=20)
@@ -115,7 +126,8 @@ class RepoSettings(FactoryModel):
     worktree: bool = True
     preview: bool = False
     models: dict[Role, str] = {}
-    branch: BranchName | None = None
+    source_branch: BranchName | None = None
+    target_branch: BranchName | None = None
 
 
 class SettingsOverrides(FactoryModel):
@@ -127,7 +139,8 @@ class SettingsOverrides(FactoryModel):
     worktree: bool | None = None
     preview: bool | None = None
     models: dict[Role, str] | None = None
-    branch: BranchName | None = None
+    source_branch: BranchName | None = None
+    target_branch: BranchName | None = None
 
 
 class RepoInfo(FactoryModel):
@@ -276,7 +289,13 @@ def _task_row(row: tuple) -> TaskRow:
 
 
 def resolve_settings(stored: dict[str, Any], overrides: SettingsOverrides | None = None) -> RepoSettings:
-    """The settings chain: defaults, the repo's *stored* settings, a task's *overrides*. `models` merge role by role."""
+    """The settings chain: defaults, the repo's *stored* settings, a task's *overrides*. `models` merge role by role.
+
+    A stored `branch` (settings saved before source and target were apart) is both branches.
+    """
+    if "branch" in stored:
+        legacy = stored.get("branch")
+        stored = {"source_branch": legacy, "target_branch": legacy} | {k: v for k, v in stored.items() if k != "branch"}
     merged = RepoSettings().model_dump()
     for layer in (stored, overrides.model_dump(exclude_none=True) if overrides else {}):
         merged = {**merged, **layer, "models": {**merged["models"], **layer.get("models", {})}}
@@ -305,17 +324,38 @@ def checkout_path(path: str) -> str:
     return str(folder)
 
 
-def resolve_branch(repo: Path, branch: str | None) -> str:
-    """The source and target branch of a worktree task: *branch* when it is a local branch of *repo*, unset `main`,
-    else `master`. `UnknownBranch` otherwise."""
-    if branch is None:
-        defaults = ("main", "master")
-        branch = next((name for name in defaults if git_ok(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")), None)
-        if branch is None:
-            raise UnknownBranch("the repo has neither main nor master, set a branch")
-    elif not git_ok(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"):
-        raise UnknownBranch(f"{branch} is not a local branch of {repo}")
-    return branch
+def _local_branch(repo: Path, branch: str) -> bool:
+    return git_ok(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
+
+
+def resolve_branches(repo: Path, source: str | None, target: str | None) -> tuple[str, str]:
+    """The source and target branch of a worktree task. The source: *source*, unset `main`, else `master`. The target:
+    *target*, unset the source. Each must be a local branch of *repo*, `UnknownBranch` otherwise."""
+    if source is None:
+        source = next((name for name in ("main", "master") if _local_branch(repo, name)), None)
+        if source is None:
+            raise UnknownBranch("the repo has neither main nor master, set a source branch")
+    elif not _local_branch(repo, source):
+        raise UnknownBranch(f"the source branch {source} is not a local branch of {repo}")
+    if target is None:
+        target = source
+    elif not _local_branch(repo, target):
+        raise UnknownBranch(f"the target branch {target} is not a local branch of {repo}")
+    if source != target:
+        _ensure_merges(repo, source, target)
+    return source, target
+
+
+def _ensure_merges(repo: Path, source: str, target: str) -> None:
+    """`BranchConflict` unless *source* merges cleanly into *target*: a task builds on their merge (the extension's
+    upstream), which it could never build."""
+    heads = (f"refs/heads/{target}", f"refs/heads/{source}")
+    merged = run_git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", *heads, check=False)
+    if merged.returncode == 1:
+        files = ", ".join(merged.stdout.split()[1:])
+        raise BranchConflict(f"the source branch {source} does not merge cleanly into {target}: {files}")
+    if merged.returncode != 0:
+        raise GitError(merged.stderr.strip())
 
 
 def _checked_out_branch(repo: Path) -> str:
@@ -329,8 +369,10 @@ def workspace_name(title: str, task_id: str) -> str:
     return f"{slug}-{task_id[:8]}"
 
 
-def start_command(title: str, request: str, settings: RepoSettings, branch: str) -> str:
-    """`/factory start <json>` as the extension reads it, settings in its camelCase shape with the resolved *branch*."""
+def start_command(title: str, request: str, settings: RepoSettings, source: str, target: str) -> str:
+    """`/factory start <json>` as the extension reads it, settings in its camelCase shape. The extension's `branch` is the
+    resolved *target* branch, the one the task is rebased onto and merges into, `sourceBranch` the one its worktree
+    started from."""
     task = {
         "request": request,
         "title": title,
@@ -339,7 +381,8 @@ def start_command(title: str, request: str, settings: RepoSettings, branch: str)
             "maxRounds": settings.max_rounds,
             "review": settings.review,
             "models": settings.models,
-            "branch": branch,
+            "branch": target,
+            "sourceBranch": source,
         },
     }
     return f"/factory start {json.dumps(task, ensure_ascii=False)}"
@@ -355,10 +398,28 @@ def _entry_data(entries: list[dict[str, Any]], custom_type: str) -> list[dict[st
     return [entry.get("data") or {} for entry in entries if entry.get("customType") == custom_type]
 
 
+def _worktree_base(workspace: Path, task: dict[str, Any]) -> str:
+    """Where a worktree task's own change starts, as the extension's `taskBase` tells it."""
+    source = (task.get("settings") or {}).get("sourceBranch")
+    if not source or source == task["mainBranch"]:
+        return git_text(workspace, "merge-base", "HEAD", task["mainBranch"]).strip()
+    for name in ("next", "base"):
+        ref = f"{UPSTREAM_REFS}/{task['branch']}/{name}"
+        if git_ok(workspace, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") and git_ok(
+            workspace, "merge-base", "--is-ancestor", ref, "HEAD"
+        ):
+            return git_text(workspace, "rev-parse", f"{ref}^{{commit}}").strip()
+    base = f"{UPSTREAM_REFS}/{task['branch']}/base"
+    fallback = base if git_ok(workspace, "rev-parse", "--verify", "--quiet", base) else f"refs/heads/{source}"
+    return git_text(workspace, "merge-base", "HEAD", fallback).strip()
+
+
 def diff_base(workspace: Path, worktree: bool, entries: list[dict[str, Any]]) -> str:
     """The commit or tree a task's changes are measured from, given its session's `factory-` *entries*.
 
-    - Worktree task: the merge base of its branch and the main branch
+    - Worktree task: the merge base of its branch and the main branch. With a source branch that is not the main
+      branch (`settings.sourceBranch`), the extension's `taskBase`: the newest of its upstream refs the branch holds,
+      before the first rebase the merge base with the source branch
     - Current-checkout task: whichever came last of the working tree right after a successful merge
       (`factory-merge.tree`, else that merge's commit) and the working tree a run on the done task opened on
       (`factory-state.base`), else the tree of the working tree it started on (`baseTree`, the user's uncommitted
@@ -369,7 +430,7 @@ def diff_base(workspace: Path, worktree: bool, entries: list[dict[str, Any]]) ->
         raise UnknownTask("The task's session has no factory-task entry")
     task = started[-1]
     if worktree:
-        return git_text(workspace, "merge-base", "HEAD", task["mainBranch"]).strip()
+        return _worktree_base(workspace, task)
     bases = []
     for entry in entries:
         data = entry.get("data") or {}
@@ -525,8 +586,8 @@ async def create_task(store: FactoryStore, new_task: NewTask) -> Task:
 
     - A task in the checkout itself takes the checkout from the check to its row (`WorkspaceBusy`): a second start
       there sees either the lock or the row
-    - A worktree task starts at the tip of its resolved branch (`UnknownBranch`), a task in the checkout ignores the
-      setting and names the checked-out branch in its start
+    - A worktree task starts at the tip of its resolved source branch and merges into its target branch
+      (`UnknownBranch`), a task in the checkout ignores both and names the checked-out branch in its start
     - `StartFailed` when the session shows no `factory-task` entry. Any failure after the workspace exists removes
       the session and the workspace again
     """
@@ -534,18 +595,19 @@ async def create_task(store: FactoryStore, new_task: NewTask) -> Task:
     repo = Path(new_task.repo)
     async with contextlib.AsyncExitStack() as held:
         if settings.worktree:
-            branch = await asyncio.to_thread(resolve_branch, repo, settings.branch)
+            source, target = await asyncio.to_thread(resolve_branches, repo, settings.source_branch, settings.target_branch)
         else:
             await held.enter_async_context(_checkout_taken(store, new_task.repo, FINISHED_STATES))
-            branch = await asyncio.to_thread(_checked_out_branch, repo)
+            source = target = await asyncio.to_thread(_checked_out_branch, repo)
         task_id = uuid4().hex
         name = workspace_name(new_task.title, task_id)
-        workspace = await asyncio.to_thread(create_workspace, repo, name, settings.worktree, branch)
+        workspace = await asyncio.to_thread(create_workspace, repo, name, settings.worktree, source)
         session_id: str | None = None
         try:
             session = await pi_host.open_session(str(workspace.path), None)
             session_id = session.session_id
-            disposition = await pi_host.prompt_session(session_id, start_command(new_task.title, new_task.request, settings, branch))
+            command = start_command(new_task.title, new_task.request, settings, source, target)
+            disposition = await pi_host.prompt_session(session_id, command)
             if not await _started(session_id):
                 raise StartFailed(
                     f"The session did not start the task (Pi answered {disposition!r}, no factory-task entry): the factory"
@@ -622,7 +684,7 @@ async def task_diff(store: FactoryStore, task_id: str) -> TaskDiff:
 
 async def delete_task(store: FactoryStore, task_id: str) -> None:
     """Remove the task for good: its preview, its session, its reviewer sessions, its worktree and branch, the refs that
-    keep its snapshot trees (`refs/factory/<session id>/`), its row.
+    keep its snapshot trees (`refs/factory/<session id>/`) and its upstreams (`refs/factory-upstream/<branch>/`), its row.
 
     `TaskBusy` while it is running or merging in a live session: an interrupted one (no Pi child) is removed. A session
     pi-host no longer knows is taken as removed. `factory_preview.PreviewError` when the preview does not stop: then
@@ -640,11 +702,12 @@ async def delete_task(store: FactoryStore, task_id: str) -> None:
             raise
     await asyncio.to_thread(shutil.rmtree, reviews_directory(row.session_id), True)
     await asyncio.to_thread(remove_workspace, row.workspace)
-    await asyncio.to_thread(_delete_task_refs, Path(row.repo), row.session_id)
+    await asyncio.to_thread(_delete_task_refs, Path(row.repo), row.session_id, row.branch)
     await asyncio.to_thread(store.delete_task, task_id)
 
 
-def _delete_task_refs(repo: Path, session_id: str) -> None:
-    refs = git_text(repo, "for-each-ref", "--format=%(refname)", f"refs/factory/{session_id}/").split()
+def _delete_task_refs(repo: Path, session_id: str, branch: str | None) -> None:
+    prefixes = [f"refs/factory/{session_id}/", *([f"{UPSTREAM_REFS}/{branch}/"] if branch else [])]
+    refs = git_text(repo, "for-each-ref", "--format=%(refname)", *prefixes).split()
     for ref in refs:
         git_text(repo, "update-ref", "-d", ref)

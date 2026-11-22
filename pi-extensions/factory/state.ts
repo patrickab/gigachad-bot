@@ -15,8 +15,14 @@ export type Severity = "blocker" | "major" | "minor";
 export type ReviewStatus = "ok" | "malformed" | "timeout" | "aborted" | "failed" | "no_diff";
 
 export interface Settings {
-  /** Worktree task: the branch it starts from, is rebased onto and merges into. A current-checkout task ignores it. */
+  /** Worktree task: the target branch, which it is rebased onto and merges into. A current-checkout task ignores it. */
   branch: string;
+  /**
+   * Worktree task: the branch gigachad started its worktree from. Absent (older tasks) or equal to `branch`: the task
+   * builds on `branch` alone. Else the task builds on the merge of both (`hasOwnSource`), and the source branch's
+   * commits are never the task's change.
+   */
+  sourceBranch?: string;
   merge: "auto" | "review";
   maxRounds: number;
   review: boolean;
@@ -304,14 +310,14 @@ export function protectedFeedback(round: number, paths: string[]): string {
 }
 
 /**
- * The task branch does not rebase cleanly onto `branch`: the conflicting files and how to resolve them. `leftOpen`: a
- * rebase is still in progress in the task worktree, the coder finishes it.
+ * The task branch does not rebase cleanly onto `branch` (the ref `onto`): the conflicting files and how to resolve
+ * them. `leftOpen`: a rebase is still in progress in the task worktree, the coder finishes it.
  */
-export function conflictFeedback(round: number, branch: string, files: string[], leftOpen: boolean): string {
+export function conflictFeedback(round: number, branch: string, files: string[], leftOpen: boolean, onto = `refs/heads/${branch}`): string {
   const list = files.map((path) => `- ${path}`).join("\n");
   const steps = leftOpen
     ? "A rebase is still in progress in the task worktree. Resolve the conflicts, `git add` the files and run `GIT_EDITOR=true git rebase --continue` until the rebase is done, then stop."
-    : `Run \`git rebase refs/heads/${branch}\`, resolve the conflicts, \`git add\` the files, run \`GIT_EDITOR=true git rebase --continue\` until the rebase is done, then stop.`;
+    : `Run \`git rebase ${onto}\`, resolve the conflicts, \`git add\` the files, run \`GIT_EDITOR=true git rebase --continue\` until the rebase is done, then stop.`;
   return `Round ${round}: the task branch conflicts with ${branch}. Conflicting files:\n${list || "- (none listed)"}\n${steps}`;
 }
 
@@ -337,8 +343,9 @@ export function parseStartPayload(text: string): StartPayload {
   if (typeof request !== "string" || request.trim() === "") throw new Error("request must be a non-empty string");
   if (typeof title !== "string" || title.trim() === "") throw new Error("title must be a non-empty string");
   if (!isRecord(settings)) throw new Error("settings must be an object");
-  const { branch, merge, maxRounds, review, models } = settings;
+  const { branch, sourceBranch, merge, maxRounds, review, models } = settings;
   if (typeof branch !== "string" || branch.trim() === "") throw new Error("settings.branch must be a non-empty string");
+  if (sourceBranch !== undefined && (typeof sourceBranch !== "string" || sourceBranch.trim() === "")) throw new Error("settings.sourceBranch must be a non-empty string");
   if (merge !== "auto" && merge !== "review") throw new Error('settings.merge must be "auto" or "review"');
   if (typeof maxRounds !== "number" || !Number.isInteger(maxRounds) || maxRounds < 1) throw new Error("settings.maxRounds must be a positive integer");
   if (typeof review !== "boolean") throw new Error("settings.review must be a boolean");
@@ -350,5 +357,23 @@ export function parseStartPayload(text: string): StartPayload {
     if (typeof model !== "string" || !model.includes("/")) throw new Error(`settings.models.${role} must be "provider/model"`);
     roleModels[role] = model;
   }
-  return { request, title, settings: { branch, merge, maxRounds, review, models: roleModels } };
+  return { request, title, settings: { branch, ...(sourceBranch === undefined ? {} : { sourceBranch }), merge, maxRounds, review, models: roleModels } };
+}
+
+/** A worktree task whose source branch is not its target: it builds on the merge of the two, its upstream. */
+export function hasOwnSource(task: Pick<Task, "worktree" | "settings" | "mainBranch">): boolean {
+  return task.worktree && task.settings.sourceBranch !== undefined && task.settings.sourceBranch !== task.mainBranch;
+}
+
+/**
+ * The refs of the upstream of a task with its own source (`hasOwnSource`): `base` the upstream its branch builds on,
+ * `next` the one it is being rebased onto. The backend deletes them with the task.
+ */
+export function upstreamRef(task: Pick<Task, "branch">, name: "base" | "next"): string {
+  return `refs/factory-upstream/${task.branch}/${name}`;
+}
+
+/** What the task branch is rebased onto: the target branch, or the next upstream of a task with its own source. */
+export function rebaseOnto(task: Pick<Task, "worktree" | "settings" | "mainBranch" | "branch">): string {
+  return hasOwnSource(task) ? upstreamRef(task, "next") : `refs/heads/${task.mainBranch}`;
 }

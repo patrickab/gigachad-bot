@@ -5,7 +5,7 @@ import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { errorMessage } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
@@ -26,9 +26,38 @@ const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 /** The two agents of a task, in pipeline order. */
 const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
 
-/** A branch the user filled in, null for an empty field: the repo's default branch. */
+/** A branch the user filled in, null for an empty field: the default branch. */
 export function branchOrDefault(branch: string | null): string | null {
   return branch?.trim() || null
+}
+
+/** Placeholders of the branch fields, naming what an empty field falls back to. */
+export const SOURCE_BRANCH_PLACEHOLDER = "main, else master"
+export const TARGET_BRANCH_PLACEHOLDER = "Same as source"
+
+/** Labelled text field of a branch name. */
+export function BranchField({ label, value, placeholder, disabled, onChange }: {
+  label: string
+  value: string
+  placeholder: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <Field label={label}>
+      <input
+        type="text"
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(FIELD_CLASS, "disabled:opacity-40")}
+        autoComplete="off"
+        spellCheck={false}
+      />
+    </Field>
+  )
 }
 
 /** Models the user filled in; an empty selector means the agent runs on Pi's default model. An empty branch is the default one. */
@@ -36,7 +65,8 @@ function withoutEmpty(settings: FactorySettings): FactorySettings {
   return {
     ...settings,
     models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")),
-    branch: branchOrDefault(settings.branch),
+    source_branch: branchOrDefault(settings.source_branch),
+    target_branch: branchOrDefault(settings.target_branch),
   }
 }
 
@@ -54,7 +84,7 @@ export function Toggle({ label, checked, disabled, onChange }: { label: string; 
   )
 }
 
-/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, branch, review, worktree, preview and a model per agent. */
+/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, source and target branch, review, worktree, preview and a model per agent. */
 export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
   const [draft, setDraft] = useState<FactorySettings | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
@@ -115,17 +145,18 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                   className={FIELD_CLASS}
                 />
               </Field>
-              <Field label="Branch">
-                <input
-                  type="text"
-                  aria-label="Branch"
-                  value={draft.branch ?? ""}
-                  onChange={(event) => change({ branch: event.target.value })}
-                  className={FIELD_CLASS}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </Field>
+              <BranchField
+                label="Source branch"
+                value={draft.source_branch ?? ""}
+                placeholder={SOURCE_BRANCH_PLACEHOLDER}
+                onChange={(source_branch) => change({ source_branch })}
+              />
+              <BranchField
+                label="Target branch"
+                value={draft.target_branch ?? ""}
+                placeholder={TARGET_BRANCH_PLACEHOLDER}
+                onChange={(target_branch) => change({ target_branch })}
+              />
             </div>
             <div className="flex gap-6">
               <Toggle label="Review" checked={draft.review} onChange={(review) => change({ review })} />

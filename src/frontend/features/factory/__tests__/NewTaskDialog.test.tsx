@@ -14,7 +14,7 @@ import { NewTaskDialog } from "@/features/factory/NewTaskDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, branch: null }
+const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, source_branch: null, target_branch: null }
 
 beforeEach(() => {
   api.createFactoryTask.mockReset().mockResolvedValue({})
@@ -38,7 +38,7 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     expect(onClose).toHaveBeenCalled()
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { worktree: true, branch: null } })
+    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky", overrides: { worktree: true } })
   })
 
   it("defaults to the current checkout for a repo without worktrees, and sends the user's choice and merge override", async () => {
@@ -57,7 +57,7 @@ describe("NewTaskDialog", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, branch: null, merge: "auto" })
+    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, merge: "auto" })
   })
 
   it("offers no workflow, image, sandbox or backlog control", async () => {
@@ -100,25 +100,30 @@ describe("NewTaskDialog", () => {
     expect(api.createFactoryTask).toHaveBeenCalledTimes(1)
   })
 
-  it("prefills the branch from the repo's setting, sends the user's branch, and null for an empty field", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
+  it("names the repo's branches as placeholders and sends only the branches the user typed", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, source_branch: "develop" })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
-    const branch = view.getByLabelText("Branch")
-    await waitFor(() => expect(branch).toHaveValue("develop"))
+    const source = view.getByLabelText("Source branch")
+    const target = view.getByLabelText("Target branch")
+    await waitFor(() => expect(source).toHaveAttribute("placeholder", "develop"))
+    expect(source).toHaveValue("")
+    expect(target).toHaveAttribute("placeholder", "Same as source")
     fill(view)
-    fireEvent.change(branch, { target: { value: "" } })
+    fireEvent.change(source, { target: { value: " feature/x " } })
+    fireEvent.change(target, { target: { value: "release" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())
-    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, branch: null })
+    expect(api.createFactoryTask.mock.calls[0][0].overrides).toEqual({ worktree: true, source_branch: "feature/x", target_branch: "release" })
   })
 
-  it("disables the branch for a task in the current checkout and does not send it", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
+  it("disables the branches for a task in the current checkout and does not send them", async () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
-    const branch = view.getByLabelText("Branch")
-    await waitFor(() => expect(branch).toBeEnabled())
+    const source = view.getByLabelText("Source branch")
+    await waitFor(() => expect(source).toBeEnabled())
+    fireEvent.change(source, { target: { value: "develop" } })
     fireEvent.click(view.getByLabelText("Worktree"))
-    expect(branch).toBeDisabled()
+    expect(source).toBeDisabled()
+    expect(view.getByLabelText("Target branch")).toBeDisabled()
     fill(view)
     fireEvent.click(view.getByRole("button", { name: "Start" }))
     await waitFor(() => expect(api.createFactoryTask).toHaveBeenCalled())

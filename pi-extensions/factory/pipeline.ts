@@ -25,6 +25,7 @@ import {
   gateData,
   passed,
   protectedFeedback,
+  rebaseOnto,
   reviewFeedback,
   roundsUsed,
   stateDraft,
@@ -102,7 +103,7 @@ export async function runMerge(snapshot: Snapshot, config: FactoryConfig, steps:
   if ((conflicts || failedGate) && steps.cancelled()) return [...drafts, stateDraft("cancelled", round, "cancelled")];
   if (failedGate?.result.exitCode === INFRA_EXIT && !failedGate.result.killed) return [...drafts, stateDraft("blocked", round, `infra: ${lastLine(failedGate.result.output)}`)];
   const problem = conflicts
-    ? { trigger: "conflict" as const, text: conflictFeedback(round, snapshot.task.mainBranch, conflicts, false) }
+    ? { trigger: "conflict" as const, text: conflictFeedback(round, snapshot.task.mainBranch, conflicts, false, rebaseOnto(snapshot.task)) }
     : failedGate
       ? { trigger: "gates" as const, text: `After the rebase onto ${snapshot.task.mainBranch}: ${commandFeedback(round, failedGate.argv, failedGate.result)}` }
       : null;
@@ -140,7 +141,7 @@ export async function runRound(snapshot: Snapshot, steps: PipelineSteps): Promis
   try {
     const config = steps.config();
     const conflicts = task.worktree ? await steps.openRebase() : null;
-    if (conflicts) return problem("conflict", conflictFeedback(round, task.mainBranch, conflicts, true));
+    if (conflicts) return problem("conflict", conflictFeedback(round, task.mainBranch, conflicts, true, rebaseOnto(task)));
     for (const [phase, commands] of [["hooks", config.hooks.after_code], ["gates", config.gates]] as const) {
       for (const argv of commands) {
         steps.status(`round ${round}: ${phase} ${argv.join(" ")}`);

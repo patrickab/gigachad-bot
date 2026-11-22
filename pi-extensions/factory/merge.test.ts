@@ -8,12 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, protectedPaths, type FactoryConfig } from "./config.ts";
-import { abortLeftoverRebase, diffBase, taskDiff, taskGit } from "./git.ts";
-import { MERGE_ATTEMPTS, mergeTask, type MergeInput } from "./merge.ts";
+import { abortLeftoverRebase, diffBase, taskDiff, taskGit, upstreamMoved } from "./git.ts";
+import { MERGE_ATTEMPTS, mergeTask, rebaseWorktree, type MergeInput } from "./merge.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import { runRound, type PipelineSteps } from "./pipeline.ts";
 import { CommandRunner, type Exec } from "./run.ts";
-import type { Settings, Snapshot, Task } from "./state.ts";
+import { upstreamRef, type Settings, type Snapshot, type Task } from "./state.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
 process.env.GIT_CONFIG_SYSTEM = "/dev/null";
@@ -208,6 +208,84 @@ describe("taskGit and taskDiff", () => {
     gitIn(worktree, "rebase", "--quiet", "--autostash", "main");
     const diff = await taskDiff(runner.run, worktree, await diffBase(runner.run, worktree, task, null));
     expect(diff.paths).toEqual(["mine.txt"]);
+  });
+});
+
+describe("a worktree task with its own source branch", () => {
+  /**
+   * `feature` off main with a commit of its own that touches the protected `factory.yaml`, then a commit on main, and
+   * the task's worktree off `feature`, as gigachad makes it for source `feature` and target `main`.
+   */
+  async function sourceTask(): Promise<{ worktree: string; task: Task }> {
+    gitIn(repo, "branch", "feature");
+    gitIn(repo, "checkout", "--quiet", "feature");
+    writeFileSync(join(repo, "feature.txt"), "feature\n");
+    writeFileSync(join(repo, "factory.yaml"), "gates: []\nprotected: []\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "feature work");
+    gitIn(repo, "checkout", "--quiet", "main");
+    writeFileSync(join(repo, "other.txt"), "someone else\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "other task");
+    const worktree = join(scratch, `wt-${counter}-source`);
+    gitIn(repo, "worktree", "add", "--quiet", "-b", "task-s", worktree, "feature");
+    const task: Task = { title: "Task title", request: "do it", settings: { ...settings, sourceBranch: "feature" }, ...(await taskGit(runner.run, worktree, "main")) };
+    return { worktree, task };
+  }
+
+  const pathsOf = async (worktree: string, task: Task) => (await taskDiff(runner.run, worktree, await diffBase(runner.run, worktree, task, null))).paths;
+
+  test("the source's commits are never the task's change: not before the rebase, not after it, and no change is none", async () => {
+    const { worktree, task } = await sourceTask();
+    expect(await pathsOf(worktree, task)).toEqual([]);
+    writeFileSync(join(worktree, "mine.txt"), "mine\n");
+    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
+
+    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
+
+    const upstream = gitIn(repo, "rev-parse", upstreamRef(task, "base"));
+    expect(gitIn(repo, "rev-list", "--parents", "-n", "1", upstream).split(" ").slice(1)).toEqual([gitIn(repo, "rev-parse", "main"), gitIn(repo, "rev-parse", "feature")]);
+    expect(gitIn(worktree, "rev-parse", "HEAD^")).toBe(upstream);
+    expect(existsSync(join(worktree, "other.txt"))).toBe(true);
+    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
+    expect(await upstreamMoved(runner.run, worktree, task)).toBe(false);
+
+    // A second rebase with nothing moved keeps the upstream, and a source that moved is taken in.
+    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
+    expect(gitIn(repo, "rev-parse", upstreamRef(task, "base"))).toBe(upstream);
+    gitIn(repo, "checkout", "--quiet", "feature");
+    writeFileSync(join(repo, "feature2.txt"), "more\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "more feature work");
+    gitIn(repo, "checkout", "--quiet", "main");
+    expect(await upstreamMoved(runner.run, worktree, task)).toBe(true);
+    expect(await rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).toBeNull();
+    expect(existsSync(join(worktree, "feature2.txt"))).toBe(true);
+    expect(await pathsOf(worktree, task)).toEqual(["mine.txt"]);
+  });
+
+  test("the merge brings the source into the target as a merge, with the task's change as its own commit on top", async () => {
+    const { worktree, task } = await sourceTask();
+    writeFileSync(join(worktree, "mine.txt"), "mine\n");
+
+    const outcome = await mergeTask(input(worktree, task, noGates));
+
+    expect(outcome.merge).toMatchObject({ ok: true, kind: "merge", commit: gitIn(repo, "rev-parse", "main") });
+    expect(gitIn(repo, "log", "--first-parent", "--format=%s", "main")).toBe("Task title\nMerge branch 'feature' into main\nother task\nbase");
+    expect(gitIn(repo, "diff", "--name-only", "main^", "main")).toBe("mine.txt");
+    for (const file of ["feature.txt", "other.txt", "mine.txt"]) expect(existsSync(join(repo, file))).toBe(true);
+  });
+
+  test("a source that does not merge cleanly into the target fails the rebase with the conflicting files", async () => {
+    const { worktree, task } = await sourceTask();
+    writeFileSync(join(repo, "feature.txt"), "main's own\n");
+    gitIn(repo, "add", "-A");
+    gitIn(repo, "commit", "--quiet", "-m", "clash");
+
+    await expect(rebaseWorktree(runner.run, runner.cleanup, worktree, task, DEFAULT_PROTECTED)).rejects.toThrow(
+      "the source branch feature does not merge cleanly into main: feature.txt",
+    );
+    expect(gitIn(worktree, "rev-parse", "HEAD")).toBe(gitIn(repo, "rev-parse", "feature"));
   });
 });
 

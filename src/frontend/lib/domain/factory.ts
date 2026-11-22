@@ -23,8 +23,10 @@ export interface FactorySettings {
   worktree: boolean
   preview: boolean
   models: FactoryModels
-  /** Source and target branch of a worktree task, null for the repo's `main`, else `master`. */
-  branch: string | null
+  /** Branch a worktree task starts from, null for the repo's `main`, else `master`. */
+  source_branch: string | null
+  /** Branch a worktree task is rebased onto and merges into, null for the source branch. */
+  target_branch: string | null
 }
 
 export type FactoryTaskState = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled"
@@ -109,7 +111,8 @@ export interface FactoryEntryData {
   "factory-task": {
     title: string
     request: string
-    settings: FactorySettings
+    /** The settings in the extension's shape: `branch` is the target branch, `sourceBranch` the source (absent on older tasks). */
+    settings: { merge: FactoryMergeMode; maxRounds: number; review: boolean; models: FactoryModels; branch: string; sourceBranch?: string }
     worktree: boolean
     branch: string
     mainBranch: string

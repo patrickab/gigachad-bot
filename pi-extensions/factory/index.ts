@@ -13,13 +13,16 @@
  *   abort is invisible inside `agent_before_settle`, so the steps already started there run to their end, but nothing
  *   is merged after it and the task ends `blocked`/`stopped`. The merge is not awaited there: Pi defers every prompt,
  *   `/factory cancel` included, until the `agent_settled` handlers return
- * - `factory.yaml` and the role prompts come from a commit of the main branch (a worktree task: its merge base at the
- *   run's start, a current-checkout task: its base commit), never from the tree the coder edits
- * - A worktree task works on its own branch off `settings.branch` and stays up to date with it: a run that opens
- *   commits the worktree and rebases it onto that branch. A conflicting rebase is aborted and the run opens with a
- *   `conflict` round instead, so does a rebase the coder left open, which is never aborted. A rebase or commit that
- *   fails otherwise (a hook, a deleted branch, an untracked file in the way) opens no run and ends the task `blocked`,
- *   `rebase_failed: <git error>`: a later retry or message tries again
+ * - `factory.yaml` and the role prompts come from a commit of the main branch (a worktree task: its base, `taskBase`,
+ *   at the run's start, a current-checkout task: its base commit), never from the tree the coder edits
+ * - A worktree task works on its own branch, which gigachad made off `settings.sourceBranch`, and stays up to date with
+ *   the target branch `settings.branch`: a run that opens commits the worktree and rebases it onto that branch. With a
+ *   source that is not the target, it rebases onto their merge instead (the upstream, `nextUpstream`): the source's
+ *   commits are never the task's change, and reach the target with its merge. A conflicting rebase is aborted and the
+ *   run opens with a `conflict` round instead, so does a rebase the coder left open, which is never aborted. A rebase
+ *   or commit that fails otherwise (a hook, a deleted branch, an untracked file in the way, a source that does not
+ *   merge into the target) opens no run and ends the task `blocked`, `rebase_failed: <git error>`: a later retry or
+ *   message tries again
  * - A current-checkout task shares its tree with the user. A state that ends a run records the tree and the HEAD
  *   (`tree`, `head`). A run opened on a done task measures from the tree as it is then. On any other state a run is
  *   refused while a path changed since. A HEAD that moved (the user committed or pulled) is taken as the new HEAD:
@@ -33,7 +36,7 @@
 import { basename, join } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadTaskFiles, type TaskFiles } from "./config.ts";
-import { abortLeftoverRebase, diffBase, git, keepTree, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, taskDiff, taskGit, treeWithPathsOf } from "./git.ts";
+import { abortLeftoverRebase, diffBase, git, keepTree, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, taskBase, taskDiff, taskGit, treeWithPathsOf } from "./git.ts";
 import { mergeTask, rebaseWorktree } from "./merge.ts";
 import { messageRoundDrafts, runMerge, runRound, type PipelineSteps, type RoundResult } from "./pipeline.ts";
 import { runReview } from "./review.ts";
@@ -46,6 +49,7 @@ import {
   followUpMessages,
   mergeFailedPrompt,
   parseStartPayload,
+  rebaseOnto,
   rebuild,
   RETRY_PROMPT,
   stateDraft,
@@ -132,7 +136,7 @@ export default function (pi: ExtensionAPI) {
   };
   const taskFiles = (ctx: ExtensionContext, task: Task) =>
     (files ??= (async () => {
-      const rules = task.worktree ? await git(runner.cleanup, ctx.cwd, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]) : task.baseSha;
+      const rules = task.worktree ? await taskBase(runner.cleanup, ctx.cwd, task) : task.baseSha;
       return loadTaskFiles(runner.cleanup, ctx.cwd, rules);
     })());
 
@@ -183,11 +187,11 @@ export default function (pi: ExtensionAPI) {
     const { task } = current;
     if (task.worktree) {
       const open = await rebaseInProgress(runner.cleanup, ctx.cwd);
-      if (open) return { conflict: conflictFeedback(current.round, task.mainBranch, open, true) };
+      if (open) return { conflict: conflictFeedback(current.round, task.mainBranch, open, true, rebaseOnto(task)) };
       const protectedGlobs = (await taskFiles(ctx, task).catch(() => undefined))?.config.protected ?? [];
       try {
         const conflicts = await rebaseWorktree(runner.cleanup, runner.cleanup, ctx.cwd, task, protectedGlobs);
-        return conflicts ? { conflict: conflictFeedback(current.round, task.mainBranch, conflicts, false) } : {};
+        return conflicts ? { conflict: conflictFeedback(current.round, task.mainBranch, conflicts, false, rebaseOnto(task)) } : {};
       } catch (error) {
         return { failed: `rebase_failed: ${errorText(error)}` };
       }

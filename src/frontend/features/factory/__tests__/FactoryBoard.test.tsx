@@ -43,7 +43,7 @@ function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof Fact
 beforeEach(() => {
   minute = 0
   api.deleteFactoryTask.mockReset().mockResolvedValue()
-  api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, branch: null })
+  api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, source_branch: null, target_branch: null })
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.listFactoryTasks.mockReset().mockResolvedValue([])
 })
@@ -225,7 +225,7 @@ describe("FactoryBoard", () => {
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(view.queryByLabelText("Title")).toBeNull())
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true, branch: null } })
+    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true } })
     const launch = within(view.getByRole("region", { name: "Working" })).getByRole("group", { name: "Fix" })
     expect(launch).toHaveTextContent("Launching session")
 

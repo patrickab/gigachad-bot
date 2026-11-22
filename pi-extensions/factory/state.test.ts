@@ -70,6 +70,8 @@ describe("parseStartPayload", () => {
 
   test("returns the payload", () => {
     expect(parseStartPayload(JSON.stringify({ request: "do it", title: "T", settings }))).toEqual({ request: "do it", title: "T", settings });
+    const withSource = { ...settings, sourceBranch: "feature" };
+    expect(parseStartPayload(JSON.stringify({ request: "do it", title: "T", settings: withSource })).settings).toEqual(withSource);
   });
 
   test.each([
@@ -80,6 +82,7 @@ describe("parseStartPayload", () => {
     [JSON.stringify({ request: "r", title: "T" }), "settings must be an object"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: undefined } }), "settings.branch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, branch: "" } }), "settings.branch must be a non-empty string"],
+    [JSON.stringify({ request: "r", title: "T", settings: { ...settings, sourceBranch: "" } }), "settings.sourceBranch must be a non-empty string"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, merge: "manual" } }), 'settings.merge must be "auto" or "review"'],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, maxRounds: 0 } }), "settings.maxRounds must be a positive integer"],
     [JSON.stringify({ request: "r", title: "T", settings: { ...settings, review: "yes" } }), "settings.review must be a boolean"],

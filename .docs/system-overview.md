@@ -164,7 +164,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 A factory task is a normal Pi coding session. A pipeline inside it runs the coder, then the repository's gates and a read-only reviewer, feeds problems back as the next round, and merges when a round passes. GigaChad sets tasks up and shows boards, timelines, diffs and previews.
 
-1. Open a repository's factory board and register its primary checkout if needed. Set its defaults: the branch tasks start from and merge into (`main`, else `master`, when unset), merge `auto` or `review`, max rounds, review on or off, worktree or current checkout, a model per role.
+1. Open a repository's factory board and register its primary checkout if needed. Set its defaults: the source branch tasks start from (`main`, else `master`, when unset) and the target branch they merge into (the source when unset), both overridable per task, merge `auto` or `review`, max rounds, review on or off, worktree or current checkout, a model per role.
 2. Create a task with a title and a request, optionally overriding worktree, branch and merge.
 3. Follow it on the board (Needs you, Working, Merging, Finished) and in the task view: the diff, the round timeline with gate output and review findings, and the agent's Pi session, which can be steered while it runs. Comment on lines of the diff and send the comments as one review message, which starts a new round.
 4. Approve a task waiting for approval, retry a blocked or cancelled one, cancel a running one, or write to it: a message to a finished task starts new rounds on the same branch.

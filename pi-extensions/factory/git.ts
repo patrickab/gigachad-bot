@@ -8,6 +8,8 @@
  *   progress (`assertCheckoutReady`). Tells a rebase in progress and its conflicting files (`rebaseInProgress`), and
  *   aborts one a killed merge left behind (`abortLeftoverRebase`)
  * - Provides a current-checkout task's diff base taken again after its HEAD moved (`treeWithPathsOf`)
+ * - Provides where a worktree task's own change starts (`taskBase`), and for a task with its own source branch the
+ *   upstream it is rebased onto: the merge of its target and source branch (`nextUpstream`, `upstreamMoved`)
  * - Keeps a tree a task still needs from git's garbage collection (`keepTree`)
  * - Nothing here writes the checkout's own index or its files: staging goes through a scratch index
  */
@@ -16,7 +18,7 @@ import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Exec } from "./run.ts";
-import type { Task } from "./state.ts";
+import { hasOwnSource, upstreamRef, type Task } from "./state.ts";
 
 const ERROR_TAIL_CHARS = 1000;
 /** Upper bound of what one git call may print: path lists and file contents, never a whole patch. */
@@ -112,12 +114,70 @@ export async function taskGit(exec: Exec, cwd: string, target: string): Promise<
 
 /**
  * The commit or tree a task's diff is taken against. `baseSha` goes stale once the pipeline rebases the branch, so a
- * worktree task uses its merge base with the main branch. A current-checkout task uses the tree its last commit left
- * in the working directory, before that the tree it started in.
+ * worktree task uses where its own change starts (`taskBase`). A current-checkout task uses the tree its last commit
+ * left in the working directory, before that the tree it started in.
  */
 export async function diffBase(exec: Exec, root: string, task: Task, mergedBase: string | null): Promise<string> {
-  if (task.worktree) return git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+  if (task.worktree) return taskBase(exec, root, task);
   return mergedBase ?? task.baseTree ?? task.baseSha;
+}
+
+/** Whether `ancestor` is an ancestor of (or is) `commit`. Throws when git fails otherwise. */
+async function isAncestor(exec: Exec, root: string, ancestor: string, commit: string): Promise<boolean> {
+  const result = await exec(["git", "merge-base", "--is-ancestor", ancestor, commit], { cwd: root });
+  if (result.exitCode === 0 || result.exitCode === 1) return result.exitCode === 0 && !result.killed;
+  throw new Error(`git merge-base --is-ancestor ${ancestor} ${commit}: ${result.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+}
+
+/** The commit `ref` points at, null without one. */
+async function refCommit(exec: Exec, root: string, ref: string): Promise<string | null> {
+  const result = await exec(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, maxStdoutChars: 100 });
+  return result.exitCode === 0 && !result.killed ? result.stdout.trim() : null;
+}
+
+/**
+ * The commit a worktree task's own change sits on: what is in it is not the task's. A task on its target alone: the
+ * merge base of HEAD and the target. A task with its own source: the newest of its upstreams (`next`, then `base`)
+ * that HEAD holds, before the first rebase the merge base of HEAD and the source branch it started from.
+ */
+export async function taskBase(exec: Exec, root: string, task: Task): Promise<string> {
+  if (!hasOwnSource(task)) return git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+  for (const name of ["next", "base"] as const) {
+    const upstream = await refCommit(exec, root, upstreamRef(task, name));
+    if (upstream && (await isAncestor(exec, root, upstream, "HEAD"))) return upstream;
+  }
+  const fallback = (await refCommit(exec, root, upstreamRef(task, "base"))) ?? `refs/heads/${task.settings.sourceBranch}`;
+  return git(exec, root, ["merge-base", "HEAD", fallback]);
+}
+
+/**
+ * A task with its own source: the upstream to rebase onto now, the target and the source branch as they are, merged.
+ * One that holds the other is the upstream itself. The merge is a commit with the target as first parent; one of the
+ * task's upstreams that already merges these two is taken again, so an upstream changes only when a branch moved.
+ * Throws when the two do not merge cleanly.
+ */
+export async function nextUpstream(exec: Exec, root: string, task: Task): Promise<string> {
+  const source = task.settings.sourceBranch as string;
+  const target = await git(exec, root, ["rev-parse", "--verify", `refs/heads/${task.mainBranch}^{commit}`]);
+  const tip = await git(exec, root, ["rev-parse", "--verify", `refs/heads/${source}^{commit}`]);
+  if (await isAncestor(exec, root, tip, target)) return target;
+  if (await isAncestor(exec, root, target, tip)) return tip;
+  for (const name of ["next", "base"] as const) {
+    const upstream = await refCommit(exec, root, upstreamRef(task, name));
+    if (upstream && (await git(exec, root, ["rev-list", "--parents", "-n", "1", upstream])) === `${upstream} ${target} ${tip}`) return upstream;
+  }
+  const merged = await exec(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", target, tip], { cwd: root, maxStdoutChars: GIT_STDOUT_MAX_CHARS });
+  const [tree, ...conflicts] = merged.stdout.trim().split("\n");
+  if (merged.exitCode === 1 && !merged.killed) throw new Error(`the source branch ${source} does not merge cleanly into ${task.mainBranch}: ${conflicts.join(", ")}`);
+  if (merged.exitCode !== 0 || merged.killed) throw new Error(`git merge-tree: ${merged.output.trim().slice(-ERROR_TAIL_CHARS) || "killed"}`);
+  return git(exec, root, ["commit-tree", "--no-gpg-sign", tree, "-p", target, "-p", tip, "-m", `Merge branch '${source}' into ${task.mainBranch}`]);
+}
+
+/** Whether the task branch no longer holds its target branch, or for a task with its own source its source branch. */
+export async function upstreamMoved(exec: Exec, root: string, task: Task): Promise<boolean> {
+  const branches = hasOwnSource(task) ? [task.mainBranch, task.settings.sourceBranch as string] : [task.mainBranch];
+  for (const branch of branches) if (!(await isAncestor(exec, root, `refs/heads/${branch}`, "HEAD"))) return true;
+  return false;
 }
 
 const GIT_OPERATIONS = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"];

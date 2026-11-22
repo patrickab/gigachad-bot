@@ -20,7 +20,7 @@ const gate = (id: string, round: number, exitCode: number) =>
   entry(id, "factory-gate", { round, phase: "gates", argv: ["scripts/check.sh"], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
 
 const ENTRIES: FactoryEntry[] = [
-  entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, branch: null }, worktree: true, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
+  entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, worktree: true, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
   entry("e2", "factory-round", { round: 1, trigger: "start" }),
   entry("e3", "factory-state", { state: "running", round: 1, reason: "start" }),
   gate("e4", 1, 1),

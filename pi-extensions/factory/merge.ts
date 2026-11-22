@@ -12,7 +12,9 @@
  *   gate that fails on the rebased branch is reported with its command (`MergeOutcome.failedGate`): the rebase stays,
  *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
- *   squashes the task branch onto its merge base first: the rebase replays one commit, the task's net change
+ *   squashes the task branch onto its base first (`taskBase`): the rebase replays one commit, the task's net change.
+ *   A task with its own source branch rebases onto its upstream (`nextUpstream`, the merge of target and source), so
+ *   the source's commits stay out of its change and reach the target with the merge
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
  * - Current-checkout task: commit the paths in which the round's tree differs from the task's base onto the HEAD
  *   the task builds on, compare-and-swap, no commit hooks. What the user had in the tree or staged before the task
@@ -24,10 +26,10 @@
 import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { protectedPaths, type FactoryConfig } from "./config.ts";
-import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, stageTree, withScratchIndex } from "./git.ts";
+import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nextUpstream, nulList, primaryCheckout, rebaseInProgress, snapshotTree, stageTree, taskBase, upstreamMoved, withScratchIndex } from "./git.ts";
 import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
-import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
+import { gateData, hasOwnSource, passed, rebaseOnto, upstreamRef, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
 
 const ERROR_TAIL_CHARS = 1000;
 /** How long a merge waits for the merge lock, polling once a second. */
@@ -92,18 +94,25 @@ export type GateFailure = { argv: string[]; result: CommandResult };
 
 /**
  * Brings a worktree task's branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto
- * its merge base with the main branch, then rebases it onto the main branch. A conflicting rebase is aborted with
- * `cleanup` and its conflicting files returned, else null. Any other failure throws. `--autostash` carries what the
- * commit leaves out (protected paths) over the rebase.
+ * its base, then rebases it onto the main branch, or for a task with its own source onto its next upstream (the ref
+ * `next`, which becomes `base` once the rebase is done). A conflicting rebase is aborted with `cleanup` and its
+ * conflicting files returned, else null; `next` stays for the coder's rebase. Any other failure throws.
+ * `--autostash` carries what the commit leaves out (protected paths) over the rebase.
  */
 export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, task: Task, protectedGlobs: string[]): Promise<string[] | null> {
   await commitWorktree(exec, root, task, protectedGlobs);
-  await squashOntoMergeBase(exec, root, task);
-  const rebase = await exec(["git", "rebase", "--autostash", `refs/heads/${task.mainBranch}`], { cwd: root });
+  await squashOntoBase(exec, root, task);
+  const onto = rebaseOnto(task);
+  if (hasOwnSource(task)) await git(exec, root, ["update-ref", onto, await nextUpstream(exec, root, task)]);
+  const rebase = await exec(["git", "rebase", "--autostash", onto], { cwd: root });
   if (passed(rebase)) {
     // An autostash that did not apply cleanly leaves conflict markers, which the next commit would take.
     const unmerged = nulList(await git(exec, root, ["diff", "--name-only", "--diff-filter=U", "-z"]));
     if (unmerged.length > 0) throw new Error(`the autostash did not apply after the rebase onto ${task.mainBranch} (kept in git stash list): ${unmerged.join(", ")}`);
+    if (hasOwnSource(task)) {
+      await git(exec, root, ["update-ref", upstreamRef(task, "base"), onto]);
+      await git(exec, root, ["update-ref", "-d", onto]);
+    }
     return null;
   }
   const open = await rebaseInProgress(cleanup, root);
@@ -114,12 +123,12 @@ export async function rebaseWorktree(exec: Exec, cleanup: Exec, root: string, ta
 }
 
 /**
- * Makes the task branch one commit on top of its merge base with the main branch, of the tree it holds now. A rebase
- * then conflicts only on what the task changes in net, and a merge of the main branch the coder made is folded in.
+ * Makes the task branch one commit on top of its base (`taskBase`), of the tree it holds now. A rebase then conflicts
+ * only on what the task changes in net, and a merge of the main branch the coder made is folded in.
  */
-async function squashOntoMergeBase(exec: Exec, root: string, task: Task): Promise<void> {
+async function squashOntoBase(exec: Exec, root: string, task: Task): Promise<void> {
   const head = await git(exec, root, ["rev-parse", "HEAD"]);
-  const base = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+  const base = await taskBase(exec, root, task);
   if (head === base || (await git(exec, root, ["rev-list", "--parents", "-n", "1", "HEAD"])) === `${head} ${base}`) return;
   const commit = await git(exec, root, ["commit-tree", "--no-gpg-sign", `${head}^{tree}`, "-p", base, "-m", task.title]);
   await git(exec, root, ["update-ref", "-m", `factory: squash ${task.branch}`, "HEAD", commit, head]);
@@ -198,10 +207,9 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
 
   status("commit");
   await commitWorktree(exec, root, task, config.protected);
-  let ontoBefore = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+  let ontoBefore = await taskBase(exec, root, task);
   const sameGates = JSON.stringify(config.merge_gates) === JSON.stringify(config.gates);
-  const targetMoved = async () =>
-    (await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`])) !== (await git(exec, root, ["rev-parse", `refs/heads/${task.mainBranch}`]));
+  const targetMoved = () => upstreamMoved(exec, root, task);
 
   // Rebased before it queues: a conflict goes to the coder at once, without a place in the queue.
   status(`rebase onto ${task.mainBranch}`);
@@ -235,7 +243,7 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
       head = await git(exec, root, ["rev-parse", "HEAD"]);
       // Merge gates that are the round's gates, on the base the round passed them on (the squash keeps the tree), would
       // only repeat that run.
-      const onto = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+      const onto = await taskBase(exec, root, task);
       for (const argv of onto === ontoBefore && sameGates ? [] : config.merge_gates) {
         status(`merge gate ${argv.join(" ")}`);
         const gate = await exec(argv, { cwd: root });

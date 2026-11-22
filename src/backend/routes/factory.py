@@ -4,8 +4,9 @@
 - `repo` is the absolute path of a registered primary checkout (`RepoInfo.path`), `RepoInfo.name` is for display
 - Provides repos, per-repo settings and tasks: start, list, read, diff, approve, retry, cancel, message, delete
 - A task's timeline is not served here: the browser reads `GET /api/pi/sessions/{id}/entries?customType=factory-`
-- Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout 400, a busy checkout or a task
-  at work 409, a workspace, git, start or preview failure 502 with its message, pi-host unreachable 503, its refusals passed on
+- Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout, an unknown branch or a source
+  branch that does not merge into the target 400, a busy checkout or a task at work 409, a workspace, git, start or
+  preview failure 502 with its message, pi-host unreachable 503, its refusals passed on
 
 Host code execution: `host_access_only`.
 """
@@ -43,6 +44,7 @@ async def _call[Result](request: Awaitable[Result]) -> Result:
         (factory.UnknownTask, 404, None),
         (factory.NotACheckout, 400, None),
         (factory.UnknownBranch, 400, None),
+        (factory.BranchConflict, 400, None),
         (factory.TaskBusy, 409, None),
         (WorkspaceBusy, 409, None),
         (factory.StartFailed, 502, None),
