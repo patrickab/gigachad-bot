@@ -124,7 +124,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                 titleAs="h3"
                 count={columnTasks.length}
                 marker={<StatusDot tone={columnTasks.length === 0 ? "idle" : column.tone} />}
-                className={cn("min-w-[15rem] border-divider/30", column.id === "finished" && "opacity-60 hover:opacity-100 focus-within:opacity-100")}
+                className="min-w-[15rem] border-divider/30"
                 bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
                 footer={<>
                   {capped && (
