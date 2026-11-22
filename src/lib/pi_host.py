@@ -12,8 +12,10 @@
 """
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
+import time
 from typing import Any, Literal
 
 import httpx
@@ -33,6 +35,16 @@ from lib.upstream import (
 )
 
 DEFAULT_URL = "http://127.0.0.1:8300"
+# pi-host gives each RPC to a Pi child 30 s (`REQUEST_TIMEOUT_MS`), a start runs several (`get_state`, `set_model`,
+# `set_thinking_level`) and a prompt waits for the extension command it runs. Calls that wait on a child get more than
+# that, so the backend never hangs up on a request pi-host is still allowed to finish. Reads keep `TIMEOUT_SECONDS`.
+CHILD_TIMEOUT_SECONDS = 75.0
+# A child closes within pi-host's `CLOSE_GRACE_MS` (10 s).
+CLOSE_TIMEOUT_SECONDS = 15.0
+# A pi-host answer slower than this is logged, so a stall names its call.
+SLOW_SECONDS = 5.0
+
+logger = logging.getLogger(__name__)
 LABEL = "pi-host"
 REPOSITORIES_ROOT = Path.home() / "git"
 HOME = Path.home()
@@ -254,23 +266,46 @@ def _body(response: httpx.Response) -> object:
         return response.text
 
 
-async def _send(method: str, path: str, *, json: object = None, params: dict[str, str | int] | None = None) -> httpx.Response:
-    """One authenticated request, `PiHostRejected` for an error status."""
+async def _send(
+    method: str,
+    path: str,
+    *,
+    json: object = None,
+    params: dict[str, str | int] | None = None,
+    timeout: float = TIMEOUT_SECONDS,
+) -> httpx.Response:
+    """One authenticated request, `PiHostRejected` for an error status. A failure and a slow answer are logged with
+    the call, its duration and the exception type."""
     headers = _auth_headers()
+    started = time.monotonic()
     try:
-        async with httpx.AsyncClient(base_url=base_url(), timeout=TIMEOUT_SECONDS, headers=headers, transport=_transport) as client:
+        async with httpx.AsyncClient(base_url=base_url(), timeout=timeout, headers=headers, transport=_transport) as client:
             response = await client.request(method, path, json=json, params=params)
     except httpx.HTTPError as exc:
-        raise PiHostUnavailable(f"{LABEL} at {base_url()} does not answer: {exc}") from exc
+        elapsed = time.monotonic() - started
+        kind = type(exc).__name__
+        logger.warning("%s %s %s failed after %.1f s (limit %.0f s): %s %s", LABEL, method, path, elapsed, timeout, kind, exc)
+        raise PiHostUnavailable(
+            f"{LABEL} at {base_url()} does not answer {method} {path} after {elapsed:.0f} s ({kind}: {exc})"
+        ) from exc
+    elapsed = time.monotonic() - started
+    if elapsed > SLOW_SECONDS:
+        logger.warning("%s %s %s took %.1f s", LABEL, method, path, elapsed)
     if response.is_error:
         raise PiHostRejected(response.status_code, error_message(response), _body(response))
     return response
 
 
 async def _request[Result](
-    method: str, path: str, result: type[Result], *, json: object = None, params: dict[str, str | int] | None = None
+    method: str,
+    path: str,
+    result: type[Result],
+    *,
+    json: object = None,
+    params: dict[str, str | int] | None = None,
+    timeout: float = TIMEOUT_SECONDS,
 ) -> Result:
-    response = await _send(method, path, json=json, params=params)
+    response = await _send(method, path, json=json, params=params, timeout=timeout)
     try:
         return validate_answer(result, response.content, label=LABEL, path=path)
     except UpstreamContractError as exc:
@@ -319,12 +354,12 @@ async def open_session(
         body["model"] = model.model_dump(by_alias=True)
     if thinking is not None:
         body["thinking"] = thinking
-    return (await _request("POST", "/sessions", SessionAnswer, json=body)).session
+    return (await _request("POST", "/sessions", SessionAnswer, json=body, timeout=CHILD_TIMEOUT_SECONDS)).session
 
 
 async def close_session(session_id: str) -> None:
     """Stop the session's Pi child, its file stays."""
-    await _send("POST", f"/sessions/{session_id}/close")
+    await _send("POST", f"/sessions/{session_id}/close", timeout=CLOSE_TIMEOUT_SECONDS)
 
 
 async def archive_session(session_id: str) -> SessionInfo:
@@ -385,7 +420,8 @@ async def prompt_session(
     body: dict[str, object] = {"message": message}
     if streaming_behavior is not None:
         body["streamingBehavior"] = streaming_behavior
-    return (await _request("POST", f"/sessions/{session_id}/prompt", PromptAnswer, json=body)).disposition
+    answer = await _request("POST", f"/sessions/{session_id}/prompt", PromptAnswer, json=body, timeout=CHILD_TIMEOUT_SECONDS)
+    return answer.disposition
 
 
 async def delete_session(session_id: str) -> None:

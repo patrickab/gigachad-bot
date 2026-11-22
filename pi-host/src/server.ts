@@ -19,6 +19,28 @@ import { createSupervisor, type SocketData, type Supervisor } from "./supervisor
 
 export type ServerOptions = { hostname: string; port: number; tokens: Tokens; supervisor: Supervisor };
 
+/** A request answered slower than this is logged, so a stall names its route. */
+const SLOW_REQUEST_MS = 5_000;
+/** How often the event-loop watch ticks, and the lag past a tick that it logs. */
+const LOOP_TICK_MS = 500;
+const LOOP_STALL_MS = 1_000;
+
+/**
+ * Logs every time the event loop was blocked for longer than `LOOP_STALL_MS`: every request waits on it, so a
+ * synchronous job that stalls it shows up here and not as a slow route.
+ */
+export function watchEventLoop(log: (message: string) => void = console.warn, clock: () => number = () => performance.now()): () => void {
+  let expected = clock() + LOOP_TICK_MS;
+  const timer = setInterval(() => {
+    const now = clock();
+    const lag = now - expected;
+    if (lag > LOOP_STALL_MS) log(`pi-host: event loop blocked for ${(lag / 1000).toFixed(1)} s`);
+    expected = now + LOOP_TICK_MS;
+  }, LOOP_TICK_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 /** Serve every route behind the Origin and bearer check (C3, C1). */
 export function startServer({ hostname, port, tokens, supervisor }: ServerOptions): Server<SocketData> {
   return Bun.serve<SocketData>({
@@ -35,12 +57,15 @@ export function startServer({ hostname, port, tokens, supervisor }: ServerOption
           : new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/health") return Response.json(await supervisor.health());
-      return (
+      const started = performance.now();
+      const response =
         (await handleGateway(request, url)) ??
         (await supervisor.handle(request, url)) ??
         (await handleCatalog(request, url, supervisor, supervisor.host)) ??
-        new Response("not found", { status: 404 })
-      );
+        new Response("not found", { status: 404 });
+      const elapsed = performance.now() - started;
+      if (elapsed > SLOW_REQUEST_MS) console.warn(`pi-host: ${request.method} ${url.pathname} took ${(elapsed / 1000).toFixed(1)} s (${response.status})`);
+      return response;
     },
     websocket: supervisor.websocket,
   });
@@ -63,6 +88,7 @@ if (import.meta.main) {
     supervisor,
   });
   console.log(`pi-host listening on http://${server.hostname}:${server.port}`);
+  watchEventLoop();
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
       await supervisor.shutdown();

@@ -40,6 +40,8 @@ const SESSION_SWITCHING_COMMANDS = new Set(["new_session", "switch_session", "fo
 /** High-rate records that cannot create the session file, skipped by the late-lock check. */
 const STREAMING_RECORDS = new Set(["message_update", "tool_execution_update", "bash_execution_update"]);
 const REQUEST_TIMEOUT_MS = 30_000;
+/** An RPC answer slower than this is logged with its command type, so a stalled start names its step. */
+const SLOW_REQUEST_MS = 5_000;
 const CLOSE_GRACE_MS = 10_000;
 /** After the child exits, how long its stdout and stderr may still drain (a descendant can hold them open). */
 const READER_DRAIN_MS = 1_000;
@@ -205,11 +207,17 @@ export class LiveSession {
   /** Send a command and call `onResponse` synchronously with its response record (or a synthetic failure). */
   request(command: PiRecord, onResponse: (record: PiRecord) => void): void {
     const id = `${INTERNAL_ID_PREFIX}${++this.requestCounter}`;
+    const started = performance.now();
+    const which = () => `${String(command.type)} to pi ${this.sessionId || "(starting)"}`;
     const timer = setTimeout(() => {
-      if (this.requests.delete(id)) onResponse({ type: "response", success: false, error: "pi did not answer" });
+      if (!this.requests.delete(id)) return;
+      console.warn(`pi-host: ${which()} got no answer in ${REQUEST_TIMEOUT_MS / 1000} s`);
+      onResponse({ type: "response", success: false, error: "pi did not answer" });
     }, REQUEST_TIMEOUT_MS);
     this.requests.set(id, (record) => {
       clearTimeout(timer);
+      const elapsed = performance.now() - started;
+      if (elapsed > SLOW_REQUEST_MS) console.warn(`pi-host: ${which()} took ${(elapsed / 1000).toFixed(1)} s`);
       onResponse(record);
     });
     if (!this.write({ ...command, id })) this.settleRequest(id, { type: "response", success: false, error: "pi is not running" });

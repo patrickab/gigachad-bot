@@ -36,8 +36,9 @@ export function watchSessions(onChange: (sessionPaths: string[]) => void): () =>
     onChange(paths);
   };
 
-  const record = (root: string, filename: string | null): void => {
-    if (filename === null) unknown = true;
+  const record = (root: string, filename: string | null | undefined): void => {
+    // Bun reports an event without a name as null or undefined: either means "something changed, rescan".
+    if (filename == null) unknown = true;
     else if (filename.endsWith(".jsonl")) pending.add(join(root, filename));
     else return;
     flushTimer ??= setTimeout(flush, DEBOUNCE_MS);

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 import json
 import threading
@@ -264,6 +264,37 @@ def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositor
         "resume": {"sessionPath": SESSION["sessionPath"]},
         "model": {"provider": "anthropic", "id": "claude-haiku-4-5"},
     }
+
+
+async def test_calls_that_wait_on_a_pi_child_outlast_pi_hosts_own_limit_reads_keep_the_short_one(monkeypatch):
+    host = _serve(monkeypatch, {
+        "POST /sessions": (200, {"session": SESSION}),
+        f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"}),
+        f"POST /sessions/{SESSION_ID}/close": (204, None),
+        "GET /health": (200, {"ok": True}),
+    })
+
+    await pi_host.open_session("/tmp", None)
+    await pi_host.prompt_session(SESSION_ID, "/factory start {}")
+    await pi_host.close_session(SESSION_ID)
+    with suppress(pi_host.PiHostBadResponse):
+        await pi_host.health()
+
+    limits = [request.extensions["timeout"]["read"] for request in host.requests]
+    # pi-host gives each RPC to a child 30 s, a start runs several.
+    assert limits[0] == limits[1] == pi_host.CHILD_TIMEOUT_SECONDS > 30
+    assert limits[2] == pi_host.CLOSE_TIMEOUT_SECONDS
+    assert limits[3] == pi_host.TIMEOUT_SECONDS
+
+
+async def test_a_pi_host_that_does_not_answer_is_logged_with_the_call_and_the_exception(monkeypatch, caplog):
+    _serve(monkeypatch, {})
+
+    with pytest.raises(pi_host.PiHostUnavailable, match=r"does not answer POST /sessions after \d+ s \(ConnectError"):
+        await pi_host.open_session("/tmp", None)
+
+    assert "POST /sessions failed after" in caplog.text
+    assert "ConnectError" in caplog.text
 
 
 def test_open_session_passes_a_fork_through(monkeypatch, repositories):
