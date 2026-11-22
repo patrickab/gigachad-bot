@@ -179,8 +179,8 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 - pi-host runner: `deploy/run-production-pi-host.sh` → `run-pi-host.sh` with
   `PI_HOST_PORT=8301` from the unit. It loads `~/.secrets` (the gateway's API-key
   providers) and `$ENV`, installs `pi-host/`'s locked dependencies when they are
-  missing or older than its manifest or lockfile, and exits non-zero when `pi --version`
-  differs from the pin (M13). Pi sessions get only pi-host's environment allowlist.
+  missing or older than its manifest or lockfile. It runs whatever `pi` is installed (M13: no
+  pin, mise updates Pi). Pi sessions get only pi-host's environment allowlist.
 - Both pi-hosts share the token file (`~/.local/state/gigachad-bot/pi-host.token`,
   `PI_HOST_TOKEN_FILE` overrides) and `~/.pi/agent` (logins, sessions): one host
   user, like `$ENV` and `~/.secrets`. That path is the one `src/lib/host_access.py`
@@ -189,12 +189,11 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 - The pi-host unit has no `NoNewPrivileges`, `PrivateTmp` or
   `UMask`: it runs the user's Pi agents.
 - `redeploy.sh` restarts pi-host before the backend, only when `pi-host/` changed
-  (code, the Pi pin, the lockfile), the installed `pi --version` differs from the
+  (code, its manifest, the lockfile), the installed `pi --version` differs from the
   one `/health` reports, or pi-host is down (M14). It never restarts while a Pi
   session is live (a `pi` child in the unit's cgroup: pi-host stops idle, unattached,
   unpinned ones after `PI_HOST_IDLE_MINUTES`, 15, pinned ones stay) and prints the
-  restart command instead (M4). An installed `pi` other than the pin stops the
-  redeploy before any restart, the running pi-host keeps serving.
+  restart command instead (M4). Without any `pi` on `PATH` the redeploy stops before a restart.
   The installer stops, disables and removes the retired `gigachad-bot-omp.service`, and the omp-web units once
   no omp session runs (see "Retire omp-web").
 - The backend starts the stateless LikeC4 service, points `C4_SERVICE_URL` at it,

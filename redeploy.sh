@@ -4,10 +4,10 @@
 # environment, so nothing inherited from the calling shell reaches uv, npm or the unit.
 #
 # Before the backend, pi-host (gigachad-bot-pi-host.service, M14): restarted only when
-# pi-host/ changed (code, the Pi pin in its package.json, the lockfile), the installed pi
+# pi-host/ changed (code, its package.json, the lockfile), the installed pi
 # is another version than the one it runs, or it is down, never while a Pi session is
 # running a turn (M4, `running` in pi-host's /health; idle and pinned sessions resume after it).
-# A pi whose version differs from the pin stops the redeploy before any restart.
+# Whatever pi version is installed runs: Pi updates itself (mise), nothing pins it here.
 #
 # Then learn mode, unless a learn session is busy: restarts LearnHarness when the commit
 # its launcher would serve moved (the newest release tag passing the overlay checks, or
@@ -141,14 +141,11 @@ if ! systemctl --user cat "$pi_host_unit" >/dev/null 2>&1; then
     exit 1
 fi
 pi_host_token_file="$(prod_setting PI_HOST_TOKEN_FILE "$HOME/.local/state/gigachad-bot/pi-host.token")"
-pi_pinned="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["dependencies"]["@earendil-works/pi-coding-agent"])' \
-    pi-host/package.json)"
 pi_installed="$(timeout 30 pi --version 2>/dev/null || true)"
 pi_served="$(pi_host_version 2>/dev/null || true)"
 if [[ -z $pi_served || $pi_served != "$pi_installed" ]] || ! git diff --quiet "$old" "$new" -- pi-host || ! pi_host_up; then
-    if [[ $pi_installed != "$pi_pinned" ]]; then
-        printf "pi-host not restarted: pi-host pins Pi %s, PATH has %s: install pi %s (mise), it keeps serving %s\n" \
-            "$pi_pinned" "${pi_installed:-no pi}" "$pi_pinned" "${pi_served:-nothing}" >&2
+    if [[ -z $pi_installed ]]; then
+        printf "pi-host not restarted: no pi on PATH (mise), it keeps serving %s\n" "${pi_served:-nothing}" >&2
         exit 1
     fi
     running="$(running_pi_sessions)"
@@ -156,7 +153,7 @@ if [[ -z $pi_served || $pi_served != "$pi_installed" ]] || ! git diff --quiet "$
         printf "pi-host not restarted: %s Pi session(s) running, run systemctl --user restart %s when they are idle\n" \
             "$running" "$pi_host_unit" >&2
     else
-        printf "Restarting %s with Pi %s\n" "$pi_host_unit" "$pi_pinned"
+        printf "Restarting %s with Pi %s\n" "$pi_host_unit" "$pi_installed"
         systemctl --user restart "$pi_host_unit"
         # The first start installs pi-host's dependencies (bun install).
         if ! wait_until 300 1 pi_host_up; then

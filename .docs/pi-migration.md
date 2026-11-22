@@ -85,7 +85,7 @@ From the P0 spike (`pi-ai` 1.5.2, LiteLLM 1.98 through `litellm_proxy/`: text, s
 | M6 | Children get an allowlisted environment, backend secrets never reach an agent. Sandboxed children get a seeded, writable agent-dir copy (`settings.json`, `npm/`, no `auth.json`): Pi crashes on a read-only agent dir, and a root process in the container could read a mounted credential |
 | M7 | `@` file completion: pi-host endpoint per cwd, `git ls-files` plus untracked files, fuzzy ranked |
 | M9 | Archive and restore: pi-host moves session files to an archive folder and back |
-| M13 | Pi is pinned, pi-host checks `pi --version` at start |
+| M13 | pi-host runs whatever Pi is installed (mise updates it), `redeploy.sh` restarts it when `pi --version` changes |
 | M14 | Production: own systemd unit, `redeploy.sh` restarts pi-host only when its code or the Pi version changed |
 | M15 | Tests use `pi-ai`'s faux provider, never a real model |
 | M16 | pi-host forwards Pi's records unchanged plus a small envelope (attached, replay start and end, lock held, exit) carrying `{streamId, sequence}`. `streamId` changes when the child or the session identity changes, so the client drops its live state. The backend proxies without parsing |
