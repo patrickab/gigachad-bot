@@ -10,6 +10,8 @@ interface BoardColumnProps extends Omit<HTMLAttributes<HTMLDivElement>, "title" 
   /** `h3` announces the column title as a heading. */
   titleAs?: "span" | "h3"
   count: number
+  /** Shown right after the count, such as a second counter. */
+  countExtra?: ReactNode
   /** Shown before the title, such as a status dot. */
   marker?: ReactNode
   /** Header control on the right, such as an add button. */
@@ -23,7 +25,7 @@ interface BoardColumnProps extends Omit<HTMLAttributes<HTMLDivElement>, "title" 
 }
 
 /** Kanban column: an elevated frame with a quiet title, its count (hidden and the title dimmed when empty) and an optional action over a scrolling card list. */
-export function BoardColumn({ title, titleAs: Title = "span", count, marker, action, bodyProps, children, footer, className, ...frameProps }: BoardColumnProps) {
+export function BoardColumn({ title, titleAs: Title = "span", count, countExtra, marker, action, bodyProps, children, footer, className, ...frameProps }: BoardColumnProps) {
   return (
     <ElevatedContainer {...frameProps} className={cn("flex flex-1 flex-col min-h-0 overflow-hidden rounded-2xl border", className)}>
       <div className="flex items-center justify-between px-4 pt-4 pb-3 select-none shrink-0">
@@ -31,6 +33,7 @@ export function BoardColumn({ title, titleAs: Title = "span", count, marker, act
           {marker}
           <Title className={cn("text-xs font-medium", count === 0 ? "text-ink-faint" : "text-ink-muted")}>{title}</Title>
           {count > 0 && <span className="text-[11px] text-ink-faint tabular-nums">{count}</span>}
+          {countExtra}
         </div>
         {action}
       </div>

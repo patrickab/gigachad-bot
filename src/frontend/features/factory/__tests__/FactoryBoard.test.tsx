@@ -191,6 +191,29 @@ describe("FactoryBoard", () => {
     expect(titles("Finished")).toHaveLength(12)
   })
 
+  it("archives a finished task out of the finished count into a separate counter, and brings it back", async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value) },
+      removeItem: (key: string) => { stored.delete(key) },
+    })
+    const { view, titles } = renderBoard([task("Task a", "done"), task("Task b", "cancelled"), task("Task c", "running")])
+    expect(view.queryByRole("button", { name: /^Archive Task c/ })).toBeNull()
+
+    fireEvent.click(view.getByRole("button", { name: "Archive Task a" }))
+    await waitFor(() => expect(titles("Finished")).toEqual(["Task b"]))
+    const counter = view.getByRole("button", { name: "Archived" })
+    expect(counter).toHaveTextContent("1")
+
+    fireEvent.click(counter)
+    await waitFor(() => expect(titles("Finished")).toEqual(["Task a"]))
+    fireEvent.click(view.getByRole("button", { name: "Unarchive Task a" }))
+    await waitFor(() => expect(titles("Finished")).toHaveLength(2))
+    expect(view.queryByRole("button", { name: "Archived" })).toBeNull()
+    vi.unstubAllGlobals()
+  })
+
   it("closes the dialog at once and shows the start as launching until its task is listed", async () => {
     let answer: (task: unknown) => void = () => {}
     api.createFactoryTask.mockReturnValue(new Promise((resolve) => { answer = resolve }))

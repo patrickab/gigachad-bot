@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
 import { BoardColumn } from "@/components/ui/BoardColumn"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -10,6 +10,7 @@ import { IconButton } from "@/components/ui/IconButton"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { StatusDot } from "@/components/ui/StatusDot"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useStoredJson } from "@/hooks/useStoredJson"
 import { deleteFactoryTask } from "@/lib/backend/api"
 import type { FactoryTask } from "@/lib/domain/factory"
 import { baseName } from "@/lib/paths"
@@ -29,7 +30,19 @@ function boardOrder(left: FactoryTask, right: FactoryTask): number {
   return byState || (right.factory?.at ?? right.created_at).localeCompare(left.factory?.at ?? left.created_at)
 }
 
-function TaskCard({ task, onOpen, onDelete }: { task: FactoryTask; onOpen: () => void; onDelete: () => Promise<unknown> }) {
+/** The ids in `raw`, empty when it is not a list of strings. */
+function parseArchived(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : []
+}
+
+function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
+  task: FactoryTask
+  /** Whether the task is archived, null when it cannot be (not finished). */
+  archived: boolean | null
+  onArchive: () => void
+  onOpen: () => void
+  onDelete: () => Promise<unknown>
+}) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const state = shownState(task)
@@ -59,13 +72,19 @@ function TaskCard({ task, onOpen, onDelete }: { task: FactoryTask; onOpen: () =>
           <span className="truncate">{task.branch ?? "Current checkout"}</span>
         </span>
       </button>
-      {allowedActions(state, task.created_at).delete && !confirming && (
-        <IconButton
-          icon={Trash2}
-          label={`Delete ${task.title}`}
-          onClick={() => setConfirming(true)}
-          className="absolute right-2 top-2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-        />
+      {!confirming && (
+        <div className="absolute right-2 top-2 flex opacity-0 focus-within:opacity-100 group-hover:opacity-100">
+          {archived !== null && (
+            <IconButton
+              icon={archived ? ArchiveRestore : Archive}
+              label={`${archived ? "Unarchive" : "Archive"} ${task.title}`}
+              onClick={onArchive}
+            />
+          )}
+          {allowedActions(state, task.created_at).delete && (
+            <IconButton icon={Trash2} label={`Delete ${task.title}`} onClick={() => setConfirming(true)} />
+          )}
+        </div>
       )}
       {confirming && (
         <div className="absolute inset-x-4 bottom-4 grid h-6 items-center">
@@ -118,6 +137,9 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   const launches = useFactoryLaunches(repo)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showAllFinished, setShowAllFinished] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedIds, updateArchived] = useStoredJson(`gigachad:factory-archived:${repo}`, parseArchived)
+  const toggleArchived = (id: string) => updateArchived((ids) => (ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id]))
   const { run: deleteTask, error: deleteError } = useAsyncAction(async (id: string) => {
     await deleteFactoryTask(id)
     await refresh()
@@ -142,11 +164,15 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-4 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
-            const columnTasks = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            const inColumn = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            const isFinished = column.id === "finished"
+            const archivedCount = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id)).length : 0
+            // Finished shows what waits for inspection, or the archive while that is opened.
+            const columnTasks = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id) === (showArchived && archivedCount > 0)) : inColumn
             // Newest first, like the tasks: a refused start waits on the user, one on its way works.
             const columnLaunches = launches.filter((launch) => column.id === (launch.error === null ? "working" : "needs-you")).reverse()
-            const count = columnTasks.length + columnLaunches.length
-            const capped = column.id === "finished" && !showAllFinished && columnTasks.length > FINISHED_LIMIT
+            const count = isFinished ? inColumn.length - archivedCount : columnTasks.length + columnLaunches.length
+            const capped = isFinished && !showAllFinished && columnTasks.length > FINISHED_LIMIT
             const shown = capped ? columnTasks.slice(0, FINISHED_LIMIT) : columnTasks
             return (
               <BoardColumn
@@ -156,6 +182,23 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                 title={column.title}
                 titleAs="h3"
                 count={count}
+                countExtra={archivedCount > 0 && (
+                  <>
+                    {count > 0 && <span aria-hidden className="text-[11px] text-ink-faint">|</span>}
+                    <button
+                      type="button"
+                      aria-label="Archived"
+                      aria-pressed={showArchived}
+                      onClick={() => setShowArchived((open) => !open)}
+                      className={cn(
+                        "rounded text-[11px] tabular-nums hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
+                        showArchived ? "text-ink" : "text-ink-faint",
+                      )}
+                    >
+                      {archivedCount}
+                    </button>
+                  </>
+                )}
                 marker={<StatusDot tone={count === 0 ? "idle" : column.tone} />}
                 className="min-w-[15rem] border-divider/30"
                 bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
@@ -193,7 +236,12 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <TaskCard task={task} onOpen={() => onOpenTask(task.id)} onDelete={() => deleteTask(task.id)} />
+                    <TaskCard
+                      task={task}
+                      archived={isFinished ? archivedIds.includes(task.id) : null}
+                      onArchive={() => toggleArchived(task.id)}
+                      onOpen={() => onOpenTask(task.id)} onDelete={() => deleteTask(task.id)}
+                    />
                   </motion.div>
                 ))}
               </BoardColumn>
