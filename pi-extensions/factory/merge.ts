@@ -25,6 +25,7 @@ import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { protectedPaths, type FactoryConfig } from "./config.ts";
 import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, stageTree, withScratchIndex } from "./git.ts";
+import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import type { CommandResult, Exec } from "./run.ts";
 import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
 
@@ -34,6 +35,8 @@ const LOCK_WAIT_MS = 60_000;
 /** `flock -n -E` exit code of a lock someone else holds. */
 const LOCK_BUSY_EXIT = 75;
 const AFTER_MERGE_TIMEOUT_MS = 10 * 60_000;
+/** How often a queued merge looks whether it is its turn, or the target moved. */
+const QUEUE_POLL_MS = 2_000;
 /** Exit code of `MOVE_TARGET_SCRIPT` when the main branch moved past the task's base: rebase again and retry. */
 const TARGET_MOVED_EXIT = 4;
 /** How often a merge rebases again after the main branch moved during its merge gates. */
@@ -196,59 +199,88 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
   status("commit");
   await commitWorktree(exec, root, task, config.protected);
   let ontoBefore = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
-  // Rebase, gates, move: again from the rebase while another merge lands on the main branch during the gates.
-  let merged: CommandResult;
-  let head: string;
-  for (let attempt = 1; ; attempt++) {
-    status(attempt === 1 ? `rebase onto ${task.mainBranch}` : `rebase onto ${task.mainBranch} again, it moved (attempt ${attempt})`);
-    const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
-    if (conflicts) return conflicts;
-    head = await git(exec, root, ["rev-parse", "HEAD"]);
-    // A rebase onto the same commit leaves the tree the round's gates just passed on (the squash keeps the tree).
-    const onto = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
-    for (const argv of onto === ontoBefore ? [] : config.gates) {
-      status(`merge gate ${argv.join(" ")}`);
-      const gate = await exec(argv, { cwd: root });
-      gates.push(gateData(round, "merge_gates", argv, gate));
-      if (!passed(gate)) return { argv, result: gate };
-    }
-    ontoBefore = onto;
+  const sameGates = JSON.stringify(config.merge_gates) === JSON.stringify(config.gates);
+  const targetMoved = async () =>
+    (await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`])) !== (await git(exec, root, ["rev-parse", `refs/heads/${task.mainBranch}`]));
 
-    status("fast-forward");
-    await assertCheckoutReady(exec, root, task.branch);
-    const target = await git(exec, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
-    intent({ kind: "merge", commit: head, before: target });
-    // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
-    // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
-    while (merged.exitCode === LOCK_BUSY_EXIT) {
-      if (Date.now() > deadline) return fail(`the merge lock ${lock} stayed taken for ${LOCK_WAIT_MS / 1000} s`);
-      status("wait for the merge lock");
-      if ((await exec(["sleep", "1"], { cwd: root })).killed) return fail("cancelled while waiting for the merge lock");
+  // Rebased before it queues: a conflict goes to the coder at once, without a place in the queue.
+  status(`rebase onto ${task.mainBranch}`);
+  const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
+  if (conflicts) return conflicts;
+  const ticket = await joinQueue(gitDir);
+  try {
+    for (let ahead = await queueAhead(ticket); ahead > 0; ahead = await queueAhead(ticket)) {
+      status(`queued for merge, ${ahead} ahead`);
+      if ((await exec(["sleep", String(QUEUE_POLL_MS / 1000)], { cwd: root })).killed) return fail("cancelled while queued for merge");
+      // A merge ahead landed: rebase onto it now, a conflict leaves the queue and goes to the coder.
+      if (!(await targetMoved())) continue;
+      status(`rebase onto ${task.mainBranch}, a merge ahead landed`);
+      const moved = await rebaseWorktree(exec, cleanup, root, task, config.protected);
+      if (moved) return moved;
+    }
+    return await turn();
+  } finally {
+    await leaveQueue(ticket);
+  }
+
+  /** The ticket's turn: rebase, merge gates, move the target. Again from the rebase when the target moved anyway. */
+  async function turn(): Promise<MergeData | string[] | GateFailure> {
+    // Rebase, gates, move: again from the rebase while another merge lands on the main branch during the gates.
+    let merged: CommandResult;
+    let head: string;
+    for (let attempt = 1; ; attempt++) {
+      status(attempt === 1 ? `rebase onto ${task.mainBranch}` : `rebase onto ${task.mainBranch} again, it moved (attempt ${attempt})`);
+      const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
+      if (conflicts) return conflicts;
+      head = await git(exec, root, ["rev-parse", "HEAD"]);
+      // Merge gates that are the round's gates, on the base the round passed them on (the squash keeps the tree), would
+      // only repeat that run.
+      const onto = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+      for (const argv of onto === ontoBefore && sameGates ? [] : config.merge_gates) {
+        status(`merge gate ${argv.join(" ")}`);
+        const gate = await exec(argv, { cwd: root });
+        gates.push(gateData(round, "merge_gates", argv, gate));
+        if (!passed(gate)) return { argv, result: gate };
+      }
+      ontoBefore = onto;
+
+      status("fast-forward");
+      await assertCheckoutReady(exec, root, task.branch);
+      const target = await git(exec, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
+      intent({ kind: "merge", commit: head, before: target });
+      // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
+      // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
+      const deadline = Date.now() + LOCK_WAIT_MS;
       merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+      while (merged.exitCode === LOCK_BUSY_EXIT) {
+        if (Date.now() > deadline) return fail(`the merge lock ${lock} stayed taken for ${LOCK_WAIT_MS / 1000} s`);
+        status("wait for the merge lock");
+        if ((await exec(["sleep", "1"], { cwd: root })).killed) return fail("cancelled while waiting for the merge lock");
+        merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+      }
+      if (merged.exitCode === TARGET_MOVED_EXIT && attempt < MERGE_ATTEMPTS) continue;
+      if (!passed(merged)) return fail(`update of ${task.mainBranch} refused: ${tail(merged.output)}`);
+      break;
     }
-    if (merged.exitCode === TARGET_MOVED_EXIT && attempt < MERGE_ATTEMPTS) continue;
-    if (!passed(merged)) return fail(`update of ${task.mainBranch} refused: ${tail(merged.output)}`);
-    break;
-  }
-  const [before, moved] = merged.stdout.trim().split(" ");
-  const commit = await git(cleanup, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
-  if (commit !== head) return fail(`${task.mainBranch} is at ${commit} after the update, not at the task's commit ${head}`);
+    const [before, moved] = merged.stdout.trim().split(" ");
+    const commit = await git(cleanup, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
+    if (commit !== head) return fail(`${task.mainBranch} is at ${commit} after the update, not at the task's commit ${head}`);
 
-  // Hooks install into the primary only: another worktree, or a target checked out nowhere, gets none.
-  if (moved !== "primary") return result(true, commit, null, false);
-  const changed = (await git(cleanup, primary, ["diff", "--name-only", before, commit])).split("\n");
-  if (!changed.some((path) => LOCKFILES.includes(basename(path)))) return result(true, commit, null, false);
-  for (const argv of config.hooks.after_merge) {
-    status(`after_merge ${argv.join(" ")}`);
-    // Under the merge lock, so two tasks never install into the primary checkout at once. `-o`: a process the hook
-    // leaves behind does not hold the lock.
-    const hook = await exec(["flock", "-w", String(LOCK_WAIT_MS / 1000), "-o", lock, ...argv], { cwd: primary, timeoutMs: AFTER_MERGE_TIMEOUT_MS });
-    gates.push(gateData(round, "after_merge", argv, hook));
-    if (!passed(hook)) return result(true, commit, `after_merge failed: ${argv.join(" ")}: ${tail(hook.output)}`, false);
+    // Hooks install into the primary only: another worktree, or a target checked out nowhere, gets none.
+    if (moved !== "primary") return result(true, commit, null, false);
+    const changed = (await git(cleanup, primary, ["diff", "--name-only", before, commit])).split("\n");
+    if (!changed.some((path) => LOCKFILES.includes(basename(path)))) return result(true, commit, null, false);
+    for (const argv of config.hooks.after_merge) {
+      status(`after_merge ${argv.join(" ")}`);
+      // Under the merge lock, so two tasks never install into the primary checkout at once. `-o`: a process the hook
+      // leaves behind does not hold the lock.
+      const hook = await exec(["flock", "-w", String(LOCK_WAIT_MS / 1000), "-o", lock, ...argv], { cwd: primary, timeoutMs: AFTER_MERGE_TIMEOUT_MS });
+      gates.push(gateData(round, "after_merge", argv, hook));
+      if (!passed(hook)) return result(true, commit, `after_merge failed: ${argv.join(" ")}: ${tail(hook.output)}`, false);
+    }
+    return result(true, commit, null, true);
+
   }
-  return result(true, commit, null, true);
 }
 
 export async function mergeTask(input: MergeInput): Promise<MergeOutcome> {

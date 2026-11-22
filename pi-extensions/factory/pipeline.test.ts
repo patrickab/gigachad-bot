@@ -7,6 +7,7 @@ import { stateDraft, type Draft, type MergeData, type ReviewData, type ReviewSta
 const config: FactoryConfig = {
   hooks: { after_code: [["fmt"]], after_merge: [] },
   gates: [["lint"], ["test"]],
+  merge_gates: [["lint"], ["test"]],
   protected: DEFAULT_PROTECTED,
 };
 

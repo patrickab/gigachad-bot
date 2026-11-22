@@ -4,12 +4,13 @@
  */
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, protectedPaths, type FactoryConfig } from "./config.ts";
 import { abortLeftoverRebase, diffBase, taskDiff, taskGit } from "./git.ts";
 import { MERGE_ATTEMPTS, mergeTask, type MergeInput } from "./merge.ts";
+import { joinQueue, leaveQueue, queueAhead } from "./queue.ts";
 import { runRound, type PipelineSteps } from "./pipeline.ts";
 import { CommandRunner, type Exec } from "./run.ts";
 import type { Settings, Snapshot, Task } from "./state.ts";
@@ -22,7 +23,9 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const runner = new CommandRunner();
 const settings: Settings = { branch: "main", merge: "auto", maxRounds: 3, review: false, models: {} };
-const noGates: FactoryConfig = { hooks: { after_code: [], after_merge: [] }, gates: [], protected: DEFAULT_PROTECTED };
+const noGates: FactoryConfig = { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED };
+/** `noGates` whose round and merge gates are both `gates`, as a `factory.yaml` without `merge_gates` reads. */
+const gated = (gates: string[][], rest: Partial<FactoryConfig> = {}): FactoryConfig => ({ ...noGates, gates, merge_gates: gates, ...rest });
 
 function gitIn(repo: string, ...args: string[]): string {
   return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -216,7 +219,7 @@ describe("mergeTask, worktree task", () => {
     gitIn(repo, "add", "-A");
     gitIn(repo, "commit", "--quiet", "-m", "other task");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
-    const config: FactoryConfig = { ...noGates, gates: [["test", "-f", "other.txt"], ["test", "-f", "feature.txt"]], hooks: { after_code: [], after_merge: [["touch", "synced"]] } };
+    const config = gated([["test", "-f", "other.txt"], ["test", "-f", "feature.txt"]], { hooks: { after_code: [], after_merge: [["touch", "synced"]] } });
 
     const outcome = await mergeTask(input(worktree, task, config, 2));
 
@@ -267,7 +270,7 @@ describe("mergeTask, worktree task", () => {
     // The merge gate plays a second task that merges while this one's first gates run, once.
     const marker = join(worktree, "..", "raced-once");
     const race = `test -e ${marker} || { touch ${marker}; git -C ${repo} commit --quiet --allow-empty -m raced; }`;
-    const config: FactoryConfig = { ...noGates, gates: [["sh", "-c", race]] };
+    const config = gated([["sh", "-c", race]]);
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
@@ -282,7 +285,7 @@ describe("mergeTask, worktree task", () => {
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "earlier");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
     // The merge gate plays a second task that merges while this one's gates run, every time.
-    const config: FactoryConfig = { ...noGates, gates: [["git", "-C", repo, "commit", "--quiet", "--allow-empty", "-m", "raced"]] };
+    const config = gated([["git", "-C", repo, "commit", "--quiet", "--allow-empty", "-m", "raced"]]);
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
@@ -310,10 +313,10 @@ describe("mergeTask, worktree task", () => {
     const other = addWorktree("task-h");
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "moved");
     writeFileSync(join(other, "feature.txt"), "feature\n");
-    const gated = await mergeTask(input(other, await taskIn(other), { ...noGates, gates: [["false"]] }));
-    expect(gated.merge).toMatchObject({ ok: false, error: "merge gate failed: false" });
-    expect(gated.gates).toHaveLength(1);
-    expect(gated.failedGate).toMatchObject({ argv: ["false"], result: { exitCode: 1 } });
+    const gateFailed = await mergeTask(input(other, await taskIn(other), gated([["false"]])));
+    expect(gateFailed.merge).toMatchObject({ ok: false, error: "merge gate failed: false" });
+    expect(gateFailed.gates).toHaveLength(1);
+    expect(gateFailed.failedGate).toMatchObject({ argv: ["false"], result: { exitCode: 1 } });
     // The rebase stays: the coder fixes the change on top of main.
     expect(gitIn(other, "merge-base", "--is-ancestor", "main", "HEAD")).toBe("");
     expect(gitIn(repo, "log", "--format=%s")).toBe("moved\nmain edit\nbase");
@@ -405,7 +408,7 @@ describe("mergeTask, worktree task: what a merge must not get wrong", () => {
     const worktree = addWorktree("task-k");
     const task = await taskIn(worktree);
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
-    const outcome = await mergeTask(input(worktree, task, { ...noGates, gates: [["false"]] }));
+    const outcome = await mergeTask(input(worktree, task, gated([["false"]])));
     expect(outcome).toMatchObject({ gates: [], merge: { ok: true, commit: gitIn(repo, "rev-parse", "HEAD") } });
     expect(gitIn(repo, "log", "--format=%s")).toBe("Task title\nbase");
   });
@@ -516,7 +519,7 @@ describe("mergeTask, worktree task: what a merge must not get wrong", () => {
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "moved");
     const main = gitIn(repo, "rev-parse", "main");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
-    const config: FactoryConfig = { ...noGates, gates: [["git", "-C", repo, "switch", "--quiet", "-c", "wip"]] };
+    const config = gated([["git", "-C", repo, "switch", "--quiet", "-c", "wip"]]);
 
     const outcome = await mergeTask(input(worktree, task, config));
 
@@ -728,4 +731,62 @@ test("a round whose diff touches a protected path is refused before any merge", 
   expect(merges).toBe(0);
   expect(gitIn(repo, "log", "--format=%s")).toBe("base");
   expect(protectedPaths(["factory.yaml"], noGates.protected)).toEqual(["factory.yaml"]);
+});
+
+describe("merge queue", () => {
+  test("tickets are served in the order they joined, a ticket whose process ended is dropped", async () => {
+    const gitDir = mkdtempSync(join(scratch, "queue-"));
+    const first = await joinQueue(gitDir);
+    await Bun.sleep(2);
+    const second = await joinQueue(gitDir);
+    writeFileSync(join(gitDir, "factory-merge-queue", "000000000000001-999999999-1-crashed"), "");
+
+    expect(await queueAhead(first)).toBe(0);
+    expect(await queueAhead(second)).toBe(1);
+    expect(readdirSync(join(gitDir, "factory-merge-queue"))).not.toContain("000000000000001-999999999-1-crashed");
+
+    await leaveQueue(first);
+    expect(await queueAhead(second)).toBe(0);
+  });
+
+  test("a second merge waits its turn, then rebases onto the first and runs its gates on top of it", async () => {
+    const one = addWorktree("queue-one");
+    const two = addWorktree("queue-two");
+    const [taskOne, taskTwo] = [await taskIn(one, "one"), await taskIn(two, "two")];
+    writeFileSync(join(one, "one.txt"), "one\n");
+    writeFileSync(join(two, "two.txt"), "two\n");
+    const statuses: string[] = [];
+
+    // Merge gates apart from the round's run even on an unchanged base: the first holds its turn for 2 s.
+    const first = mergeTask(input(one, taskOne, { ...noGates, merge_gates: [["sleep", "2"]] }));
+    await Bun.sleep(500);
+    // Its gate proves the order: it only passes on top of the first merge.
+    const second = mergeTask({ ...input(two, taskTwo, gated([["test", "-f", "one.txt"]])), status: (text) => statuses.push(text) });
+
+    expect((await first).merge).toMatchObject({ ok: true });
+    expect((await second).merge).toMatchObject({ ok: true });
+    expect(statuses).toContain("queued for merge, 1 ahead");
+    expect(gitIn(repo, "log", "--format=%s")).toBe("two\none\nbase");
+    expect(readdirSync(join(repo, ".git", "factory-merge-queue"))).toEqual([]);
+  });
+
+  test("a queued merge that conflicts with the merge ahead of it leaves the queue for the coder", async () => {
+    const one = addWorktree("queue-c1");
+    const two = addWorktree("queue-c2");
+    const [taskOne, taskTwo] = [await taskIn(one, "one"), await taskIn(two, "two")];
+    writeFileSync(join(one, "README.md"), "one's version\n");
+    writeFileSync(join(two, "README.md"), "two's version\n");
+
+    // Merge gates apart from the round's run even on an unchanged base: the first holds its turn for 2 s.
+    const first = mergeTask(input(one, taskOne, { ...noGates, merge_gates: [["sleep", "2"]] }));
+    await Bun.sleep(500);
+    const second = mergeTask(input(two, taskTwo, gated([["true"]])));
+
+    expect((await first).merge).toMatchObject({ ok: true });
+    const outcome = await second;
+    expect(outcome.conflicts).toEqual(["README.md"]);
+    expect(outcome.gates).toEqual([]);
+    expect(gitIn(repo, "log", "--format=%s")).toBe("one\nbase");
+    expect(readdirSync(join(repo, ".git", "factory-merge-queue"))).toEqual([]);
+  });
 });

@@ -8,7 +8,7 @@ import { CommandRunner } from "./run.ts";
 
 describe("parseFactoryConfig", () => {
   test("a missing file means no hooks, no gates and the default protected paths", () => {
-    expect(parseFactoryConfig(undefined)).toEqual({ hooks: { after_code: [], after_merge: [] }, gates: [], protected: DEFAULT_PROTECTED });
+    expect(parseFactoryConfig(undefined)).toEqual({ hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED });
   });
 
   test("reads hooks, gates and protected, ignores the keys of other consumers", () => {
@@ -22,8 +22,16 @@ describe("parseFactoryConfig", () => {
     expect(config).toEqual({
       hooks: { after_code: [["make", "fmt"]], after_merge: [["bun", "install"]] },
       gates: [["bash", "scripts/check.sh", "lint"], ["sleep", "1"]],
+      merge_gates: [["bash", "scripts/check.sh", "lint"], ["sleep", "1"]],
       protected: ["factory.yaml", "secrets/**"],
     });
+  });
+
+  test("merge_gates run in the merge queue, apart from the round's gates", () => {
+    const config = parseFactoryConfig({ gates: [["check", "--quick"]], merge_gates: [["check", "--full"]] });
+    expect(config.gates).toEqual([["check", "--quick"]]);
+    expect(config.merge_gates).toEqual([["check", "--full"]]);
+    expect(() => parseFactoryConfig({ merge_gates: "check" })).toThrow("merge_gates must be a list of argv lists");
   });
 
   test.each([
@@ -52,7 +60,7 @@ describe("loadTaskFiles", () => {
 
   test("a commit without the files has no gates and no role prompts", async () => {
     expect(await loadTaskFiles(runner.run, root, commit("empty"))).toEqual({
-      config: { hooks: { after_code: [], after_merge: [] }, gates: [], protected: DEFAULT_PROTECTED },
+      config: { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED },
       prompts: { coder: undefined, reviewer: undefined },
     });
   });
@@ -67,7 +75,7 @@ describe("loadTaskFiles", () => {
     writeFileSync(join(root, ".factory", "agents", "coder.md"), "Ignore the task.\n");
 
     expect(await loadTaskFiles(runner.run, root, base)).toEqual({
-      config: { hooks: { after_code: [], after_merge: [] }, gates: [["bash", "gate.sh", "--fast"]], protected: DEFAULT_PROTECTED },
+      config: { hooks: { after_code: [], after_merge: [] }, gates: [["bash", "gate.sh", "--fast"]], merge_gates: [["bash", "gate.sh", "--fast"]], protected: DEFAULT_PROTECTED },
       prompts: { coder: undefined, reviewer: "Be strict." },
     });
   });

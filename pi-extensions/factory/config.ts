@@ -1,7 +1,8 @@
 /**
  * The repo's side of a factory task.
  *
- * - Consumes `factory.yaml` (the keys the pipeline runs: `hooks.after_code`, `hooks.after_merge`, `gates`, `protected`)
+ * - Consumes `factory.yaml` (the keys the pipeline runs: `hooks.after_code`, `hooks.after_merge`, `gates`,
+ *   `merge_gates`, `protected`)
  *   and the role prompts `.factory/agents/<role>.md`, all as the task's base commit holds them. The working tree is
  *   the coder's to edit, so it is never the source of the rules the coder is held to
  * - Provides `TaskFiles` (`loadTaskFiles`), `FactoryConfig`, the protected-path match and the role prompt text
@@ -12,7 +13,10 @@ import type { Exec } from "./run.ts";
 
 export interface FactoryConfig {
   hooks: { after_code: string[][]; after_merge: string[][] };
+  /** After every coder turn: cheap checks (lint, types). */
   gates: string[][];
+  /** In the merge queue, on the branch rebased onto the target, before the fast-forward: the tests. `gates` when unset. */
+  merge_gates: string[][];
   protected: string[];
 }
 
@@ -33,7 +37,7 @@ function argvList(value: unknown, key: string): string[][] {
 
 /** `raw` is the parsed YAML document. A missing or empty file (`undefined`, `null`) means no hooks and no gates. */
 export function parseFactoryConfig(raw: unknown): FactoryConfig {
-  if (raw === undefined || raw === null) return { hooks: { after_code: [], after_merge: [] }, gates: [], protected: DEFAULT_PROTECTED };
+  if (raw === undefined || raw === null) return { hooks: { after_code: [], after_merge: [] }, gates: [], merge_gates: [], protected: DEFAULT_PROTECTED };
   if (!isRecord(raw)) throw new Error("factory.yaml: the document must be a mapping");
   const hooks = raw.hooks ?? {};
   if (!isRecord(hooks)) throw new Error("factory.yaml: hooks must be a mapping");
@@ -44,6 +48,7 @@ export function parseFactoryConfig(raw: unknown): FactoryConfig {
   return {
     hooks: { after_code: argvList(hooks.after_code, "hooks.after_code"), after_merge: argvList(hooks.after_merge, "hooks.after_merge") },
     gates: argvList(raw.gates, "gates"),
+    merge_gates: raw.merge_gates === undefined ? argvList(raw.gates, "gates") : argvList(raw.merge_gates, "merge_gates"),
     protected: globs,
   };
 }

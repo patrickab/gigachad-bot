@@ -15,10 +15,13 @@ hooks:
     - [uv, sync, --locked]
     - [npm, install, --prefix, src/frontend, --no-save, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
     - [bun, install, --cwd, pi-host, --frozen-lockfile]
-# One gate: scripts/check.sh --changed runs the steps the task's change reaches, in parallel, and names the failed ones
-# in its last lines. It is hermetic (env -i) and gives the Postgres-backed tests a throwaway database. Exit 75 means a
-# broken environment (missing packages or tools): the factory blocks the task as `infra` instead of spending a round.
+# After every coder turn only the quick checks (lint, types) of what the change reaches. The tests run once, in the
+# merge queue: on the branch rebased onto the target, one task of the repo at a time, before the fast-forward.
+# scripts/check.sh is hermetic (env -i), runs its steps in parallel and names the failed ones in its last lines. Exit 75
+# means a broken environment (missing packages or tools): the factory blocks the task as `infra` instead of a round.
 gates:
+  - [bash, scripts/check.sh, --changed, lint, types]
+merge_gates:
   - [bash, scripts/check.sh, --changed]
 # The browser reaches a preview only through the preview gate (`src/backend/preview_gate.py`), which picks it by the port in
 # the path: the frontend is served under `/preview/<port>`, its API base is the gate path of the backend (a path, resolved
