@@ -432,7 +432,7 @@ describe("Project navigation", () => {
     expect(manager.current!.getTabs().at(-1)?.workspaceItem?.path).toBe("/repo/paper/notes.pdf")
   })
 
-  it("offers a new file in mounts and promoted folders that directly hold a .tex, and opens what it creates", async () => {
+  it("offers a new file in promoted folders, not in mounts, that directly hold a .tex, and opens what it creates", async () => {
     const folder = "/data/workbench/latex/proj/paper"
     api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
       ? [{
@@ -451,8 +451,8 @@ describe("Project navigation", () => {
     const onFileSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onFileSelect={onFileSelect} />)
     const code = within(view.getByLabelText("Code"))
-    expect(await code.findByRole("button", { name: "New file in paper" })).toBeInTheDocument()
-    expect(code.queryByRole("button", { name: "New file in source" })).not.toBeInTheDocument()
+    expect(await code.findByRole("button", { name: "Open diff for paper" })).toBeInTheDocument()
+    expect(code.queryByRole("button", { name: /New file in (paper|source)/ })).not.toBeInTheDocument()
     const project = openedProject(view)
 
     fireEvent.click(await project.findByRole("button", { name: "paper" }))

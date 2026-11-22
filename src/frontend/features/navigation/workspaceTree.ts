@@ -247,12 +247,11 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
         // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
         multiSelect: node.path === mount,
         actions: [
-          { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, onClick: () => context.onDiffSelect?.(node.path) },
+          { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, inline: true, onClick: () => context.onDiffSelect?.(node.path) },
           { label: `Archive ${node.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.setArchived(mount, true) },
           ...sessions.directoryActions(mount, node.name),
         ],
         onDelete: () => context.removeMount(mount, node.name),
-        create: holdsTex(node.children) ? createFileAction(context, node.path, node.name) : undefined,
         onMoveHere: (path) => context.moveToFolder(path, node.path),
         accepts: [PROJECT_FILE_DRAG_KIND],
         children: [...generatedRows([context.folder(mount), code]), ...rootFileItems(context, node.children ?? [])],
