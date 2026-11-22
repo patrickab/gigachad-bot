@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/backend/api", () => api)
 
 import { FactoryBoard } from "@/features/factory/FactoryBoard"
+import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 
 const REPO = "/home/me/git/gigachad-bot"
 
@@ -35,7 +36,14 @@ function task(title: string, state: FactoryTaskState | null, extra: Partial<Fact
 function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof FactoryBoard>[0]> = {}) {
   const refresh = vi.fn(async () => {})
   const onOpenTask = vi.fn()
-  const view = render(<FactoryBoard repo={REPO} tasks={tasks} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />)
+  // The title and the buttons render into the app's top bar, so the board is mounted under its slots
+  const view = render(
+    <TopBarSlotProvider>
+      <TopBarSlot name="title">{(ref) => <div ref={ref} />}</TopBarSlot>
+      <TopBarSlot name="center">{(ref) => <div ref={ref} />}</TopBarSlot>
+      <FactoryBoard repo={REPO} tasks={tasks} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />
+    </TopBarSlotProvider>,
+  )
   const titles = (column: string) => within(view.getByRole("region", { name: column })).queryAllByRole("button", { name: /^Task / }).map((card) => within(card).getByText(/^Task /).textContent)
   const card = (title: string) => view.getByText(title).closest("button")!.parentElement!
   return { view, refresh, onOpenTask, titles, card }

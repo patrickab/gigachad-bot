@@ -10,6 +10,7 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { IconButton } from "@/components/ui/IconButton"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { StatusDot } from "@/components/ui/StatusDot"
+import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useStoredJson } from "@/hooks/useStoredJson"
 import { deleteFactoryTask } from "@/lib/backend/api"
@@ -157,8 +158,10 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
     // Lanes start at --surface, the level of the sidebar beside them
     <ElevationProvider base={1}>
       <div className="flex h-full flex-col">
-        <div className="flex shrink-0 items-center justify-between px-8 pb-2 pt-6 select-none">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
+        <InTopBar name="title">
+          <h2 className="truncate text-sm font-semibold tracking-tight text-ink select-none">Factory <span className="font-normal text-ink-muted">· {baseName(repo)}</span></h2>
+        </InTopBar>
+        <InTopBar name="center">
           <div className="flex items-center gap-2">
             <button type="button" aria-label="Factory settings" onClick={() => setSettingsOpen(true)} className={ICON_BUTTON_CLASS}>
               <Settings className="h-4 w-4" />
@@ -168,7 +171,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
               New task
             </button>
           </div>
-        </div>
+        </InTopBar>
         <ErrorText className="px-8 pt-3">{error ?? deleteError}</ErrorText>
         <div className="flex min-h-0 flex-1 gap-16 overflow-x-auto px-8 pb-8 pt-4 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {

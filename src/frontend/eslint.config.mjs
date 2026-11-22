@@ -49,6 +49,7 @@ export default defineConfig([
           crossFeature("chat", "learn"),
           crossFeature("chat", "navigation"),
           crossFeature("editor", "navigation"),
+          crossFeature("factory", "navigation"),
           crossFeature("factory", "editor"),
           crossFeature("navigation", "factory"),
           crossFeature("navigation", "learn"),
