@@ -88,6 +88,7 @@ The page bundle of `/` holds the shell, chat and markdown (streamdown, KaTeX). H
 - Development identity requires `GIGACHAD_ENV=development` and `GIGACHAD_DEV_USER`. That local login has host access.
 - Treat `X-Device-Id` as a UUID for write attribution/echo suppression, never authorization. SSE may omit it.
 - Resolve identity with one read per request. `resolve_user` writes only for a new login, a new or reassigned device, or a device last seen over `DEVICE_SEEN_INTERVAL` (one minute) ago, so concurrent requests never queue on the users row lock or a commit.
+- Per-user display preferences are columns of `users` (`lib/user_preferences.py`): `animated_background` (default on) is returned by `GET /api/config`, set by `PUT /api/config/animated-background`, and switched in the settings menu. `AmbientBackdrop` draws nothing until the setting loaded and while it is off.
 - Reject wildcard/empty production `GIGACHAD_CORS_ORIGINS`. Explicitly validate WebSocket origins too: CORS does not protect sockets.
 
 | Operation | Policy |

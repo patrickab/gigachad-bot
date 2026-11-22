@@ -3,6 +3,7 @@
 import asyncio
 import os
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI
@@ -11,7 +12,7 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes import config, documents, models, projects
-from backend.routes.deps import get_document_store, get_model_provider_store, get_project_store, get_prompt_store
+from backend.routes.deps import get_document_store, get_model_provider_store, get_project_store, get_prompt_store, get_user_preferences
 from backend.server import widen_default_executor
 from tests.conftest import request_identity
 
@@ -58,6 +59,7 @@ async def test_a_blocked_store_read_does_not_stall_other_requests(path: str, dep
         app.include_router(router)
     app.dependency_overrides[dependency] = lambda: store
     app.dependency_overrides[get_request_identity] = lambda: request_identity(has_host_access=False)
+    app.dependency_overrides[get_user_preferences] = lambda: SimpleNamespace(animated_background=lambda: True)
 
     @app.get("/ping")
     async def ping() -> dict[str, bool]:

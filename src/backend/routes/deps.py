@@ -32,12 +32,17 @@ from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
+from lib.user_preferences import UserPreferences
 
 ExtractionPublisher = Callable[[str, str, str], None]
 
 
 def get_user_scope(identity: RequestIdentity = Depends(get_request_identity)) -> UserScope:
     return UserScope(get_postgres_pool(), identity.user_id, identity.device_id)
+
+
+def get_user_preferences(identity: RequestIdentity = Depends(get_request_identity)) -> UserPreferences:
+    return UserPreferences(get_postgres_pool(), identity.user_id)
 
 
 def get_document_store(scope: UserScope = Depends(get_user_scope)) -> DataStore:

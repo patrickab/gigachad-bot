@@ -228,6 +228,8 @@ export interface BackendConfig {
   default_model: string
   downscale_images: boolean
   neovim_available: boolean
+  /** This user's animated app background setting. */
+  animated_background: boolean
   /** Whether this login may use the host-only factory. */
   host_access: boolean
   /** LearnHarness's address, the source of the learn frame. Null for logins without host access. */

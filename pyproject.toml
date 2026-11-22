@@ -103,6 +103,9 @@ ignore = [
   "B904"
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
 known-first-party = ["config", "lib", "backend"]

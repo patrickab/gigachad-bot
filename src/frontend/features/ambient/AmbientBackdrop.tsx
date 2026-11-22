@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { readSceneAnchor, startNightOcean, type NightOceanFrame } from "deepfocus-ambient"
+import { useAnimatedBackground } from "@/contexts/SettingsContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { setAmbientCanvas } from "@/lib/ambientCanvas"
 import { readToken } from "@/lib/palette"
@@ -37,6 +38,11 @@ function toRgb(cssColor: string): [number, number, number] {
  *   and a canvas the browser gives no context (WebGL refused after a GPU reset) is retried with a growing wait
  */
 export function AmbientBackdrop() {
+  // Nothing is drawn until the stored setting is known, so a user who turned it off never sees it start
+  return useAnimatedBackground() ? <NightOcean /> : null
+}
+
+function NightOcean() {
   const theme = useThemeName()
   const [hasFrame, setHasFrame] = useState(false)
   /** Counts the canvases used up: each lost graphics context that stayed lost. */

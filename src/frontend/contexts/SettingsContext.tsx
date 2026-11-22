@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, type ReactNode } from "react"
-import { fetchBackendConfig } from "@/lib/backend/api"
+import { fetchBackendConfig, saveAnimatedBackground } from "@/lib/backend/api"
 import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
@@ -60,6 +60,9 @@ interface SettingsValue {
   learnharnessUrl: string | null
   /** This login may use host-only features such as the factory. */
   hostAccess: boolean
+  /** Whether the animated background shows: stored per user, null until the backend config loaded. */
+  animatedBackground: boolean | null
+  setAnimatedBackground: (enabled: boolean) => void
 }
 
 const SettingsContext = createContext<SettingsValue | null>(null)
@@ -78,6 +81,16 @@ export function useHostAccess(): boolean {
   return useContext(SettingsContext)?.hostAccess ?? false
 }
 
+/** The user's animated background setting, null outside a `SettingsProvider` and until it loaded. */
+export function useAnimatedBackground(): boolean | null {
+  return useContext(SettingsContext)?.animatedBackground ?? null
+}
+
+/** Stores the animated background setting, a no-op outside a `SettingsProvider`. */
+export function useSetAnimatedBackground(): (enabled: boolean) => void {
+  return useContext(SettingsContext)?.setAnimatedBackground ?? (() => {})
+}
+
 function readNeovimPreference(): boolean {
   return readStorage(STORAGE_KEY_NEOVIM) === "true"
 }
@@ -90,6 +103,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
   const [learnharnessUrl, setLearnharnessUrl] = useState<string | null>(null)
   const [hostAccess, setHostAccess] = useState(false)
+  const [animatedBackground, setAnimatedBackgroundState] = useState<boolean | null>(null)
 
   useStartupRead("Settings", fetchBackendConfig, (cfg) => {
     setTabDefaults((prev) => ({
@@ -102,6 +116,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setNeovimAvailable(cfg.neovim_available)
     setLearnharnessUrl(cfg.learnharness_url)
     setHostAccess(cfg.host_access)
+    setAnimatedBackgroundState(cfg.animated_background)
   })
 
   const neovim: NeovimSetting = {
@@ -113,8 +128,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     },
   }
 
+  const setAnimatedBackground = (enabled: boolean) => {
+    setAnimatedBackgroundState(enabled)
+    saveAnimatedBackground(enabled).catch(() => setAnimatedBackgroundState(!enabled))
+  }
+
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, learnharnessUrl, hostAccess }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, learnharnessUrl, hostAccess, animatedBackground, setAnimatedBackground }}>
       {children}
     </SettingsContext.Provider>
   )
