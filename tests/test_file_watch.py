@@ -1,11 +1,11 @@
 import asyncio
 import json
 import os
-import threading
 from pathlib import Path
+import threading
 
-import pytest
 from anyio import to_thread
+import pytest
 
 from backend import websocket_origin
 from backend.routes import file_watch as file_watch_route
@@ -317,6 +317,11 @@ async def test_closing_the_socket_stops_the_watcher_and_its_threads(vault):
         assert watch_threads()
 
     assert asyncio.all_tasks() == tasks_before
+    # A stopped thread can take a moment to end on a loaded machine (test suites running side by side).
+    for _ in range(50):
+        if not watch_threads():
+            break
+        await asyncio.sleep(0.1)
     assert not watch_threads()
 
 

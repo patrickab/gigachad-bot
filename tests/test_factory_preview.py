@@ -16,6 +16,7 @@ import sys
 import time
 from typing import Any
 import urllib.request
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import psycopg
@@ -260,17 +261,20 @@ def test_stopping_a_task_without_a_preview_is_fine():
 
 def test_a_preview_with_a_database_gets_an_empty_one_named_after_the_task_and_stop_drops_it(tmp_path, monkeypatch, database_url):
     monkeypatch.setenv("GIGACHAD_DATABASE_URL", database_url)
-    task = _task(tmp_path, _shell('echo "$DATABASE"; exec sleep 30', database=True, env={"DATABASE": "{database_url}"}), "withdb01")
+    # Preview databases are server-wide: a suite running beside this one must not get the same name.
+    task_id = f"withdb{uuid4().hex[:8]}"
+    name = f"gigachad_preview_{task_id}"
+    task = _task(tmp_path, _shell('echo "$DATABASE"; exec sleep 30', database=True, env={"DATABASE": "{database_url}"}), task_id)
 
     def exists() -> bool:
         with psycopg.connect(database_url) as connection:
-            return connection.execute("SELECT 1 FROM pg_database WHERE datname = 'gigachad_preview_withdb01'").fetchone() is not None
+            return connection.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone() is not None
 
     start_preview(task)
 
-    assert _state(task.id).database == "gigachad_preview_withdb01"
+    assert _state(task.id).database == name
     with psycopg.connect(_log(task.id).strip()) as connection:
-        assert connection.execute("SELECT current_database()").fetchone() == ("gigachad_preview_withdb01",)
+        assert connection.execute("SELECT current_database()").fetchone() == (name,)
         assert connection.execute("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'").fetchone() == (0,)
 
     stop_preview(task.id)

@@ -17,6 +17,9 @@ from tests.conftest import SRC, is_running, requires_proc, still_running
 
 pytestmark = requires_proc
 
+# Every test here orphans marked processes or sweeps the machine: one at a time across test suites.
+pytestmark = pytest.mark.usefixtures("reaper_lock")
+
 _NO_MARK = {name: value for name, value in os.environ.items() if name != OWNER_VARIABLE}
 
 

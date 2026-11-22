@@ -112,7 +112,8 @@ def names(specs: jupyter.KernelSpecList) -> list[str]:
 
 
 def client_for(host: JupyterHost, *mounts: Path, host_access: bool = True):
-    """A client whose requests come from the app's own page (`ORIGIN`), `sent_from` changes that. *mounts* are its mounted file roots."""
+    """A client whose requests come from the app's own page (`ORIGIN`), `sent_from` changes that. *mounts* are its
+    mounted file roots."""
     overrides = {
         get_request_identity: request_identity(host_access),
         get_file_roots: mounted_roots(*mounts, host_access=host_access),
@@ -843,7 +844,9 @@ def test_a_hung_server_a_killed_backend_left_behind_is_reaped_with_its_kernels_b
 
     reaped = reap_orphans()
 
-    assert {server, *kernels} <= set(reaped)
+    # The stopped server cannot exit by itself, only the sweep ends it. A kernel may notice its dead backend and end
+    # on its own in the meantime: what counts is that nothing is left.
+    assert server in reaped
     assert still_running([server, *kernels], 5) == []
 
 

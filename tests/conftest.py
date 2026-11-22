@@ -1,11 +1,13 @@
 """Shared pytest fixtures."""
 
 from collections.abc import Callable, Iterator, Mapping
+import fcntl
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from types import SimpleNamespace
@@ -14,6 +16,8 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import ConnectionPool
 import pytest
 
@@ -111,13 +115,33 @@ def route_client(*routers: APIRouter, overrides: Mapping[Callable[..., Any], Any
     return TestClient(app)
 
 
-@pytest.fixture(scope="module")
-def database_url() -> str:
+@pytest.fixture(scope="session")
+def _test_database_url() -> Iterator[str | None]:
+    """`POSTGRES_TEST_DATABASE_URL`, or under pytest-xdist a database of the worker's own on the same server
+    (`<name>_<worker>`, dropped at the end): workers truncate and listen on it, so they must never share one."""
     url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if not url or not worker:
+        yield url
+        return
+    name = f"{conninfo_to_dict(url)['dbname']}_{worker}"
+    admin = make_conninfo(url, dbname="postgres")
+    with psycopg.connect(admin, autocommit=True) as connection:
+        connection.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        connection.execute(f'CREATE DATABASE "{name}"')
+    try:
+        yield make_conninfo(url, dbname=name)
+    finally:
+        with psycopg.connect(admin, autocommit=True) as connection:
+            connection.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.fixture(scope="module")
+def database_url(_test_database_url: str | None) -> str:
+    if not _test_database_url:
         pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres-backed tests")
-    upgrade(url)
-    return url
+    upgrade(_test_database_url)
+    return _test_database_url
 
 
 @pytest.fixture(scope="module")
@@ -187,7 +211,16 @@ def still_running(pids: list[int], seconds: float) -> list[int]:
 
 
 @pytest.fixture
-def backend_process():
+def reaper_lock() -> Iterator[None]:
+    """Held by a test that orphans marked processes or runs `reap_orphans`: the sweep is machine-wide, so a test suite
+    running beside this one (another factory task, another xdist worker) would take or spare the wrong processes."""
+    with open(Path(tempfile.gettempdir()) / "gigachad-test-reaper.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+@pytest.fixture
+def backend_process(reaper_lock: None):
     """`start(script, env=None)` runs *script* from `src` as an unmarked backend-like parent, killed and reaped at teardown."""
     started: list[subprocess.Popen] = []
 
