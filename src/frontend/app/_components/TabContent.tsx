@@ -94,6 +94,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const { projectSlug, config } = tab
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const registerContentArea = useContentAreaRef()
+  const [mainArea, setMainArea] = useState<HTMLElement | null>(null)
   const contentAreaRef = useCallback<RefCallback<HTMLElement>>((main) => {
     if (!main) return
     setMainArea(main)
@@ -105,7 +106,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       stopMeasuring?.()
     }
   }, [registerContentArea])
-  const [mainArea, setMainArea] = useState<HTMLElement | null>(null)
   // Without a composer anchor the scene sits at the middle of the area between the sidebars, not of the window
   useEffect(() => {
     if (!isActive || !mainArea) return
