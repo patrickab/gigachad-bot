@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack -p 2999",
-    "prebuild": "mkdir -p public/ambient && curl -fsSL -o public/ambient/night-ocean.webm https://github.com/patrickab/deepfocus-ambient/releases/latest/download/night-ocean.webm",
-    "build": "next build --webpack",
+    "build": "mkdir -p public/ambient && curl -fsSL -o public/ambient/night-ocean.webm https://github.com/patrickab/deepfocus-ambient/releases/latest/download/night-ocean.webm && next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "ambient:fetch": "gh release download --repo patrickab/deepfocus-ambient --pattern night-ocean.webm --dir public/ambient --clobber",
