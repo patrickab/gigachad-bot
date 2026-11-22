@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
-import subprocess
 from typing import Any
 from uuid import uuid4
 
@@ -20,25 +19,8 @@ import pytest
 from backend.identity import get_request_identity
 from backend.routes.factory import get_factory_store, router
 from lib import factory, factory_preview, pi_host
-from lib.git import git_text
 from tests.conftest import git, request_identity, route_client
 from tests.test_factory_workspace import STUB
-
-
-def working_tree(checkout: Path) -> str:
-    """The tree id of *checkout*'s working tree, untracked files included, as the extension takes it at a start:
-    through an index of its own, the checkout's index untouched."""
-    index = checkout / ".git" / "factory-snapshot-index"
-    environment = {**os.environ, "GIT_INDEX_FILE": str(index)}
-    try:
-        for arguments in (("read-tree", "HEAD"), ("add", "-A")):
-            subprocess.run(["git", "-C", str(checkout), *arguments], check=True, env=environment)
-        written = subprocess.run(
-            ["git", "-C", str(checkout), "write-tree"], check=True, env=environment, capture_output=True, text=True
-        )
-        return written.stdout.strip()
-    finally:
-        index.unlink(missing_ok=True)
 
 
 @dataclass
@@ -50,8 +32,6 @@ class FakePiHost:
     requests: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
     # False: `/factory start` is answered `handled` and writes nothing, like the extension refusing it.
     accepts_start: bool = True
-    # False: a start in the checkout writes no `baseTree`, like the extension before it took the snapshot.
-    snapshots: bool = True
     down: bool = False
 
     def record(self, session_id: str, custom_type: str, data: dict[str, Any]) -> None:
@@ -131,11 +111,8 @@ class FakePiHost:
         if message.startswith("/factory start ") and self.accepts_start:
             task = json.loads(message.removeprefix("/factory start "))
             cwd = Path(session["cwd"])
-            linked = git(cwd, "rev-parse", "--git-dir") != git(cwd, "rev-parse", "--git-common-dir")
             branch = git(cwd, "symbolic-ref", "--short", "HEAD")
-            position = {"worktree": linked, "branch": branch, "mainBranch": "main", "baseSha": git(cwd, "rev-parse", "HEAD")}
-            if not linked and self.snapshots:
-                position["baseTree"] = working_tree(cwd)
+            position = {"branch": branch, "mainBranch": "main", "baseSha": git(cwd, "rev-parse", "HEAD")}
             self.record(session_id, "factory-task", {**task, **position})
             self.set_state(session_id, "running")
         return httpx.Response(200, json={"disposition": "handled"})
@@ -210,27 +187,47 @@ def _branches(repo: Path) -> list[str]:
 
 def test_settings_chain_is_defaults_then_repo_then_task():
     assert factory.resolve_settings({}) == factory.RepoSettings(
-        merge="review", max_rounds=3, review=False, worktree=True, preview=False, models={}
+        merge="review", max_rounds=3, review=False, preview=False, models={}, branch=None
     )
 
     stored = {"merge": "auto", "max_rounds": 5, "models": {"coder": "anthropic/a", "reviewer": "anthropic/b"}}
-    overrides = factory.SettingsOverrides(max_rounds=1, worktree=False, models={"reviewer": "openai/c"})
+    overrides = factory.SettingsOverrides(max_rounds=1, branch="release", models={"reviewer": "openai/c"})
     settings = factory.resolve_settings(stored, overrides)
 
-    assert (settings.merge, settings.max_rounds, settings.review, settings.worktree) == ("auto", 1, False, False)
+    assert (settings.merge, settings.max_rounds, settings.review, settings.branch) == ("auto", 1, False, "release")
     assert settings.models == {"coder": "anthropic/a", "reviewer": "openai/c"}
 
 
-def test_a_stored_branch_from_before_the_split_is_both_source_and_target():
-    settings = factory.resolve_settings({"branch": "release"}, factory.SettingsOverrides(target_branch="main"))
+def test_settings_saved_with_a_source_and_a_target_branch_keep_the_one_tasks_merged_into():
+    assert factory.resolve_settings({"source_branch": "feature", "target_branch": "release"}).branch == "release"
+    assert factory.resolve_settings({"source_branch": "feature", "target_branch": None}).branch == "feature"
+    assert factory.resolve_settings({"source_branch": "feature", "branch": "main", "worktree": False}).branch == "main"
+    assert factory.resolve_settings({"source_branch": None, "target_branch": None}) == factory.RepoSettings()
 
-    assert (settings.source_branch, settings.target_branch) == ("release", "main")
-    assert factory.resolve_settings({"branch": None}) == factory.RepoSettings()
+
+def test_the_branch_resolves_to_a_local_one_unset_the_default_branch_then_main_then_master(tmp_path):
+    repo = (tmp_path / "repo").resolve()
+    git(tmp_path, "init", "-q", "-b", "trunk", str(repo))
+    git(repo, "commit", "-q", "--allow-empty", "-m", "first")
+    with pytest.raises(factory.UnknownBranch, match="the repo has no default branch, main or master, set a branch"):
+        factory.resolve_branch(repo, None)
+    assert factory.resolve_branch(repo, "trunk") == "trunk"
+    with pytest.raises(factory.UnknownBranch, match="the branch release is not a local branch"):
+        factory.resolve_branch(repo, "release")
+
+    git(repo, "branch", "master")
+    assert factory.resolve_branch(repo, None) == "master"
+    git(repo, "branch", "main")
+    assert factory.resolve_branch(repo, None) == "main"
+    # The repo's default branch (origin's HEAD) wins over both names.
+    git(repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    assert factory.resolve_branch(repo, None) == "trunk"
 
 
 def test_the_start_command_carries_the_settings_in_the_extensions_shape():
     settings = factory.RepoSettings(merge="auto", max_rounds=2, review=False, models={"coder": "anthropic/a"})
-    command = factory.start_command("Title", "Do it", settings, "feature", "release")
+    command = factory.start_command("Title", "Do it", settings, "release")
 
     assert command.startswith("/factory start ")
     assert json.loads(command.removeprefix("/factory start ")) == {
@@ -238,84 +235,13 @@ def test_the_start_command_carries_the_settings_in_the_extensions_shape():
         "title": "Title",
         "settings": {
             "merge": "auto", "maxRounds": 2, "review": False, "models": {"coder": "anthropic/a"}, "branch": "release",
-            "sourceBranch": "feature",
         },
     }
-
-
-def test_branches_resolve_to_local_ones_the_source_else_the_default_branch_then_main_then_master_the_target_else_the_source(tmp_path):
-    repo = (tmp_path / "repo").resolve()
-    git(tmp_path, "init", "-q", "-b", "trunk", str(repo))
-    git(repo, "commit", "-q", "--allow-empty", "-m", "first")
-    with pytest.raises(factory.UnknownBranch, match="the repo has no default branch, main or master, set a source branch"):
-        factory.resolve_branches(repo, None, None)
-    assert factory.resolve_branches(repo, "trunk", None) == ("trunk", "trunk")
-    with pytest.raises(factory.UnknownBranch, match="the source branch release is not a local branch"):
-        factory.resolve_branches(repo, "release", None)
-    with pytest.raises(factory.UnknownBranch, match="the target branch release is not a local branch"):
-        factory.resolve_branches(repo, "trunk", "release")
-
-    git(repo, "branch", "master")
-    assert factory.resolve_branches(repo, None, None) == ("master", "master")
-    git(repo, "branch", "main")
-    assert factory.resolve_branches(repo, None, None) == ("main", "main")
-    assert factory.resolve_branches(repo, "trunk", "main") == ("trunk", "main")
-    # The repo's default branch (origin's HEAD) wins over both names.
-    git(repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
-    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
-    assert factory.resolve_branches(repo, None, None) == ("trunk", "trunk")
 
 
 def test_a_worktree_is_named_after_the_title_and_the_short_id():
     assert factory.workspace_name("Rename the Sidebar!", "0123456789abcdef") == "rename-the-sidebar-01234567"
     assert factory.workspace_name("???", "0123456789abcdef") == "task-01234567"
-
-
-def test_the_diff_of_a_checkout_task_starts_at_its_last_merge(repo):
-    base = git(repo, "rev-parse", "HEAD")
-    started = {"customType": "factory-task", "data": {"mainBranch": "main", "baseSha": base}}
-    failed = {"customType": "factory-merge", "data": {"ok": False, "commit": "", "error": "conflict"}}
-    merged = {"customType": "factory-merge", "data": {"ok": True, "commit": "c" * 40}}
-
-    assert factory.diff_base(repo, False, [started, failed]) == base
-    assert factory.diff_base(repo, False, [started, merged, failed]) == "c" * 40
-    with pytest.raises(factory.UnknownTask):
-        factory.diff_base(repo, False, [failed])
-
-
-def test_the_diff_of_a_checkout_task_starts_at_the_tree_it_found(repo):
-    data = {"mainBranch": "main", "baseSha": git(repo, "rev-parse", "HEAD"), "baseTree": "t" * 40}
-    started = {"customType": "factory-task", "data": data}
-    merged = {"customType": "factory-merge", "data": {"ok": True, "commit": "c" * 40}}
-
-    assert factory.diff_base(repo, False, [started]) == "t" * 40
-    assert factory.diff_base(repo, False, [started, merged]) == "c" * 40
-    assert factory.diff_base(repo, True, [started]) == data["baseSha"]
-
-
-def test_a_workspace_diff_against_a_tree_leaves_out_what_the_tree_holds(repo):
-    (repo / "readme.md").write_text("hi\nmine\n")
-    (repo / "kept note.txt").write_text("old\n")
-    (repo / "draft.txt").write_text("draft\n")
-    (repo / "gone.txt").write_text("gone\n")
-    base = working_tree(repo)
-    assert factory.workspace_diff(repo, base) == ""
-
-    (repo / "readme.md").write_text("hi\nmine\ntask\n")
-    (repo / "draft.txt").write_text("draft\nmore\n")
-    (repo / "gone.txt").unlink()
-    (repo / "new.txt").write_text("fresh\n")
-    diff = factory.workspace_diff(repo, base)
-
-    assert " hi\n mine\n+task\n" in diff
-    assert "+mine" not in diff
-    assert "kept note.txt" not in diff
-    assert "diff --git a/draft.txt b/draft.txt" in diff
-    assert " draft\n+more\n" in diff
-    assert "--- a/gone.txt\n+++ /dev/null" in diff
-    assert "--- /dev/null\n+++ b/new.txt" in diff
-    assert diff.count("diff --git") == 4
-    assert git(repo, "diff", "--cached", "--name-only") == ""
 
 
 def test_a_workspace_diff_holds_changed_and_untracked_files_and_leaves_the_index(repo):
@@ -353,8 +279,7 @@ def test_repos_are_registered_once_by_the_path_of_a_primary_checkout(client, rep
 
 def test_settings_of_a_repo_are_the_defaults_until_saved(client, registered):
     defaults = {
-        "merge": "review", "max_rounds": 3, "review": False, "worktree": True, "preview": False, "models": {},
-        "source_branch": None, "target_branch": None,
+        "merge": "review", "max_rounds": 3, "review": False, "preview": False, "models": {}, "branch": None,
     }
     saved = {**defaults, "merge": "auto", "max_rounds": 7, "models": {"reviewer": "anthropic/b"}}
 
@@ -363,12 +288,9 @@ def test_settings_of_a_repo_are_the_defaults_until_saved(client, registered):
     assert client.get("/api/factory/settings", params={"repo": registered}).json() == saved
 
     assert client.put("/api/factory/settings", params={"repo": registered}, json={**saved, "max_rounds": 21}).status_code == 422
-    assert client.put("/api/factory/settings", params={"repo": registered}, json={**saved, "source_branch": "a..b"}).status_code == 422
-    assert client.put("/api/factory/settings", params={"repo": registered}, json={**saved, "target_branch": "a..b"}).status_code == 422
-    with_branches = client.put(
-        "/api/factory/settings", params={"repo": registered}, json={**saved, "source_branch": "develop", "target_branch": "release"}
-    )
-    assert (with_branches.json()["source_branch"], with_branches.json()["target_branch"]) == ("develop", "release")
+    assert client.put("/api/factory/settings", params={"repo": registered}, json={**saved, "branch": "a..b"}).status_code == 422
+    with_branch = client.put("/api/factory/settings", params={"repo": registered}, json={**saved, "branch": "release"})
+    assert with_branch.json()["branch"] == "release"
     assert client.get("/api/factory/settings", params={"repo": "/absent"}).status_code == 404
     assert client.put("/api/factory/settings", params={"repo": "/absent"}, json=saved).status_code == 404
 
@@ -402,12 +324,11 @@ def test_a_task_starts_in_a_worktree_with_a_coding_session_and_the_start_command
         "title": "Rename the sidebar!",
         "settings": {
             "merge": "auto", "maxRounds": 1, "review": False, "models": {"coder": "anthropic/a"}, "branch": "main",
-            "sourceBranch": "main",
         },
     }
 
 
-def test_a_worktree_task_starts_at_its_source_branchs_tip_whatever_the_primary_has_checked_out(client, host, registered, repo):
+def test_a_task_starts_at_its_branchs_tip_whatever_the_primary_has_checked_out(client, host, registered, repo):
     git(repo, "checkout", "-q", "-b", "release")
     (repo / "readme.md").write_text("release\n")
     git(repo, "commit", "-q", "-am", "release")
@@ -415,7 +336,7 @@ def test_a_worktree_task_starts_at_its_source_branchs_tip_whatever_the_primary_h
     git(repo, "checkout", "-q", "-b", "side")
     (repo / "readme.md").write_text("dirty\n")
 
-    task = _start(client, registered, source_branch="release")
+    task = _start(client, registered, branch="release")
 
     assert git(Path(task["worktree"]), "rev-parse", "HEAD") == release_tip
     assert (Path(task["worktree"]) / "readme.md").read_text() == "release\n"
@@ -423,59 +344,15 @@ def test_a_worktree_task_starts_at_its_source_branchs_tip_whatever_the_primary_h
     assert json.loads(prompt["message"].removeprefix("/factory start "))["settings"]["branch"] == "release"
 
 
-def test_a_worktree_task_starts_at_the_source_and_merges_into_the_target(client, host, registered, repo):
-    git(repo, "checkout", "-q", "-b", "feature")
-    (repo / "readme.md").write_text("feature\n")
-    git(repo, "commit", "-q", "-am", "feature")
-    feature_tip = git(repo, "rev-parse", "HEAD")
-    git(repo, "checkout", "-q", "main")
-    client.put("/api/factory/settings", params={"repo": registered}, json={"source_branch": "main", "target_branch": "main"})
-
-    task = _start(client, registered, source_branch="feature")
-
-    assert git(Path(task["worktree"]), "rev-parse", "HEAD") == feature_tip
-    (prompt,) = host.sent("POST", "/prompt")
-    assert json.loads(prompt["message"].removeprefix("/factory start "))["settings"]["branch"] == "main"
-
-
-def test_a_source_that_does_not_merge_into_the_target_is_refused_before_anything_exists(client, host, registered, repo, tmp_path):
-    git(repo, "checkout", "-q", "-b", "feature")
-    (repo / "readme.md").write_text("feature\n")
-    git(repo, "commit", "-q", "-am", "feature")
-    git(repo, "checkout", "-q", "main")
-    (repo / "readme.md").write_text("main\n")
-    git(repo, "commit", "-q", "-am", "main")
-
-    overrides = {"source_branch": "feature", "target_branch": "main"}
-    refused = client.post("/api/factory/tasks", json={"repo": registered, "title": "T", "request": "R", "overrides": overrides})
-
-    assert refused.status_code == 400
-    assert "the source branch feature does not merge cleanly into main: readme.md" in refused.text
-    assert host.sent("POST", "/sessions") == []
-    assert not (tmp_path / "worktrees").exists()
-
-
-def test_a_worktree_task_on_an_unknown_branch_is_refused_before_anything_exists(client, host, registered, repo, tmp_path):
-    body = {"repo": registered, "title": "T", "request": "R", "overrides": {"source_branch": "absent"}}
+def test_a_task_on_an_unknown_branch_is_refused_before_anything_exists(client, host, registered, repo, tmp_path):
+    body = {"repo": registered, "title": "T", "request": "R", "overrides": {"branch": "absent"}}
     refused = client.post("/api/factory/tasks", json=body)
 
     assert refused.status_code == 400
     assert "absent is not a local branch" in refused.text
-    refused = client.post("/api/factory/tasks", json={**body, "overrides": {"target_branch": "elsewhere"}})
-    assert refused.status_code == 400
-    assert "the target branch elsewhere is not a local branch" in refused.text
     assert host.sent("POST", "/sessions") == []
     assert not (tmp_path / "worktrees").exists()
-    assert client.post("/api/factory/tasks", json={**body, "overrides": {"source_branch": "a..b"}}).status_code == 422
-
-
-def test_a_checkout_task_ignores_the_branch_setting_and_names_the_checked_out_branch(client, host, registered, repo):
-    git(repo, "checkout", "-q", "-b", "side")
-
-    _start(client, registered, worktree=False, source_branch="absent", target_branch="absent")
-
-    (prompt,) = host.sent("POST", "/prompt")
-    assert json.loads(prompt["message"].removeprefix("/factory start "))["settings"]["branch"] == "side"
+    assert client.post("/api/factory/tasks", json={**body, "overrides": {"branch": "a..b"}}).status_code == 422
 
 
 def test_tasks_are_listed_with_their_state_from_one_pi_host_listing(client, host, registered):
@@ -503,77 +380,6 @@ def test_tasks_are_listed_with_their_state_from_one_pi_host_listing(client, host
     assert one == tasks[1]
     assert client.get("/api/factory/tasks", params={"repo": "/absent"}).status_code == 404
     assert client.get("/api/factory/tasks/absent000").status_code == 404
-
-
-def test_one_task_at_a_time_works_in_the_checkout(client, host, registered, repo):
-    task = _start(client, registered, worktree=False)
-    assert (task["worktree"], task["branch"]) == (None, None)
-    assert host.sent("POST", "/sessions")[0]["cwd"] == str(repo)
-
-    body = {"repo": registered, "title": "Second", "request": "More", "overrides": {"worktree": False}}
-    busy = client.post("/api/factory/tasks", json=body)
-    assert busy.status_code == 409
-    assert "already has a task" in busy.json()["detail"]
-    _start(client, registered)
-
-    host.set_state(task["session_id"], "done")
-    assert client.post("/api/factory/tasks", json=body).status_code == 200
-
-
-def test_a_start_in_the_checkout_is_refused_while_another_worker_starts_one_there(client, host, registered, postgres_pool):
-    body = {"repo": registered, "title": "Second", "request": "More", "overrides": {"worktree": False}}
-
-    with postgres_pool.connection() as other_worker:
-        other_worker.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"factory-checkout:{registered}",))
-        busy = client.post("/api/factory/tasks", json=body)
-        reached_pi_host = list(host.requests)
-        _start(client, registered)
-
-    assert busy.status_code == 409
-    assert "Another task is starting" in busy.json()["detail"]
-    assert reached_pi_host == []
-    assert client.post("/api/factory/tasks", json=body).status_code == 200
-    assert client.post("/api/factory/tasks", json=body).status_code == 409
-
-
-@pytest.mark.parametrize("state", ["running", "merging", "waiting_approve"])
-def test_a_retry_and_a_message_in_the_checkout_are_refused_while_another_task_works_there(client, host, registered, state):
-    first = _start(client, registered, worktree=False)
-    host.set_state(first["session_id"], "cancelled")
-    second = _start(client, registered, worktree=False)
-    host.set_state(second["session_id"], state)
-    host.requests.clear()
-
-    retry = client.post(f"/api/factory/tasks/{first['id']}/retry")
-    message = client.post(f"/api/factory/tasks/{first['id']}/messages", json={"text": "Once more"})
-
-    assert (retry.status_code, message.status_code) == (409, 409)
-    assert "already has a task" in retry.json()["detail"]
-    assert host.sent("POST", "/prompt") == []
-    assert client.post(f"/api/factory/tasks/{first['id']}/cancel").status_code == 200
-    # The extension drops a message to a merging task: it is refused before it reaches pi-host.
-    expected = 409 if state == "merging" else 200
-    assert client.post(f"/api/factory/tasks/{second['id']}/messages", json={"text": "Go on"}).status_code == expected
-
-
-def test_a_retry_and_a_message_in_the_checkout_go_through_beside_tasks_at_rest(client, host, registered, postgres_pool):
-    first = _start(client, registered, worktree=False)
-    host.set_state(first["session_id"], "cancelled")
-    second = _start(client, registered, worktree=False)
-    host.set_state(second["session_id"], "blocked")
-    host.requests.clear()
-
-    assert client.post(f"/api/factory/tasks/{first['id']}/retry").status_code == 200
-    assert client.post(f"/api/factory/tasks/{first['id']}/messages", json={"text": "Once more"}).status_code == 200
-    assert host.sent("POST", "/prompt") == [
-        {"message": "/factory retry"},
-        {"message": "Once more", "streamingBehavior": "followUp"},
-    ]
-
-    with postgres_pool.connection() as other_worker:
-        other_worker.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"factory-checkout:{registered}",))
-        assert client.post(f"/api/factory/tasks/{first['id']}/retry").status_code == 409
-        assert client.post(f"/api/factory/tasks/{first['id']}/approve").status_code == 200
 
 
 def test_a_start_the_session_does_not_take_fails_and_leaves_nothing(client, host, registered, repo, tmp_path):
@@ -614,7 +420,7 @@ def test_a_start_fails_for_an_unknown_repo_and_a_failing_workspace(client, host,
     assert _branches(repo) == ["main"]
 
 
-def test_the_diff_of_a_worktree_task_is_measured_from_the_main_branch(client, host, registered, repo):
+def test_the_diff_of_a_task_is_measured_from_the_branch_it_merges_into(client, host, registered, repo):
     task = _start(client, registered)
     worktree = Path(task["worktree"])
     (worktree / "readme.md").write_text("hello\n")
@@ -634,81 +440,6 @@ def test_the_diff_of_a_worktree_task_is_measured_from_the_main_branch(client, ho
     assert host.sent("GET", "/entries") == [{"customType": "factory-"}]
     assert git(worktree, "diff", "--cached", "--name-only") == ""
     assert git(worktree, "ls-files", "--others", "--exclude-standard") == "new.txt"
-
-
-def test_the_diff_of_a_task_with_its_own_source_leaves_out_the_sources_commits(client, host, registered, repo):
-    git(repo, "checkout", "-q", "-b", "feature")
-    (repo / "feature.txt").write_text("feature\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "feature")
-    git(repo, "checkout", "-q", "main")
-    (repo / "other.txt").write_text("other\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "other")
-    task = _start(client, registered, source_branch="feature", target_branch="main")
-    worktree = Path(task["worktree"])
-    (worktree / "mine.txt").write_text("mine\n")
-
-    before_rebase = client.get(f"/api/factory/tasks/{task['id']}/diff").json()
-    assert before_rebase["base"] == git(repo, "rev-parse", "feature")
-    assert "b/mine.txt" in before_rebase["diff"] and "feature.txt" not in before_rebase["diff"]
-
-    # As the extension's rebase leaves it: the branch on the upstream (main and feature merged), the upstream recorded.
-    tree = git(repo, "merge-tree", "--write-tree", "main", "feature")
-    upstream = git(repo, "commit-tree", tree, "-p", "main", "-p", "feature", "-m", "Merge branch 'feature' into main")
-    git(repo, "update-ref", f"refs/factory-upstream/{task['branch']}/base", upstream)
-    git(worktree, "merge", "-q", "--ff-only", upstream)
-
-    after_rebase = client.get(f"/api/factory/tasks/{task['id']}/diff").json()
-    assert after_rebase["base"] == upstream
-    assert "b/mine.txt" in after_rebase["diff"]
-    assert "feature.txt" not in after_rebase["diff"] and "other.txt" not in after_rebase["diff"]
-
-
-def test_the_diff_of_a_checkout_task_leaves_out_what_the_user_had_not_committed(client, host, registered, repo):
-    (repo / "readme.md").write_text("hi\nmine\n")
-    (repo / "draft.txt").write_text("draft\n")
-    task = _start(client, registered, worktree=False)
-    base = host.entries[task["session_id"]][0]["data"]["baseTree"]
-
-    assert client.get(f"/api/factory/tasks/{task['id']}/diff").json() == {"base": base, "diff": ""}
-
-    (repo / "readme.md").write_text("hi\nmine\ntask\n")
-    (repo / "new.txt").write_text("fresh\n")
-    diff = client.get(f"/api/factory/tasks/{task['id']}/diff").json()["diff"]
-
-    assert " mine\n+task\n" in diff
-    assert "+mine" not in diff
-    assert "draft.txt" not in diff
-    assert "--- /dev/null\n+++ b/new.txt" in diff
-    assert git(repo, "diff", "--cached", "--name-only") == ""
-
-    git(repo, "add", "new.txt")
-    git(repo, "commit", "-q", "-m", "Rename the sidebar!")
-    merged = git(repo, "rev-parse", "HEAD")
-    host.record(task["session_id"], "factory-merge", {"ok": True, "kind": "commit", "commit": merged, "error": ""})
-    assert client.get(f"/api/factory/tasks/{task['id']}/diff").json()["base"] == merged
-
-
-def test_the_diff_of_a_checkout_task_follows_its_merges(client, host, registered, repo):
-    host.snapshots = False
-    task = _start(client, registered, worktree=False)
-    started_on = git(repo, "rev-parse", "HEAD")
-    (repo / "readme.md").write_text("hello\n")
-
-    first = client.get(f"/api/factory/tasks/{task['id']}/diff").json()
-    assert first["base"] == started_on
-    assert "+hello\n" in first["diff"]
-
-    git(repo, "commit", "-q", "-am", "Rename the sidebar!")
-    merged = git(repo, "rev-parse", "HEAD")
-    merge = {"ok": True, "kind": "commit", "commit": merged, "error": "", "depsSynced": False}
-    host.record(task["session_id"], "factory-merge", merge)
-    assert client.get(f"/api/factory/tasks/{task['id']}/diff").json() == {"base": merged, "diff": ""}
-
-    host.entries.pop(task["session_id"])
-    assert client.get(f"/api/factory/tasks/{task['id']}/diff").status_code == 404
-    assert client.get("/api/factory/tasks/absent000/diff").status_code == 404
 
 
 def test_commands_open_the_session_and_prompt_it(client, host, registered):
@@ -748,25 +479,6 @@ def test_opening_the_session_makes_it_live_without_a_prompt(client, host, regist
     assert client.post("/api/factory/tasks/absent000/session").status_code == 404
 
 
-def test_the_diff_base_after_a_merge_is_the_tree_the_merge_left(repo):
-    entries = [
-        {"customType": "factory-task", "data": {"baseSha": "a", "baseTree": "b", "mainBranch": "main"}},
-        {"customType": "factory-merge", "data": {"ok": True, "commit": "c", "tree": "d"}},
-    ]
-    assert factory.diff_base(repo, False, entries) == "d"
-
-
-def test_the_diff_base_of_a_run_opened_on_a_done_task_is_its_state_base(repo):
-    entries = [
-        {"customType": "factory-task", "data": {"baseSha": "a", "baseTree": "b", "mainBranch": "main"}},
-        {"customType": "factory-merge", "data": {"ok": True, "commit": "c", "tree": "d"}},
-        {"customType": "factory-state", "data": {"state": "running", "round": 2, "reason": "message", "base": "e", "head": "c"}},
-    ]
-    assert factory.diff_base(repo, False, entries) == "e"
-    later = {"customType": "factory-merge", "data": {"ok": True, "commit": "f", "tree": "g"}}
-    assert factory.diff_base(repo, False, [*entries, later]) == "g"
-
-
 def test_a_message_to_a_merging_task_is_refused(client, host, registered):
     task = _start(client, registered)
     host.set_state(task["session_id"], "merging")
@@ -776,33 +488,6 @@ def test_a_message_to_a_merging_task_is_refused(client, host, registered):
 
     assert refused.status_code == 409
     assert host.sent("POST", "/prompt") == []
-
-
-def test_delete_removes_the_refs_that_keep_the_task_trees(client, host, registered, repo):
-    task = _start(client, registered, worktree=False)
-    host.set_state(task["session_id"], "done")
-    tree = git_text(repo, "rev-parse", "HEAD^{tree}").strip()
-    commit = git_text(repo, "commit-tree", tree, "-m", "factory base").strip()
-    git_text(repo, "update-ref", f"refs/factory/{task['session_id']}/base", commit)
-    git_text(repo, "update-ref", "refs/factory/another-session/base", commit)
-
-    assert client.delete(f"/api/factory/tasks/{task['id']}").status_code == 204
-
-    assert git_text(repo, "for-each-ref", "--format=%(refname)", "refs/factory/").split() == ["refs/factory/another-session/base"]
-
-
-def test_delete_removes_the_upstream_refs_of_a_task_with_its_own_source(client, host, registered, repo):
-    git(repo, "branch", "feature")
-    task = _start(client, registered, source_branch="feature", target_branch="main")
-    host.set_state(task["session_id"], "done")
-    head = git(repo, "rev-parse", "HEAD")
-    git(repo, "update-ref", f"refs/factory-upstream/{task['branch']}/base", head)
-    git(repo, "update-ref", "refs/factory-upstream/another-task/base", head)
-
-    assert client.delete(f"/api/factory/tasks/{task['id']}").status_code == 204
-
-    remaining = git(repo, "for-each-ref", "--format=%(refname)", "refs/factory-upstream/").split()
-    assert remaining == ["refs/factory-upstream/another-task/base"]
 
 
 def test_a_message_is_queued_behind_a_running_turn(client, host, registered):
@@ -817,16 +502,13 @@ def test_a_message_is_queued_behind_a_running_turn(client, host, registered):
     assert client.post(f"/api/factory/tasks/{task['id']}/messages", json={"text": ""}).status_code == 422
 
 
-def test_an_archived_task_session_keeps_its_state_and_holds_the_checkout(client, host, registered):
-    task = _start(client, registered, worktree=False)
+def test_an_archived_task_session_keeps_its_state(client, host, registered):
+    task = _start(client, registered)
     host.sessions[task["session_id"]]["archived"] = True
 
     listed = client.get("/api/factory/tasks", params={"repo": registered}).json()
     assert listed[0]["factory"]["state"] == "running"
     assert client.get(f"/api/factory/tasks/{task['id']}").json()["factory"]["state"] == "running"
-    second = {"repo": registered, "title": "t", "request": "r", "overrides": {"worktree": False}}
-    blocked = client.post("/api/factory/tasks", json=second)
-    assert blocked.status_code == 409
     assert client.delete(f"/api/factory/tasks/{task['id']}").status_code == 409
 
 
@@ -903,16 +585,6 @@ def test_delete_answers_502_and_keeps_everything_when_the_preview_does_not_stop(
     assert task["session_id"] in host.sessions
     assert host.sent("DELETE", task["session_id"]) == []
     assert client.get(f"/api/factory/tasks/{task['id']}").status_code == 200
-
-
-def test_delete_takes_a_session_pi_host_lost_as_removed_and_keeps_the_checkout(client, host, registered, repo):
-    task = _start(client, registered, worktree=False)
-    host.sessions.pop(task["session_id"])
-
-    assert client.delete(f"/api/factory/tasks/{task['id']}").status_code == 204
-
-    assert repo.is_dir()
-    assert client.get("/api/factory/tasks", params={"repo": registered}).json() == []
 
 
 def test_logins_without_host_access_are_refused(store, host):

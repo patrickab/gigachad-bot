@@ -25,14 +25,10 @@ export interface FactorySettings {
   merge: FactoryMergeMode
   max_rounds: number
   review: boolean
-  /** True runs a task in its own worktree and branch, false in the repo's current checkout. */
-  worktree: boolean
   preview: boolean
   models: FactoryModels
-  /** Branch a worktree task starts from, null for the repo's `main`, else `master`. */
-  source_branch: string | null
-  /** Branch a worktree task is rebased onto and merges into, null for the source branch. */
-  target_branch: string | null
+  /** The branch a task's worktree starts from, is rebased onto and merges into; null for the repo's default branch. */
+  branch: string | null
 }
 
 export type FactoryTaskState = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled"
@@ -126,9 +122,8 @@ export interface FactoryEntryData {
   "factory-task": {
     title: string
     request: string
-    /** The settings in the extension's shape: `branch` is the target branch, `sourceBranch` the source (absent on older tasks). */
-    settings: { merge: FactoryMergeMode; maxRounds: number; review: boolean; models: FactoryModels; branch: string; sourceBranch?: string }
-    worktree: boolean
+    /** The settings in the plugin's shape: `branch` is the one the task starts from and merges into. */
+    settings: { merge: FactoryMergeMode; maxRounds: number; review: boolean; models: FactoryModels; branch: string }
     branch: string
     mainBranch: string
     baseSha: string
@@ -155,17 +150,12 @@ export interface FactoryEntryData {
   }
   "factory-merge": {
     ok: boolean
-    kind: "merge" | "commit"
     commit: string
     error: string
     depsSynced: boolean
-    /** Current-checkout commit: the working tree right after it. */
-    tree?: string | null
-    /** Current-checkout commit: committed paths the user had also changed, uncommitted, before the task. */
-    mixed?: string[]
   }
   /** Written right before the merge step that cannot be undone, so a resume can tell whether it landed. */
-  "factory-merge-intent": { kind: "merge" | "commit"; commit: string; before: string }
+  "factory-merge-intent": { commit: string; before: string }
   "factory-state": {
     state: FactoryTaskState
     round: number

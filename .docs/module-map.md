@@ -134,7 +134,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
 |   |   |-- factory.py                Factory tasks: models, `FactoryStore` (`factory_tasks`, `factory_repo_settings`), settings chain, branch resolution, diff, task life over pi-host
-|   |   |-- factory_workspace.py      Task worktrees through `agent-worktree`, current-checkout rule, `factory.yaml` reader
+|   |   |-- factory_workspace.py      Task worktrees through `agent-worktree`, `factory.yaml` reader
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check

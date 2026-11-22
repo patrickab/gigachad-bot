@@ -5,10 +5,9 @@
 - Provides repos, per-repo settings, local branches, the repo's `factory.yaml` (a draft to write once) and tasks: start,
   list, read, diff, approve, retry, cancel, message, delete
 - A task's timeline is not served here: the browser reads `GET /api/pi/sessions/{id}/entries?customType=factory-`
-- Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout, an unknown branch or a source
-  branch that does not merge into the target 400, a `factory.yaml` that is no config 400, an existing
-  one, a busy checkout or a task at work 409, a workspace, git, start or preview
-  failure 502 with its message, pi-host unreachable 503, its refusals passed on
+- Failures map to HTTP: unknown repo or task 404, a path that is no primary checkout or an unknown branch 400, a
+  `factory.yaml` that is no config 400, an existing one or a task at work 409, a workspace, git, start or preview
+  failure 502 with its message, pi-host unreachable or the factory plugin missing 503, pi-host's refusals passed on
 
 Host code execution: `host_access_only`.
 """
@@ -22,7 +21,7 @@ from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
 from backend.routes.upstream import call_upstream
 from lib import factory, factory_preview, pi_host
-from lib.factory_workspace import WorkspaceBusy, WorkspaceError
+from lib.factory_workspace import WorkspaceError
 from lib.git import GitError
 from lib.postgres_pool import get_postgres_pool
 
@@ -46,11 +45,9 @@ async def _call[Result](request: Awaitable[Result]) -> Result:
         (factory.UnknownTask, 404, None),
         (factory.NotACheckout, 400, None),
         (factory.UnknownBranch, 400, None),
-        (factory.BranchConflict, 400, None),
         (factory.TaskBusy, 409, None),
         (factory.ConfigExists, 409, None),
         (factory.InvalidConfig, 400, None),
-        (WorkspaceBusy, 409, None),
         (factory.StartFailed, 502, None),
         (pi_host.FactoryPluginMissing, 503, None),
         (WorkspaceError, 502, None),
@@ -118,14 +115,13 @@ async def get_task(task_id: TaskId, store: Store) -> factory.Task:
 
 @router.get("/tasks/{task_id}/diff")
 async def get_diff(task_id: TaskId, store: Store) -> factory.TaskDiff:
-    """The task's changes as a unified diff against its diff base, untracked files included. A task in the checkout
-    starts from the working tree as it was: what the user had not committed then is not part of its diff."""
+    """The task's changes as a unified diff against its diff base, untracked files included."""
     return await _call(factory.task_diff(store, task_id))
 
 
 @router.post("/tasks/{task_id}/messages")
 async def post_message(task_id: TaskId, body: factory.NewMessage, store: Store) -> factory.Task:
-    """Hand a message to the task's coder. 409 for a task in the checkout while another task works there."""
+    """Hand a message to the task's coder. 409 while the task merges."""
     return await _call(factory.message_task(store, task_id, body.text))
 
 
@@ -137,7 +133,7 @@ async def post_session(task_id: TaskId, store: Store) -> factory.Task:
 
 @router.post("/tasks/{task_id}/{command}")
 async def post_command(task_id: TaskId, command: factory.TaskCommand, store: Store) -> factory.Task:
-    """Approve, retry or cancel the task. A retry answers 409 for a task in the checkout while another task works there."""
+    """Approve, retry or cancel the task."""
     return await _call(factory.command_task(store, task_id, command))
 
 

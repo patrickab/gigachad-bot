@@ -108,7 +108,7 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete }: {
 
 /** A start on its way, "Launching session" in Working, or refused, with its reason, in Needs you. */
 function LaunchCard({ launch }: { launch: FactoryLaunch }) {
-  const { repo, title, overrides } = launch.body
+  const { repo, title } = launch.body
   const failed = launch.error !== null
   return (
     <ElevatedContainer className="relative rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
@@ -120,8 +120,8 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
         </span>
         {failed && <span className="line-clamp-3 text-[11px] text-ink-subtle">{launch.error}</span>}
         <span className="flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint">
-          {overrides.worktree && <GitBranch aria-hidden className="h-3 w-3 shrink-0" />}
-          <span className="truncate">{overrides.worktree ? "New worktree" : "Current checkout"}</span>
+          <GitBranch aria-hidden className="h-3 w-3 shrink-0" />
+          <span className="truncate">New worktree</span>
         </span>
       </div>
       {failed && (

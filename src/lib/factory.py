@@ -1,22 +1,18 @@
 """The agent factory: tasks a Pi coding session works through in a workspace of a repo, driven by the factory extension.
 
 - Consumes `lib.pi_host` (the task's session: opened, prompted with `/factory <command>`, its `factory-` entries, its
-  removal), `lib.factory_workspace` (worktree or current checkout), `lib.factory_preview` (a deleted task's preview is
+  removal), `lib.factory_workspace` (the task's worktree), `lib.factory_preview` (a deleted task's preview is
   stopped), git for the diff, and the tables `factory_repo_settings` and `factory_tasks` (`db/schema/0017_factory_tasks.sql`)
 - Provides the repos with their settings and local branches, and a task's life: start, list, read, diff, command, message, delete
 - A repo is the absolute path of a primary git checkout, its name the folder's, for display only
 - The extension (a Pi user extension) runs the rounds, gates, review and merge inside the session. A task's state is
   the session's last `factory-state` entry, which pi-host reports as `SessionInfo.factory`: no state is stored here
-- Settings chain: the defaults of `RepoSettings`, the repo's stored settings, a task's overrides. `source_branch` and
-  `target_branch` resolve at a worktree task's start (`resolve_branches`): the worktree starts at the source branch's
-  tip, and is rebased onto and merged into the target branch
-- One task at a time works in a repo's checkout: a start, a retry and a message there take the checkout first, under a
-  lock all backend workers share (`FactoryStore.checkout_lock`)
-- pi-host failures are `lib.pi_host`'s own, workspace failures `WorkspaceError` and `WorkspaceBusy`, git failures `GitError`
+- Settings chain: the defaults of `RepoSettings`, the repo's stored settings, a task's overrides. `branch` resolves at
+  a task's start (`resolve_branch`): its worktree starts at that branch's tip, is rebased onto it and merges into it
+- pi-host failures are `lib.pi_host`'s own, workspace failures `WorkspaceError`, git failures `GitError`
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
 import contextlib
 from datetime import datetime
 import json
@@ -34,14 +30,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 import yaml
 
 from lib import factory_preview, pi_host
-from lib.factory_workspace import (
-    Workspace,
-    WorkspaceBusy,
-    WorkspaceError,
-    create_workspace,
-    ensure_checkout_free,
-    remove_workspace,
-)
+from lib.factory_workspace import Workspace, WorkspaceError, create_workspace, remove_workspace
 from lib.git import GitError, git_ok, git_text, run_git
 
 log = logging.getLogger(__name__)
@@ -55,17 +44,11 @@ ENTRY_PREFIX = "factory-"
 CONFIG_FILE = "factory.yaml"
 # A task in one of these states has its session at work while a Pi child runs it: it is not deleted.
 BUSY_STATES = ("running", "merging")
-# A task in one of these states no longer holds the checkout it worked in: another task may start there.
-FINISHED_STATES = ("done", "cancelled")
-# A task in one of these states is not at work in its checkout: another task of it takes a retry or a message.
-RESTING_STATES = (*FINISHED_STATES, "blocked")
 # How long a start may take to show its `factory-task` entry: Pi writes the file with the first coder prompt.
 START_WAIT_SECONDS = 4.0
 START_POLL_SECONDS = 0.2
 DIFF_TIMEOUT_SECONDS = 30.0
 _DIFF_OPTIONS = ("--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
-# The extension's upstream refs of a task with its own source branch: `<prefix>/<task branch>/{base,next}`.
-UPSTREAM_REFS = "refs/factory-upstream"
 _TASK_COLUMNS = "id, repo, session_id, session_path, worktree, branch, title, created_at"
 
 
@@ -86,11 +69,7 @@ class TaskBusy(RuntimeError):
 
 
 class UnknownBranch(ValueError):
-    """The task's source or target branch is not a local branch of the repo, or the repo has neither `main` nor `master`."""
-
-
-class BranchConflict(ValueError):
-    """The task's source branch does not merge cleanly into its target branch."""
+    """The task's branch is not a local branch of the repo, or the repo has no default branch, `main` or `master`."""
 
 
 class ConfigExists(RuntimeError):
@@ -127,19 +106,16 @@ class FactoryModel(BaseModel):
 class RepoSettings(FactoryModel):
     """How a repo's tasks run. `models` maps a role to a model selector (`provider/id`), a missing role uses Pi's own.
 
-    `source_branch` is the branch a worktree task starts from, None for the repo's default branch (origin's `HEAD`), else
-    `main`, else `master`. `target_branch` is the branch it is rebased onto and merges into, None for the source branch.
-    A current-checkout task ignores both.
+    `branch` is the branch a task's worktree starts from, is rebased onto and merges into: None for the repo's default
+    branch (origin's `HEAD`), else `main`, else `master`.
     """
 
     merge: Literal["auto", "review"] = "review"
     max_rounds: int = Field(default=3, ge=1, le=20)
     review: bool = False
-    worktree: bool = True
     preview: bool = False
     models: dict[Role, str] = {}
-    source_branch: BranchName | None = None
-    target_branch: BranchName | None = None
+    branch: BranchName | None = None
 
 
 class SettingsOverrides(FactoryModel):
@@ -148,11 +124,9 @@ class SettingsOverrides(FactoryModel):
     merge: Literal["auto", "review"] | None = None
     max_rounds: int | None = Field(default=None, ge=1, le=20)
     review: bool | None = None
-    worktree: bool | None = None
     preview: bool | None = None
     models: dict[Role, str] | None = None
-    source_branch: BranchName | None = None
-    target_branch: BranchName | None = None
+    branch: BranchName | None = None
 
 
 class RepoInfo(FactoryModel):
@@ -189,7 +163,8 @@ class NewMessage(FactoryModel):
 
 
 class TaskRow(FactoryModel):
-    """A task as stored. `worktree` and `branch` are None for a task that works in the repo's checkout."""
+    """A task as stored: `worktree` its folder, `branch` its own branch. Both are None for a task of an older version
+    that worked in the repo's checkout."""
 
     id: str
     repo: str
@@ -220,8 +195,7 @@ class Task(TaskRow):
 
 
 class TaskDiff(FactoryModel):
-    """The task's changes as one unified diff against `base`: a commit, or the tree of the working tree a task in the
-    checkout started on."""
+    """The task's changes as one unified diff against the commit `base`."""
 
     base: str
     diff: str
@@ -295,18 +269,6 @@ class FactoryStore:
         with self._pool.connection() as connection:
             connection.execute("DELETE FROM factory_tasks WHERE id = %s", (task_id,))
 
-    @contextlib.contextmanager
-    def checkout_lock(self, repo: str) -> Iterator[None]:
-        """Hold the checkout of *repo* until the block ends, across every backend worker. `WorkspaceBusy`, without
-        waiting, while another block holds it."""
-        with self._pool.connection() as connection:
-            # Transaction-scoped: PostgreSQL releases it when the connection goes back to the pool, however the block ends.
-            key = f"factory-checkout:{repo}"
-            (locked,) = connection.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s))", (key,)).fetchone()
-            if not locked:
-                raise WorkspaceBusy(f"Another task is starting or resuming in the checkout {repo}, try again")
-            yield
-
 
 def _task_row(row: tuple) -> TaskRow:
     return TaskRow(**dict(zip(_TASK_COLUMNS.split(", "), row, strict=True)))
@@ -315,11 +277,10 @@ def _task_row(row: tuple) -> TaskRow:
 def resolve_settings(stored: dict[str, Any], overrides: SettingsOverrides | None = None) -> RepoSettings:
     """The settings chain: defaults, the repo's *stored* settings, a task's *overrides*. `models` merge role by role.
 
-    A stored `branch` (settings saved before source and target were apart) is both branches.
+    Settings saved while a task had a source and a target branch name the one it merged into as `branch`.
     """
-    if "branch" in stored:
-        legacy = stored.get("branch")
-        stored = {"source_branch": legacy, "target_branch": legacy} | {k: v for k, v in stored.items() if k != "branch"}
+    if "branch" not in stored and (legacy := stored.get("target_branch") or stored.get("source_branch")):
+        stored = {**stored, "branch": legacy}
     merged = RepoSettings().model_dump()
     for layer in (stored, overrides.model_dump(exclude_none=True) if overrides else {}):
         merged = {**merged, **layer, "models": {**merged["models"], **layer.get("models", {})}}
@@ -333,7 +294,7 @@ def repo_info(repo: str) -> RepoInfo:
 def checkout_path(path: str) -> str:
     """The resolved *path* when it is the top of a primary git checkout, `NotACheckout` otherwise.
 
-    A linked worktree is refused: the extension would treat a task in it as a worktree task and merge into the primary's branch.
+    A linked worktree is refused: tasks get worktrees of the primary checkout.
     """
     folder = Path(path).expanduser()
     if not folder.is_absolute() or not folder.is_dir():
@@ -360,40 +321,16 @@ def _default_branch(repo: Path) -> str | None:
         return None
 
 
-def resolve_branches(repo: Path, source: str | None, target: str | None) -> tuple[str, str]:
-    """The source and target branch of a worktree task. The source: *source*, unset the repo's default branch (origin's
-    `HEAD`), else `main`, else `master`. The target: *target*, unset the source. Each must be a local branch of *repo*,
-    `UnknownBranch` otherwise."""
-    if source is None:
-        source = next((name for name in (_default_branch(repo), "main", "master") if name and _local_branch(repo, name)), None)
-        if source is None:
-            raise UnknownBranch("the repo has no default branch, main or master, set a source branch")
-    elif not _local_branch(repo, source):
-        raise UnknownBranch(f"the source branch {source} is not a local branch of {repo}")
-    if target is None:
-        target = source
-    elif not _local_branch(repo, target):
-        raise UnknownBranch(f"the target branch {target} is not a local branch of {repo}")
-    if source != target:
-        _ensure_merges(repo, source, target)
-    return source, target
-
-
-def _ensure_merges(repo: Path, source: str, target: str) -> None:
-    """`BranchConflict` unless *source* merges cleanly into *target*: a task builds on their merge (the extension's
-    upstream), which it could never build."""
-    heads = (f"refs/heads/{target}", f"refs/heads/{source}")
-    merged = run_git(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", *heads, check=False)
-    if merged.returncode == 1:
-        files = ", ".join(merged.stdout.split()[1:])
-        raise BranchConflict(f"the source branch {source} does not merge cleanly into {target}: {files}")
-    if merged.returncode != 0:
-        raise GitError(merged.stderr.strip())
-
-
-def _checked_out_branch(repo: Path) -> str:
-    """The branch a current-checkout task works on, `HEAD` when it is detached."""
-    return git_text(repo, "branch", "--show-current").strip() or "HEAD"
+def resolve_branch(repo: Path, branch: str | None) -> str:
+    """The branch a task starts from and merges into: *branch*, unset the repo's default branch (origin's `HEAD`), else
+    `main`, else `master`. It must be a local branch of *repo*, `UnknownBranch` otherwise."""
+    if branch is None:
+        branch = next((name for name in (_default_branch(repo), "main", "master") if name and _local_branch(repo, name)), None)
+        if branch is None:
+            raise UnknownBranch("the repo has no default branch, main or master, set a branch")
+    elif not _local_branch(repo, branch):
+        raise UnknownBranch(f"the branch {branch} is not a local branch of {repo}")
+    return branch
 
 
 def workspace_name(title: str, task_id: str) -> str:
@@ -402,10 +339,8 @@ def workspace_name(title: str, task_id: str) -> str:
     return f"{slug}-{task_id[:8]}"
 
 
-def start_command(title: str, request: str, settings: RepoSettings, source: str, target: str) -> str:
-    """`/factory start <json>` as the extension reads it, settings in its camelCase shape. The extension's `branch` is the
-    resolved *target* branch, the one the task is rebased onto and merges into, `sourceBranch` the one its worktree
-    started from."""
+def start_command(title: str, request: str, settings: RepoSettings, branch: str) -> str:
+    """`/factory start <json>` as the plugin reads it, settings in its camelCase shape, `branch` the resolved one."""
     task = {
         "request": request,
         "title": title,
@@ -414,8 +349,7 @@ def start_command(title: str, request: str, settings: RepoSettings, source: str,
             "maxRounds": settings.max_rounds,
             "review": settings.review,
             "models": settings.models,
-            "branch": target,
-            "sourceBranch": source,
+            "branch": branch,
         },
     }
     return f"/factory start {json.dumps(task, ensure_ascii=False)}"
@@ -431,66 +365,24 @@ def _entry_data(entries: list[dict[str, Any]], custom_type: str) -> list[dict[st
     return [entry.get("data") or {} for entry in entries if entry.get("customType") == custom_type]
 
 
-def _worktree_base(workspace: Path, task: dict[str, Any]) -> str:
-    """Where a worktree task's own change starts, as the extension's `taskBase` tells it."""
-    source = (task.get("settings") or {}).get("sourceBranch")
-    if not source or source == task["mainBranch"]:
-        return git_text(workspace, "merge-base", "HEAD", task["mainBranch"]).strip()
-    for name in ("next", "base"):
-        ref = f"{UPSTREAM_REFS}/{task['branch']}/{name}"
-        if git_ok(workspace, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") and git_ok(
-            workspace, "merge-base", "--is-ancestor", ref, "HEAD"
-        ):
-            return git_text(workspace, "rev-parse", f"{ref}^{{commit}}").strip()
-    base = f"{UPSTREAM_REFS}/{task['branch']}/base"
-    fallback = base if git_ok(workspace, "rev-parse", "--verify", "--quiet", base) else f"refs/heads/{source}"
-    return git_text(workspace, "merge-base", "HEAD", fallback).strip()
-
-
-def diff_base(workspace: Path, worktree: bool, entries: list[dict[str, Any]]) -> str:
-    """The commit or tree a task's changes are measured from, given its session's `factory-` *entries*.
-
-    - Worktree task: the merge base of its branch and the main branch. With a source branch that is not the main
-      branch (`settings.sourceBranch`), the extension's `taskBase`: the newest of its upstream refs the branch holds,
-      before the first rebase the merge base with the source branch
-    - Current-checkout task: whichever came last of the working tree right after a successful merge
-      (`factory-merge.tree`, else that merge's commit) and the working tree a run on the done task opened on
-      (`factory-state.base`), else the tree of the working tree it started on (`baseTree`, the user's uncommitted
-      edits included), else the commit it started on (a task older than `baseTree`)
-    """
+def diff_base(workspace: Path, entries: list[dict[str, Any]]) -> str:
+    """The commit a task's changes are measured from, given its session's `factory-` *entries*: the merge base of its
+    branch and the branch it merges into (the plugin's `taskBase`)."""
     started = _entry_data(entries, "factory-task")
     if not started:
         raise UnknownTask("The task's session has no factory-task entry")
-    task = started[-1]
-    if worktree:
-        return _worktree_base(workspace, task)
-    bases = []
-    for entry in entries:
-        data = entry.get("data") or {}
-        if entry.get("customType") == "factory-merge" and data.get("ok") and data.get("commit"):
-            bases.append(data.get("tree") or data["commit"])
-        elif entry.get("customType") == "factory-state" and data.get("base"):
-            bases.append(data["base"])
-    return bases[-1] if bases else task.get("baseTree") or task["baseSha"]
+    return git_text(workspace, "merge-base", "HEAD", started[-1]["mainBranch"]).strip()
 
 
 def workspace_diff(workspace: Path, base: str) -> str:
-    """Unified diff of *workspace* (index and work tree) against the commit or tree *base*, untracked files included.
-
-    - An untracked file *base* holds (one the user had not committed when a task in the checkout started) is compared
-      with its content there, any other untracked file is a new file
-    - Reads only: nothing is added to the index
-    """
-    in_base = set(git_text(workspace, "ls-tree", "-r", "--name-only", "-z", base, timeout=DIFF_TIMEOUT_SECONDS).split("\0"))
+    """Unified diff of *workspace* (index and work tree) against the commit *base*, untracked files included as new
+    files. Reads only: nothing is added to the index."""
+    diff = git_text(workspace, "diff", *_DIFF_OPTIONS, base, timeout=DIFF_TIMEOUT_SECONDS)
     others = git_text(workspace, "ls-files", "--others", "--exclude-standard", "-z", timeout=DIFF_TIMEOUT_SECONDS)
-    untracked = [file for file in others.split("\0") if file]
-    # Git compares *base* with the paths of the index: an untracked file of *base* would show as deleted.
-    left_out = [f":(exclude,literal){file}" for file in untracked if file in in_base]
-    diff = git_text(workspace, "diff", *_DIFF_OPTIONS, base, "--", ".", *left_out, timeout=DIFF_TIMEOUT_SECONDS)
-    for file in untracked:
-        sides = (f"{base}:{file}", "--", file) if file in in_base else ("--no-index", "--", "/dev/null", file)
+    for file in filter(None, others.split("\0")):
         # `--no-index` exits 1 when the files differ, which a new file always does.
-        changed = run_git(workspace, "diff", *_DIFF_OPTIONS, *sides, timeout=DIFF_TIMEOUT_SECONDS, check=False)
+        new_file = ("diff", *_DIFF_OPTIONS, "--no-index", "--", "/dev/null", file)
+        changed = run_git(workspace, *new_file, timeout=DIFF_TIMEOUT_SECONDS, check=False)
         if changed.returncode > 1:
             raise GitError(changed.stderr.strip())
         diff += changed.stdout
@@ -606,37 +498,6 @@ async def read_task(store: FactoryStore, task_id: str) -> Task:
     return _with_session(row, await _session_of(row))
 
 
-async def _ensure_checkout_free(store: FactoryStore, repo: str, at_rest: tuple[str, ...], apart_from: str | None) -> None:
-    """`WorkspaceBusy` while a task that works in the checkout of *repo*, other than the task *apart_from*, is in none
-    of the states *at_rest*."""
-    rows = [row for row in await asyncio.to_thread(store.tasks, repo) if row.worktree is None and row.id != apart_from]
-    if not rows:
-        return
-    sessions = await _sessions_of(rows, repo)
-
-    def holds_checkout(row: TaskRow) -> bool:
-        # A session pi-host no longer knows cannot work. One without a state yet has just started.
-        session = sessions.get(row.session_id)
-        return session is not None and (session.factory is None or session.factory.state not in at_rest)
-
-    await asyncio.to_thread(ensure_checkout_free, Path(repo), [Path(row.cwd) for row in rows if holds_checkout(row)])
-
-
-@contextlib.asynccontextmanager
-async def _checkout_taken(
-    store: FactoryStore, repo: str, at_rest: tuple[str, ...], apart_from: str | None = None
-) -> AsyncIterator[None]:
-    """Take the checkout of *repo* for a task about to work in it: the lock, held until the block ends, then the check
-    that no other task works there (`_ensure_checkout_free`). `WorkspaceBusy` when either says no."""
-    lock = store.checkout_lock(repo)
-    await asyncio.to_thread(lock.__enter__)
-    try:
-        await _ensure_checkout_free(store, repo, at_rest, apart_from)
-        yield
-    finally:
-        await asyncio.to_thread(lock.__exit__, None, None, None)
-
-
 async def _started(session_id: str) -> bool:
     """Whether the session shows a `factory-task` entry within `START_WAIT_SECONDS`. A new session has no file at first."""
     deadline = asyncio.get_running_loop().time() + START_WAIT_SECONDS
@@ -667,51 +528,42 @@ async def _discard(session_id: str | None, workspace: Workspace) -> None:
 
 
 async def create_task(store: FactoryStore, new_task: NewTask) -> Task:
-    """Start a task of a registered repo: its workspace, a coding session in it, `/factory start`, then its row.
+    """Start a task of a registered repo: its worktree, a coding session in it, `/factory start`, then its row.
 
-    - A task in the checkout itself takes the checkout from the check to its row (`WorkspaceBusy`): a second start
-      there sees either the lock or the row
-    - A worktree task starts at the tip of its resolved source branch and merges into its target branch
-      (`UnknownBranch`), a task in the checkout ignores both and names the checked-out branch in its start
+    - The worktree starts at the tip of the resolved branch (`UnknownBranch`), which the task also merges into
     - `StartFailed` when the session shows no `factory-task` entry. Any failure after the workspace exists removes
       the session and the workspace again
     """
     settings = resolve_settings(await asyncio.to_thread(store.repo_settings, new_task.repo), new_task.overrides)
     repo = Path(new_task.repo)
-    async with contextlib.AsyncExitStack() as held:
-        if settings.worktree:
-            source, target = await asyncio.to_thread(resolve_branches, repo, settings.source_branch, settings.target_branch)
-        else:
-            await held.enter_async_context(_checkout_taken(store, new_task.repo, FINISHED_STATES))
-            source = target = await asyncio.to_thread(_checked_out_branch, repo)
-        task_id = uuid4().hex
-        name = workspace_name(new_task.title, task_id)
-        workspace = await asyncio.to_thread(create_workspace, repo, name, settings.worktree, source)
-        session_id: str | None = None
-        try:
-            session = await pi_host.open_session(str(workspace.path), None)
-            session_id = session.session_id
-            command = start_command(new_task.title, new_task.request, settings, source, target)
-            disposition = await pi_host.prompt_session(session_id, command)
-            if not await _started(session_id):
-                raise StartFailed(
-                    f"The session did not start the task (Pi answered {disposition!r}, no factory-task entry): the factory"
-                    " plugin refused the start (not a git repository, an unknown model) or is not loaded."
-                    f" {pi_host.FACTORY_PLUGIN_HINT}"
-                )
-            row = await asyncio.to_thread(
-                store.insert_task,
-                task_id=task_id,
-                repo=new_task.repo,
-                session_id=session_id,
-                session_path=session.session_path,
-                worktree=str(workspace.path) if workspace.worktree else None,
-                branch=workspace.branch,
-                title=new_task.title,
+    branch = await asyncio.to_thread(resolve_branch, repo, settings.branch)
+    task_id = uuid4().hex
+    workspace = await asyncio.to_thread(create_workspace, repo, workspace_name(new_task.title, task_id), branch)
+    session_id: str | None = None
+    try:
+        session = await pi_host.open_session(str(workspace.path), None)
+        session_id = session.session_id
+        command = start_command(new_task.title, new_task.request, settings, branch)
+        disposition = await pi_host.prompt_session(session_id, command)
+        if not await _started(session_id):
+            raise StartFailed(
+                f"The session did not start the task (Pi answered {disposition!r}, no factory-task entry): the factory"
+                " plugin refused the start (not a git repository, an unknown model) or is not loaded."
+                f" {pi_host.FACTORY_PLUGIN_HINT}"
             )
-        except BaseException:
-            await _discard(session_id, workspace)
-            raise
+        row = await asyncio.to_thread(
+            store.insert_task,
+            task_id=task_id,
+            repo=new_task.repo,
+            session_id=session_id,
+            session_path=session.session_path,
+            worktree=str(workspace.path) if workspace.worktree else None,
+            branch=workspace.branch,
+            title=new_task.title,
+        )
+    except BaseException:
+        await _discard(session_id, workspace)
+        raise
     return _with_session(row, await _session_of(row))
 
 
@@ -720,20 +572,11 @@ async def _prompt(
     task_id: str,
     message: str,
     streaming_behavior: Literal["followUp"] | None = None,
-    *,
-    starts_rounds: bool,
 ) -> Task:
-    """Send *message* to the task's session, opened first when it is not live.
-
-    A message that *starts_rounds* in the repo's checkout takes the checkout first: `WorkspaceBusy` while another task
-    of it is running, merging or waiting for its approval.
-    """
+    """Send *message* to the task's session, opened first when it is not live."""
     row = await asyncio.to_thread(store.task, task_id)
-    async with contextlib.AsyncExitStack() as held:
-        if starts_rounds and row.worktree is None:
-            await held.enter_async_context(_checkout_taken(store, row.repo, RESTING_STATES, apart_from=row.id))
-        session = await pi_host.open_session(row.cwd, pi_host.ResumeById(session_id=row.session_id))
-        await pi_host.prompt_session(row.session_id, message, streaming_behavior)
+    session = await pi_host.open_session(row.cwd, pi_host.ResumeById(session_id=row.session_id))
+    await pi_host.prompt_session(row.session_id, message, streaming_behavior)
     return _with_session(row, session)
 
 
@@ -745,7 +588,7 @@ async def open_task_session(store: FactoryStore, task_id: str) -> Task:
 
 async def command_task(store: FactoryStore, task_id: str, command: TaskCommand) -> Task:
     """Approve, retry or cancel the task. The answer is the task as it was just before: its new state follows in the session."""
-    return await _prompt(store, task_id, f"/factory {command}", starts_rounds=command == "retry")
+    return await _prompt(store, task_id, f"/factory {command}")
 
 
 async def message_task(store: FactoryStore, task_id: str, text: str) -> Task:
@@ -757,20 +600,19 @@ async def message_task(store: FactoryStore, task_id: str, text: str) -> Task:
     session = await _session_of(row)
     if session is not None and session.factory is not None and session.factory.state == "merging":
         raise TaskBusy("The task is merging, send the message when it has ended")
-    return await _prompt(store, task_id, text, "followUp", starts_rounds=True)
+    return await _prompt(store, task_id, text, "followUp")
 
 
 async def task_diff(store: FactoryStore, task_id: str) -> TaskDiff:
     """The task's changes against its diff base. `UnknownTask` when its session has no `factory-task` entry."""
     row = await asyncio.to_thread(store.task, task_id)
     entries = (await pi_host.session_entries(row.session_id, custom_type=ENTRY_PREFIX)).entries
-    base = await asyncio.to_thread(diff_base, Path(row.cwd), row.worktree is not None, entries)
+    base = await asyncio.to_thread(diff_base, Path(row.cwd), entries)
     return TaskDiff(base=base, diff=await asyncio.to_thread(workspace_diff, Path(row.cwd), base))
 
 
 async def delete_task(store: FactoryStore, task_id: str) -> None:
-    """Remove the task for good: its preview, its session, its reviewer sessions, its worktree and branch, the refs that
-    keep its snapshot trees (`refs/factory/<session id>/`) and its upstreams (`refs/factory-upstream/<branch>/`), its row.
+    """Remove the task for good: its preview, its session, its reviewer sessions, its worktree and branch, its row.
 
     `TaskBusy` while it is running or merging in a live session: an interrupted one (no Pi child) is removed. A session
     pi-host no longer knows is taken as removed. `factory_preview.PreviewError` when the preview does not stop: then
@@ -788,12 +630,4 @@ async def delete_task(store: FactoryStore, task_id: str) -> None:
             raise
     await asyncio.to_thread(shutil.rmtree, reviews_directory(row.session_id), True)
     await asyncio.to_thread(remove_workspace, row.workspace)
-    await asyncio.to_thread(_delete_task_refs, Path(row.repo), row.session_id, row.branch)
     await asyncio.to_thread(store.delete_task, task_id)
-
-
-def _delete_task_refs(repo: Path, session_id: str, branch: str | None) -> None:
-    prefixes = [f"refs/factory/{session_id}/", *([f"{UPSTREAM_REFS}/{branch}/"] if branch else [])]
-    refs = git_text(repo, "for-each-ref", "--format=%(refname)", *prefixes).split()
-    for ref in refs:
-        git_text(repo, "update-ref", "-d", ref)

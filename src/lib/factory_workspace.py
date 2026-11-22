@@ -1,16 +1,13 @@
-"""Where a factory task works: a fresh worktree of its repo or the current checkout, and the repo's `factory.yaml`.
+"""Where a factory task works: a fresh worktree of its repo, and the repo's `factory.yaml`.
 
-- A worktree task gets branch `<name>` in `<root>/<name>` from `agent-worktree`: an overlay venv on the main checkout's
+- A task gets branch `<name>` in `<root>/<name>` from `agent-worktree`: an overlay venv on the main checkout's
   `.venv`, and copy-on-write `node_modules` that arrive in the background. `hooks.after_create` then run in it
 - The root is `GIGACHAD_FACTORY_WORKTREES`, default `~/git/worktrees/<repo name>/factory`
-- A current-checkout task works in the repo itself, on the branch checked out there. Nothing is made, nothing is ever removed.
-  One such task per checkout at a time: `ensure_checkout_free` is the rule, the caller knows the tasks that are not done
 - `factory.yaml` is read from the repo: hooks and gates are argv lists with `{repo_path}` filled in as the main checkout
   (the repo, or the checkout it is a linked worktree of). `preview` is passed on as written, placeholders included
 - Every function blocks on subprocesses: call them with `asyncio.to_thread`
 """
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -35,10 +32,6 @@ OUTPUT_TAIL_CHARACTERS = 2000
 
 class WorkspaceError(RuntimeError):
     """A workspace command failed (the message names it and ends with its output tail), or `factory.yaml` is invalid."""
-
-
-class WorkspaceBusy(RuntimeError):
-    """The checkout already has a current-checkout task that is not done."""
 
 
 class ConfigModel(BaseModel):
@@ -68,7 +61,8 @@ class FactoryConfig(ConfigModel):
 
 @dataclass(frozen=True)
 class Workspace:
-    """The directory a task works in. `branch` is the task's own branch, None in the current checkout."""
+    """The directory a task works in and its own branch. `worktree` is False for a task of an older version that worked
+    in the repo's checkout: nothing of it is ever removed."""
 
     path: Path
     branch: str | None
@@ -138,14 +132,12 @@ def _worktree_root(primary: Path) -> Path:
     return Path(override).expanduser() if override else Path.home() / "git" / "worktrees" / primary.name / "factory"
 
 
-def create_workspace(repo: Path, name: str, worktree: bool, base: str) -> Workspace:
+def create_workspace(repo: Path, name: str, base: str) -> Workspace:
     """The workspace of a new task of *repo*: branch and worktree *name* from the tip of the local branch *base* with
-    `hooks.after_create` run, else *repo* itself (*base* unused). Nothing uncommitted in *repo* enters a worktree.
+    `hooks.after_create` run. Nothing uncommitted in *repo* enters it.
 
     A failing hook removes the worktree and its branch again. A name that is taken (branch or directory) is refused.
     """
-    if not worktree:
-        return Workspace(path=repo, branch=None, worktree=False)
     config = load_factory_config(repo)
     target = _worktree_root(_primary_checkout(repo)) / name
     create = ["agent-worktree", "create", name, "--base", base, "--path", str(target), "--background"]
@@ -161,7 +153,7 @@ def create_workspace(repo: Path, name: str, worktree: bool, base: str) -> Worksp
 
 
 def remove_workspace(workspace: Workspace) -> None:
-    """Remove a task's worktree and branch, uncommitted work included. The current checkout is never removed.
+    """Remove a task's worktree and branch, uncommitted work included. The repo's main checkout is never removed.
 
     A worktree whose directory is already gone is left as it is: its branch, if it still exists, stays.
     """
@@ -169,10 +161,3 @@ def remove_workspace(workspace: Workspace) -> None:
         return
     primary = _primary_checkout(workspace.path)
     _run(["agent-worktree", "remove", str(workspace.path), "--force", "--delete-branch"], primary, REMOVE_TIMEOUT_SECONDS)
-
-
-def ensure_checkout_free(repo: Path, active: Iterable[Path]) -> None:
-    """Raise WorkspaceBusy when *repo* is among *active*, the workspace paths of the tasks that are not done."""
-    checkout = repo.resolve()
-    if any(path.resolve() == checkout for path in active):
-        raise WorkspaceBusy(f"{repo} already has a task working in the checkout")

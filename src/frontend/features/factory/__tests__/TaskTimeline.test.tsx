@@ -92,7 +92,7 @@ describe("TaskTimeline", () => {
   it("shows the merge result in the newest round", () => {
     const merged = [
       ...ENTRIES,
-      { id: "e11", timestamp: "", customType: "factory-merge", data: { ok: false, kind: "merge", commit: "", error: "rebase conflict", depsSynced: false } },
+      { id: "e11", timestamp: "", customType: "factory-merge", data: { ok: false, commit: "", error: "rebase conflict", depsSynced: false } },
     ] as unknown as FactoryEntry[]
     const second = within(render(<TaskTimeline entries={merged} error="" />).getByLabelText("Round 2"))
 

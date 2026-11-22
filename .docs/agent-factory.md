@@ -35,14 +35,14 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 
 ## Lifecycle
 
-1. **Start**: a worktree (`agent-worktree`, branch `<title-slug>-<id8>`) off the source branch, or the current checkout.
-   The session opens there and gets `/factory start`.
+1. **Start**: a worktree (`agent-worktree`, branch `<title-slug>-<id8>`) off the task's branch, which it also merges
+   into. The session opens there and gets `/factory start`. A task never runs in the repo's main checkout.
 2. **Rounds**: coder turn → `hooks.after_code` → `gates` → protected-path check → review (when on, off by default).
    A problem goes back to the coder as feedback and opens the next round, up to `maxRounds`. The tests run only after
    that, in the merge queue: a round the reviewer rejects costs no test run.
 3. **Pass**: `merge: auto` merges, `merge: review` waits for approve.
-4. **Merge** (worktree task): the merge queue below. Current-checkout task: one commit of the task's paths onto `HEAD`.
-5. **End**: `done` (merged, committed, or `no_changes` when the diff is empty), else `blocked` with a reason.
+4. **Merge**: the merge queue below.
+5. **End**: `done` (merged, or `no_changes` when the diff is empty), else `blocked` with a reason.
 
 - States: `running`, `waiting_approve`, `merging`, `done`, `blocked`, `cancelled`.
 - Commands: `approve` (from `waiting_approve`), `retry` (from `blocked`/`cancelled`, a fresh round budget), `cancel`.
@@ -95,7 +95,6 @@ One per repository, shared by every task's session through ticket files in `<git
 | `merge_failed` | the fast-forward was refused, usually uncommitted edits in the main checkout on a file the merge touches | commit or stash, retry |
 | `rebase_failed: …` | a rebase failed without a conflict (deleted branch, untracked file in the way) | fix, retry |
 | `review_<status>` | the reviewer gave no usable verdict | retry |
-| `protected: …` | a current-checkout task touched a protected path | restore it |
 | `pipeline_error: …` | an unexpected error | read it, retry |
 
 - Review: `blocker` and `major` findings go back to the coder, `minor` ones pass.
@@ -112,10 +111,10 @@ One per repository, shared by every task's session through ticket files in `<git
 ## Settings
 
 Per repo (`factory_repo_settings`), overridable per task: `merge` (`auto`/`review`, default `review`), `max_rounds`
-(default 3), `review` (default off), `worktree` (default on), `preview`, `models` per role (`coder`, `reviewer`),
-`source_branch`, `target_branch`. The new-task dialog shows them all at the repo's values: a model per role (the
-reviewer's only with review on), workspace, review and merge as pills, the branches. A task keeps the settings it
-started with.
+(default 3), `review` (default off), `preview`, `models` per role (`coder`, `reviewer`), `branch` (the one a task
+starts from and merges into, unset: the repo's default branch, origin's `HEAD`, else `main`, else `master`). The
+new-task dialog shows them at the repo's values: a model per role (the reviewer's only with review on), merge, review,
+the branch. A task keeps the settings it started with.
 
 ## New repo
 

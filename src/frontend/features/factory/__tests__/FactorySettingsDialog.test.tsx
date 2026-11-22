@@ -16,7 +16,7 @@ import { FactorySettingsDialog } from "@/features/factory/FactorySettingsDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, worktree: true, preview: true, models: { coder: "old-model" }, source_branch: null, target_branch: null }
+const SETTINGS: FactorySettings = { merge: "review", max_rounds: 3, review: true, preview: true, models: { coder: "old-model" }, branch: null }
 
 const CATALOG: ModelsResponse = {
   ollama: ["local-model"],
@@ -52,7 +52,6 @@ describe("FactorySettingsDialog", () => {
     fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))
     fireEvent.click(view.getByRole("switch", { name: "Review" }))
     expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
-    fireEvent.click(pill("Workspace", "Checkout"))
     fireEvent.click(view.getByRole("switch", { name: "Preview" }))
     fireEvent.click(view.getByLabelText("Model of coder"))
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
@@ -60,7 +59,7 @@ describe("FactorySettingsDialog", () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, {
-      merge: "auto", max_rounds: 5, review: false, worktree: false, preview: false, models: { reviewer: "openai-codex/fast" }, source_branch: null, target_branch: null,
+      merge: "auto", max_rounds: 5, review: false, preview: false, models: { reviewer: "openai-codex/fast" }, branch: null,
     })
   })
 
@@ -123,33 +122,31 @@ describe("FactorySettingsDialog", () => {
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledWith(REPO, { ...SETTINGS, models: {} }))
   })
 
-  it("picks the source and target branch from the repo's branches, the default saved as null", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, source_branch: "develop" })
+  it("picks the branch from the repo's branches, the default saved as null", async () => {
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "develop" })
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    const source = await view.findByLabelText("Source branch")
-    const target = view.getByLabelText("Target branch")
-    expect(source).toHaveTextContent("develop")
-    expect(target).toHaveTextContent("Default (same as source)")
+    const branch = await view.findByLabelText("Branch")
+    expect(branch).toHaveTextContent("develop")
     expect(api.listFactoryBranches).toHaveBeenCalledWith(REPO)
 
-    fireEvent.click(target)
-    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (same as source)", "develop", "feature/x", "main", "release"]))
+    fireEvent.click(branch)
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (origin HEAD)", "develop", "feature/x", "main", "release"]))
     fireEvent.click(view.getByRole("option", { name: "release" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(1))
-    expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ source_branch: "develop", target_branch: "release" })
+    expect(api.putFactorySettings.mock.calls[0][1]).toMatchObject({ branch: "release" })
 
-    fireEvent.click(source)
+    fireEvent.click(branch)
     fireEvent.click(view.getByRole("option", { name: "Default (origin HEAD)" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(api.putFactorySettings).toHaveBeenCalledTimes(2))
-    expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ source_branch: null, target_branch: "release" })
+    expect(api.putFactorySettings.mock.calls[1][1]).toMatchObject({ branch: null })
   })
 
   it("keeps a saved branch that no longer exists selectable, marked missing", async () => {
-    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, target_branch: "gone" })
+    api.getFactorySettings.mockResolvedValue({ ...SETTINGS, branch: "gone" })
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    const target = await view.findByLabelText("Target branch")
-    await waitFor(() => expect(target).toHaveTextContent("gone (missing)"))
+    const branch = await view.findByLabelText("Branch")
+    await waitFor(() => expect(branch).toHaveTextContent("gone (missing)"))
   })
 })

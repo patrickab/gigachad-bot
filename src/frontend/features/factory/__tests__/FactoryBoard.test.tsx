@@ -54,7 +54,7 @@ function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof Fact
 beforeEach(() => {
   minute = 0
   api.deleteFactoryTask.mockReset().mockResolvedValue()
-  api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, worktree: true, preview: false, models: {}, source_branch: null, target_branch: null })
+  api.getFactorySettings.mockReset().mockResolvedValue({ merge: "review", max_rounds: 3, review: true, preview: false, models: {}, branch: null })
   api.fetchModels.mockReset().mockReturnValue(new Promise(() => {}))
   api.createFactoryTask.mockReset().mockResolvedValue({})
   api.listFactoryTasks.mockReset().mockResolvedValue([])
@@ -244,13 +244,13 @@ describe("FactoryBoard", () => {
     api.createFactoryTask.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Fix" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(view.queryByLabelText("Title")).toBeNull())
-    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { worktree: true, review: true } })
+    expect(api.createFactoryTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix", request: "Fix it", overrides: { review: true } })
     const launch = within(view.getByRole("region", { name: "Working" })).getByRole("group", { name: "Fix" })
     expect(launch).toHaveTextContent("Launching session")
 
@@ -263,7 +263,7 @@ describe("FactoryBoard", () => {
     api.createFactoryTask.mockRejectedValueOnce(new Error("The checkout already has a task"))
     const { view } = renderBoard([])
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Refused" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
@@ -278,7 +278,7 @@ describe("FactoryBoard", () => {
 
     api.createFactoryTask.mockRejectedValueOnce(new Error("No"))
     fireEvent.click(view.getByRole("button", { name: "New task" }))
-    await waitFor(() => expect(within(view.getByRole("group", { name: "Workspace" })).getByRole("button", { name: "Worktree" })).toBeEnabled())
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     fireEvent.change(view.getByLabelText("Title"), { target: { value: "Dismissed" } })
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))

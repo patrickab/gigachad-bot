@@ -20,7 +20,7 @@ const gate = (id: string, round: number, exitCode: number) =>
   entry(id, "factory-gate", { round, phase: "gates", argv: ["factory/gates.sh"], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
 
 const ENTRIES: FactoryEntry[] = [
-  entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, worktree: true, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
+  entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),
   entry("e2", "factory-round", { round: 1, trigger: "start" }),
   entry("e3", "factory-state", { state: "running", round: 1, reason: "start" }),
   gate("e4", 1, 1),
@@ -30,7 +30,7 @@ const ENTRIES: FactoryEntry[] = [
   entry("e8", "factory-review", { round: 2, status: "ok", approved: true, findings: [], model: "haiku", sessionFile: "/r.jsonl", usage: USAGE, wallMs: 4000 }),
   entry("e9", "factory-state", { state: "waiting_approve", round: 2, reason: "approved" }),
   entry("e10", "factory-state", { state: "merging", round: 2, reason: "approved" }),
-  entry("e11", "factory-merge", { ok: true, kind: "merge", commit: "0123456789abcdef", error: "", depsSynced: false }),
+  entry("e11", "factory-merge", { ok: true, commit: "0123456789abcdef", error: "", depsSynced: false }),
   entry("e12", "factory-state", { state: "done", round: 2, reason: "merged" }),
 ]
 

@@ -40,8 +40,7 @@ export function branchOrDefault(branch: string | null): string | null {
 }
 
 /** What an unset branch falls back to, named by the first option of its select. */
-export const SOURCE_BRANCH_DEFAULT = "origin HEAD"
-export const TARGET_BRANCH_DEFAULT = "same as source"
+export const BRANCH_DEFAULT = "origin HEAD"
 
 /**
  * Options of a branch select: `fallback` for no branch (the value ""), then `branches`. A `value` that is not among
@@ -74,8 +73,7 @@ function withoutEmpty(settings: FactorySettings): FactorySettings {
   return {
     ...settings,
     models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")),
-    source_branch: branchOrDefault(settings.source_branch),
-    target_branch: branchOrDefault(settings.target_branch),
+    branch: branchOrDefault(settings.branch),
   }
 }
 
@@ -112,9 +110,7 @@ export function SwitchChoice({ label, checked, disabled, onChange }: { label: st
   )
 }
 
-export const WORKSPACE_OPTIONS = [{ value: "worktree", label: "Worktree" }, { value: "checkout", label: "Checkout" }] as const
-
-/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, source and target branch, review, worktree, preview and a model per agent. */
+/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, branch, review, preview and a model per agent. */
 export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
   const [draft, setDraft] = useState<FactorySettings | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
@@ -183,25 +179,17 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
               })}
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-              <PillChoice label="Workspace" options={WORKSPACE_OPTIONS} value={draft.worktree ? "worktree" : "checkout"} onChange={(workspace) => change({ worktree: workspace === "worktree" })} />
-              <SwitchChoice label="Review" checked={draft.review} onChange={(review) => change({ review })} />
               <PillChoice label="Merge" options={MERGE_OPTIONS} value={draft.merge} onChange={(merge) => change({ merge })} />
+              <SwitchChoice label="Review" checked={draft.review} onChange={(review) => change({ review })} />
               <SwitchChoice label="Preview" checked={draft.preview} onChange={(preview) => change({ preview })} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <BranchSelect
-                label="Source branch"
-                value={draft.source_branch ?? ""}
-                fallback={`Default (${SOURCE_BRANCH_DEFAULT})`}
+                label="Branch"
+                value={draft.branch ?? ""}
+                fallback={`Default (${BRANCH_DEFAULT})`}
                 branches={branches}
-                onChange={(source_branch) => change({ source_branch })}
-              />
-              <BranchSelect
-                label="Target branch"
-                value={draft.target_branch ?? ""}
-                fallback={`Default (${TARGET_BRANCH_DEFAULT})`}
-                branches={branches}
-                onChange={(target_branch) => change({ target_branch })}
+                onChange={(branch) => change({ branch })}
               />
               <Field label="Max rounds">
                 <input

@@ -125,12 +125,12 @@ function ReviewStep({ review, current }: { review: FactoryEntryData["factory-rev
   )
 }
 
-/** The merge or commit: the commit it made, or its error behind a disclosure. */
+/** The merge: the commit it made, or its error behind a disclosure. */
 function MergeStep({ merge }: { merge: FactoryEntryData["factory-merge"] }) {
   return (
     <li>
       <div className={ROW_CLASS}>
-        <span className={KIND_CLASS}>{merge.kind}</span>
+        <span className={KIND_CLASS}>merge</span>
         <code className="min-w-0 flex-1 truncate font-mono text-ink-muted">{merge.ok ? merge.commit.slice(0, 8) : ""}</code>
         <Verdict ok={merge.ok}>{merge.ok ? "done" : "failed"}</Verdict>
       </div>
