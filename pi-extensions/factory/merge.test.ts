@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROTECTED, protectedPaths, type FactoryConfig } from "./config.ts";
 import { abortLeftoverRebase, diffBase, taskDiff, taskGit } from "./git.ts";
-import { mergeTask, type MergeInput } from "./merge.ts";
+import { MERGE_ATTEMPTS, mergeTask, type MergeInput } from "./merge.ts";
 import { runRound, type PipelineSteps } from "./pipeline.ts";
 import { CommandRunner, type Exec } from "./run.ts";
 import type { Settings, Snapshot, Task } from "./state.ts";
@@ -259,19 +259,37 @@ describe("mergeTask, worktree task", () => {
     expect(outcome.gates).toMatchObject([{ phase: "after_merge", exitCode: 1, outputTail: "no network\n" }]);
   });
 
-  test("refuses when the main branch moved after the rebase: no fast-forward, main untouched", async () => {
+  test("rebases again and merges when the main branch moved during the merge gates", async () => {
+    const worktree = addWorktree("task-f2");
+    const task = await taskIn(worktree);
+    gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "earlier");
+    writeFileSync(join(worktree, "feature.txt"), "feature\n");
+    // The merge gate plays a second task that merges while this one's first gates run, once.
+    const marker = join(worktree, "..", "raced-once");
+    const race = `test -e ${marker} || { touch ${marker}; git -C ${repo} commit --quiet --allow-empty -m raced; }`;
+    const config: FactoryConfig = { ...noGates, gates: [["sh", "-c", race]] };
+
+    const outcome = await mergeTask(input(worktree, task, config, 1));
+
+    expect(outcome.merge).toMatchObject({ ok: true, kind: "merge", commit: gitIn(repo, "rev-parse", "main") });
+    expect(outcome.gates.map((gate) => gate.phase)).toEqual(["merge_gates", "merge_gates"]);
+    expect(gitIn(repo, "log", "--format=%s")).toBe(`${task.title}\nraced\nearlier\nbase`);
+  });
+
+  test("refuses when the main branch keeps moving through every merge attempt: no fast-forward, main untouched", async () => {
     const worktree = addWorktree("task-f");
     const task = await taskIn(worktree);
     gitIn(repo, "commit", "--quiet", "--allow-empty", "-m", "earlier");
     writeFileSync(join(worktree, "feature.txt"), "feature\n");
-    // The merge gate plays a second task that merges while this one's gates run.
+    // The merge gate plays a second task that merges while this one's gates run, every time.
     const config: FactoryConfig = { ...noGates, gates: [["git", "-C", repo, "commit", "--quiet", "--allow-empty", "-m", "raced"]] };
 
     const outcome = await mergeTask(input(worktree, task, config, 1));
 
     expect(outcome.merge).toMatchObject({ ok: false, kind: "merge", commit: null, depsSynced: false });
-    expect(outcome.merge.error).toContain("update of main refused");
-    expect(gitIn(repo, "log", "--format=%s")).toBe("raced\nearlier\nbase");
+    expect(outcome.merge.error).toContain("update of main refused: main moved past the task's base");
+    expect(outcome.gates).toHaveLength(MERGE_ATTEMPTS);
+    expect(gitIn(repo, "log", "--format=%s")).toBe(`${"raced\n".repeat(MERGE_ATTEMPTS)}earlier\nbase`);
     expect(existsSync(join(repo, "feature.txt"))).toBe(false);
   });
 

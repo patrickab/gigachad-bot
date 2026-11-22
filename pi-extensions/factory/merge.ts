@@ -34,13 +34,19 @@ const LOCK_WAIT_MS = 60_000;
 /** `flock -n -E` exit code of a lock someone else holds. */
 const LOCK_BUSY_EXIT = 75;
 const AFTER_MERGE_TIMEOUT_MS = 10 * 60_000;
+/** Exit code of `MOVE_TARGET_SCRIPT` when the main branch moved past the task's base: rebase again and retry. */
+const TARGET_MOVED_EXIT = 4;
+/** How often a merge rebases again after the main branch moved during its merge gates. */
+export const MERGE_ATTEMPTS = 3;
 /**
  * Moves the main branch to the task's commit in one lock holder: `$1` primary, `$2` main branch, `$3` task branch,
- * `$4` the task's commit, `$5` the main branch's commit as the merge read it. Checked out in a worktree (the primary
- * or another one, by `git worktree list`): fast-forward there. Else compare-and-swap of the ref. Prints the commit
- * before and `primary`, `checkout` (another worktree) or `ref`.
+ * `$4` the task's commit, `$5` the main branch's commit as the merge read it. A main branch that is no longer an
+ * ancestor of the task's commit (another merge landed meanwhile) exits `TARGET_MOVED_EXIT`, nothing moved. Checked
+ * out in a worktree (the primary or another one, by `git worktree list`): fast-forward there. Else compare-and-swap of
+ * the ref. Prints the commit before and `primary`, `checkout` (another worktree) or `ref`.
  */
 const MOVE_TARGET_SCRIPT =
+  `git -C "$1" merge-base --is-ancestor "refs/heads/$2" "$4" || { echo "$2 moved past the task's base" >&2; exit ${TARGET_MOVED_EXIT}; }; ` +
   'list=$(git -C "$1" worktree list --porcelain) || exit; ' +
   'where=$(printf "%s\\n" "$list" | awk -v ref="branch refs/heads/$2" ' +
   "'/^worktree /{path=substr($0,10);n++} $0==ref{print (n==1?\"primary\":\"checkout\") \" \" path; exit}'); " +
@@ -189,35 +195,43 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
 
   status("commit");
   await commitWorktree(exec, root, task, config.protected);
-  const ontoBefore = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
-  status(`rebase onto ${task.mainBranch}`);
-  const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
-  if (conflicts) return conflicts;
-  const head = await git(exec, root, ["rev-parse", "HEAD"]);
-  // A rebase onto the same commit leaves the tree the round's gates just passed on (the squash keeps the tree).
-  const unmoved = (await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`])) === ontoBefore;
-  for (const argv of unmoved ? [] : config.gates) {
-    status(`merge gate ${argv.join(" ")}`);
-    const gate = await exec(argv, { cwd: root });
-    gates.push(gateData(round, "merge_gates", argv, gate));
-    if (!passed(gate)) return { argv, result: gate };
-  }
+  let ontoBefore = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+  // Rebase, gates, move: again from the rebase while another merge lands on the main branch during the gates.
+  let merged: CommandResult;
+  let head: string;
+  for (let attempt = 1; ; attempt++) {
+    status(attempt === 1 ? `rebase onto ${task.mainBranch}` : `rebase onto ${task.mainBranch} again, it moved (attempt ${attempt})`);
+    const conflicts = await rebaseWorktree(exec, cleanup, root, task, config.protected);
+    if (conflicts) return conflicts;
+    head = await git(exec, root, ["rev-parse", "HEAD"]);
+    // A rebase onto the same commit leaves the tree the round's gates just passed on (the squash keeps the tree).
+    const onto = await git(exec, root, ["merge-base", "HEAD", `refs/heads/${task.mainBranch}`]);
+    for (const argv of onto === ontoBefore ? [] : config.gates) {
+      status(`merge gate ${argv.join(" ")}`);
+      const gate = await exec(argv, { cwd: root });
+      gates.push(gateData(round, "merge_gates", argv, gate));
+      if (!passed(gate)) return { argv, result: gate };
+    }
+    ontoBefore = onto;
 
-  status("fast-forward");
-  await assertCheckoutReady(exec, root, task.branch);
-  const target = await git(exec, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
-  intent({ kind: "merge", commit: head, before: target });
-  // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
-  // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  let merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
-  while (merged.exitCode === LOCK_BUSY_EXIT) {
-    if (Date.now() > deadline) return fail(`the merge lock ${lock} stayed taken for ${LOCK_WAIT_MS / 1000} s`);
-    status("wait for the merge lock");
-    if ((await exec(["sleep", "1"], { cwd: root })).killed) return fail("cancelled while waiting for the merge lock");
+    status("fast-forward");
+    await assertCheckoutReady(exec, root, task.branch);
+    const target = await git(exec, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
+    intent({ kind: "merge", commit: head, before: target });
+    // Each try takes the lock or gives up at once. The update is not killed by a cancel: a fast-forward cut in half
+    // leaves the target's checkout partly updated. The wait between tries is, and a lock holder that hangs ends in a timeout.
+    const deadline = Date.now() + LOCK_WAIT_MS;
     merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+    while (merged.exitCode === LOCK_BUSY_EXIT) {
+      if (Date.now() > deadline) return fail(`the merge lock ${lock} stayed taken for ${LOCK_WAIT_MS / 1000} s`);
+      status("wait for the merge lock");
+      if ((await exec(["sleep", "1"], { cwd: root })).killed) return fail("cancelled while waiting for the merge lock");
+      merged = await tryMoveTarget(cleanup, lock, root, primary, task, head, target);
+    }
+    if (merged.exitCode === TARGET_MOVED_EXIT && attempt < MERGE_ATTEMPTS) continue;
+    if (!passed(merged)) return fail(`update of ${task.mainBranch} refused: ${tail(merged.output)}`);
+    break;
   }
-  if (!passed(merged)) return fail(`update of ${task.mainBranch} refused: ${tail(merged.output)}`);
   const [before, moved] = merged.stdout.trim().split(" ");
   const commit = await git(cleanup, primary, ["rev-parse", `refs/heads/${task.mainBranch}`]);
   if (commit !== head) return fail(`${task.mainBranch} is at ${commit} after the update, not at the task's commit ${head}`);
