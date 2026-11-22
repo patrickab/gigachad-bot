@@ -124,7 +124,7 @@ def test_this_repos_factory_yaml_loads():
     config = load_factory_config(root)
     assert config.hooks.after_create == []
     assert [argv[:2] for argv in config.hooks.after_merge] == [["uv", "sync"], ["npm", "install"], ["bun", "install"]]
-    assert config.gates and all(argv[:2] == ["bash", "scripts/check.sh"] for argv in config.gates)
+    assert config.gates and all(argv[:2] == ["bash", "factory/gates.sh"] for argv in config.gates)
     assert config.protected == ["factory.yaml", ".factory/**"]
     assert [process["name"] for process in config.preview["processes"]] == ["backend", "frontend"]
 

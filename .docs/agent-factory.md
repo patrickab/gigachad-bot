@@ -42,9 +42,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 
 ## Checks
 
-- **Rounds**: `gates` = `check.sh --changed --reuse lint types`. Seconds, only what the change reaches.
-- **Merge**: `merge_gates` = `check.sh --changed --reuse`. The tests: affected vitest, all Python, lint, types.
-- `scripts/check.sh`:
+- **Rounds**: `gates` = `gates.sh --changed --reuse lint types`. Seconds, only what the change reaches.
+- **Merge**: `merge_gates` = `gates.sh --changed --reuse`. The tests: affected vitest, all Python, lint, types.
+- `factory/gates.sh`:
   - `--changed`: steps, TypeScript projects, eslint files and vitest tests by the paths changed since the merge base
     with the target. Docs alone run nothing. A path outside the known projects runs everything.
   - `--reuse`: a step that passed on the same tree (working tree with untracked files) and merge base is skipped.

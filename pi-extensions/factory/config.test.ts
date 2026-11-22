@@ -15,14 +15,14 @@ describe("parseFactoryConfig", () => {
     const config = parseFactoryConfig({
       profile: "old",
       hooks: { after_create: [["npm", "ci"]], after_code: [["make", "fmt"]], after_merge: [["bun", "install"]], before_remove: [] },
-      gates: [["bash", "scripts/check.sh", "lint"], ["sleep", 1]],
+      gates: [["bash", "factory/gates.sh", "lint"], ["sleep", 1]],
       protected: ["factory.yaml", "secrets/**"],
       preview: { processes: [] },
     });
     expect(config).toEqual({
       hooks: { after_code: [["make", "fmt"]], after_merge: [["bun", "install"]] },
-      gates: [["bash", "scripts/check.sh", "lint"], ["sleep", "1"]],
-      merge_gates: [["bash", "scripts/check.sh", "lint"], ["sleep", "1"]],
+      gates: [["bash", "factory/gates.sh", "lint"], ["sleep", "1"]],
+      merge_gates: [["bash", "factory/gates.sh", "lint"], ["sleep", "1"]],
       protected: ["factory.yaml", "secrets/**"],
     });
   });
@@ -37,7 +37,7 @@ describe("parseFactoryConfig", () => {
   test.each([
     [["not a mapping"], "the document must be a mapping"],
     [{ hooks: [] }, "hooks must be a mapping"],
-    [{ gates: ["bash scripts/check.sh"] }, "gates must be a list of argv lists"],
+    [{ gates: ["bash factory/gates.sh"] }, "gates must be a list of argv lists"],
     [{ gates: [[]] }, "gates must be a list of argv lists"],
     [{ hooks: { after_code: [[{ run: "x" }]] } }, "hooks.after_code must be a list of argv lists"],
     [{ protected: "factory.yaml" }, "protected must be a list of globs"],

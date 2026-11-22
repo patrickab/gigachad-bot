@@ -17,7 +17,7 @@ function entry<Kind extends FactoryEntry["customType"]>(id: string, customType: 
 }
 
 const gate = (id: string, round: number, exitCode: number) =>
-  entry(id, "factory-gate", { round, phase: "gates", argv: ["scripts/check.sh"], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
+  entry(id, "factory-gate", { round, phase: "gates", argv: ["factory/gates.sh"], exitCode, killed: false, durationMs: 1200, outputTail: exitCode ? "boom" : "" })
 
 const ENTRIES: FactoryEntry[] = [
   entry("e1", "factory-task", { title: "T", request: "R", settings: { merge: "review", maxRounds: 3, review: true, models: {}, branch: "master" }, worktree: true, branch: "factory/t", mainBranch: "master", baseSha: "abc" }),

@@ -11,7 +11,7 @@ via `run.sh`.
 
 ## Testing
 
-- `scripts/check.sh [lint|types|python|frontend|pi-host]` is the one pipeline: local runs, factory gates (`factory.yaml`, as `--changed`: only the steps the change reaches) and before a redeploy. Run it before you call work done. Exit 75 means a broken environment, not a failed test.
+- `factory/gates.sh [lint|types|python|frontend|pi-host]` is the one pipeline: local runs, factory gates (`factory.yaml`, as `--changed`: only the steps the change reaches) and before a redeploy. Run it before you call work done. Exit 75 means a broken environment, not a failed test.
 - It is hermetic (`env -i`), and gives the Postgres-backed tests a throwaway database on the dev or production PostgreSQL. Never rely on variables from your shell in tests: `tests/__init__.py` strips the host's `GIGACHAD_*`, `PI_*` and similar for plain `pytest` too.
 - Tests never reach the network or a real model: stub `completions`, pi-host and the engine.
 - `lint` runs ruff on Python files changed since `origin/master`: fix what ruff reports in a file you touch.

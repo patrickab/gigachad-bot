@@ -9,10 +9,10 @@ const ENTRIES = [
   { id: "e2", timestamp: "", customType: "factory-round", data: { round: 1, trigger: "start" } },
   { id: "e3", timestamp: "", customType: "factory-state", data: { state: "running", round: 1, reason: "start" } },
   { id: "e4", timestamp: "", customType: "factory-gate", data: { round: 1, phase: "hooks", argv: ["ruff", "format"], exitCode: 0, killed: false, durationMs: 400, outputTail: "" } },
-  { id: "e5", timestamp: "", customType: "factory-gate", data: { round: 1, phase: "gates", argv: ["scripts/check.sh"], exitCode: 2, killed: false, durationMs: 12000, outputTail: "1 failed" } },
+  { id: "e5", timestamp: "", customType: "factory-gate", data: { round: 1, phase: "gates", argv: ["factory/gates.sh"], exitCode: 2, killed: false, durationMs: 12000, outputTail: "1 failed" } },
   { id: "e6", timestamp: "", customType: "factory-round", data: { round: 2, trigger: "gates" } },
   { id: "e7", timestamp: "", customType: "factory-state", data: { state: "running", round: 2, reason: "gates" } },
-  { id: "e8", timestamp: "", customType: "factory-gate", data: { round: 2, phase: "gates", argv: ["scripts/check.sh"], exitCode: null, killed: true, durationMs: 60000, outputTail: "" } },
+  { id: "e8", timestamp: "", customType: "factory-gate", data: { round: 2, phase: "gates", argv: ["factory/gates.sh"], exitCode: null, killed: true, durationMs: 60000, outputTail: "" } },
   {
     id: "e9", timestamp: "", customType: "factory-review",
     data: { round: 2, status: "ok", approved: false, findings: [{ file: "src/a.ts", line: 12, severity: "blocker", text: "Leaks the handle" }], model: "haiku", sessionFile: "", usage: USAGE, wallMs: 4000 },
