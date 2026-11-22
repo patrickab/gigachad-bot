@@ -910,19 +910,19 @@ describe("Project navigation", () => {
       await waitFor(() => expect(api.listFactoryRepos).toHaveBeenCalled())
       await act(async () => {})
 
-      fireEvent.click(rowMenuItem(view, "known", "Open factory for known"))
+      fireEvent.click(view.getByRole("button", { name: "Open factory for known" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "/git/known", projectSlug: null }))
       expect(api.openFactoryRepo).not.toHaveBeenCalled()
 
-      fireEvent.click(rowMenuItem(view, "fresh", "Open factory for fresh"))
+      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "/git/fresh", projectSlug: null }))
       expect(api.openFactoryRepo).toHaveBeenCalledWith("/git/fresh")
 
-      fireEvent.click(rowMenuItem(view, "fresh", "Open factory for fresh"))
+      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
       await waitFor(() => expect(onItemOpen).toHaveBeenCalledTimes(3))
       expect(api.openFactoryRepo).toHaveBeenCalledTimes(1)
 
-      fireEvent.click(rowMenuItem(view, "broken", "Open factory for broken"))
+      fireEvent.click(view.getByRole("button", { name: "Open factory for broken" }))
       expect(await view.findByRole("alert")).toHaveTextContent("Not a git checkout: /git/broken")
       expect(onItemOpen).toHaveBeenCalledTimes(3)
 

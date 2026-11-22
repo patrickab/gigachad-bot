@@ -42,6 +42,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
       label: `Open factory for ${label}`,
       menuLabel: "Open factory",
       icon: Factory,
+      inline: true,
       onClick: async () => {
         reportError("")
         try {

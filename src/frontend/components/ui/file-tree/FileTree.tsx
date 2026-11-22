@@ -81,6 +81,8 @@ export interface FileTreeItem<T = unknown> {
     onClick: () => void
     /** Destructive: listed last in the menu, with delete. */
     danger?: boolean
+    /** Always an inline icon on hover, never in the "…" menu. */
+    inline?: boolean
   }[]
   onMoveHere?: (id: string) => Promise<void>
   /** Drag kinds `onMoveHere` takes. Default ["item"]. */
@@ -128,13 +130,16 @@ type RowAction = NonNullable<FileTreeItem["actions"]>[number]
 /**
  * A row's hover actions: its first action inline, the rest in the "…" menu. Delete (`onDelete`) stays its own inline button.
  *
+ * - An action flagged `inline` is always an inline icon
  * - Beside `create` the first action stays inline only when the menu would hold nothing else
  * - Destructive actions never show inline
  */
-function splitActions<T>(item: FileTreeItem<T>): { inline?: RowAction; menu: RowAction[] } {
+function splitActions<T>(item: FileTreeItem<T>): { inline: RowAction[]; menu: RowAction[] } {
   const actions = item.actions ?? []
-  const inline = actions[0] && !actions[0].danger && (!item.create || actions.length === 1) ? actions[0] : undefined
-  return { inline, menu: inline ? actions.slice(1) : actions }
+  const pinned = actions.filter((action) => action.inline && !action.danger)
+  const rest = actions.filter((action) => !pinned.includes(action))
+  const first = pinned.length === 0 && rest[0] && !rest[0].danger && (!item.create || rest.length === 1) ? rest[0] : undefined
+  return { inline: first ? [first] : pinned, menu: first ? rest.slice(1) : rest }
 }
 
 /** Children `item` renders: up to `childLimit` unless `uncapped`, plus any later child holding the active item. */
@@ -314,10 +319,10 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
         {!item.rename?.editing && <>
-          {(inline || menu.length > 0 || item.onDelete) && <div className={ACTIONS_CLASS}>
-            {inline && <button aria-label={inline.label} onClick={inline.onClick} className={ACTION_CLASS}>
-              <inline.icon className="h-3 w-3" />
-            </button>}
+          {(inline.length > 0 || menu.length > 0 || item.onDelete) && <div className={ACTIONS_CLASS}>
+            {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
+              <action.icon className="h-3 w-3" />
+            </button>)}
             {menu.length > 0 && <RowMenu label={item.label} actions={menu} />}
             {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
               <Trash2 className="h-3 w-3" />
