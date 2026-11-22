@@ -45,7 +45,7 @@ def _listener_pids(pool) -> list[int]:
         return [
             row[0]
             for row in connection.execute(
-                "SELECT pid FROM pg_stat_activity WHERE query = %s AND pid <> pg_backend_pid()",
+                "SELECT pid FROM pg_stat_activity WHERE query = %s AND datname = current_database() AND pid <> pg_backend_pid()",
                 (f"LISTEN {CHANNEL}",),
             ).fetchall()
         ]
@@ -54,7 +54,7 @@ def _listener_pids(pool) -> list[int]:
 def _terminate_listeners(pool) -> None:
     with pool.connection() as connection:
         connection.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = %s AND pid <> pg_backend_pid()",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = %s AND datname = current_database() AND pid <> pg_backend_pid()",
             (f"LISTEN {CHANNEL}",),
         )
 
