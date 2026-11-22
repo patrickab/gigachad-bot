@@ -8,7 +8,9 @@
  *   checked out in a worktree (the primary or another one) is fast-forwarded there, and `hooks.after_merge` run when
  *   that is the primary and the merge changed a lockfile; a target checked out nowhere is moved with a
  *   compare-and-swap `update-ref`, no hooks. A
- *   conflicting rebase is aborted and reported with its files (`MergeOutcome.conflicts`), not as a failure
+ *   conflicting rebase is aborted and reported with its files (`MergeOutcome.conflicts`), not as a failure. A merge
+ *   gate that fails on the rebased branch is reported with its command (`MergeOutcome.failedGate`): the rebase stays,
+ *   so the coder fixes the change on top of the target branch
  * - Provides `rebaseWorktree`, which a run that opens uses to bring the task branch up to date the same way. It
  *   squashes the task branch onto its merge base first: the rebase replays one commit, the task's net change
  * - The factory's own commits run no commit hooks and are not signed (`--no-verify --no-gpg-sign`)
@@ -23,7 +25,7 @@ import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { protectedPaths, type FactoryConfig } from "./config.ts";
 import { addAllArgs, assertCheckoutReady, git, LOCKFILES, nulList, primaryCheckout, rebaseInProgress, snapshotTree, stageTree, withScratchIndex } from "./git.ts";
-import type { Exec } from "./run.ts";
+import type { CommandResult, Exec } from "./run.ts";
 import { gateData, passed, type GateData, type MergeData, type MergeIntentData, type Task } from "./state.ts";
 
 const ERROR_TAIL_CHARS = 1000;
@@ -73,7 +75,11 @@ export interface MergeOutcome {
   merge: MergeData;
   /** The files of a rebase onto the main branch that conflicted and was aborted, else null. Nothing was merged then. */
   conflicts: string[] | null;
+  /** The merge gate that failed on the rebased branch, else null. Nothing was merged then. */
+  failedGate: GateFailure | null;
 }
+
+export type GateFailure = { argv: string[]; result: CommandResult };
 
 /**
  * Brings a worktree task's branch up to date: commits the worktree as `commitWorktree` does, squashes the branch onto
@@ -169,7 +175,7 @@ function tryMoveTarget(cleanup: Exec, lock: string, root: string, primary: strin
   return cleanup(argv, { cwd: root, maxStdoutChars: 100 });
 }
 
-async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<MergeData | string[]> {
+async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<MergeData | string[] | GateFailure> {
   const { exec, cleanup, root, round, task, config, intent } = input;
   const status = input.status ?? (() => undefined);
   const result = (ok: boolean, commit: string | null, error: string | null, depsSynced: boolean): MergeData => ({ ok, kind: "merge", commit, error, depsSynced, tree: null, mixed: [] });
@@ -194,7 +200,7 @@ async function mergeWorktree(input: MergeInput, gates: GateData[]): Promise<Merg
     status(`merge gate ${argv.join(" ")}`);
     const gate = await exec(argv, { cwd: root });
     gates.push(gateData(round, "merge_gates", argv, gate));
-    if (!passed(gate)) return fail(`merge gate failed: ${argv.join(" ")}`);
+    if (!passed(gate)) return { argv, result: gate };
   }
 
   status("fast-forward");
@@ -237,9 +243,10 @@ export async function mergeTask(input: MergeInput): Promise<MergeOutcome> {
   const failed = (error: string): MergeData => ({ ok: false, kind, commit: null, error, depsSynced: false, tree: null, mixed: [] });
   try {
     const merge = input.task.worktree ? await mergeWorktree(input, gates) : await commitCheckout(input);
-    if (Array.isArray(merge)) return { gates, merge: failed(`rebase onto ${input.task.mainBranch} conflicts`), conflicts: merge };
-    return { gates, merge, conflicts: null };
+    if (Array.isArray(merge)) return { gates, merge: failed(`rebase onto ${input.task.mainBranch} conflicts`), conflicts: merge, failedGate: null };
+    if ("argv" in merge) return { gates, merge: failed(`merge gate failed: ${merge.argv.join(" ")}`), conflicts: null, failedGate: merge };
+    return { gates, merge, conflicts: null, failedGate: null };
   } catch (error) {
-    return { gates, merge: failed(error instanceof Error ? error.message : String(error)), conflicts: null };
+    return { gates, merge: failed(error instanceof Error ? error.message : String(error)), conflicts: null, failedGate: null };
   }
 }

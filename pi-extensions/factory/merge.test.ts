@@ -295,6 +295,9 @@ describe("mergeTask, worktree task", () => {
     const gated = await mergeTask(input(other, await taskIn(other), { ...noGates, gates: [["false"]] }));
     expect(gated.merge).toMatchObject({ ok: false, error: "merge gate failed: false" });
     expect(gated.gates).toHaveLength(1);
+    expect(gated.failedGate).toMatchObject({ argv: ["false"], result: { exitCode: 1 } });
+    // The rebase stays: the coder fixes the change on top of main.
+    expect(gitIn(other, "merge-base", "--is-ancestor", "main", "HEAD")).toBe("");
     expect(gitIn(repo, "log", "--format=%s")).toBe("moved\nmain edit\nbase");
   });
 
@@ -661,7 +664,7 @@ describe("mergeTask, current-checkout task", () => {
 
     const outcome = await mergeTask(input(repo, task, noGates));
 
-    expect(outcome).toEqual({ gates: [], merge: { ok: true, kind: "commit", commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false, tree: expect.any(String), mixed: [] }, conflicts: null });
+    expect(outcome).toEqual({ gates: [], merge: { ok: true, kind: "commit", commit: gitIn(repo, "rev-parse", "HEAD"), error: null, depsSynced: false, tree: expect.any(String), mixed: [] }, conflicts: null, failedGate: null });
     expect(gitIn(repo, "log", "--format=%s")).toBe("Checkout change\nbase");
     expect(gitIn(repo, "show", "--format=", "--name-only", "HEAD").split("\n").sort()).toEqual(["README.md", "new.txt"]);
     expect(gitIn(repo, "status", "--porcelain")).toBe("M factory.yaml\n?? .factory/");

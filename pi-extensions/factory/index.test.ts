@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import factory from "./index.ts";
+import { MERGE_GRACE_ROUNDS } from "./pipeline.ts";
 import type { Draft, Settings } from "./state.ts";
 
 process.env.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -471,7 +472,7 @@ describe("a worktree task on its target branch (B7)", () => {
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("main version\ntask version\n");
   });
 
-  test("a rebase conflict at merge merges nothing and opens a conflict round, within maxRounds, then blocks; retry opens one again", async () => {
+  test("a rebase conflict at merge merges nothing and opens a conflict round, past maxRounds by the merge grace, then blocks; retry opens one again", async () => {
     const { pi } = await conflicting(2);
     const main = gitIn(repo, "rev-parse", "main");
     await pi.command("approve");
@@ -482,18 +483,23 @@ describe("a worktree task on its target branch (B7)", () => {
     expect(pi.sent[0].message.content).toContain("- README.md");
     expect(pi.of("factory-merge")).toEqual([]);
 
-    // The coder ignores it: the round passes, the merge conflicts again and the run's two rounds are used up.
-    await pi.boundary();
-    await pi.settled();
-    await pi.command("approve");
+    // The coder ignores it: each round passes and the merge conflicts again, until the run's two rounds and the
+    // merge grace are used up.
+    const rounds = 2 + MERGE_GRACE_ROUNDS;
+    for (let sent = 1; sent < rounds; sent++) {
+      await pi.boundary();
+      await pi.settled();
+      await pi.command("approve");
+      while (pi.sent.length === sent) await Bun.sleep(10);
+    }
     await pi.until("blocked/max_rounds: conflict");
-    while (pi.sent.length === 1) await Bun.sleep(10);
-    expect(pi.sent[1].options).toEqual({ triggerTurn: false });
+    expect(pi.of("factory-round").at(-1)).toEqual({ round: rounds, trigger: "conflict" });
+    expect(pi.sent.at(-1)!.options).toEqual({ triggerTurn: false });
     expect(gitIn(repo, "rev-parse", "main")).toBe(main);
 
     await pi.command("retry");
     expect(pi.states().at(-1)).toBe("running/conflict");
-    expect(pi.sent[2].options).toEqual({ triggerTurn: true });
+    expect(pi.sent.at(-1)!.options).toEqual({ triggerTurn: true });
     expect(pi.messages).toEqual(["Add task.txt"]);
   });
 });
