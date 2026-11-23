@@ -53,14 +53,6 @@ describe("usePiFolder", () => {
     expect(result.current.folderError).toBeNull()
   })
 
-  it("refuses a mounted folder outside ~/git with a clear error", async () => {
-    vi.mocked(fetchPiRepositories).mockResolvedValue([{ name: "repo", path: "/home/u/git/repo" }])
-    const { result } = renderHook(() => usePiFolder())
-    act(() => result.current.pickFolder("/mnt/notes"))
-    await waitFor(() => expect(result.current.folderError).toBe("notes is not a Git checkout under ~/git, Pi sessions start only there"))
-    expect(result.current.folder).toBeNull()
-  })
-
   it("keeps the latest of overlapping picks", async () => {
     const first = Promise.withResolvers<{ name: string; path: string }[]>()
     vi.mocked(fetchPiRepositories)

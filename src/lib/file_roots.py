@@ -55,13 +55,15 @@ class FileRoots:
     def roots(self) -> list[str]:
         return [str(r) for r in self._roots]
 
-    def add_root(self, path: str) -> None:
+    def add_root(self, path: str) -> Path:
+        """Mount *path*, returning the resolved folder."""
         resolved = Path(path).expanduser().resolve()
         if not resolved.is_dir():
             raise ValueError(f"Not a directory: {path}")
         if resolved not in self._roots:
             self._roots.append(resolved)
         self._save_roots()
+        return resolved
 
     def remove_root(self, path: str) -> None:
         resolved = Path(path).expanduser().resolve()
@@ -114,7 +116,8 @@ class FileRoots:
         return max(holding, key=lambda root: len(root.parts))
 
     def ceiling_of(self, path: Path) -> Path:
-        """`root_of` *path*, else the home folder when only host access reaches it (host access is limited to home), else ValueError."""
+        """`root_of` *path*, else the home folder when only host access reaches it
+        (host access is limited to home), else ValueError."""
         try:
             return self.root_of(str(path))
         except ValueError:
@@ -206,7 +209,8 @@ class FileRoots:
         return target
 
     def create(self, path: str, data: str | bytes) -> Path:
-        """Create the file-root file *path* with *data*, validated like `write`, returning its resolved path. FileExistsError when taken."""
+        """Create the file-root file *path* with *data*, validated like `write`, returning its resolved path.
+        FileExistsError when taken."""
         target = self._root_for(path)
         if isinstance(data, str):
             with target.open("x", encoding="utf-8") as file:
@@ -219,7 +223,8 @@ class FileRoots:
     def rename(self, path: str, new_name: str) -> Path:
         """Rename the file-root file *path* inside its folder (validated like `write`), returning the new path.
 
-        Raises FileNotFoundError when *path* is no file, FileExistsError when *new_name* is taken and ValueError for a name with a separator.
+        Raises FileNotFoundError when *path* is no file, FileExistsError when *new_name* is taken
+        and ValueError for a name with a separator.
         """
         if not new_name or Path(new_name).name != new_name:
             raise ValueError(f"Invalid file name: {new_name}")

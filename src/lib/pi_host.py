@@ -598,10 +598,11 @@ def _git_repositories(directory: Path, depth: int) -> list[Path]:
 
 
 def repository_name(folder: Path) -> str:
-    """The name `scan_repositories` gives *folder*: plain `<folder>` directly under `~/git`, else `<path from ~>`."""
-    if folder.parent in (REPOSITORIES_ROOT, REPOSITORIES_ROOT.resolve()):
+    """The name `scan_repositories` gives *folder*: plain `<folder>` directly under `~/git` or `~/dev`, else
+    `<path from ~>`, the absolute path outside `~`."""
+    if folder.parent in (REPOSITORIES_ROOT, REPOSITORIES_ROOT.resolve(), DEV_ROOT, DEV_ROOT.resolve()):
         return folder.name
-    return str(folder.relative_to(HOME))
+    return str(folder.relative_to(HOME)) if folder.is_relative_to(HOME) else str(folder)
 
 
 def scan_repositories() -> list[Repository]:
@@ -617,6 +618,6 @@ def scan_repositories() -> list[Repository]:
                 if _is_folder(child):
                     paths.setdefault(repository_name(child), child)
     for checkout in _git_repositories(HOME, SCAN_DEPTH):
-        if checkout.parent != REPOSITORIES_ROOT:  # those are listed above, unless hidden
+        if checkout.parent not in (REPOSITORIES_ROOT, DEV_ROOT):  # those are listed above, unless hidden
             paths.setdefault(repository_name(checkout), checkout)
     return [Repository(name=name, path=str(path)) for name, path in paths.items()]

@@ -160,7 +160,7 @@ export function piSessionOf(tab: Tab): string | null {
 /** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */
 export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "pi") {
-    return { category: "code", file: tab.name ?? tab.title ?? tab.workspaceItem?.pi?.repo ?? "Pi" }
+    return { category: "code", file: tab.name ?? tab.title ?? (tab.workspaceItem?.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi") }
   }
   if (tab.appMode === "workbench") {
     const kind = tab.workspaceItem ? workbenchKindOf(tab.workspaceItem.path) : null
@@ -190,7 +190,7 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
 /** Activity description of `tab` for screen readers; a chat shows its latest mode label. */
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
-    if (tab.appMode === "pi") return tab.name ?? tab.title ?? tab.workspaceItem.pi?.repo ?? "Pi"
+    if (tab.appMode === "pi") return tab.name ?? tab.title ?? (tab.workspaceItem.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi")
     if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
     if (tab.appMode === "workbench") return tab.name ?? baseName(tab.workspaceItem.path)
     if (tab.appMode === "factory") return tab.name ?? "Factory"

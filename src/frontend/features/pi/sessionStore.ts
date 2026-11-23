@@ -190,7 +190,7 @@ export function usePiSessions(filter: { repo?: string; archived?: boolean; profi
   const sessions = useMemo(() => {
     const profiled = profile === undefined ? state.sessions : state.sessions.filter((session) => piSessionProfile(session) === profile)
     if (repo === undefined) return profiled
-    const path = known.find((repository) => repository.name === repo)?.path
+    const path = repo.startsWith("/") ? repo : known.find((repository) => repository.name === repo)?.path
     return path === undefined ? [] : profiled.filter((session) => session.cwd === path || session.cwd.startsWith(`${path}/`))
   }, [state.sessions, known, repo, profile])
   return { sessions, loading: state.loading, error: state.error }

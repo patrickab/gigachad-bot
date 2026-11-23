@@ -775,7 +775,7 @@ describe("Project navigation", () => {
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: "worktree", repo: "proj" } })
 
       fireEvent.click(section.getByRole("button", { name: "New session in proj" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: null, repo: "proj" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: null, repo: "/git/proj" } }, true)
     } finally {
       resetPi()
       api.fileRootTree.mockImplementation(listTree!)
@@ -866,7 +866,7 @@ describe("Project navigation", () => {
       expect(section.queryByRole("button", { name: "me" })).not.toBeInTheDocument()
 
       fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: null, repo: "tool" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: null, repo: "/git/tool" } }, true)
       fireEvent.click(tool.getByRole("button", { name: "tooling" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "tool", projectSlug: null, pi: { sessionId: "tooling", repo: "tool" } })
     } finally {

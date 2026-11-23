@@ -7,6 +7,7 @@ import { ContextUsage } from "@/features/chat/ContextUsage"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { catalogOffering, gatewayModelId, selectorIdOf } from "@/lib/models"
+import { baseName } from "@/lib/paths"
 import type { PiModel } from "./types"
 import type { PiSessionStats } from "./usePiSession"
 
@@ -119,7 +120,7 @@ export function PiRepoLabel({ repo, tone }: { repo: string; tone?: StatusTone })
   return (
     <span className="flex h-8 min-w-0 items-center gap-1.5 px-2 text-xs text-ink">
       {tone && <StatusDot tone={tone} />}
-      <span className="truncate">{repo}</span>
+      <span className="truncate">{baseName(repo)}</span>
     </span>
   )
 }

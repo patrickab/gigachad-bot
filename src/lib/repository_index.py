@@ -4,6 +4,8 @@
 - `sweep` scans the disk and writes the difference: new folders are added, vanished ones removed. The backend sweeps
   once at startup in the background, serving the list of the last run meanwhile
 - A name the stored list lacks sweeps once more before it is refused (a folder created since), and a clone is added at once
+- Any folder may hold sessions: an absolute path resolves to itself and is stored (`add`), as is a mounted folder.
+  A sweep keeps added folders while they exist
 - Tests swap in a store through `use`, None is the database
 """
 
@@ -97,6 +99,9 @@ def sweep() -> list[Repository]:
     """Scan the disk and store what it holds now. Concurrent sweeps run one after the other."""
     with _sweeping:
         found = pi_host.scan_repositories()
+        names = {repository.name for repository in found}
+        kept = [r for r in _current().load() if r.name not in names and Path(r.path).is_dir()]
+        found += kept
         added, removed = _current().replace(found)
     if added or removed:
         log.info("Repositories: %d added, %d removed, %d stored", added, removed, len(found))
@@ -117,7 +122,17 @@ def list_repositories() -> list[Repository]:
 
 
 def resolve(name: str) -> Path | None:
-    """The folder of the repository *name*, sweeping once when it is not stored or gone. None for an unknown name."""
+    """The folder of the repository *name*, sweeping once when it is not stored or gone. None for an unknown name.
+
+    An absolute *name* is the folder itself: any existing directory, stored on first use.
+    """
+    if Path(name).is_absolute():
+        folder = Path(name)
+        if not folder.is_dir():
+            return None
+        if not any(Path(repository.path) == folder for repository in _current().load()):
+            add(folder)
+        return folder
     for repositories in (_current().load, sweep):
         folder = next((Path(repository.path) for repository in repositories() if repository.name == name), None)
         if folder is not None and folder.is_dir():
@@ -126,9 +141,5 @@ def resolve(name: str) -> Path | None:
 
 
 def add(folder: Path) -> None:
-    """Store *folder*, a repository just created on disk, without a sweep. A folder outside `~` is no start folder."""
-    try:
-        name = pi_host.repository_name(folder)
-    except ValueError:
-        return
-    _current().add(Repository(name=name, path=str(folder)))
+    """Store *folder* (a clone, a mounted or picked folder) without a sweep."""
+    _current().add(Repository(name=pi_host.repository_name(folder), path=str(folder)))

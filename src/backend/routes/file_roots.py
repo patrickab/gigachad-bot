@@ -88,7 +88,8 @@ _MOUNTING = host_access_only("mounting host folders")
 @router.post("/roots", response_model=FileTreeResponse, dependencies=[_MOUNTING])
 def add_root(body: RootBody, roots: Annotated[FileRoots, Depends(get_file_roots)]) -> FileTreeResponse:
     with http_errors((ValueError, 400, None)):
-        roots.add_root(body.path)
+        folder = roots.add_root(body.path)
+    repository_index.add(folder)  # a mounted folder holds Pi sessions
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 

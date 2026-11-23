@@ -24,14 +24,14 @@ def _names(repositories: list[Repository]) -> list[str]:
 
 
 def test_the_first_listing_scans_and_stores(home, repository_store):
-    assert _names(repository_index.list_repositories()) == ["app", "dev/tool"]
-    assert _names(repository_store.load()) == ["app", "dev/tool"]
+    assert _names(repository_index.list_repositories()) == ["app", "tool"]
+    assert _names(repository_store.load()) == ["app", "tool"]
 
 
 def test_listing_reads_the_stored_list_without_scanning(home, repository_store, monkeypatch):
     repository_index.sweep()
     monkeypatch.setattr(pi_host, "scan_repositories", lambda: pytest.fail("scanned"))
-    assert _names(repository_index.list_repositories()) == ["app", "dev/tool"]
+    assert _names(repository_index.list_repositories()) == ["app", "tool"]
 
 
 def test_a_sweep_adds_new_folders_and_drops_vanished_ones(home, repository_store):
@@ -42,7 +42,7 @@ def test_a_sweep_adds_new_folders_and_drops_vanished_ones(home, repository_store
 
     repository_index.sweep()
 
-    assert _names(repository_store.load()) == ["dev/tool", "code/proj"]
+    assert _names(repository_store.load()) == ["tool", "code/proj"]
 
 
 def test_resolving_a_new_folder_sweeps_once(home, repository_store):
@@ -55,7 +55,7 @@ def test_resolving_a_new_folder_sweeps_once(home, repository_store):
 def test_resolving_a_vanished_folder_sweeps_it_away(home, repository_store):
     repository_index.sweep()
     (home / "dev" / "tool").rmdir()
-    assert repository_index.resolve("dev/tool") is None
+    assert repository_index.resolve("tool") is None
     assert _names(repository_store.load()) == ["app"]
 
 

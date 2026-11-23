@@ -421,7 +421,7 @@ def test_unknown_repositories_are_refused_before_pi_host(monkeypatch, repositori
 def test_repositories_are_listed(monkeypatch, repositories):
     _serve(monkeypatch, {"GET /sessions": (200, {"sessions": []})})
     names = [repo["name"] for repo in _client().get("/api/pi/repos").json()]
-    assert names == ["app", "notes", "dev/tool", "code/proj"]
+    assert names == ["app", "notes", "tool", "code/proj"]
 
 
 def test_repositories_are_sorted_by_most_recent_use(monkeypatch, repositories):
@@ -429,7 +429,7 @@ def test_repositories_are_sorted_by_most_recent_use(monkeypatch, repositories):
     newer = {**SESSION, "cwd": str(repositories.parent / "dev" / "tool"), "modifiedAt": "2025-02-01T00:00:00Z"}
     _serve(monkeypatch, {"GET /sessions": (200, {"sessions": [older, newer]})})
     names = [repo["name"] for repo in _client().get("/api/pi/repos").json()]
-    assert names == ["dev/tool", "app", "notes", "code/proj"]
+    assert names == ["tool", "app", "notes", "code/proj"]
 
 
 def test_pi_host_down_answers_503(monkeypatch):

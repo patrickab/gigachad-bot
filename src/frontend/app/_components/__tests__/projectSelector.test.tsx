@@ -88,19 +88,8 @@ describe("the empty chat's project selector", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
-    expect(onOpenItem).toHaveBeenCalledWith({ kind: "pi", path: "repo", projectSlug: "proj", pi: { sessionId: null, repo: "repo" } })
+    expect(onOpenItem).toHaveBeenCalledWith({ kind: "pi", path: "repo", projectSlug: "proj", pi: { sessionId: null, repo: "/home/u/git/repo" } })
     expect(fixtures.handleSend).not.toHaveBeenCalled()
   })
 
-  it("refuses a mounted folder outside ~/git and keeps the message in the chat", async () => {
-    fixtures.repositories = [{ name: "repo", path: "/home/u/git/repo" }]
-    fixtures.tree = [{ path: "/mnt/notes", name: "notes", type: "root", children: [] }]
-    const onOpenItem = renderTab()
-    await pick("notes")
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("notes is not a Git checkout under ~/git, Pi sessions start only there")
-    fireEvent.click(screen.getByRole("button", { name: "Send" }))
-    expect(onOpenItem).not.toHaveBeenCalled()
-    expect(fixtures.handleSend).toHaveBeenCalledWith("hello", [])
-  })
 })

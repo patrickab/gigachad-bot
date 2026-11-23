@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type RefCallback } from "react"
+import { useCallback, useEffect, useState, type RefCallback } from "react"
 import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
@@ -23,8 +23,7 @@ import type { PiLaunch } from "@/features/pi/PiTab"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
 import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { fetchPiRepositories, writeRootFile } from "@/lib/backend/api"
-import { baseName } from "@/lib/paths"
+import { writeRootFile } from "@/lib/backend/api"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
@@ -60,28 +59,14 @@ function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
 /**
  * The checkout an empty chat's first message starts a Pi session in, picked by path.
  *
- * Pi starts sessions only in checkouts under ~/git (`/api/pi/repos`): any other folder (a mount elsewhere) is refused on pick with `folderError`, before a message could be lost.
- * Of overlapping picks the latest wins.
+ * Any folder may hold a Pi session. `folderError` stays for callers, it is always null.
  */
 export function usePiFolder(): { folder: string | null; folderError: string | null; pickFolder: (picked: string | null) => void } {
   const [folder, setFolder] = useState<string | null>(null)
-  const [folderError, setFolderError] = useState<string | null>(null)
-  const latestPick = useRef<string | null>(null)
   const pickFolder = useCallback((picked: string | null) => {
-    const path = picked?.replace(/\/+$/, "") ?? null
-    latestPick.current = path
-    setFolderError(null)
-    setFolder(null)
-    if (path === null) return
-    fetchPiRepositories().then((repositories) => {
-      if (latestPick.current !== path) return
-      if (repositories.some((repository) => repository.path === path)) setFolder(path)
-      else setFolderError(`${baseName(path)} is not a Git checkout under ~/git, Pi sessions start only there`)
-    }, (reason: unknown) => {
-      if (latestPick.current === path) setFolderError(reason instanceof Error ? reason.message : String(reason))
-    })
+    setFolder(picked === null ? null : picked.replace(/\/+$/, "") || "/")
   }, [])
-  return { folder, folderError, pickFolder }
+  return { folder, folderError: null, pickFolder }
 }
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */

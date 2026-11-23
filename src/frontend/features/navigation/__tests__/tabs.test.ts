@@ -211,7 +211,7 @@ describe("parseSavedTabs", () => {
 describe("Pi tabs", () => {
   it("start without a session in the checkout's repo and show under code", () => {
     const item = newPiItem("/home/me/git/app/", "proj")
-    expect(item).toEqual({ kind: "pi", path: "app", projectSlug: "proj", pi: { sessionId: null, repo: "app" } })
+    expect(item).toEqual({ kind: "pi", path: "app", projectSlug: "proj", pi: { sessionId: null, repo: "/home/me/git/app" } })
     const tab = { ...nextTab(), ...showingItem(item) }
     expect(tab.appMode).toBe("pi")
     expect(tabLocation(tab, () => undefined)).toEqual({ category: "code", file: "app" })
