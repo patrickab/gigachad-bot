@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { render, within } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, within } from "@testing-library/react"
 import type { FactoryTimelineEntry } from "@/lib/domain/factory"
 import { TaskTimeline } from "@/features/factory/TaskTimeline"
 
@@ -29,7 +29,7 @@ describe("TaskTimeline", () => {
       ...ENTRIES.slice(1),
     ] as unknown as FactoryTimelineEntry[]
 
-    const view = render(<TaskTimeline entries={entries} usage={{ input: 4500, output: 605, cost: 1.75 }} error="" />)
+    const view = render(<TaskTimeline entries={entries} usage={{ input: 4500, output: 605, cost: 1.75 }} error="" onOpenTask={vi.fn()} />)
 
     const first = within(view.getByLabelText("Round 1"))
     expect(first.getByText("coder")).toBeTruthy()
@@ -42,7 +42,7 @@ describe("TaskTimeline", () => {
   })
 
   it("shows the totals and each round with its trigger and status", () => {
-    const view = render(<TaskTimeline entries={ENTRIES} usage={{ input: 10, output: 5, cost: 0.25 }} error="" />)
+    const view = render(<TaskTimeline entries={ENTRIES} usage={{ input: 10, output: 5, cost: 0.25 }} error="" onOpenTask={vi.fn()} />)
 
     expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · 10 in / 5 out · $0.25 (review $0.25)")
     const first = within(view.getByLabelText("Round 1"))
@@ -55,7 +55,7 @@ describe("TaskTimeline", () => {
   })
 
   it("shows each gate with its result and duration, a failed one's output collapsed", () => {
-    const view = render(<TaskTimeline entries={ENTRIES} usage={null} error="" />)
+    const view = render(<TaskTimeline entries={ENTRIES} usage={null} error="" onOpenTask={vi.fn()} />)
     const first = within(view.getByLabelText("Round 1"))
 
     expect(first.getByText("ruff format")).toBeTruthy()
@@ -73,7 +73,7 @@ describe("TaskTimeline", () => {
     const entries = [
       { at: "", kind: "gate", data: { round: 1, phase: "after_merge", argv: ["uv", "sync"], exitCode: null, killed: false, durationMs: 100, outputTail: "spawn ENOENT" } },
     ] as unknown as FactoryTimelineEntry[]
-    const round = within(render(<TaskTimeline entries={entries} usage={null} error="" />).getByLabelText("Round 1"))
+    const round = within(render(<TaskTimeline entries={entries} usage={null} error="" onOpenTask={vi.fn()} />).getByLabelText("Round 1"))
 
     expect(round.getByText("after merge")).toBeTruthy()
     expect(round.getByText("failed")).toBeTruthy()
@@ -81,7 +81,7 @@ describe("TaskTimeline", () => {
   })
 
   it("shows the review with verdict, cost and findings, open for the current round", () => {
-    const view = render(<TaskTimeline entries={ENTRIES} usage={null} error="" />)
+    const view = render(<TaskTimeline entries={ENTRIES} usage={null} error="" onOpenTask={vi.fn()} />)
     const second = within(view.getByLabelText("Round 2"))
 
     expect(second.getByText("rejected")).toBeTruthy()
@@ -96,20 +96,33 @@ describe("TaskTimeline", () => {
       ...ENTRIES,
       { at: "", kind: "merge", data: { ok: false, commit: "", error: "rebase conflict", depsSynced: false } },
     ] as unknown as FactoryTimelineEntry[]
-    const second = within(render(<TaskTimeline entries={merged} usage={null} error="" />).getByLabelText("Round 2"))
+    const second = within(render(<TaskTimeline entries={merged} usage={null} error="" onOpenTask={vi.fn()} />).getByLabelText("Round 2"))
 
     expect(second.getByText("merge")).toBeTruthy()
     expect(second.getByText("failed")).toBeTruthy()
     expect(second.getByText("rebase conflict").closest("details")!.open).toBe(false)
   })
 
+  it("names a task the coder started in the newest round and opens it on click", () => {
+    const onOpenTask = vi.fn()
+    const spawned = [
+      ...ENTRIES,
+      { at: "", kind: "spawn", data: { id: "t9", title: "fix(ui): align the header" } },
+    ] as unknown as FactoryTimelineEntry[]
+    const second = within(render(<TaskTimeline entries={spawned} usage={null} error="" onOpenTask={onOpenTask} />).getByLabelText("Round 2"))
+
+    expect(second.getByText("new task")).toBeTruthy()
+    fireEvent.click(second.getByRole("button", { name: "fix(ui): align the header" }))
+    expect(onOpenTask).toHaveBeenCalledWith("t9")
+  })
+
   it("leaves the usage out of the totals before a model answered", () => {
-    const view = render(<TaskTimeline entries={ENTRIES.slice(0, 2)} usage={null} error="" />)
+    const view = render(<TaskTimeline entries={ENTRIES.slice(0, 2)} usage={null} error="" onOpenTask={vi.fn()} />)
     expect(view.getByLabelText("Totals").textContent).toBe("1 round")
   })
 
   it("shows nothing but the error for a task without entries", () => {
-    const view = render(<TaskTimeline entries={[]} usage={null} error="Could not load the timeline" />)
+    const view = render(<TaskTimeline entries={[]} usage={null} error="Could not load the timeline" onOpenTask={vi.fn()} />)
 
     expect(view.queryByLabelText("Totals")).toBeNull()
     expect(view.getByRole("alert").textContent).toBe("Could not load the timeline")

@@ -146,7 +146,7 @@ function ReviewStep({ review, current }: { review: FactoryTimelineData["review"]
   )
 }
 
-/** The merge: the commit it made, or its error behind a disclosure. */
+/** The merge: the commit it made or its error behind a disclosure. */
 function MergeStep({ merge }: { merge: FactoryTimelineData["merge"] }) {
   return (
     <li>
@@ -165,9 +165,20 @@ function MergeStep({ merge }: { merge: FactoryTimelineData["merge"] }) {
   )
 }
 
-function Step({ step, current }: { step: TimelineStep; current: boolean }) {
+/** A task the coder started: its title, which opens it. */
+function SpawnStep({ spawn, onOpenTask }: { spawn: FactoryTimelineData["spawn"]; onOpenTask: (taskId: string) => void }) {
+  return (
+    <li className={ROW_CLASS}>
+      <span className={KIND_CLASS}>new task</span>
+      <button type="button" onClick={() => onOpenTask(spawn.id)} className="min-w-0 flex-1 truncate text-left text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{spawn.title}</button>
+    </li>
+  )
+}
+
+function Step({ step, current, onOpenTask }: { step: TimelineStep; current: boolean; onOpenTask: (taskId: string) => void }) {
   if (step.kind === "gate") return <GateStep gate={step.data} />
   if (step.kind === "review") return <ReviewStep review={step.data} current={current} />
+  if (step.kind === "spawn") return <SpawnStep spawn={step.data} onOpenTask={onOpenTask} />
   return <MergeStep merge={step.data} />
 }
 
@@ -177,7 +188,7 @@ function Step({ step, current }: { step: TimelineStep; current: boolean }) {
  * - The status is the round's newest state. An earlier round still recorded as running was ended by the next one, whose
  *   trigger says how: it shows no status
  */
-function Round({ round, current }: { round: TimelineRound; current: boolean }) {
+function Round({ round, current, onOpenTask }: { round: TimelineRound; current: boolean; onOpenTask: (taskId: string) => void }) {
   const state = round.state && (current || round.state.state !== "running") ? round.state : null
   const said = conversation(round.messages)
   return (
@@ -195,7 +206,7 @@ function Round({ round, current }: { round: TimelineRound; current: boolean }) {
       {(said.length > 0 || round.steps.length > 0) && (
         <ul className="mt-1.5 flex flex-col gap-1.5 text-[11px]">
           {said.map((one, index) => one.kind === "user" ? <UserStep key={`said-${index}`} text={one.text} /> : <CoderStep key={`said-${index}`} texts={one.texts} />)}
-          {round.steps.map((step, index) => <Step key={`step-${index}`} step={step} current={current} />)}
+          {round.steps.map((step, index) => <Step key={`step-${index}`} step={step} current={current} onOpenTask={onOpenTask} />)}
         </ul>
       )}
     </li>
@@ -204,12 +215,18 @@ function Round({ round, current }: { round: TimelineRound; current: boolean }) {
 
 /**
  * A task's pipeline, compact: totals, then each round with its trigger, status, what the user and the coder wrote,
- * gates, review and merge.
+ * gates, review, merge and the tasks the coder started.
  *
  * - `entries` are the task's timeline in append order (`useTaskTimeline`), `usage` the core's total of the task
+ * - A started task's title opens it (`onOpenTask`)
  * - Details stay behind disclosures: a failed command's output, a merge error, the findings of earlier rounds
  */
-export function TaskTimeline({ entries, usage, error }: { entries: readonly FactoryTimelineEntry[]; usage: FactoryUsage | null; error: string }) {
+export function TaskTimeline({ entries, usage, error, onOpenTask }: {
+  entries: readonly FactoryTimelineEntry[]
+  usage: FactoryUsage | null
+  error: string
+  onOpenTask: (taskId: string) => void
+}) {
   const { rounds, review } = useMemo(() => groupTimeline(entries), [entries])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
@@ -223,7 +240,7 @@ export function TaskTimeline({ entries, usage, error }: { entries: readonly Fact
           </p>
         )}
         <ol aria-label="Rounds" className="flex flex-col gap-4">
-          {rounds.map((round, index) => <Round key={round.round} round={round} current={index === rounds.length - 1} />)}
+          {rounds.map((round, index) => <Round key={round.round} round={round} current={index === rounds.length - 1} onOpenTask={onOpenTask} />)}
         </ol>
       </div>
     </SidePanelScroll>

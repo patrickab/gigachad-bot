@@ -12,9 +12,10 @@ export function FactorySurface({ item }: { item: WorkspaceItem }) {
   const { repo, taskId } = parseFactoryPath(item.path)
   // Read here, so the task view's `useFactoryTask` stays current as well as the board.
   const { tasks, error, refresh } = useFactoryTasks(repo)
+  const openTask = (id: string) => setWorkspaceItem(factoryItem(repo, id))
   return taskId ? (
-    <TaskView key={taskId} repo={repo} taskId={taskId} onBack={() => setWorkspaceItem(factoryItem(repo))} />
+    <TaskView key={taskId} repo={repo} taskId={taskId} onBack={() => setWorkspaceItem(factoryItem(repo))} onOpenTask={openTask} />
   ) : (
-    <FactoryBoard key={repo} repo={repo} tasks={tasks} error={error} refresh={refresh} onOpenTask={(id) => setWorkspaceItem(factoryItem(repo, id))} />
+    <FactoryBoard key={repo} repo={repo} tasks={tasks} error={error} refresh={refresh} onOpenTask={openTask} />
   )
 }

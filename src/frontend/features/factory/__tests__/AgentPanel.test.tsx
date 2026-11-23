@@ -15,7 +15,7 @@ import { AgentPanel } from "@/features/factory/AgentPanel"
 function renderPanel(canMessage = true) {
   const onSent = vi.fn()
   const entries = [{ at: "", kind: "coder", data: { text: "Added the toggle." } }] as const
-  render(<AgentPanel task={factoryTask("t1")} entries={entries} timelineError="" canMessage={canMessage} onSent={onSent} onClose={vi.fn()} />)
+  render(<AgentPanel task={factoryTask("t1")} entries={entries} timelineError="" canMessage={canMessage} onSent={onSent} onOpenTask={vi.fn()} onClose={vi.fn()} />)
   return { onSent, box: screen.getByLabelText("Message to the coder") }
 }
 

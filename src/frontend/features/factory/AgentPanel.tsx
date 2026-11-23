@@ -18,13 +18,15 @@ const PANEL_WIDTH_PX = 420
  * - A message goes to the core (`tasks.message`): a resting task runs new rounds, a running coder gets it as a
  *   follow-up. Enter sends, Shift+Enter adds a line; disabled while `canMessage` is false (the core refuses `tasks.message`)
  * - `onSent` runs after the core took a message, so the owner reads the task again
+ * - `onOpenTask` opens a task the coder started
  */
-export function AgentPanel({ task, entries, timelineError, canMessage, onSent, onClose }: {
+export function AgentPanel({ task, entries, timelineError, canMessage, onSent, onOpenTask, onClose }: {
   task: FactoryTask
   entries: readonly FactoryTimelineEntry[]
   timelineError: string
   canMessage: boolean
   onSent: () => void
+  onOpenTask: (taskId: string) => void
   onClose: () => void
 }) {
   const [text, setText] = useState("")
@@ -37,7 +39,7 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
   return (
     <FilePanel label="Agent" bare onClose={onClose} width={PANEL_WIDTH_PX}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <TaskTimeline entries={entries} usage={task.usage} error={timelineError} />
+        <TaskTimeline entries={entries} usage={task.usage} error={timelineError} onOpenTask={onOpenTask} />
         <div className="shrink-0 px-3 pb-3">
           <ErrorText className="px-1 pb-1 text-[11px]">{error}</ErrorText>
           <Composer

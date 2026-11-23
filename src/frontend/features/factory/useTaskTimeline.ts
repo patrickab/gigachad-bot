@@ -8,8 +8,8 @@ import { errorMessage } from "@/lib/utils"
 /** How often the timeline of a task a runner holds is read on: the coder's messages land in its session file. */
 export const TIMELINE_POLL_MS = 2000
 
-/** What ran in a round: a hook or gate, the review, the merge. */
-export type TimelineStep = Extract<FactoryTimelineEntry, { kind: "gate" | "review" | "merge" }>
+/** What ran in a round: a hook or gate, the review, the merge, a task the coder started. */
+export type TimelineStep = Extract<FactoryTimelineEntry, { kind: "gate" | "review" | "merge" | "spawn" }>
 
 /** A message of the round's conversation: the user's or the coder's text. */
 export type TimelineMessage = Extract<FactoryTimelineEntry, { kind: "coder" | "user" }>
@@ -34,7 +34,7 @@ export interface Timeline {
 /**
  * Group timeline entries in append order by round.
  *
- * - Gates, reviews and states join the round they name, a merge and a message (they name none) the newest round:
+ * - Gates, reviews and states join the round they name, a merge, a started task and a message (they name none) the newest round:
  *   the extension records a round before the coder turn it opens
  * - A round's `state` is the last one written for it: the approval and the merge of a round stay in its group
  */
@@ -68,6 +68,7 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
         review.cost += entry.data.usage.cost
         break
       case "merge":
+      case "spawn":
         roundOf(rounds.at(-1)?.round ?? 0).steps.push(entry)
         break
       case "state":

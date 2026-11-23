@@ -50,11 +50,13 @@ const commandFailure = (command: FactoryTaskCommand) => `Could not ${command} th
  *   timeline grows
  * - A command or message answers the task as the core has it then, the list is read again after it
  * - Review comments on the diff go out as one message with "Send review", the round it opens arrives the same way
+ * - `onOpenTask` opens another task of the repo: one the coder started from the timeline
  */
-export function TaskView({ repo, taskId, onBack }: {
+export function TaskView({ repo, taskId, onBack, onOpenTask }: {
   repo: string
   taskId: string
   onBack: () => void
+  onOpenTask: (taskId: string) => void
 }) {
   const { error: tasksError, refresh } = useFactoryTasks(repo)
   const task = useFactoryTask(taskId)
@@ -131,6 +133,7 @@ export function TaskView({ repo, taskId, onBack }: {
         timelineError={timeline.error}
         canMessage={canMessage}
         onSent={() => void refresh()}
+        onOpenTask={onOpenTask}
         onClose={() => setPanelOpen(false)}
       />}
     </div>

@@ -62,6 +62,11 @@ describe("groupTimeline", () => {
     expect(review.cost).toBe(0.25)
   })
 
+  it("puts a task the coder started in the newest round", () => {
+    const { rounds } = groupTimeline([...ENTRIES, entry("spawn", { id: "t9", title: "fix: follow-up" })])
+    expect(rounds.at(-1)?.steps.map(stepName)).toEqual(["gates-2", "review", "merge", "spawn"])
+  })
+
   it("sums the usage of every review as the core counts it: uncached input", () => {
     const review = (round: number) => entry("review", { round, status: "ok", approved: false, findings: [], model: "haiku", sessionFile: "", usage: USAGE, wallMs: 1 })
     expect(groupTimeline([review(1), review(2)]).review).toEqual({ input: 2 * USAGE.input, output: 2 * USAGE.output, cost: 0.5 })

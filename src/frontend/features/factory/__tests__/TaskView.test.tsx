@@ -73,7 +73,7 @@ const ROUND: FactoryTimelineEntry = { at: "", kind: "round", data: { round: 1, t
 const GATE: FactoryTimelineEntry = { at: "", kind: "gate", data: { round: 1, phase: "gates", argv: ["check"], exitCode: 0, killed: false, durationMs: 1, outputTail: "" } }
 
 function view() {
-  return <TaskView repo="/home/u/git/demo" taskId="t1" onBack={vi.fn()} />
+  return <TaskView repo="/home/u/git/demo" taskId="t1" onBack={vi.fn()} onOpenTask={vi.fn()} />
 }
 
 const buttons = () => screen.queryAllByRole("button").map((button) => button.textContent).filter((label) => ["Approve", "Retry", "Cancel"].includes(label ?? ""))
