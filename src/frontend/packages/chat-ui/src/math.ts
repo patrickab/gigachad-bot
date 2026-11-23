@@ -1,3 +1,67 @@
+const CODE_SEGMENT = /(<(code|pre|kbd|samp|script|style)\b[\s\S]*?<\/\2>|<[a-zA-Z\/][^>\n]*>|```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g
+const isSpace = (c: string | undefined) => c === undefined || /\s/.test(c)
+
+/** Escape the `$` of `text` that are not Pandoc single-dollar math (see `escapeCurrencyDollars`). */
+function escapeTextDollars(text: string): string {
+  let out = ""
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]
+    if (c === "\\") {
+      out += text.slice(i, i + 2)
+      i += 2
+    } else if (c !== "$") {
+      out += c
+      i++
+    } else if (text[i + 1] === "$") {
+      // `$$…$$` display math is left to remark-math.
+      out += "$$"
+      i += 2
+    } else {
+      const end = singleDollarEnd(text, i)
+      if (end === -1) {
+        out += "\\$"
+        i++
+      } else {
+        out += text.slice(i, end + 1)
+        i = end + 1
+      }
+    }
+  }
+  return out
+}
+
+/** Index of the closing `$` of the math opened at `open`, or -1 when it is a literal dollar. */
+function singleDollarEnd(text: string, open: number): number {
+  if (isSpace(text[open + 1])) return -1
+  for (let j = open + 1; j < text.length; j++) {
+    const c = text[j]
+    if (c === "\\") j++
+    else if (c === "\n" && text[j + 1] === "\n") return -1
+    else if (c === "$" && !isSpace(text[j - 1]) && !/\d/.test(text[j + 1] ?? "")) return j
+  }
+  return -1
+}
+
+/**
+ * Pandoc's rule for single-dollar math: an opening `$` is followed by a non-space, a closing `$` is
+ * preceded by a non-space and not followed by a digit. Every other `$` becomes `\$`, so "costs $5 and $10"
+ * stays text. Code spans, fences and already escaped `\$` are untouched. Run before `normalizeMathDelimiters`.
+ */
+export function escapeCurrencyDollars(input: string): string {
+  if (input.indexOf("$") === -1) return input
+  return input
+    .split(CODE_SEGMENT)
+    .map((seg, i, all) => {
+      if (i % 3 === 2) return ""
+      if (i % 3 === 1) return seg
+      // Text between two HTML tags is raw HTML, which remark does not read as markdown: `htmlMathToCode` owns it.
+      const inHtml = i > 2 && i < all.length - 1 && all[i - 2].startsWith("<") && all[i + 1].startsWith("<")
+      return inHtml ? seg : escapeTextDollars(seg)
+    })
+    .join("")
+}
+
 /** Rewrite `\( \)` and `\[ \]` to `$` and `$$` outside code spans and fences. */
 export function normalizeMathDelimiters(input: string): string {
   if (input.indexOf("\\(") === -1 && input.indexOf("\\[") === -1) return input

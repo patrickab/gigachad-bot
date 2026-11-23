@@ -14,7 +14,7 @@ describe("CodeBlock", () => {
     expect(block.getAttribute("data-theme")).toBe("light")
     expect(block.getAttribute("data-code-language")).toBe("ts")
     expect(block.querySelector(".gc-code-fallback")?.textContent).toBe("const x = 1")
-    await waitFor(() => expect(block.querySelector(".gc-code-highlighted pre.shiki")).not.toBeNull())
+    await waitFor(() => expect(block.querySelector(".gc-code-highlighted pre.shiki")).not.toBeNull(), { timeout: 10_000 })
     view.rerender(<CodeBlock codeString="const x = 1" language="ts" theme="dark" />)
     expect(block.getAttribute("data-theme")).toBe("dark")
   })

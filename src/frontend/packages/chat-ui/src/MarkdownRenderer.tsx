@@ -5,7 +5,7 @@ import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
 import { memo, useCallback, useMemo, type ClipboardEvent as ReactClipboardEvent, type ComponentProps, type CSSProperties } from "react"
 import { proseComponents, type CodeRenderers } from "./components.tsx"
-import { normalizeMathDelimiters, remarkHtmlMath } from "./math.ts"
+import { escapeCurrencyDollars, normalizeMathDelimiters, remarkHtmlMath } from "./math.ts"
 import { selectionToMarkdown } from "./selectionToMarkdown.ts"
 
 type StreamdownProps = ComponentProps<typeof Streamdown>
@@ -77,7 +77,7 @@ function MarkdownRendererInner({
   onContentChange,
   checkboxClassName,
 }: MarkdownRendererProps) {
-  const processed = useMemo(() => normalizeMathDelimiters(content), [content])
+  const processed = useMemo(() => normalizeMathDelimiters(escapeCurrencyDollars(content)), [content])
 
   // Source line index of each task item, only tracked when toggling is enabled.
   const togglingEnabled = !!onContentChange
