@@ -88,6 +88,8 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
     setWasRunning(isRunning)
     if (isRunning && !defaultCollapsed) setExpanded(true)
   }
+  // Edits and tool images are always shown; a click on the header overrides that.
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const [inputExpanded, setInputExpanded] = useState(false)
   const detailsId = useId()
   const inputId = useId()
@@ -97,7 +99,9 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
   const resultImages = content.filter((block): block is ImageContent => block.type === "image")
   const lastLine = isRunning ? (resultText ?? "").trimEnd().split("\n").at(-1)?.trim() : undefined
   const resultIsEmpty = resultText !== null && (resultText.trim() === "" || resultText.trim() === "(no output)")
-  const resultDiff = expanded && isDone && !isError ? getResultDiff(run.result?.details) : null
+  const alwaysOpen = getToolCategory(call.name) === "edit" || resultImages.length > 0
+  const isOpen = userToggled ?? (alwaysOpen || expanded)
+  const resultDiff = isOpen && isDone && !isError ? getResultDiff(run.result?.details) : null
 
   const category = getToolCategory(call.name)
   const CategoryIcon = CATEGORY_ICONS[category]
@@ -115,12 +119,12 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
   return (
     <div className="pi-activity-row" data-activity-operation="true">
       {/* Clicks anywhere on the header toggle; the trigger button's own click (mouse or keyboard) bubbles here. */}
-      <div className="pi-activity-row-header" onClick={() => setExpanded((value) => !value)}>
+      <div className="pi-activity-row-header" onClick={() => setUserToggled(!isOpen)}>
         <button
           type="button"
           className="pi-activity-row-trigger"
           data-fill={previewTarget ? undefined : "true"}
-          aria-expanded={expanded}
+          aria-expanded={isOpen}
           aria-controls={detailsId}
         >
           <span className="pi-activity-row-indicator" data-error={isError || undefined} aria-hidden>
@@ -149,10 +153,10 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
         {isDone && run.durationMs !== undefined && (
           <span className="pi-activity-row-duration">{formatDuration(run.durationMs)}</span>
         )}
-        <ChevronDown size={12} strokeWidth={1.8} aria-hidden className="pi-activity-row-chevron" data-expanded={expanded || undefined} />
+        <ChevronDown size={12} strokeWidth={1.8} aria-hidden className="pi-activity-row-chevron" data-expanded={isOpen || undefined} />
       </div>
-      {!expanded && isRunning && lastLine && <div className="pi-tool-call-live-tail" data-tool-live-tail="true">{lastLine}</div>}
-      {expanded && (
+      {!isOpen && isRunning && lastLine && <div className="pi-tool-call-live-tail" data-tool-live-tail="true">{lastLine}</div>}
+      {isOpen && (
         <div id={detailsId} className="pi-tool-call-details" data-error={isError || undefined}>
           <div className="pi-tool-call-command">
             <span className="pi-tool-call-command-prompt" aria-hidden>$</span>
