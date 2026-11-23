@@ -31,7 +31,7 @@ vi.mock("../usePiSession", () => ({
     transcript: session.transcript ?? EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
     state: { model: null, thinkingLevel: "medium", isStreaming: false, sessionId: "s1", sessionFile: "/sessions/s1.jsonl" },
-    commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null, models: [], thinkingLevels: [], stats: null,
+    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null, models: [], thinkingLevels: [], stats: null,
     send, abort: async () => [], runBash: async () => {}, compact: async () => {}, setModel: async () => {}, setThinking: async () => {},
     answerDialog: () => {}, notify: () => {},
   }),

@@ -9,6 +9,8 @@ import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
 import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
+import { BtwPanel } from "./BtwPanel"
+import { isBtwCommand } from "./btw"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
@@ -191,7 +193,8 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const submit = useCallback(async (request: PiSubmit) => {
     if (await runShellCommand(request, shellCommands)) return
     const { action } = request
-    if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
+    if (action.kind === "prompt" && isBtwCommand(action.text)) void send(action.text, [])
+    else if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
     else if (action.kind === "compact") void compact(action.instructions)
     else {
       const text = withLead(action.text, lead !== sentLead.current ? lead : undefined)
@@ -239,6 +242,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
       {renderHeader(header)}
       <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
       <ComposerDock dock={dock}>
+        <BtwPanel threads={session.btw.threads} actions={session.btw} fileLinks={fileLinks} />
         <PiComposer
           sessionKey={sessionId}
           files={files}

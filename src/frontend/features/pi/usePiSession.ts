@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useReducer, useMemo, useRef, useState } from "react"
+import { BTW_WIDGET_KEY, isBtwCommand, parseBtwWidget, type BtwThread } from "./btw"
 import { useCoalescedDispatch } from "./coalescer"
 import { confirmedIds, heldOf, hold, patchHeld, removeHeld, takeHeld, useHeld, type HeldMessage } from "./outbox"
 import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "./piSocket"
@@ -78,6 +79,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
   const [models, setModels] = useState<PiModel[]>([])
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([])
   const [stats, setStats] = useState<PiSessionStats | null>(null)
+  const [btwThreads, setBtwThreads] = useState<BtwThread[]>([])
   const pendingRef = useRef(new Map<string, (response: Response) => void>())
   const nextIdRef = useRef(0)
   const syncRef = useRef<SessionResync | null>(null)
@@ -143,6 +145,10 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
           const rest = Object.fromEntries(Object.entries(current).filter(([existing]) => existing !== key))
           return typeof record.statusText === "string" && record.statusText ? { ...rest, [key]: record.statusText } : rest
         }); break
+        case "setWidget":
+          // The btw widget is parsed, never shown as text; other widgets are not rendered
+          if (record.widgetKey === BTW_WIDGET_KEY) setBtwThreads((current) => parseBtwWidget(record) ?? current)
+          break
         case "set_editor_text": setEditorText({ text: String(record.text ?? "") }); break
       }
     }
@@ -191,7 +197,11 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
           applyUi(ui)
           setStatus({ kind: "ready" })
           void command("get_commands").then((response) => {
-            if (response.success) setCommands((response.data as { commands: PiCommand[] }).commands)
+            if (!response.success) return
+            const listed = (response.data as { commands: PiCommand[] }).commands
+            setCommands(listed)
+            // The widget is no part of the attach snapshot: ask the extension to publish its state (an unknown command would reach the model)
+            if (listed.some((entry) => entry.name === "btw-list")) void command("prompt", { message: "/btw-list" })
           })
           void command("get_available_models").then((response) => {
             if (response.success) setModels((response.data as { models: PiModel[] }).models)
@@ -267,6 +277,12 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
 
   /** Start a run, or hold the message and deliver it into the running one as `mode`. A new run's prompt shows optimistically until Pi reports it. Failures become a notice. */
   const send = useCallback(async (message: string, images: ImageContent[], mode: QueueMode = "steer") => {
+    // A btw command is handled at once by its extension, also mid-run: never held, steered or queued, no optimistic prompt
+    if (isBtwCommand(message)) {
+      const response = await command("prompt", { message })
+      if (!response.success) notify(response.error ?? "Side question refused", "error")
+      return
+    }
     if (transcript.running) {
       hold(sessionId, { text: message, images, mode })
       flush()
@@ -279,6 +295,13 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     dispatch({ kind: "prompt", prompt: null })
     notify(response.error ?? "Prompt refused", "error")
   }, [command, notify, dispatch, transcript.running, sessionId, flush])
+
+  const btw = useMemo(() => ({
+    threads: btwThreads,
+    followUp: (id: string, question: string) => void send(`/btw-followup ${id} ${question}`, []),
+    cancel: (id: string) => void send(`/btw-cancel ${id}`, []),
+    dismiss: (id: string) => void send(`/btw-dismiss ${id}`, []),
+  }), [btwThreads, send])
 
   const held = useHeld(sessionId)
 
@@ -354,6 +377,6 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
 
   return {
     transcript, status, state, commands, dialogs, notices, statusLines, editorText, models, thinkingLevels, stats,
-    held, retryHeld, deleteHeld, send, abort, runBash, compact, setModel, setThinking, answerDialog, notify,
+    btw, held, retryHeld, deleteHeld, send, abort, runBash, compact, setModel, setThinking, answerDialog, notify,
   }
 }

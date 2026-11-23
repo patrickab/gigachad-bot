@@ -25,7 +25,7 @@ vi.mock("../usePiSession", () => ({
     transcript: EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
     state: { model: { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }, thinkingLevel: "medium", isStreaming: false, sessionId: "d1", sessionName: "Notes chat" },
-    commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null,
+    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null,
     models: [{ provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }],
     thinkingLevels: ["off", "low", "medium", "high"],
     stats: { cost: 0.12, contextUsage: { tokens: 20_000, contextWindow: 200_000, percent: 10 } },
