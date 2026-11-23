@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefCallback } from "react"
 import { anchorSceneFallback } from "deepfocus-ambient"
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -85,7 +86,7 @@ export function usePiFolder(): { folder: string | null; folderError: string | nu
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
 export function TabContent(props: TabContentProps) {
-  return <TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider>
+  return <ErrorBoundary><TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider></ErrorBoundary>
 }
 
 /** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
