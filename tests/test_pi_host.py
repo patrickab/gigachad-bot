@@ -590,3 +590,19 @@ def test_ws_answers_try_again_later_when_pi_host_is_down(monkeypatch):
     ):
         socket.receive_text()
     assert refused.value.code == 1013
+
+
+def test_auto_resume_setting_passes_through_for_host_logins_only(monkeypatch):
+    host = _serve(monkeypatch, {"GET /settings": (200, {"autoResume": False}), "PUT /settings": (200, {"autoResume": True})})
+
+    assert _client().get("/api/pi/settings").json() == {"autoResume": False}
+    assert _client().put("/api/pi/settings", json={"autoResume": True}).json() == {"autoResume": True}
+    assert json.loads(host.requests[1].content) == {"autoResume": True}
+    assert _client(has_host_access=False).get("/api/pi/settings").status_code == 403
+    assert len(host.requests) == 2
+
+
+def test_auto_resume_setting_is_unavailable_without_pi_host(monkeypatch):
+    _serve(monkeypatch, {})
+
+    assert _client().get("/api/pi/settings").status_code == 503

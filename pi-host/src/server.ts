@@ -10,13 +10,14 @@
  * the factory plugin's core.
  */
 import type { Server } from "bun";
-import { authorize, loadToken, type Tokens } from "./auth.ts";
+import { authorize, loadToken, stateDir, type Tokens } from "./auth.ts";
 import { handleCatalog } from "./catalog/index.ts";
 import { handleFactory } from "./factory.ts";
 import { handleGateway } from "./gateway/index.ts";
 import { stopOmp } from "./gateway/omp.ts";
 import { LocalHost } from "./host/local/index.ts";
 import { loadConfig } from "./supervisor/config.ts";
+import { ResumeState } from "./supervisor/resume.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "./supervisor/index.ts";
 
 export type ServerOptions = { hostname: string; port: number; tokens: Tokens; supervisor: Supervisor };
@@ -79,7 +80,7 @@ if (import.meta.main) {
   const tokens = { full: await loadToken(), gateway: await loadToken(config.gatewayTokenPath) };
   let supervisor: Supervisor;
   try {
-    supervisor = await createSupervisor({ host: new LocalHost(config) });
+    supervisor = await createSupervisor({ host: new LocalHost(config), resume: new ResumeState(stateDir) });
   } catch (error) {
     console.error(`pi-host: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
@@ -92,6 +93,7 @@ if (import.meta.main) {
   });
   console.log(`pi-host listening on http://${server.hostname}:${server.port}`);
   watchEventLoop();
+  void supervisor.resumeInterrupted().catch((error) => console.error(`pi-host: resume failed: ${String(error)}`));
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
       await supervisor.shutdown();

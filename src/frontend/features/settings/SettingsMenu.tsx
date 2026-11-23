@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Blend, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
+import { Blend, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket, RotateCcw } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -14,7 +14,7 @@ import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { setGlassMode, useGlassMode } from "@/hooks/useGlassMode"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { useAnimatedBackground, useHostAccess, useSetAnimatedBackground, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
+import { useAnimatedBackground, useHostAccess, usePiAutoResume, useSetAnimatedBackground, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 import { startRedeploy } from "@/lib/backend/api"
 import { Switch } from "@/components/ui/Switch"
 
@@ -63,6 +63,7 @@ export function SettingsMenu({
   const hostAccess = useHostAccess()
   const animatedBackground = useAnimatedBackground()
   const setAnimatedBackground = useSetAnimatedBackground()
+  const [piAutoResume, setPiAutoResume] = usePiAutoResume()
   const [redeployStarted, setRedeployStarted] = useState(false)
   const redeploy = useAsyncAction(async () => {
     await startRedeploy()
@@ -235,6 +236,16 @@ export function SettingsMenu({
                     Animated background
                   </div>
                   <Switch label="Animated background" checked={animatedBackground} onToggle={() => setAnimatedBackground(!animatedBackground)} />
+                </div>
+              )}
+
+              {piAutoResume !== null && (
+                <div className={ROW_CLASS}>
+                  <div className={ROW_LABEL_CLASS}>
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Resume interrupted sessions
+                  </div>
+                  <Switch label="Resume interrupted sessions" checked={piAutoResume} onToggle={() => setPiAutoResume(!piAutoResume)} />
                 </div>
               )}
 

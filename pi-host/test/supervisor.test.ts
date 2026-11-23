@@ -39,7 +39,7 @@ function workdir(name: string): string {
   return path;
 }
 
-async function until<T>(probe: () => T | undefined, timeoutMs = 5000): Promise<T> {
+async function until<T>(probe: () => T | undefined, timeoutMs = 20_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = probe();

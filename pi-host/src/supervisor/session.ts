@@ -161,6 +161,8 @@ export class LiveSession {
     readonly spec: ProfileSpec,
     private readonly lock: SessionLock | undefined,
     private readonly onExit: (session: LiveSession) => void,
+    /** Called with true when a run starts, false when it settles or a client aborts it (auto-resume bookkeeping). */
+    private readonly onRun: (session: LiveSession, active: boolean) => void = () => undefined,
   ) {
     const readers = Promise.all([
       this.readStdout().catch((error) => this.noteStderr(`stdout reader failed: ${String(error)}`)),
@@ -303,6 +305,8 @@ export class LiveSession {
     }
     if (!this.write(record)) return "pi is not running";
     this.lastActivity = Date.now();
+    // An aborted run is the user's decision, never resumed after a crash
+    if (record.type === "abort") this.onRun(this, false);
     if (record.type === "extension_ui_response" && typeof record.id === "string") this.closeDialog(record.id);
     return undefined;
   }
@@ -481,9 +485,11 @@ export class LiveSession {
         return true;
       case "agent_start":
         this.running = true;
+        this.onRun(this, true);
         break;
       case "agent_settled":
         this.running = false;
+        this.onRun(this, false);
         this.dropReplay(() => true);
         return true;
       case "compaction_start":

@@ -102,6 +102,17 @@ def _cwd(repo: str) -> str:
     return str(folder)
 
 
+@http_router.get("/settings")
+async def get_settings() -> pi_host.PiSettings:
+    return await _call(pi_host.get_settings())
+
+
+@http_router.put("/settings")
+async def put_settings(body: pi_host.PiSettings) -> pi_host.PiSettings:
+    """Store pi-host's settings, `autoResume`: reopen the runs a pi-host crash or reboot interrupted (off by default)."""
+    return await _call(pi_host.set_settings(auto_resume=body.auto_resume))
+
+
 @http_router.get("/repos")
 async def get_repositories() -> list[RepositoryOut]:
     """Start folders, the most recently used (newest session activity) first, never-used ones after."""

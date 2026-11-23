@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useContext, useState, type ReactNode } from "react"
-import { fetchBackendConfig, saveAnimatedBackground } from "@/lib/backend/api"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { fetchBackendConfig, fetchPiSettings, savePiSettings, saveAnimatedBackground } from "@/lib/backend/api"
 import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
@@ -63,6 +63,9 @@ interface SettingsValue {
   /** Whether the animated background shows: stored per user, null until the backend config loaded. */
   animatedBackground: boolean | null
   setAnimatedBackground: (enabled: boolean) => void
+  /** Whether pi-host resumes runs a restart interrupted: null until loaded, and without host access or pi-host. */
+  piAutoResume: boolean | null
+  setPiAutoResume: (enabled: boolean) => void
 }
 
 const SettingsContext = createContext<SettingsValue | null>(null)
@@ -87,6 +90,12 @@ export function useAnimatedBackground(): boolean | null {
 }
 
 /** Stores the animated background setting, a no-op outside a `SettingsProvider`. */
+/** pi-host's auto-resume setting and its setter, null outside a `SettingsProvider` and until it loaded. */
+export function usePiAutoResume(): [boolean | null, (enabled: boolean) => void] {
+  const settings = useContext(SettingsContext)
+  return [settings?.piAutoResume ?? null, settings?.setPiAutoResume ?? (() => {})]
+}
+
 export function useSetAnimatedBackground(): (enabled: boolean) => void {
   return useContext(SettingsContext)?.setAnimatedBackground ?? (() => {})
 }
@@ -104,6 +113,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [learnharnessUrl, setLearnharnessUrl] = useState<string | null>(null)
   const [hostAccess, setHostAccess] = useState(false)
   const [animatedBackground, setAnimatedBackgroundState] = useState<boolean | null>(null)
+  const [piAutoResume, setPiAutoResumeState] = useState<boolean | null>(null)
 
   useStartupRead("Settings", fetchBackendConfig, (cfg) => {
     setTabDefaults((prev) => ({
@@ -119,6 +129,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setAnimatedBackgroundState(cfg.animated_background)
   })
 
+  useEffect(() => {
+    if (!hostAccess) return
+    const controller = new AbortController()
+    // Without pi-host the setting stays hidden
+    fetchPiSettings(controller.signal)
+      .then((settings) => setPiAutoResumeState(settings.autoResume))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [hostAccess])
+
   const neovim: NeovimSetting = {
     available: neovimAvailable,
     enabled: neovimAvailable && neovimPreferred,
@@ -133,8 +153,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     saveAnimatedBackground(enabled).catch(() => setAnimatedBackgroundState(!enabled))
   }
 
+  const setPiAutoResume = (enabled: boolean) => {
+    setPiAutoResumeState(enabled)
+    savePiSettings({ autoResume: enabled }).catch(() => setPiAutoResumeState(!enabled))
+  }
+
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, learnharnessUrl, hostAccess, animatedBackground, setAnimatedBackground }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, learnharnessUrl, hostAccess, animatedBackground, setAnimatedBackground, piAutoResume, setPiAutoResume }}>
       {children}
     </SettingsContext.Provider>
   )

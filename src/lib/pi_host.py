@@ -240,6 +240,12 @@ class PromptAnswer(ContractModel):
     disposition: str
 
 
+class PiSettings(ContractModel):
+    """pi-host's own settings: `auto_resume` reopens runs a restart interrupted (off by default)."""
+
+    auto_resume: bool
+
+
 class Health(ContractModel):
     ok: bool
     pi_version: str
@@ -352,6 +358,14 @@ async def _request[Result](
 
 async def health() -> Health:
     return await _request("GET", "/health", Health)
+
+
+async def get_settings() -> PiSettings:
+    return await _request("GET", "/settings", PiSettings)
+
+
+async def set_settings(*, auto_resume: bool) -> PiSettings:
+    return await _request("PUT", "/settings", PiSettings, json={"autoResume": auto_resume})
 
 
 async def list_sessions(cwd: str | None, *, archived: bool) -> list[SessionInfo]:

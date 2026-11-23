@@ -4,7 +4,7 @@
  * - Consumes: a `Host` (spawn, session lock, session metadata; Pi version checked at start, M13), Catalog's helpers
  * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
  *   `POST /sessions/:id/close`, `POST /sessions/:id/prompt`, `DELETE /sessions/:id`), the multiplexed `/ws` handler
- *   (M16, M18, resync M2) and `LiveSessions` (live status, closing an idle child before archive) for the catalog
+ *   (M16, M18, resync M2), `GET|PUT /settings` and `resumeInterrupted()` (auto-resume, `resume.ts`) and `LiveSessions` (live status, closing an idle child before archive) for the catalog
  *
  * Liveness (M17): Pi exposes no liveness registry over RPC, so an extension with background work keeps its session
  * from idle eviction by setting a non-empty `setStatus` under key `session-liveness` and clearing it when done.
@@ -14,7 +14,8 @@ import { isPinned } from "../catalog/index.ts";
 import type { Host } from "../host/index.ts";
 import { LocalHost } from "../host/local/index.ts";
 import { loadConfig, type SupervisorConfig } from "./config.ts";
-import { SupervisorHost } from "./host.ts";
+import { SupervisorHost, type ResumeOutcome } from "./host.ts";
+import type { ResumeState } from "./resume.ts";
 
 export type SocketData = { clientId: string };
 
@@ -38,6 +39,8 @@ export interface Supervisor extends LiveSessions {
   handle(request: Request, url: URL): Promise<Response | undefined>;
   health(): Promise<Health>;
   shutdown(): Promise<void>;
+  /** Resume the sessions a dead pi-host left mid-run, when the `autoResume` setting is on. Call once after start. */
+  resumeInterrupted(): Promise<ResumeOutcome[]>;
 }
 
 export type SupervisorOptions = Partial<SupervisorConfig> & {
@@ -45,13 +48,15 @@ export type SupervisorOptions = Partial<SupervisorConfig> & {
   host?: Host;
   /** Pin lookup (M20), Catalog's sidecar by default. */
   isPinned?: (sessionPath: string) => Promise<boolean>;
+  /** Active-run records and the `autoResume` setting. Without it nothing is recorded and `/settings` is not served. */
+  resume?: ResumeState;
 };
 
 /** Start the supervisor on whatever Pi version the host has installed: Pi updates on its own schedule. */
 export async function createSupervisor(options: SupervisorOptions = {}): Promise<Supervisor> {
-  const { host: givenHost, isPinned: pinLookup, ...overrides } = options;
+  const { host: givenHost, isPinned: pinLookup, resume, ...overrides } = options;
   const config = { ...loadConfig(), ...overrides };
   const host = givenHost ?? new LocalHost(config);
   const version = await host.piVersion();
-  return new SupervisorHost(config, version, pinLookup ?? ((sessionPath) => isPinned(host, sessionPath)), host);
+  return new SupervisorHost(config, version, pinLookup ?? ((sessionPath) => isPinned(host, sessionPath)), host, resume);
 }

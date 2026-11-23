@@ -15,6 +15,7 @@ import { copyPrivateState, markProfile, profileOf, sessionInfo, type SessionInfo
 import { isPlainObject as isRecord } from "../catalog/state.ts";
 import type { Host, Profile, SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
+import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
 import { childModels, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
@@ -35,6 +36,8 @@ type StartOutcome = { session: LiveSession } | Failure;
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
 const SESSION_PROMPT = /^\/sessions\/([^/]+)\/prompt$/;
 const SESSION = /^\/sessions\/([^/]+)$/;
+/** What happened to one interrupted session at start: `resumed`, or why not (`open`, `locked`, `not_found`, ...). */
+export type ResumeOutcome = { sessionId: string; outcome: string };
 const MAX_EVICTION_INTERVAL_MS = 60_000;
 const MIN_EVICTION_INTERVAL_MS = 50;
 /** Far above any snapshot (omp sessions reach 27 MB): a healthy client never hits it, a stalled one is closed. */
@@ -107,6 +110,7 @@ export class SupervisorHost implements Supervisor {
   private readonly sockets = new Set<ServerWebSocket<SocketData>>();
   private readonly stopWatching: () => void;
   private evicting = false;
+  private shuttingDown = false;
 
   readonly websocket: WebSocketHandler<SocketData> = {
     open: (ws) => void this.sockets.add(ws),
@@ -125,6 +129,7 @@ export class SupervisorHost implements Supervisor {
     private readonly piVersion: string,
     private readonly isPinned: (sessionPath: string) => Promise<boolean>,
     readonly host: Host,
+    private readonly resume?: ResumeState,
   ) {
     const interval = Math.min(MAX_EVICTION_INTERVAL_MS, Math.max(MIN_EVICTION_INTERVAL_MS, config.idleMs / 4));
     this.evictionTimer = setInterval(() => void this.evictIdle(), interval);
@@ -167,6 +172,15 @@ export class SupervisorHost implements Supervisor {
   }
 
   async handle(request: Request, url: URL): Promise<Response | undefined> {
+    if (url.pathname === "/settings" && this.resume) {
+      if (request.method === "GET") return Response.json({ autoResume: await this.resume.autoResume() });
+      if (request.method === "PUT") {
+        const body = await request.json().catch(() => undefined);
+        if (!isRecord(body) || typeof body.autoResume !== "boolean") return respond(fail(400, "invalid_body"));
+        await this.resume.setAutoResume(body.autoResume);
+        return Response.json({ autoResume: body.autoResume });
+      }
+    }
     if (url.pathname === "/sessions" && request.method === "POST") {
       const parsed = await parseStartRequest(await request.json().catch(() => undefined), this.host);
       if ("status" in parsed) return respond(parsed);
@@ -237,9 +251,53 @@ export class SupervisorHost implements Supervisor {
   }
 
   async shutdown(): Promise<void> {
+    // The runs this ends are interrupted, not settled: their records stay for the next start.
+    this.shuttingDown = true;
     clearInterval(this.evictionTimer);
     this.stopWatching();
     for (const session of this.byId.values()) session.terminate();
+    await this.resume?.flush();
+  }
+
+  /**
+   * On start: take the run lists of dead pi-hosts and, when `autoResume` is on, reopen those sessions with a short
+   * resume prompt. Always claims, so a list never waits for the setting to be switched on. A session another holder
+   * has (live here, locked by the Pi TUI or another pi-host), an archived one and one the user aborted (no record)
+   * are left alone.
+   */
+  async resumeInterrupted(): Promise<ResumeOutcome[]> {
+    if (!this.resume) return [];
+    const records = await this.resume.claimOrphans();
+    if (records.length === 0 || !(await this.resume.autoResume())) return [];
+    const outcomes: ResumeOutcome[] = [];
+    for (const record of records) {
+      const outcome = await this.resumeOne(record).catch((error) => `failed: ${String(error)}`);
+      outcomes.push({ sessionId: record.sessionId, outcome });
+      if (outcome !== "resumed") console.warn(`pi-host: session ${record.sessionId} not resumed: ${outcome}`);
+    }
+    return outcomes;
+  }
+
+  private async resumeOne(record: RunRecord): Promise<string> {
+    if (this.byId.has(record.sessionId) || this.byPath.has(resolve(record.sessionPath))) return "open";
+    const started = await this.start({ cwd: record.cwd, spec: record.spec, resume: { sessionPath: record.sessionPath } });
+    if ("status" in started) return String(started.body.error ?? started.status);
+    const { session } = started;
+    if (session.liveStatus().running) return "open";
+    const response = await session.requestAsync({ type: "prompt", message: RESUME_PROMPT });
+    if (response.success !== true) {
+      void session.close();
+      return `prompt_failed: ${String(response.error ?? "rejected")}`;
+    }
+    return "resumed";
+  }
+
+  /** Auto-resume bookkeeping: a run in `session` started or ended. A failed write must not touch the session. */
+  private onRun(session: LiveSession, active: boolean): void {
+    if (!this.resume || this.shuttingDown) return;
+    const { sessionId, sessionPath, cwd, spec } = session;
+    const written = active ? this.resume.track({ sessionId, sessionPath, cwd, spec }) : this.resume.untrack(sessionId);
+    written.catch((error) => console.warn(`pi-host: resume state not written: ${String(error)}`));
   }
 
   /** Stop live sessions nobody needs (no client, not running, no dialog or liveness status, not pinned). */
@@ -365,7 +423,7 @@ export class SupervisorHost implements Supervisor {
     let session: LiveSession;
     try {
       const child = await this.host.spawn({ profile: request.spec.profile, cwd, piArgs });
-      session = new LiveSession(child, cwd, request.spec, lock, (exited) => this.forget(exited));
+      session = new LiveSession(child, cwd, request.spec, lock, (exited) => this.forget(exited), (live, active) => this.onRun(live, active));
     } catch (error) {
       lock.release();
       return fail(502, "spawn_failed", { message: String(error) });
@@ -415,6 +473,7 @@ export class SupervisorHost implements Supervisor {
   }
 
   private forget(session: LiveSession): void {
+    this.onRun(session, false);
     if (this.byId.get(session.sessionId) === session) this.byId.delete(session.sessionId);
     if (this.byPath.get(session.sessionPath) === session) this.byPath.delete(session.sessionPath);
   }

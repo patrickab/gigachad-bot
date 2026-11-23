@@ -1,6 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
-import { fileForm, post, request, requestVoid } from "./http"
+import { fileForm, jsonInit, post, request, requestVoid } from "./http"
 
 export interface PiRepository {
   name: string
@@ -142,4 +142,17 @@ export interface PiSessionEntries {
 export async function fetchPiSessionEntries(sessionId: string, options: { turns?: number } = {}): Promise<PiSessionEntries> {
   const query = options.turns === undefined ? "" : `?turns=${options.turns}`
   return request(`/pi/sessions/${encodeURIComponent(sessionId)}/entries${query}`)
+}
+
+/** pi-host's settings: reopen the runs a pi-host crash or reboot interrupted. */
+export interface PiSettings {
+  autoResume: boolean
+}
+
+export async function fetchPiSettings(signal?: AbortSignal): Promise<PiSettings> {
+  return request<PiSettings>("/pi/settings", { signal })
+}
+
+export async function savePiSettings(settings: PiSettings): Promise<void> {
+  await request<PiSettings>("/pi/settings", await jsonInit("PUT", settings))
 }

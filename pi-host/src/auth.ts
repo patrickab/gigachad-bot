@@ -9,7 +9,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 
-const stateDir = `${process.env.XDG_STATE_HOME ?? `${homedir()}/.local/state`}/gigachad-bot`;
+export const stateDir = `${process.env.XDG_STATE_HOME ?? `${homedir()}/.local/state`}/gigachad-bot`;
 export const tokenPath = process.env.PI_HOST_TOKEN_FILE ?? `${stateDir}/pi-host.token`;
 export const gatewayTokenPath = process.env.PI_GATEWAY_TOKEN_FILE ?? `${stateDir}/pi-gateway.token`;
 
