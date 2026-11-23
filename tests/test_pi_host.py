@@ -159,7 +159,8 @@ def test_sessions_leave_factory_tasks_out(monkeypatch):
 
 
 def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
-    hit = {"session": SESSION, "snippet": "…fix the tests…", "entryId": "a1b2c3d4"}
+    found = {"entryId": "a1b2c3d4", "ordinal": 1, "quality": 1, "before": "…fix the ", "match": "tests", "after": "…"}
+    hit = {"session": SESSION, "snippet": "…fix the tests…", "entryId": "a1b2c3d4", "matches": [found]}
     host = _serve(monkeypatch, {"GET /search": (200, {"hits": [hit]})})
 
     response = _client().get("/api/pi/search", params={"q": "fix tests"})
@@ -169,6 +170,25 @@ def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     assert response.json() == {"hits": [{**hit, "session": session}]}
     assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
     assert _client().get("/api/pi/search").status_code == 422
+
+
+def test_session_matches_pass_ranked_hits_through_with_the_query_and_limit(monkeypatch):
+    found = {"entryId": "a1b2c3d4", "ordinal": 2, "quality": 0.8, "before": "run the ", "match": "test", "after": "s"}
+    page = {"matches": [found], "total": 7}
+    host = _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/matches": (200, page)})
+
+    response = _client().get(f"/api/pi/sessions/{SESSION_ID}/matches", params={"q": "test", "limit": 5})
+
+    assert (response.status_code, response.json()) == (200, page)
+    assert dict(host.requests[0].url.params) == {"q": "test", "limit": "5"}
+    assert _client().get(f"/api/pi/sessions/{SESSION_ID}/matches").status_code == 422
+    assert _client().get(f"/api/pi/sessions/{SESSION_ID}/matches", params={"q": "x", "limit": 0}).status_code == 422
+
+
+def test_session_matches_of_an_unknown_session_are_404(monkeypatch):
+    _serve(monkeypatch, {f"GET /sessions/{SESSION_ID}/matches": (404, {"error": "not_found"})})
+
+    assert _client().get(f"/api/pi/sessions/{SESSION_ID}/matches", params={"q": "x"}).status_code == 404
 
 
 def test_entries_pass_pi_shapes_through_untouched(monkeypatch):

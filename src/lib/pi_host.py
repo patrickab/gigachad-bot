@@ -215,12 +215,33 @@ class FileList(ContractModel):
     files: list[FileMatch]
 
 
+class SessionMatch(ContractModel):
+    """One hit in a session: the *ordinal*th match (text order) in the user or assistant text of entry *entry_id*,
+    with the text around it."""
+
+    entry_id: str
+    ordinal: int
+    quality: float
+    before: str
+    match: str
+    after: str
+
+
+class SessionMatches(ContractModel):
+    """A session's best hits, ranked, and how many it has in all."""
+
+    matches: list[SessionMatch]
+    total: int
+
+
 class SearchHit(ContractModel):
-    """A session matching a transcript search (M24): the text around the hit and the entry holding it."""
+    """A session matching a transcript search (M24): the text around the hit and the entry holding it, and its best
+    few hits."""
 
     session: SessionInfo
     snippet: str
     entry_id: str
+    matches: list[SessionMatch] = []
 
 
 class SessionEntries(ContractModel):
@@ -536,6 +557,12 @@ async def search_sessions(query: str, limit: int = 20) -> list[SearchHit]:
     """Live sessions whose user and assistant text matches *query*, best first, newest first on ties (M24)."""
     params: dict[str, str | int] = {"q": query, "limit": limit}
     return (await _request("GET", "/search", SearchResult, params=params)).hits
+
+
+async def session_matches(session_id: str, query: str, limit: int = 50) -> SessionMatches:
+    """The best *limit* hits of one session's transcript for *query*, ranked, each addressed by entry id and ordinal."""
+    params: dict[str, str | int] = {"q": query, "limit": limit}
+    return await _request("GET", f"/sessions/{session_id}/matches", SessionMatches, params=params)
 
 
 async def open_websocket() -> ClientConnection:

@@ -30,6 +30,7 @@ import type {
   PiChild,
   PrivateState,
   SearchMatch,
+  SessionMatchPage,
   SessionEntries,
   SessionMeta,
   SpawnRequest,
@@ -39,7 +40,7 @@ import { listFiles } from "./files.ts";
 import { forkSession } from "./fork.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { spawnSandboxed } from "./sandbox.ts";
-import { searchSessions } from "./search.ts";
+import { searchSessions, sessionMatches } from "./search.ts";
 import { deleteSession, findSession, listSessions, readEntries, moveSession, sessionMeta } from "./sessions.ts";
 import { readState, writeState } from "./state.ts";
 import { watchSessions } from "./watch.ts";
@@ -221,6 +222,10 @@ export class LocalHost implements Host {
   async searchSessions(query: string, limit: number): Promise<SearchMatch[]> {
     const metas = await listSessions(null, false);
     return searchSessions(query, limit, metas.filter((meta) => meta.factory === undefined));
+  }
+
+  sessionMatches(sessionPath: string, query: string, limit: number): Promise<SessionMatchPage | undefined> {
+    return sessionMatches(sessionPath, query, limit);
   }
 
   watchSessions(onChange: (sessionPaths: string[]) => void): () => void {

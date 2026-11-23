@@ -699,7 +699,7 @@ describe("file completion", () => {
 });
 
 describe("transcript search (M24)", () => {
-  type SearchBody = { hits: { session: SessionInfo; snippet: string; entryId: string }[] };
+  type SearchBody = { hits: { session: SessionInfo; snippet: string; entryId: string; matches: { entryId: string; ordinal: number }[] }[] };
 
   /** Entries chained by `parentId` in order, the last one the leaf. */
   function chained(...entries: [id: string, role: string, text: string][]): object[] {
@@ -741,6 +741,43 @@ describe("transcript search (M24)", () => {
     expect(hits[1]!.snippet).toBe("where is the frobnicator");
     expect(hits[0]!.session).toMatchObject({ sessionId: NEW_ID, machine: "local", live: null });
     expect((await search("")).hits).toEqual([]);
+  });
+
+  test("lists a session's best hits, addressed by entry and ordinal, and ranks them in a matches route of its own", async () => {
+    await writeSession(
+      NEW_ID,
+      sessionLines(
+        NEW_ID,
+        projectDir,
+        "2026-11-19T08:00:00.000Z",
+        chained(
+          ["m1", "user", "pangolin and then a pangolin"],
+          ["m2", "assistant", "a pangolin again"],
+          ["m3", "user", "pangolins"],
+          ["m4", "assistant", "nothing here"],
+        ),
+      ),
+      new Date("2026-11-19T08:30:00.000Z"),
+    );
+    type Page = { matches: { entryId: string; ordinal: number; quality: number; before: string; match: string; after: string }[]; total: number };
+    const page = (await call<Page>("GET", `/sessions/${NEW_ID}/matches?q=pangolin`)).json;
+    // Exact words first (later entries first among equals), the prefix hit last
+    expect(page.matches.map((hit) => [hit.entryId, hit.ordinal, hit.quality])).toEqual([
+      ["m2", 0, 1],
+      ["m1", 0, 1],
+      ["m1", 1, 1],
+      ["m3", 0, 0.8],
+    ]);
+    expect(page.total).toBe(4);
+    expect(page.matches[0]).toMatchObject({ before: "a ", match: "pangolin", after: " again" });
+    expect((await call<Page>("GET", `/sessions/${NEW_ID}/matches?q=pangolin&limit=2`)).json.matches).toHaveLength(2);
+    expect((await call<Page>("GET", `/sessions/${NEW_ID}/matches?q=`)).json).toEqual({ matches: [], total: 0 });
+    expect((await call("GET", "/sessions/unknown-id/matches?q=pangolin")).status).toBe(404);
+
+    // The search lists the best three of them next to its entry and snippet
+    const { hits } = await search("pangolin");
+    expect(hits[0]!.entryId).toBe("m1");
+    expect(hits[0]!.matches.map((hit) => [hit.entryId, hit.ordinal])).toEqual([["m2", 0], ["m1", 0], ["m1", 1]]);
   });
 
   test("skips tool output, thinking and abandoned branches; a large tool result is not parsed for text", async () => {

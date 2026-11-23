@@ -1,12 +1,12 @@
 /**
- * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, and `@` file completion.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, search hits of one session, and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
  * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
  *   `profileOf` and `markProfile` for the supervisor
  */
 import { isAbsolute, resolve } from "node:path";
-import { PROFILES, type Host, type Profile } from "../host/index.ts";
+import { PROFILES, type Host, type Profile, type SessionMatch } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
 import { rankFiles } from "./files.ts";
@@ -20,6 +20,8 @@ const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
+const DEFAULT_MATCH_LIMIT = 50;
+const MAX_MATCH_LIMIT = 500;
 /** The methods each `/sessions/:id/<action>` route takes. */
 const ACTION_METHODS = {
   archive: ["POST"],
@@ -27,12 +29,13 @@ const ACTION_METHODS = {
   pin: ["PUT"],
   state: ["GET", "PUT"],
   entries: ["GET"],
+  matches: ["GET"],
 } as const satisfies Record<string, readonly string[]>;
 type SessionAction = keyof typeof ACTION_METHODS;
 const SESSION_ACTION = new RegExp(`^/sessions/([^/]+)/(${Object.keys(ACTION_METHODS).join("|")})$`);
 
 /** One `GET /search` hit (M24). */
-export type SearchHit = { session: SessionInfo; snippet: string; entryId: string };
+export type SearchHit = { session: SessionInfo; snippet: string; entryId: string; matches: SessionMatch[] };
 
 /** JSON error response `{error}`. */
 function fail(status: number, error: string): Response {
@@ -97,12 +100,20 @@ async function handleSearch(url: URL, live: LiveSessions, host: Host): Promise<R
   if (!query.trim()) return Response.json({ hits: [] });
   const matches = await host.searchSessions(query, limitParam(url, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
   const hits = await Promise.all(
-    matches.map(async ({ sessionPath, snippet, entryId }): Promise<SearchHit | undefined> => {
+    matches.map(async ({ sessionPath, snippet, entryId, matches }): Promise<SearchHit | undefined> => {
       const session = await sessionInfo(host, sessionPath, live);
-      return session && { session, snippet, entryId };
+      return session && { session, snippet, entryId, matches };
     }),
   );
   return Response.json({ hits: hits.filter((hit) => hit !== undefined) });
+}
+
+/** `GET /sessions/:id/matches?q=&limit=50`: the session's best hits for `q` as `{matches, total}`, ranked, each addressed by entry id and ordinal. */
+async function handleMatches(url: URL, sessionPath: string, host: Host): Promise<Response> {
+  const query = url.searchParams.get("q") ?? "";
+  if (!query.trim()) return Response.json({ matches: [], total: 0 });
+  const page = await host.sessionMatches(sessionPath, query, limitParam(url, DEFAULT_MATCH_LIMIT, MAX_MATCH_LIMIT));
+  return page ? Response.json(page) : fail(404, "not_found");
 }
 
 /**
@@ -195,6 +206,7 @@ export async function handleCatalog(request: Request, url: URL, live: LiveSessio
   if (action === "archive" || action === "restore") return handleMove(sessionPath, action === "archive", live, host);
   if (action === "pin") return handlePin(request, sessionPath, live, host);
   if (action === "entries") return handleEntries(url, sessionPath, host);
+  if (action === "matches") return handleMatches(url, sessionPath, host);
   if (request.method === "PUT") return handlePutState(request, sessionPath, host);
   const { revision, data } = await host.readState(sessionPath);
   return Response.json({ revision, data });

@@ -107,8 +107,24 @@ export type SearchMatch = {
   /** Id of the entry holding the hit, empty when the file has no entry ids. */
   entryId: string;
   snippet: string;
+  /** The session's best hits (a few), each addressed by entry and ordinal. */
+  matches: SessionMatch[];
   score: number;
 };
+
+/** One hit in a session: the `ordinal`th match (text order) in the entry's user or assistant text, with the text around it. */
+export type SessionMatch = {
+  entryId: string;
+  ordinal: number;
+  /** 1 exact word or phrase down to 0.3 for two typos. */
+  quality: number;
+  before: string;
+  match: string;
+  after: string;
+};
+
+/** A session's best hits and how many it has in all. */
+export type SessionMatchPage = { matches: SessionMatch[]; total: number };
 
 export interface Host {
   /** Machine id in every `SessionInfo`, `local` for this machine. */
@@ -145,6 +161,8 @@ export interface Host {
    * tasks (a `factory` state, or a file in the factory root) are left out.
    */
   searchSessions(query: string, limit: number): Promise<SearchMatch[]>;
+  /** The best `limit` hits of one session's transcript for `query`, best first; undefined when the file is unreadable. */
+  sessionMatches(sessionPath: string, query: string, limit: number): Promise<SessionMatchPage | undefined>;
   /**
    * Call `onChange` with the session files changed in the live root and the session and task record files changed in
    * the factory's data (`<agent dir>/factory/`), at most once per debounce window; an empty list means the changed files

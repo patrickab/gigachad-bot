@@ -14,6 +14,7 @@ import { isBtwCommand } from "./btw"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
+import { usePiSearchFocus } from "./searchFocus"
 import { refreshPiSessions } from "./sessionStore"
 import { textOf } from "./transcript"
 import type { AgentMessage, PiCommand, PiModel } from "./types"
@@ -165,6 +166,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
 }) {
   const openFile = useOpenFile()
   const session = usePiSession(sessionId, openFile)
+  const search = usePiSearchFocus(sessionId)
   const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
@@ -240,7 +242,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   return (
     <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
+      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
       <ComposerDock dock={dock}>
         <BtwPanel threads={session.btw.threads} actions={session.btw} fileLinks={fileLinks} />
         <PiComposer

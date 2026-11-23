@@ -7,9 +7,10 @@ import { useHostAccess } from "@/contexts/SettingsContext"
 import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
-import { archivePiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
+import { archivePiSession, type PiRepository, type PiSessionInfo, type PiSessionMatch } from "@/lib/backend/api"
 import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
 import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
+import { focusPiSearchHit } from "./searchFocus"
 import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, type PiSearchHit } from "./sessionStore"
 import { PiSessionPreview, prefetchPiSessionPreviews } from "./PiSessionPreview"
 import { PiSessionDot, piTokenText, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
@@ -20,7 +21,10 @@ const SEARCH_DELAY_MS = 200
 /** Widest a row's title and its details line get, one value so both edges line up. */
 const ROW_TEXT_WIDTH = "max-w-[16rem]"
 
-interface Entry { session: PiSessionInfo; snippet?: string }
+/** A row: a session, or one hit of a session found by its content (`listed`: the session's hits the search lists, `first` its first row, the one that names the session). */
+interface Entry { session: PiSessionInfo; snippet?: string; hit?: PiSessionMatch; listed?: readonly PiSessionMatch[]; first?: boolean }
+
+const entryKey = ({ session, hit }: Entry) => (hit ? `${session.sessionId}:${hit.entryId}:${hit.ordinal}` : session.sessionId)
 
 /** Newest first by last use. */
 function newestFirst(sessions: readonly PiSessionInfo[]): PiSessionInfo[] {
@@ -77,15 +81,23 @@ function FittedPath({ path }: { path: string }) {
   return <span ref={ref} className="min-w-0 flex-1 truncate">{short ? abbreviatePath(path) : path}</span>
 }
 
-function SessionRow({ session, snippet, repositories, now }: { session: PiSessionInfo; snippet?: string; repositories: readonly PiRepository[]; now: number }) {
+/** The text around a hit, the matched part in full ink. */
+function HitText({ hit }: { hit: PiSessionMatch }) {
+  return <>{hit.before}<span className="text-ink">{hit.match}</span>{hit.after}</>
+}
+
+function SessionRow({ entry: { session, snippet, hit, first = true }, repositories, now }: { entry: Entry; repositories: readonly PiRepository[]; now: number }) {
   const worktree = piSessionWorktree(session, piSessionRepository(session, repositories))
+  if (hit && !first) {
+    return <span className={cn("ml-3.5 truncate py-0.5 text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}><HitText hit={hit} /></span>
+  }
   return <span className="flex min-w-0 flex-1 flex-col py-0.5">
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex w-1.5 shrink-0 justify-center"><PiSessionDot sessionId={session.sessionId} /></span>
       <span className={cn("truncate leading-5", ROW_TEXT_WIDTH)}>{piSessionTitle(session)}</span>
     </span>
-    {snippet
-      ? <span className={cn("ml-3.5 truncate text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}>{snippet.replace(/\s+/g, " ").trim()}</span>
+    {hit || snippet
+      ? <span className={cn("ml-3.5 truncate text-[10px] text-ink-subtle", ROW_TEXT_WIDTH)}>{hit ? <HitText hit={hit} /> : snippet!.replace(/\s+/g, " ").trim()}</span>
       : <span className={cn("ml-3.5 flex min-w-0 gap-2 text-[10px] tabular-nums text-ink-subtle", ROW_TEXT_WIDTH)}>
         <span className="w-6 shrink-0">{compactElapsed(Date.parse(session.modifiedAt), now)}</span>
         <span className="w-8 shrink-0 text-right">{piTokenText(session.tokens)}</span>
@@ -99,6 +111,7 @@ function SessionRow({ session, snippet, repositories, now }: { session: PiSessio
  * Panel over every Pi coding session, opened by Alt+A (G5) and docked under the top bar, the most recently used first; a hovered session previews its transcript.
  *
  * - Typing filters by title and directory and searches the transcripts, matches show the text they matched
+ * - A content match lists the session's best hits, picking one opens the session at that hit (`focusPiSearchHit`)
  * - Picking a session opens it, or switches to the tab already showing it; Delete at the search's end archives the highlighted one
  */
 export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void }) {
@@ -151,7 +164,9 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     const hits = (search.hits ?? []).filter((hit) => !shown.has(hit.session.sessionId) && !archiving.has(hit.session.sessionId))
     groups.push(
       { key: "named", label: "Sessions", items: named.map((session) => ({ session })) },
-      { key: "content", label: "Content", items: hits.map((hit) => ({ session: hit.session, snippet: hit.snippet })) },
+      { key: "content", label: "Content", items: hits.flatMap((hit): Entry[] => hit.matches.length > 0
+        ? hit.matches.map((match, index) => ({ session: hit.session, hit: match, listed: hit.matches, first: index === 0 }))
+        : [{ session: hit.session, snippet: hit.snippet }]) },
     )
   } else {
     groups.push({ key: "all", items: sessions.map((session) => ({ session })) })
@@ -162,24 +177,25 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     label="Agents"
     onClose={close}
     groups={groups}
-    itemKey={(entry) => (entry.session.sessionId)}
+    itemKey={entryKey}
     searchPlaceholder="Search sessions…"
     query={query}
     onQueryChange={setQuery}
     header={error ? <ErrorText className="text-[10px]">{error}</ErrorText> : undefined}
     emptyText={words.length > 0 && search.hits === null ? "Searching…" : "No sessions"}
-    renderItem={(entry) => <SessionRow session={entry.session} snippet={entry.snippet} repositories={repositories} now={now} />}
+    renderItem={(entry) => <SessionRow entry={entry} repositories={repositories} now={now} />}
     renderPreview={(entry) => <PiSessionPreview session={entry.session} />}
     onKeyDown={(event, entry, list) => {
       if (!isRemoveRowKey(event) || !entry) return false
       event.preventDefault()
-      const neighbour = neighbourKey(list, entry.session.sessionId)
+      const neighbour = neighbourKey(list, entryKey(entry))
       if (neighbour) list.highlight(neighbour)
       void archive(entry.session)
       return true
     }}
     onPick={(entry) => {
-      const { session } = entry
+      const { session, hit } = entry
+      if (hit) focusPiSearchHit(session.sessionId, query.trim(), hit, entry.listed)
       onOpenItem(piSessionItem(session, piSessionRepository(session, repositories)?.name ?? baseName(session.cwd), null))
       return true
     }}

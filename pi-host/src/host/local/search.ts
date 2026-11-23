@@ -12,7 +12,7 @@
  * https://github.com/ompweb-dev/ompweb), adapted to Pi's records and to report the hit's entry and a snippet.
  */
 import { stat } from "node:fs/promises";
-import type { SearchMatch, SessionMeta } from "../index.ts";
+import type { SearchMatch, SessionMatch, SessionMatchPage, SessionMeta } from "../index.ts";
 import {
   compileSearchQuery,
   CONTENT_WEIGHT,
@@ -31,6 +31,11 @@ const LARGE_LINE_CHARS = 64 * 1024;
 const LINE_HEAD_CHARS = 512;
 const SNIPPET_BEFORE_CHARS = 60;
 const SNIPPET_AFTER_CHARS = 140;
+/** Hits per session a search lists, the rest through `sessionMatches`. */
+const LISTED_MATCHES = 3;
+/** Context of a listed hit, short because its row is narrow. */
+const MATCH_BEFORE_CHARS = 24;
+const MATCH_AFTER_CHARS = 100;
 
 /** One record of a session file, reduced to what the active branch and the search need. */
 type SessionRecord = {
@@ -190,6 +195,33 @@ function snippetOf(text: string, query: CompiledSearchQuery): string {
   return `${start > 0 ? "…" : ""}${body}${end < text.length ? "…" : ""}`;
 }
 
+/** Every hit of the transcript, entry by entry, `ordinal` counting an entry's hits in text order. */
+function transcriptHits(transcript: Transcript, query: CompiledSearchQuery): { entryIndex: number; entryId: string; ordinal: number; quality: number; text: string; start: number; end: number }[] {
+  return transcript.entries.flatMap((entry, entryIndex) =>
+    findSearchMatches(entry.text, query).map((span, ordinal) => ({ entryIndex, entryId: entry.id, ordinal, quality: span.quality, text: entry.text, start: span.start, end: span.end })),
+  );
+}
+
+/** The best `limit` hits, best first and later entries first among equals; legacy entries without an id cannot be addressed and are left out. */
+function rankedMatches(transcript: Transcript, query: CompiledSearchQuery, limit: number): SessionMatchPage {
+  const hits = transcriptHits(transcript, query).filter((hit) => hit.entryId !== "");
+  hits.sort((a, b) => b.quality - a.quality || b.entryIndex - a.entryIndex || a.ordinal - b.ordinal);
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  const matches = hits.slice(0, limit).map((hit): SessionMatch => {
+    const from = Math.max(0, hit.start - MATCH_BEFORE_CHARS);
+    const to = Math.min(hit.text.length, hit.end + MATCH_AFTER_CHARS);
+    return {
+      entryId: hit.entryId,
+      ordinal: hit.ordinal,
+      quality: hit.quality,
+      before: (from > 0 ? "…" : "") + flat(hit.text.slice(from, hit.start)).trimStart(),
+      match: flat(hit.text.slice(hit.start, hit.end)),
+      after: flat(hit.text.slice(hit.end, to)).trimEnd() + (to < hit.text.length ? "…" : ""),
+    };
+  });
+  return { matches, total: hits.length };
+}
+
 /** The entry with the most and best hits (the first on ties), with its snippet. */
 function bestEntry(transcript: Transcript, query: CompiledSearchQuery): { entryId: string; snippet: string } {
   let best: { id: string; text: string } | undefined;
@@ -203,6 +235,14 @@ function bestEntry(transcript: Transcript, query: CompiledSearchQuery): { entryI
   }
   const entry = best ?? transcript.entries[0];
   return entry ? { entryId: entry.id, snippet: snippetOf(entry.text, query) } : { entryId: "", snippet: "" };
+}
+
+/** The session file's best `limit` hits for `rawQuery` (addressed by entry id and ordinal), undefined when the file is unreadable. */
+export async function sessionMatches(sessionPath: string, rawQuery: string, limit: number): Promise<SessionMatchPage | undefined> {
+  const query = compileSearchQuery(rawQuery.slice(0, MAX_QUERY_CHARS));
+  const transcript = await transcriptOf(sessionPath);
+  if (!transcript) return undefined;
+  return query ? rankedMatches(transcript, query, limit) : { matches: [], total: 0 };
 }
 
 /** `sessions` (newest first) matching `rawQuery`, best score first and newest first among equal scores. */
@@ -220,7 +260,7 @@ export async function searchSessions(rawQuery: string, limit: number, sessions: 
         if (!transcript) return;
         const score = scoreSearchFields(transcript.fields, query);
         if (score === null) return;
-        const match = { sessionPath: session.sessionPath, ...bestEntry(transcript, query), score };
+        const match = { sessionPath: session.sessionPath, ...bestEntry(transcript, query), matches: rankedMatches(transcript, query, LISTED_MATCHES).matches, score };
         hits.push({ match, modifiedAt: session.modifiedAt });
       }),
     );

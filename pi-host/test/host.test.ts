@@ -11,6 +11,7 @@ import type {
   PiChild,
   PrivateState,
   SearchMatch,
+  SessionMatchPage,
   SessionEntries,
   SessionMeta,
   SpawnRequest,
@@ -156,7 +157,11 @@ class FakeHost implements Host {
     return [...this.sessions.values()]
       .filter((meta) => !meta.archived && meta.firstMessage.includes(query))
       .slice(0, limit)
-      .map((meta) => ({ sessionPath: meta.sessionPath, entryId: "e1", snippet: meta.firstMessage, score: 1 }));
+      .map((meta) => ({ sessionPath: meta.sessionPath, entryId: "e1", snippet: meta.firstMessage, matches: [], score: 1 }));
+  }
+
+  async sessionMatches(): Promise<SessionMatchPage | undefined> {
+    return { matches: [], total: 0 };
   }
 
   readonly watchers = new Set<(sessionPaths: string[]) => void>();
@@ -265,7 +270,7 @@ test("listing without a cwd, search and the sessions_changed broadcast go throug
 
   const searched = await api("/search?q=other");
   expect(searched.body).toEqual({
-    hits: [{ session: expect.objectContaining({ sessionPath: otherPath, machine: "box-1" }), snippet: "hello other", entryId: "e1" }],
+    hits: [{ session: expect.objectContaining({ sessionPath: otherPath, machine: "box-1" }), snippet: "hello other", entryId: "e1", matches: [] }],
   });
   expect((await api("/search?q=")).body).toEqual({ hits: [] });
 

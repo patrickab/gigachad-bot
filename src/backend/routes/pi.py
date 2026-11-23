@@ -206,6 +206,14 @@ async def get_search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> pi
     return pi_host.SearchResult(hits=await _call(pi_host.search_sessions(q, limit)))
 
 
+@http_router.get("/sessions/{session_id}/matches")
+async def get_session_matches(
+    session_id: SessionId, q: str, limit: int = Query(default=50, ge=1, le=500)
+) -> pi_host.SessionMatches:
+    """The best *limit* hits of the session's transcript for *q*, ranked, each addressed by entry id and ordinal."""
+    return await _call(pi_host.session_matches(session_id, q, limit))
+
+
 def _allowed_cwd(cwd: str, roots: FileRoots) -> str:
     """The absolute folder *cwd* resolved, 400 when relative, 404 unless it is a folder in the file roots or the workbench."""
     folder = FilePath(cwd)

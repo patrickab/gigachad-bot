@@ -233,7 +233,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
-|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search
+|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search with a row per hit
 |       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview
 |       |   |   |-- PiWorkspacePicker.tsx Composer project selector of an empty chat, a pick makes the first message start a Pi session
 |       |   |   `-- tools/            Tool-call rows (ported from omp-web, MIT)

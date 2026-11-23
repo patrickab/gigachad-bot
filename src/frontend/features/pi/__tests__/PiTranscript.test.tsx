@@ -1,8 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript, TURN_PAGE_SIZE } from "../PiTranscript"
+import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"
 import type { AgentMessage, AssistantMessage } from "../types"
+
+// The hits of the whole session are read through the API: a failure keeps the listed ones
+vi.mock("@/lib/backend/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/backend/api")>(),
+  fetchPiSessionMatches: () => Promise.reject(new Error("offline")),
+}))
 
 const fileLinks = { base: "/repo", open: () => {} }
 
@@ -127,5 +134,82 @@ describe("PiTranscript entry edits", () => {
     expect(screen.getByText("Omitted from context")).toBeTruthy()
     expect(screen.getByText("Hello")).toBeTruthy()
     expect(screen.queryByText(/Retried after/)).toBeNull()
+  })
+})
+
+describe("PiTranscript search hit", () => {
+  const hit = (entryId: string, ordinal = 0) => ({ entryId, ordinal, quality: 1, before: "", match: "needle", after: "" })
+  /** Highlight registry and the calls jsdom lacks. */
+  const registry = new Map<string, { ranges: Range[] }>()
+  let scrolled: Element[]
+
+  beforeEach(() => {
+    registry.clear()
+    scrolled = []
+    class FakeHighlight { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } add(range: Range) { this.ranges.push(range) } }
+    vi.stubGlobal("Highlight", FakeHighlight)
+    Object.defineProperty(CSS, "highlights", { configurable: true, value: registry })
+    Object.defineProperty(CSS, "escape", { configurable: true, value: (value: string) => value })
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    Element.prototype.scrollTo = () => {}
+    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 40, 10, 10)
+  })
+  afterEach(() => {
+    clearPiSearchHit()
+    vi.unstubAllGlobals()
+    Reflect.deleteProperty(CSS, "highlights")
+  })
+
+  function Harness({ transcript }: { transcript: Transcript }) {
+    return <PiTranscript transcript={transcript} fileLinks={fileLinks} search={usePiSearchFocus("s1")} />
+  }
+
+  /** The text each painted range covers. */
+  const painted = (name: string) => registry.get(name)?.ranges.map((range) => range.toString())
+
+  it("widens the window and opens the turn, scrolls to the hit and paints every hit with the current one apart", () => {
+    const messages = history(45)
+    messages[0] = { role: "user", content: "an old needle here", timestamp: 0 }
+    messages[1] = { role: "assistant", content: [{ type: "text", text: "needle one, needle two" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 1 }
+    render(<Harness transcript={transcriptOf(messages)} />)
+    expect(screen.queryByText("Answer 0")).toBeNull()
+
+    act(() => focusPiSearchHit("s1", "needle", hit("e1", 1), [hit("e0"), hit("e1", 1)]))
+
+    // Turn 0 was out of the window and collapsed: now mounted and open, its answer text rendered
+    expect(screen.getByText(/needle one, needle two/)).toBeTruthy()
+    expect(scrolled.at(-1)?.textContent).toContain("needle one, needle two")
+    expect(painted("pi-search")).toEqual(["needle", "needle", "needle"])
+    expect(painted("pi-search-current")).toHaveLength(1)
+    expect(registry.get("pi-search-current")?.ranges[0].startContainer.textContent).toContain("needle one, needle two")
+    expect(screen.getByText("2 / 2")).toBeTruthy()
+  })
+
+  it("steps through the hits with Enter and Shift+Enter, clears on Escape, and leaves text fields alone", () => {
+    const messages = history(2)
+    messages[0] = { role: "user", content: "needle", timestamp: 0 }
+    messages[3] = { role: "assistant", content: [{ type: "text", text: "a needle" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 3 }
+    render(<><Harness transcript={transcriptOf(messages)} /><textarea aria-label="composer" /></>)
+    act(() => focusPiSearchHit("s1", "needle", hit("e0"), [hit("e0"), hit("e3")]))
+    expect(screen.getByText("1 / 2")).toBeTruthy()
+
+    fireEvent.keyDown(document.body, { key: "Enter" })
+    expect(screen.getByText("2 / 2")).toBeTruthy()
+    fireEvent.keyDown(document.body, { key: "Enter", shiftKey: true })
+    fireEvent.keyDown(document.body, { key: "Enter", shiftKey: true })
+    expect(screen.getByText("2 / 2")).toBeTruthy()
+    fireEvent.keyDown(screen.getByLabelText("composer"), { key: "Enter" })
+    expect(screen.getByText("2 / 2")).toBeTruthy()
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    expect(screen.queryByText("2 / 2")).toBeNull()
+    expect(registry.has("pi-search")).toBe(false)
+    expect(registry.has("pi-search-current")).toBe(false)
+  })
+
+  it("drops a hit whose entry is not on the shown branch", () => {
+    render(<Harness transcript={transcriptOf(history(2))} />)
+    act(() => focusPiSearchHit("s1", "answer", hit("other")))
+    expect(scrolled).toEqual([])
   })
 })

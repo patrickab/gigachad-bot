@@ -7,9 +7,15 @@ import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { useEventListener } from "@/hooks/useEventListener"
+import { useTabActive } from "@/contexts/TabContext"
 import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/components/ui/columnResize"
 import { WideModeToggle } from "@/features/chat/WideModeToggle"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
+import { PiSearchBar } from "./PiSearchBar"
+import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
+import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighlights"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
@@ -28,7 +34,8 @@ const LOAD_EARLIER_ROOT_MARGIN = "400px 0px 0px 0px"
 
 /** One rendered part of an answer, in the order Pi produced it. */
 type Piece =
-  | { kind: "text"; key: string; text: string }
+  /** `entryId`: the persisted entry the text belongs to, what a search hit addresses. */
+  | { kind: "text"; key: string; text: string; entryId?: string }
   | { kind: "thinking"; key: string; text: string; messageKey: string }
   | { kind: "tool"; key: string; call: ToolCall; messageKey: string }
   | { kind: "bash"; key: string; message: BashExecutionMessage }
@@ -85,7 +92,10 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
     const retried = retriedError(message, marks)
     if (marks) pieces.push({ kind: "mark", key: `${key}-mark`, marks, retried })
     if (retried) continue
-    if (message.role === "assistant") pieces.push(...assistantPieces(message as AssistantMessage, key))
+    if (message.role === "assistant") {
+      const entryId = index < confirmed.count ? confirmed.entryIds[index] : undefined
+      pieces.push(...assistantPieces(message as AssistantMessage, key).map((piece) => (piece.kind === "text" && entryId ? { ...piece, entryId } : piece)))
+    }
     if (message.role === "bashExecution") pieces.push({ kind: "bash", key, message: message as BashExecutionMessage })
     if (message.role === "custom" && (message as CustomMessage).display) pieces.push({ kind: "custom", key, message: message as CustomMessage })
   }
@@ -125,7 +135,10 @@ function MarksLine({ marks, retried }: { marks: MessageMarks; retried?: string }
 
 function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean, fileLinks: FileLinks): ReactNode {
   switch (piece.kind) {
-    case "text": return <LaTeXMarkdown key={piece.key} content={piece.text} streaming={live && piece.key.startsWith("streaming")} fileLinks={fileLinks} />
+    case "text": {
+      const markdown = <LaTeXMarkdown content={piece.text} streaming={live && piece.key.startsWith("streaming")} fileLinks={fileLinks} />
+      return piece.entryId ? <div key={piece.key} data-entry-id={piece.entryId} className="contents">{markdown}</div> : <Fragment key={piece.key}>{markdown}</Fragment>
+    }
     case "thinking": return <ThinkingBlock key={piece.key} text={piece.text} />
     case "tool": {
       const run = runs[piece.call.id]
@@ -226,6 +239,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   const { text, compaction } = promptOf(prompt)
   const pieces = answerPieces(messages, turn, streaming, confirmed)
   const promptMarks = marksAt(confirmed, turn.start)
+  const promptEntryId = turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined
   const icon = compaction ? <FoldVertical size={14} aria-hidden="true" /> : undefined
   const answerText = pieces.flatMap((piece) => (piece.kind === "text" ? [piece.text] : [])).join("\n\n")
   const toggle = () => onToggle(turn.start, expanded)
@@ -259,7 +273,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     <TurnCard expanded>
       <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
-        {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <div><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
+        {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>
@@ -281,17 +295,21 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
  * - Follows the end while the reader is there, `paddingBottom` keeps the last turn clear of the floating composer
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
  *   from the end the window's top stays put, so appended turns do not push the read ones out
+ * - A search hit (`search`) widens the mounted window and opens its turn when needed, scrolls to the hit, centred, and holds the view
+ *   there; Enter and Shift+Enter (outside text fields) step through the session's hits, Escape clears
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
  *   and Edit, with the entry before the prompt and the prompt
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  */
-export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, onBranch, paddingBottom, onColumnChange }: {
+export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, paddingBottom, onColumnChange }: {
   transcript: Transcript
   /** Sent but unconfirmed messages, shown below the turns. */
   held?: readonly HeldMessage[]
   onRetryHeld?: (id: string) => void
   onDeleteHeld?: (id: string) => void
   fileLinks: FileLinks
+  /** The session search hit to show: its turn is mounted and opened, the view scrolls to it and every hit is painted (CSS Custom Highlight API). */
+  search?: PiSearchFocus | null
   onBranch?: (entryId: string, prompt?: string) => void
   paddingBottom?: number
   onColumnChange?: (column: HTMLDivElement | null) => void
@@ -356,11 +374,56 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
     if (!pinned && anchor === null) setAnchor(start)
   }
 
+  // The jump to a search hit: its turn is mounted and opened while rendering, then the effect scrolls to its text
+  const jumped = useRef(0)
+  const tabActive = useTabActive()
+  useSearchHighlights(scrollRef, search)
+  const hitTurn = (hit: PiSearchFocus["matches"][number]) => {
+    const message = entryIds.indexOf(hit.entryId)
+    return message < 0 || message >= confirmedMessages.length ? -1 : turns.findIndex((turn) => turn.start <= message && message < turn.end)
+  }
+  // Waits for the session's entries: nothing is loaded yet when a pick opens it
+  useResetOnChange(search && confirmedMessages.length > 0 ? search.seq : null, () => {
+    const turnIndex = search ? hitTurn(search.matches[search.index]) : -1
+    if (turnIndex < 0) return
+    const turnStart = turns[turnIndex].start
+    if (turnIndex < start) setAnchor(turnIndex)
+    setToggled((current) => (current[turnStart] ? current : { ...current, [turnStart]: true }))
+  })
+  useEffect(() => {
+    const root = scrollRef.current
+    const hit = search?.matches[search.index]
+    if (!search || !hit || !root || jumped.current === search.seq || confirmedMessages.length === 0) return
+    jumped.current = search.seq
+    const range = currentRange(root, search)
+    // Else the entry's text, e.g. when a hit's ordinal is past what rendered (a message too large to render shows less)
+    const target = range?.startContainer.parentElement ?? root.querySelector(`${ENTRY_TEXT}[data-entry-id="${CSS.escape(hit.entryId)}"]`)
+    if (!target) return
+    pinnedRef.current = false
+    // Instant: a smooth scroll would race the sentinel that loads the earlier page
+    target.scrollIntoView({ block: "center", behavior: "instant" })
+    if (range) {
+      const rect = range.getBoundingClientRect()
+      const view = root.getBoundingClientRect()
+      root.scrollTo({ top: root.scrollTop + rect.top + rect.height / 2 - (view.top + view.height / 2), behavior: "instant" })
+    }
+  }, [search, confirmedMessages.length])
+  // Enter and Shift+Enter step, Escape clears: from the page or the transcript, never from a text field or a button
+  useEventListener("window", "keydown", (event) => {
+    const target = event.target
+    if (target instanceof Element && (!(target === document.body || scrollRef.current?.contains(target)) || target.closest("input, textarea, select, button, [contenteditable='true']"))) return
+    if (event.key === "Escape") clearPiSearchHit()
+    else if (event.key === "Enter") stepPiSearchHit(event.shiftKey ? -1 : 1)
+    else return
+    event.preventDefault()
+  }, { active: tabActive && search !== null })
+
   const onToggle = useCallback((turnStart: number, expanded: boolean) => setToggled((current) => ({ ...current, [turnStart]: !expanded })), [])
   const liveTail = running || streaming !== null || optimistic !== null
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
+      {search && <PiSearchBar search={search} />}
       <div ref={onColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
         {start > 0 && (
           <button ref={earlierRef} type="button" onClick={showEarlier} className="mx-auto mt-3 block rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">

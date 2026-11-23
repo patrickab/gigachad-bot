@@ -49,11 +49,28 @@ export interface PiSessionOptions {
   thinking?: string
 }
 
-/** A session matching a search, with the matched text and the entry it sits in (pi-host `GET /search`, M24). */
+/** One hit in a session: the `ordinal`th match (text order) in the user or assistant text of entry `entryId`, with the text around it. */
+export interface PiSessionMatch {
+  entryId: string
+  ordinal: number
+  quality: number
+  before: string
+  match: string
+  after: string
+}
+
+/** A session matching a search, with the matched text and the entry it sits in, and its best few hits (pi-host `GET /search`, M24). */
 export interface PiSearchHit {
   session: PiSessionInfo
   snippet: string
   entryId: string
+  matches: PiSessionMatch[]
+}
+
+/** A session's ranked hits for a query, `total` counting those beyond the `limit` asked. */
+export interface PiSessionMatches {
+  matches: PiSessionMatch[]
+  total: number
 }
 
 /** Git checkouts directly under `~/git` a Pi session may start in. */
@@ -75,6 +92,11 @@ export async function fetchPiSessions(repo?: string, options: { archived?: boole
 export async function searchPiSessions(query: string, signal?: AbortSignal): Promise<PiSearchHit[]> {
   const { hits } = await request<{ hits: PiSearchHit[] }>(`/pi/search?q=${encodeURIComponent(query)}`, { signal })
   return hits
+}
+
+/** The best `limit` hits of one session's transcript for `query`, best first. */
+export async function fetchPiSessionMatches(sessionId: string, query: string, limit = 100, signal?: AbortSignal): Promise<PiSessionMatches> {
+  return request(`/pi/sessions/${encodeURIComponent(sessionId)}/matches?q=${encodeURIComponent(query)}&limit=${limit}`, { signal })
 }
 
 /** Up to 500 files of `scope`, unranked (the UI ranks them, K6), for `@` completion. */

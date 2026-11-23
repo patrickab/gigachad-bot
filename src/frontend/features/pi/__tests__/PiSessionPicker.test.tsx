@@ -12,6 +12,7 @@ const pi = vi.hoisted(() => ({
   search: vi.fn<(query: string, filter?: { profile?: string }) => Promise<PiSearchHit[]>>(),
   listFilters: [] as unknown[],
   archive: vi.fn<(sessionId: string) => Promise<PiSessionInfo>>(),
+  focus: vi.fn(),
 }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
@@ -27,6 +28,7 @@ vi.mock("../sessionStore", () => ({
   refreshPiSessions: vi.fn(),
   searchPiSessions: (query: string, filter?: { profile?: string }) => pi.search(query, filter),
 }))
+vi.mock("../searchFocus", () => ({ focusPiSearchHit: (...args: unknown[]) => pi.focus(...args) }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   archivePiSession: (sessionId: string) => pi.archive(sessionId),
@@ -91,8 +93,8 @@ describe("PiSessionPicker", () => {
     const other = piSession("unrelated", 2 * HOUR)
     pi.sessions = [titled, other]
     pi.search.mockResolvedValue([
-      { session: titled, snippet: "about refactor", entryId: "e1" },
-      { session: other, snippet: "…we should refactor the store…", entryId: "e2" },
+      { session: titled, snippet: "about refactor", entryId: "e1", matches: [] },
+      { session: other, snippet: "…we should refactor the store…", entryId: "e2", matches: [] },
     ])
     const onOpenItem = renderPicker()
 
@@ -105,6 +107,27 @@ describe("PiSessionPicker", () => {
     expect(hit).toHaveTextContent("…we should refactor the store…")
 
     fireEvent.click(hit)
+    expect(onOpenItem).toHaveBeenCalledWith({ kind: "pi", path: "proj", projectSlug: null, pi: { sessionId: "unrelated", repo: "proj" } })
+  })
+
+  it("lists a session's hits by content and opens the picked one at that hit", async () => {
+    pi.repositories = [{ name: "proj", path: "/git/proj" }]
+    const other = piSession("unrelated", 2 * HOUR)
+    pi.sessions = [other]
+    const first = { entryId: "e2", ordinal: 0, quality: 1, before: "…we should ", match: "refactor", after: " the store…" }
+    const second = { entryId: "e5", ordinal: 1, quality: 0.8, before: "and ", match: "refactoring", after: " later" }
+    pi.search.mockResolvedValue([{ session: other, snippet: "…we should refactor the store…", entryId: "e2", matches: [first, second] }])
+    const onOpenItem = renderPicker()
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Search sessions…" }), { target: { value: " refactor " } })
+    const rows = within(await screen.findByRole("group", { name: "Content" })).getAllByRole("option")
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent("unrelated")
+    expect(rows[1]).toHaveTextContent("and refactoring later")
+    expect(rows[1]).not.toHaveTextContent("unrelated")
+
+    fireEvent.click(rows[1])
+    expect(pi.focus).toHaveBeenCalledWith("unrelated", "refactor", second, [first, second])
     expect(onOpenItem).toHaveBeenCalledWith({ kind: "pi", path: "proj", projectSlug: null, pi: { sessionId: "unrelated", repo: "proj" } })
   })
 
