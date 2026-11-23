@@ -18,6 +18,54 @@ wait_until() {
     "$@"
 }
 
+# Prints every descendant of `pid`, deepest first.
+descendants() {
+    local child
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        descendants "$child"
+        printf '%s\n' "$child"
+    done
+}
+
+# Whether `pid` still runs: an exited child its parent has not reaped yet (a zombie) does not.
+running() {
+    local state
+    state=$(ps -o stat= -p "$1" 2>/dev/null) && [[ "$state" != Z* ]]
+}
+
+# Stops `pids`: TERM, up to `grace` seconds to exit, then KILL for the rest.
+stop_processes() {
+    local grace=$1 pid alive tick
+    shift
+    (($# > 0)) || return 0
+    kill -TERM "$@" 2>/dev/null || true
+    for ((tick = 0; tick < grace * 4; tick++)); do
+        alive=()
+        for pid in "$@"; do running "$pid" && alive+=("$pid"); done
+        ((${#alive[@]} == 0)) && return 0
+        sleep 0.25
+    done
+    kill -KILL "$@" 2>/dev/null || true
+}
+
+# Kills what listens on `port` when it was started from `dir` and no `run*.sh` launcher owns it any more:
+# the leftovers of a run that was killed before its cleanup ran. A live stack's processes are left alone.
+free_orphaned_port() {
+    local port=$1 dir=$2 pid ancestor owned
+    for pid in $(ss -Hltnp "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+        [[ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" == "$dir"* ]] || continue
+        owned=false
+        ancestor=$pid
+        while ancestor=$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ') && ((ancestor > 1)); do
+            if ps -o args= -p "$ancestor" | grep -qE '(^|[ /])run(-[a-z-]+)?\.sh( |$)'; then owned=true; break; fi
+        done
+        if [[ "$owned" == false ]]; then
+            printf 'Stopping orphaned process %s on port %s\n' "$pid" "$port" >&2
+            stop_processes 5 "$pid"
+        fi
+    done
+}
+
 # Repairs a stale development uv.lock, then runs `uv sync --locked` with the given options.
 # run.sh syncs once and exports GIGACHAD_DEPS_SYNCED=1, so the scripts it starts skip
 # their own sync, which would race it on the shared venv.

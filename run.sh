@@ -30,22 +30,28 @@ cleanup() {
     cleaned_up=true
 
     printf 'Shutting down...\n'
+    # TERM reaches only the launchers, bash does not pass it on: `npm -> next dev -> next-server` would keep 2999.
+    # Snapshot the whole tree first, let the launchers stop gracefully, then stop whatever of it is left.
+    local tree launchers=()
+    mapfile -t tree < <(descendants $$)
     for pid in "$backend_pid" "$frontend_pid" "${service_pids[@]}"; do
-        if [[ -n "$pid" ]]; then
-            kill -TERM "$pid" 2>/dev/null || true
-        fi
+        [[ -n "$pid" ]] && launchers+=("$pid")
     done
     pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-    for pid in "$backend_pid" "$frontend_pid" "${service_pids[@]}"; do
-        if [[ -n "$pid" ]]; then
-            wait "$pid" 2>/dev/null || true
-        fi
-    done
+    stop_processes 15 "${launchers[@]}"
+    local left=()
+    for pid in "${tree[@]}"; do running "$pid" && left+=("$pid"); done
+    stop_processes 5 "${left[@]}"
     printf 'Done.\n'
 }
 
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+
+# A run killed before its cleanup leaves its servers behind, and the next start fails on their ports.
+for port in 2999 8001 8011; do
+    free_orphaned_port "$port" "$root_dir"
+done
 
 # Sync the shared venv once before the services start. The scripts started below skip their
 # own sync, which would race this one.
