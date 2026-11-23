@@ -1,5 +1,7 @@
 "use client"
 
+import { HeldMessages } from "./HeldMessages"
+import type { HeldMessage } from "./outbox"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
@@ -283,8 +285,12 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
  *   and Edit, with the entry before the prompt and the prompt
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  */
-export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, onColumnChange }: {
+export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, onBranch, paddingBottom, onColumnChange }: {
   transcript: Transcript
+  /** Sent but unconfirmed messages, shown below the turns. */
+  held?: readonly HeldMessage[]
+  onRetryHeld?: (id: string) => void
+  onDeleteHeld?: (id: string) => void
   fileLinks: FileLinks
   onBranch?: (entryId: string, prompt?: string) => void
   paddingBottom?: number
@@ -381,6 +387,7 @@ export function PiTranscript({ transcript, fileLinks, onBranch, paddingBottom, o
             />
           )
         })}
+        <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
       </div>
       <WideModeToggle wide={wide} onToggle={() => setWide((current) => !current)} />
     </div>

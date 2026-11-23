@@ -237,13 +237,13 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   return (
     <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      <PiTranscript transcript={transcript} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
+      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
       <ComposerDock dock={dock}>
         <PiComposer
           sessionKey={sessionId}
           files={files}
           running={transcript.running}
-          disabled={status.kind !== "ready"}
+          disabled={status.kind !== "ready" && !(status.kind === "connecting" && transcript.running)}
           commands={commands}
           dialog={session.dialogs[0]}
           queue={transcript.queue}

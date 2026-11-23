@@ -230,6 +230,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- pi/                   Pi sessions rendered natively, the only frontend code that knows Pi's protocol
 |       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar, shell commands (`/memorize`)
 |       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
+|       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
 |       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search

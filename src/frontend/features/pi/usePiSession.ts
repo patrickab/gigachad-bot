@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
 import { useCoalescedDispatch } from "./coalescer"
+import { confirmedIds, heldOf, hold, patchHeld, removeHeld, takeHeld, useHeld, type HeldMessage } from "./outbox"
 import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "./piSocket"
 import { SessionResync } from "./resync"
-import { EMPTY_TRANSCRIPT, transcriptReducer, type ResyncEntries, type SessionEntries, type Transcript } from "./transcript"
+import { EMPTY_TRANSCRIPT, textOf, transcriptReducer, type ResyncEntries, type SessionEntries, type Transcript } from "./transcript"
 import type { ExtensionDialog, ImageContent, PiCommand, PiModel, PiState, UserMessage } from "./types"
 
 export type ConnectionStatus = { kind: "connecting" } | { kind: "ready" } | { kind: "closed"; reason: string }
@@ -57,6 +58,7 @@ function entriesOf(data: unknown): SessionEntries {
  * - Catches up with a guarded `resync` (`resync.ts`, M2, M22) on reconnect, tab visible, `online`, `agent_settled`, compaction and every live `message_end`, whose message gets its entry from the resync
  * - A new `streamId` drops the live state (streaming reply, live messages, optimistic prompt) and resyncs from scratch
  * - `send` starts a run (shown as an optimistic prompt until Pi reports it), or queues into the running one as steering or a follow-up (F4)
+ * - A message sent during a run is held (`outbox.ts`) until the queue snapshot or the session shows it, flushed in order after a reconnect
  * - `abort` takes the queued messages back (returned for the draft) before stopping, like Pi's Esc (F5)
  * - `runBash` runs `!cmd` (F7), `compact` compacts with optional instructions (F8), `setModel`/`setThinking` switch the session's model and thinking (D10, F10)
  * - `stats` (cost, context use) refresh on attach, after each run, compaction and model switch (F3)
@@ -87,13 +89,18 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), NOTICE_LIFETIME_MS)
   }, [])
 
-  const command = useCallback((type: string, fields: Record<string, unknown> = {}): Promise<Response> => {
+  /** Write one command to the socket: its answer, or null when the socket is down and nothing was sent. */
+  const post = useCallback((type: string, fields: Record<string, unknown> = {}): Promise<Response> | null => {
     const id = `${CLIENT_ID}-${++nextIdRef.current}`
-    if (!sendPiCommand(sessionId, { id, type, ...fields })) return Promise.resolve({ success: false, error: "Not connected" })
+    if (!sendPiCommand(sessionId, { id, type, ...fields })) return null
     const { promise, resolve } = Promise.withResolvers<Response>()
     pendingRef.current.set(id, resolve)
     return promise
   }, [sessionId])
+
+  const command = useCallback((type: string, fields: Record<string, unknown> = {}): Promise<Response> => {
+    return post(type, fields) ?? Promise.resolve({ success: false, error: "Not connected" })
+  }, [post])
 
   const refreshStats = useCallback(async () => {
     const response = await command("get_session_stats")
@@ -243,27 +250,74 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     }
   }, [sessionId, command, notify, dispatch, refreshStats])
 
-  /** Start a run, or queue into the running one as `mode`. A new run's prompt shows optimistically until Pi reports it. Failures become a notice. */
-  const send = useCallback(async (message: string, images: ImageContent[], mode: QueueMode = "steer") => {
-    const queueing = transcript.running
-    const fields = { message, ...(images.length > 0 ? { images } : {}), ...(queueing ? { streamingBehavior: mode } : {}) }
-    if (!queueing) {
-      const prompt: UserMessage = { role: "user", content: images.length > 0 ? [{ type: "text", text: message }, ...images] : message, timestamp: Date.now() }
-      dispatch({ kind: "prompt", prompt })
+  /** Send held messages not yet on the wire, oldest first. A down socket leaves them held for the next flush. A drop before the answer makes delivery uncertain: "not sent", never resent here. */
+  const flush = useCallback(() => {
+    for (const entry of heldOf(sessionId)) {
+      if (entry.state !== "sending" || entry.dispatched) continue
+      const fields = { message: entry.text, ...(entry.images.length > 0 ? { images: entry.images } : {}), streamingBehavior: entry.mode }
+      const answer = post("prompt", fields)
+      if (!answer) return
+      patchHeld(sessionId, entry.id, { dispatched: true })
+      void answer.then((response) => {
+        if (response.success) patchHeld(sessionId, entry.id, { state: "queued" })
+        else patchHeld(sessionId, entry.id, { state: "failed", error: response.error })
+      })
     }
-    const response = await command("prompt", fields)
-    if (response.success) return
-    if (!queueing) dispatch({ kind: "prompt", prompt: null })
-    notify(response.error ?? "Prompt refused", "error")
-  }, [command, notify, dispatch, transcript.running])
+  }, [sessionId, post])
 
-  /** Stop the run. Resolves to the queued messages taken back, for the draft. */
+  /** Start a run, or hold the message and deliver it into the running one as `mode`. A new run's prompt shows optimistically until Pi reports it. Failures become a notice. */
+  const send = useCallback(async (message: string, images: ImageContent[], mode: QueueMode = "steer") => {
+    if (transcript.running) {
+      hold(sessionId, { text: message, images, mode })
+      flush()
+      return
+    }
+    const prompt: UserMessage = { role: "user", content: images.length > 0 ? [{ type: "text", text: message }, ...images] : message, timestamp: Date.now() }
+    dispatch({ kind: "prompt", prompt })
+    const response = await command("prompt", { message, ...(images.length > 0 ? { images } : {}) })
+    if (response.success) return
+    dispatch({ kind: "prompt", prompt: null })
+    notify(response.error ?? "Prompt refused", "error")
+  }, [command, notify, dispatch, transcript.running, sessionId, flush])
+
+  const held = useHeld(sessionId)
+
+  // Flush once attached (also after a reconnect), in order
+  useEffect(() => {
+    if (status.kind === "ready" && held.some((entry) => entry.state === "sending" && !entry.dispatched)) flush()
+  }, [status.kind, held, flush])
+
+  // Pi's queue snapshot or the user message in the session confirms a held message
+  useEffect(() => {
+    if (held.length === 0) return
+    const userTexts = (since: number) => transcript.messages
+      .filter((message) => message.role === "user" && message.timestamp >= since - 2_000)
+      .map((message) => textOf((message as UserMessage).content))
+    const ids = confirmedIds(held, transcript.queue, userTexts)
+    if (ids.length > 0) removeHeld(sessionId, ids)
+  }, [held, transcript.queue, transcript.messages, sessionId])
+
+  const retryHeld = useCallback((id: string) => {
+    patchHeld(sessionId, id, { state: "sending", dispatched: false, error: undefined })
+    flush()
+  }, [sessionId, flush])
+  const deleteHeld = useCallback((id: string) => removeHeld(sessionId, [id]), [sessionId])
+
+  /** Stop the run. Resolves to the queued messages taken back, and the held ones not queued, for the draft. */
   const abort = useCallback(async (): Promise<string[]> => {
+    const taken = takeHeld(sessionId)
     const cleared = await command("clear_queue")
     await command("abort")
     const queue = (cleared.data ?? EMPTY_QUEUE) as Queue
-    return [...queue.steering, ...queue.followUp]
-  }, [command])
+    const back = [...queue.steering, ...queue.followUp]
+    const unqueued: string[] = []
+    for (const entry of taken as readonly HeldMessage[]) {
+      const at = back.indexOf(entry.text)
+      if (at >= 0) back.splice(at, 1)
+      else unqueued.push(entry.text)
+    }
+    return [...queue.steering, ...queue.followUp, ...unqueued]
+  }, [command, sessionId])
 
   /** Run `line` in the session's shell (`!cmd`), its output kept out of the model's context with `excludeFromContext` (`!!cmd`). */
   const runBash = useCallback(async (line: string, excludeFromContext: boolean) => {
@@ -300,6 +354,6 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
 
   return {
     transcript, status, state, commands, dialogs, notices, statusLines, editorText, models, thinkingLevels, stats,
-    send, abort, runBash, compact, setModel, setThinking, answerDialog, notify,
+    held, retryHeld, deleteHeld, send, abort, runBash, compact, setModel, setThinking, answerDialog, notify,
   }
 }
