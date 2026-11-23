@@ -106,6 +106,10 @@ ignore = [
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime, so their imports must stay real.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
 known-first-party = ["config", "lib", "backend"]

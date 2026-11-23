@@ -1,3 +1,4 @@
+import type { CanvasEndpoint } from "./api/canvases"
 import { getApiBase } from "./config"
 
 type QueryValue = string | number | boolean | string[] | undefined | null
@@ -57,8 +58,8 @@ export function sandboxAssetUrl(assetPath: string): string {
   return `${getApiBase()}/assets/${encodePath(assetPath)}`
 }
 
-export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number): string {
-  return `${getApiBase()}/canvases/${encodePath(canvasKey)}/stream${toQuery({ sinceRevision })}`
+export function canvasMutationStreamUrl(endpoint: CanvasEndpoint, sinceRevision: number): string {
+  return `${getApiBase()}${endpoint}/stream${toQuery({ sinceRevision })}`
 }
 
 /** WebSocket URL of the backend route at `path` (with its leading slash): the backend base URL with its scheme switched to ws(s). */

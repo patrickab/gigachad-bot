@@ -24,6 +24,7 @@ vi.mock("@/components/content/PdfViewer", () => ({
 
 const annotations = vi.hoisted(() => ({ resolve: null as null | ((key: string) => void), reject: null as null | ((error: Error) => void) }))
 vi.mock("@/lib/backend/api", () => ({
+  canvasEndpoint: (key: string) => key,
   openPdfAnnotations: vi.fn(() => {
     const { promise, resolve, reject } = Promise.withResolvers<string>()
     annotations.resolve = resolve

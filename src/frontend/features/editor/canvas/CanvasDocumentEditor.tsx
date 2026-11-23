@@ -7,7 +7,7 @@ import { ResizableEditor } from "@/features/editor/ResizableEditor"
 import type { DocumentEditorProps } from "@/features/editor/TextDocumentEditor"
 import { A4_ASPECT, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { imageFrameEmbeds } from "@/lib/domain/canvasRender"
-import { storeDrawing, writeBinaryDocument } from "@/lib/backend/api"
+import { canvasEndpoint, storeDrawing, writeBinaryDocument } from "@/lib/backend/api"
 import { renderPageToPng, renderCanvasToJpeg } from "@/lib/canvasExport"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
@@ -15,10 +15,11 @@ import { useDisplayName } from "@/contexts/ProjectContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useModeLabel } from "@/hooks/useModeLabel"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
+import { ShareButton } from "@/features/sharing/ShareButton"
 
 /** Database canvas: the collaboration hook owns loading and saving. */
 export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, onModeLabel }: DocumentEditorProps) {
-  const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
+  const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(canvasEndpoint(path))
   const filename = baseName(path)
   const shownName = useDisplayName()(slug, path) ?? filename
   const [exporting, setExporting] = useState(false)
@@ -101,6 +102,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider/50 shrink-0">
         <span className="text-[11px] font-medium text-ink truncate">{shownName}</span>
         <div className="flex items-center gap-1 shrink-0">
+          <ShareButton target={{ kind: "document", key: path }} className="h-auto w-auto rounded p-1" />
           <button
             aria-label="Export PDF"
             onClick={handleExportPdf}

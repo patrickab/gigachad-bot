@@ -10,7 +10,7 @@ import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useUndoRedoKeys } from "@/hooks/useUndoRedoKeys"
-import { openPdfAnnotations } from "@/lib/backend/api"
+import { canvasEndpoint, openPdfAnnotations } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { emptyCanvasDoc } from "@/lib/domain/canvasDocument"
 import { inkOutlinePath, type StrokeData } from "@/lib/drawing"
@@ -78,7 +78,7 @@ const PdfInk = memo(function PdfInk({ canvasKey, scroller, pen, clipToPages, onP
   onPageOverlay: (render: PageOverlay | undefined) => void
 }) {
   const active = useTabActive()
-  const { document, replace, status } = useCollaborativeCanvas(canvasKey)
+  const { document, replace, status } = useCollaborativeCanvas(canvasEndpoint(canvasKey))
   const doc = document ?? EMPTY_DOC
   const { liveRef, applyChange, commit, snapshotOnce, endGesture, undo, redo, canUndo, canRedo } = useCanvasHistory(doc, replace)
   const loaded = document !== null

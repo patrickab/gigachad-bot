@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 import pytest
 
-from backend.identity import RequestIdentity
 from backend.routes.canvases import CanvasMutationBatchRequest, stream_canvas, submit_mutations
 from backend.sync import ChangeBroker
 from lib.canvas_store import CanvasMutation, CanvasMutationStore, InvalidCanvasSnapshot
@@ -123,12 +122,12 @@ def test_canvas_access_is_user_scoped(postgres_pool):
     bob = create_user(postgres_pool, "bob@example.test")
     key = "notes/private.canvas"
     _canvas(postgres_pool, alice, key, EMPTY)
-    identity = RequestIdentity(user_id=bob, login="bob@example.test", device_id=None)
-    store = CanvasMutationStore(UserScope(postgres_pool, bob))
+    scope = UserScope(postgres_pool, bob)
+    store = CanvasMutationStore(scope)
 
     for attempt in (
         submit_mutations(key, CanvasMutationBatchRequest(mutations=[]), store),
-        stream_canvas(key, sinceRevision=0, identity=identity, store=store),
+        stream_canvas(key, sinceRevision=0, scope=scope),
     ):
         with pytest.raises(HTTPException) as error:
             asyncio.run(attempt)
@@ -146,10 +145,9 @@ async def test_canvas_stream_replays_then_delivers_live_batches(postgres_pool, d
 
     broker = ChangeBroker()
     monkeypatch.setattr("backend.routes.canvases.get_change_broker", lambda: broker)
-    identity = RequestIdentity(user_id=user_id, login="alice@example.test", device_id=None)
     await broker.start(database_url)
     try:
-        events = (await stream_canvas(key, sinceRevision=0, identity=identity, store=store)).body_iterator
+        events = (await stream_canvas(key, sinceRevision=0, scope=UserScope(postgres_pool, user_id))).body_iterator
         first = json.loads((await asyncio.wait_for(anext(events), timeout=5))["data"])
         for _ in range(40):
             with postgres_pool.connection() as connection:

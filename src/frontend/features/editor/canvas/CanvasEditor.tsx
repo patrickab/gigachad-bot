@@ -14,6 +14,7 @@ import { useCanvasInsert } from "@/features/editor/canvas/attachments/useCanvasI
 import { useCanvasScreenshot } from "@/features/editor/canvas/attachments/useCanvasScreenshot"
 import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
+import { canvasEndpoint } from "@/lib/backend/api"
 import { useTabActive } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -278,7 +279,7 @@ function NestedCanvasFile({ path, slug, depth, hostScale }: {
   depth: number
   hostScale: number
 }) {
-  const { document, replace, status, retry } = useCollaborativeCanvas(path)
+  const { document, replace, status, retry } = useCollaborativeCanvas(canvasEndpoint(path))
 
   if (!document) {
     return status === "error"

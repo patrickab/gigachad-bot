@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CanvasAcceptedBatch, CanvasDocument, CanvasMutation } from "@/lib/domain/canvasDocument"
+import type { CanvasEndpoint } from "@/lib/backend/api"
 
 const api = vi.hoisted(() => {
   class MockApiError extends Error {
@@ -18,6 +19,7 @@ vi.mock("@/lib/backend/canvasStream", () => stream)
 import { useCollaborativeCanvas, type CollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 
 const KEY = "project/board.canvas"
+const SOURCE = `/canvases/${KEY}` as CanvasEndpoint
 const EMPTY: CanvasDocument = { version: 1, frames: [], strokes: [], attachments: [], texts: [] }
 const page = (id: string, x = 0) => ({ id, kind: "page" as const, x, y: 0, width: 794 })
 
@@ -49,7 +51,7 @@ describe("useCollaborativeCanvas", () => {
     api.loadCanvasSnapshot.mockReset().mockResolvedValue({ revision: 0, document: EMPTY })
     api.submitCanvasMutations.mockReset().mockReturnValue(Promise.withResolvers().promise)
     stream.subscribeToCanvasMutationBatches.mockReset().mockImplementation(
-      (_key: string, _since: () => number, onBatch: typeof deliver, onError: () => void, onOpen: () => void) => {
+      (_source: CanvasEndpoint, _since: () => number, onBatch: typeof deliver, onError: () => void, onOpen: () => void) => {
         deliver = onBatch
         streamError = onError
         streamOpen = onOpen
@@ -64,7 +66,7 @@ describe("useCollaborativeCanvas", () => {
 
   it("keeps an acknowledged batch visible until the stream delivers it, then sends queued edits", async () => {
     api.submitCanvasMutations.mockResolvedValueOnce({ revision: 1 }).mockResolvedValueOnce({ revision: 2 })
-    const { result } = renderHook(() => useCollaborativeCanvas(KEY))
+    const { result } = renderHook(() => useCollaborativeCanvas(SOURCE))
     await flush()
 
     await edit(result, [page("first")])
@@ -84,7 +86,7 @@ describe("useCollaborativeCanvas", () => {
   })
 
   it("rebases pending local edits over remote batches", async () => {
-    const { result } = renderHook(() => useCollaborativeCanvas(KEY))
+    const { result } = renderHook(() => useCollaborativeCanvas(SOURCE))
     await flush()
 
     await edit(result, [page("local")])
@@ -95,7 +97,7 @@ describe("useCollaborativeCanvas", () => {
 
   it("retries a network failure with the original mutation IDs", async () => {
     api.submitCanvasMutations.mockRejectedValueOnce(new TypeError("network unavailable")).mockResolvedValueOnce({ revision: 1 })
-    const { result } = renderHook(() => useCollaborativeCanvas(KEY))
+    const { result } = renderHook(() => useCollaborativeCanvas(SOURCE))
     await flush()
 
     await edit(result, [page("first")])
@@ -110,7 +112,7 @@ describe("useCollaborativeCanvas", () => {
 
   it("does not retry a rejected mutation or a malformed canvas", async () => {
     api.submitCanvasMutations.mockRejectedValueOnce(new api.ApiError("invalid mutation", 422))
-    const { result } = renderHook(() => useCollaborativeCanvas(KEY))
+    const { result } = renderHook(() => useCollaborativeCanvas(SOURCE))
     await flush()
     await edit(result, [page("first")])
     act(() => vi.advanceTimersByTime(60_000))
@@ -118,7 +120,7 @@ describe("useCollaborativeCanvas", () => {
     expect(result.current.status).toBe("error")
 
     api.loadCanvasSnapshot.mockRejectedValueOnce(new api.ApiError("Canvas snapshot is not valid JSON", 422))
-    const malformed = renderHook(() => useCollaborativeCanvas("project/broken.canvas"))
+    const malformed = renderHook(() => useCollaborativeCanvas("/canvases/project/broken.canvas" as CanvasEndpoint))
     await flush()
     act(() => vi.advanceTimersByTime(60_000))
     expect(api.loadCanvasSnapshot).toHaveBeenCalledTimes(2)
@@ -127,7 +129,7 @@ describe("useCollaborativeCanvas", () => {
 
   it("recovers a transient snapshot failure and clears stream errors on reconnect", async () => {
     api.loadCanvasSnapshot.mockRejectedValueOnce(new TypeError("network unavailable"))
-    const { result } = renderHook(() => useCollaborativeCanvas(KEY))
+    const { result } = renderHook(() => useCollaborativeCanvas(SOURCE))
     await flush()
     expect(result.current).toMatchObject({ document: null, status: "error" })
 

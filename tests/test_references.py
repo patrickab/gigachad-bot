@@ -190,7 +190,7 @@ def test_removing_a_canvas_drops_its_mutation_log_and_the_documents_only_it_show
     frame = {"kind": "image", "x": 0, "y": 0, "width": 10, "path": pasted}
     CanvasMutationStore(world.docs._scope).apply(board, [CanvasMutation(uuid4(), "upsert", "frame", "f", frame)])
     with world.docs._scope.connection() as connection:
-        connection.execute("INSERT INTO canvas_shares (secret_hash, user_id, canvas_key) VALUES (%s, %s, %s)",
+        connection.execute("INSERT INTO share_links (secret_hash, user_id, document_key) VALUES (%s, %s, %s)",
                            (b"secret", world.docs._scope.user_id, board))
 
     scope = DocumentScope(slug)
@@ -200,7 +200,7 @@ def test_removing_a_canvas_drops_its_mutation_log_and_the_documents_only_it_show
     assert not world.has(board) and not world.has(pasted)
     with world.docs._scope.connection() as connection:
         assert connection.execute("SELECT count(*) FROM canvas_mutations").fetchone()[0] == 0
-        assert connection.execute("SELECT count(*) FROM canvas_shares").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM share_links").fetchone()[0] == 0
 
 
 def test_removing_a_note_deletes_it_with_its_unused_derived_data(world: World) -> None:

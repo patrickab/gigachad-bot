@@ -21,3 +21,8 @@ export const LazyFileCanvasEditor = dynamic(
   () => import("./FileCanvasEditor").then((m) => ({ default: m.FileCanvasEditor })),
   { ssr: false },
 )
+
+export const LazySharedCanvas = dynamic(
+  () => import("./SharedCanvas").then((m) => ({ default: m.SharedCanvas })),
+  { ssr: false },
+)

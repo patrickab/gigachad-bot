@@ -32,6 +32,7 @@ from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore, seed_prompts
 from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
+from lib.share_links import ShareLinks
 from lib.user_preferences import UserPreferences
 
 ExtractionPublisher = Callable[[str, str, str], None]
@@ -59,6 +60,10 @@ def get_chat_store(docs: DataStore = Depends(get_document_store)) -> ChatStore:
 
 def get_canvas_store(scope: UserScope = Depends(get_user_scope)) -> CanvasMutationStore:
     return CanvasMutationStore(scope)
+
+
+def get_share_links(scope: UserScope = Depends(get_user_scope)) -> ShareLinks:
+    return ShareLinks(scope)
 
 
 _sandbox_runner: SandboxRunner | None = None

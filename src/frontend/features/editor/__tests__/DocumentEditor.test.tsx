@@ -4,6 +4,7 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 
 const api = vi.hoisted(() => ({
+  canvasEndpoint: (key: string) => key,
   loadFileViewerText: vi.fn(),
   readFileRootRendered: vi.fn(),
   writeDocument: vi.fn(),

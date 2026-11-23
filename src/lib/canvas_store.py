@@ -86,12 +86,16 @@ def normalize_canvas_key(canvas_key: str) -> str:
         key = validate_key(canvas_key)
     except InvalidStorageKey as exc:
         raise CanvasNotFound("Canvas not found") from exc
-    if not key.endswith(".canvas"):
+    if not is_canvas_key(key):
         raise CanvasNotFound("Canvas not found")
     return key
 
 
-def _entities(value: Any, name: str) -> list[dict[str, Any]]:
+def is_canvas_key(key: str) -> bool:
+    return key.endswith(".canvas")
+
+
+def _entities(value: object, name: str) -> list[dict[str, Any]]:
     if value is None:
         return []
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
@@ -132,7 +136,8 @@ def canonical_snapshot(content: bytes) -> dict[str, Any]:
     ]
     # Text boxes saved before sizing existed get the default box size.
     texts = [
-        {**text, "width": 240 if text.get("width") is None else text["width"], "height": 80 if text.get("height") is None else text["height"]}
+        {**text, "width": 240 if text.get("width") is None else text["width"],
+         "height": 80 if text.get("height") is None else text["height"]}
         for text in _entities(document.get("texts"), "texts")
     ]
     canonical: dict[str, Any] = {

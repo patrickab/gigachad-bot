@@ -1,6 +1,7 @@
 "use client"
 
 import type { CanvasAcceptedBatch } from "@/lib/domain/canvasDocument"
+import type { CanvasEndpoint } from "./api/canvases"
 import { canvasMutationStreamUrl } from "./urls"
 
 const RECONNECT_INITIAL_MS = 250
@@ -11,7 +12,7 @@ const RECONNECT_MAX_MS = 5_000
  * `sinceRevision()`, so a dropped connection never replays or skips batches.
  */
 export function subscribeToCanvasMutationBatches(
-  canvasKey: string,
+  endpoint: CanvasEndpoint,
   sinceRevision: () => number,
   onBatch: (batch: CanvasAcceptedBatch) => void,
   onError: () => void,
@@ -22,7 +23,7 @@ export function subscribeToCanvasMutationBatches(
   let attempts = 0
 
   const open = () => {
-    source = new EventSource(canvasMutationStreamUrl(canvasKey, sinceRevision()))
+    source = new EventSource(canvasMutationStreamUrl(endpoint, sinceRevision()))
     source.addEventListener("batch", (message) => onBatch(JSON.parse((message as MessageEvent<string>).data)))
     source.onopen = () => {
       attempts = 0

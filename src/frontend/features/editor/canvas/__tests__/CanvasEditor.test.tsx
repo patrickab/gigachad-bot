@@ -56,6 +56,7 @@ vi.mock("@/features/editor/DocumentEditor", () => ({
   DocumentEditor: ({ path }: { path: string }) => <div data-testid="text-editor">{path}</div>,
 }))
 const api = vi.hoisted(() => ({
+  canvasEndpoint: (key: string) => key,
   writeBinaryDocument: vi.fn(),
   listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),

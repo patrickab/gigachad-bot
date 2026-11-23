@@ -38,6 +38,8 @@ from backend.routes.neovim import router as neovim_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.pi import router as pi_router
 from backend.routes.projects import router as projects_router
+from backend.routes.share_links import guest_router as share_guest_router
+from backend.routes.share_links import owner_router as share_owner_router
 from backend.routes.sync import router as sync_router
 from backend.routes.terminal import router as terminal_router
 from backend.routes.workbench import router as workbench_router
@@ -193,6 +195,8 @@ app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
+app.include_router(share_owner_router)
+app.include_router(share_guest_router)
 app.include_router(pi_router)
 app.include_router(learn_router)
 app.include_router(factory_router)

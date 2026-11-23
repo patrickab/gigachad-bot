@@ -161,15 +161,24 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool,
     docs.write_bytes("project/old/document/report.md", b"old [self](project/old/document/report.md)")
     docs.write_bytes("graph/old/system.c4", b"model {}")
     put(docs, "memory/project/old/memory/memory.json", [{"id": "f", "text": "old fact", "topic": "note"}])
-    put(docs, "chat/other/external.json", {"messages": [{"content": "[report](project/old/document/report.md)", "attachments": [{"vaultPath": attachment["path"]}]}]})
+    put(docs, "chat/other/external.json", {
+        "messages": [{"content": "[report](project/old/document/report.md)", "attachments": [{"vaultPath": attachment["path"]}]}],
+    })
     put(docs, "model/unrelated.json", {"slug": "old"})
     put(docs, "project/older/document/untouched.json", {"text": "old"})
     asset = assets.write("upload", "attachment/project/old/chat/parent/image.png", b"\x00\xffimage", mime="image/png")
     mutation = uuid4()
-    secret = b"share-secret"
     with postgres_pool.connection() as conn, conn.transaction():
-        conn.execute("INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value) VALUES (%s,%s,%s,1,0,'upsert','attachment','a',%s)", (mutation, user, canvas, Jsonb(attachment)))
-        conn.execute("INSERT INTO canvas_shares (secret_hash,user_id,canvas_key) VALUES (%s,%s,%s)", (secret, user, canvas))
+        conn.execute(
+            "INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value)"
+            " VALUES (%s,%s,%s,1,0,'upsert','attachment','a',%s)",
+            (mutation, user, canvas, Jsonb(attachment)),
+        )
+        conn.execute(
+            "INSERT INTO share_links (secret_hash,user_id,document_key,asset_path)"
+            " VALUES ('canvas',%s,%s,NULL), ('asset',%s,NULL,%s)",
+            (user, canvas, user, asset.logical_path),
+        )
     before = get(docs, "chat/projects-meta.json")["projects"][0]
     with postgres_pool.connection() as conn:
         last_seq = conn.execute("SELECT max(seq) FROM changes WHERE user_id=%s", (user,)).fetchone()[0]
@@ -195,11 +204,17 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool,
     assert get(docs, "model/unrelated.json") == {"slug": "old"}
     assert get(docs, "project/older/document/untouched.json") == {"text": "old"}
     with postgres_pool.connection() as conn:
-        events = conn.execute("SELECT resource_kind, resource_key FROM changes WHERE user_id=%s AND seq>%s", (user, last_seq)).fetchall()
-        assert {("document", "chat/old/main.json"), ("document", "chat/new-name/main.json"), ("asset", asset.logical_path)} <= set(events)
+        events = conn.execute(
+            "SELECT resource_kind, resource_key FROM changes WHERE user_id=%s AND seq>%s", (user, last_seq)
+        ).fetchall()
+        assert {("document", "chat/old/main.json"), ("document", "chat/new-name/main.json"), ("asset", asset.logical_path)} \
+            <= set(events)
         assert conn.execute("SELECT canvas_key,value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone() == (
-            "project/new-name/document/board.canvas", {**attachment, "path": "project/new-name/document/report.md", "projectSlug": "new-name"})
-        assert conn.execute("SELECT canvas_key FROM canvas_shares WHERE secret_hash=%s", (secret,)).fetchone()[0] == "project/new-name/document/board.canvas"
+            "project/new-name/document/board.canvas",
+            {**attachment, "path": "project/new-name/document/report.md", "projectSlug": "new-name"},
+        )
+        links = conn.execute("SELECT document_key, asset_path FROM share_links ORDER BY secret_hash").fetchall()
+        assert links == [(None, moved.logical_path), ("project/new-name/document/board.canvas", None)]
         assert conn.execute("SELECT path FROM vault_roots WHERE user_id=%s", (user,)).fetchone()[0] == str(mount)
 
 
@@ -296,7 +311,7 @@ def test_rename_replaces_an_empty_leftover_workbench_folder(stores, workbench_ro
 
 
 def test_database_conflict_moves_workbench_folders_back(stores, workbench_root):
-    docs, projects, assets, _ = stores
+    _docs, projects, assets, _ = stores
     projects.create_project("Old")
     paper, _ = workbench_folders(workbench_root)
     assets.write("upload", "attachment/project/old/chat/id/a.txt", b"source")
