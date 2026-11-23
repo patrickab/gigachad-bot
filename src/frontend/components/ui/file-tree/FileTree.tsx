@@ -247,7 +247,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     }
   }
 
-  const renderItems = (nodes: FileTreeItem<T>[], depth: number): ReactNode => nodes.map((item) => {
+  const renderItems = (nodes: FileTreeItem<T>[], depth: number, ancestors: ReadonlySet<string> = new Set()): ReactNode => nodes.filter((item) => !ancestors.has(item.id)).map((item) => {
     const branch = item.type !== "element"
     const expanded = branch && controller.isExpanded(item.id)
     // A lone selection is just the last click, so only a Ctrl/Shift multi-selection is shown.
@@ -339,7 +339,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       </div>}
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`} className="motion-expand-in">
-        {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1)}
+        {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1, new Set(ancestors).add(item.id))}
         {item.children?.length === 0 && creation?.parentId !== item.id && <div
           style={{ marginLeft: INDENT_BASE + (depth + 1) * INDENT_STEP + 20 }} className={cn("flex items-center px-1 text-xs text-ink-faint", rowHeight(depth + 1))}>Empty</div>}
         <CapToggle item={item} depth={depth + 1} uncapped={uncappedIds.has(item.id)} onToggle={() => toggleCap(item.id)} />
