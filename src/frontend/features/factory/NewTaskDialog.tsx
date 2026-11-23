@@ -7,8 +7,10 @@ import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
+import { AttachImageButton, ImageChips, useRequestImages } from "./requestImages"
 import { launchTask } from "./useFactoryTasks"
 import { AGENTS, agentModelOptions, BranchSelect, branchOrDefault, loadBranchNames, loadFactoryModels, loadRepoSettings, MERGE_OPTIONS, NO_FACTORY_MODELS, PillChoice, SwitchChoice } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
@@ -39,6 +41,7 @@ export function changedOverrides(settings: FactoryResolvedSettings, choices: Tas
  * Modal that starts a factory task in the repo at path `repo` from a title and a request, in a worktree off a branch
  * it also merges into.
  *
+ * - Images (picked or pasted into the request) are stored on the host when Start is pressed, their paths join the request
  * - Start closes the dialog at once: the start runs on as a launch on the board (`launchTask`), which shows a refusal
  * - Everything starts at the repo's settings. Only a choice that differs from them is sent as an override ("Repo
  *   default" names the setting)
@@ -61,6 +64,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
   /** The factory models list, null until loaded. */
   const [factoryModels, setFactoryModels] = useState<string[] | null>(null)
   const [error, setError] = useState("")
+  const pictures = useRequestImages()
   const titleRef = useRef<HTMLInputElement>(null)
   /** The user's choices, null while the repo's setting applies. */
   const [reviewChoice, setReviewChoice] = useState<boolean | null>(null)
@@ -79,6 +83,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setModels({})
     setFactoryModels(null)
     setError("")
+    pictures.clear()
   })
 
   const loadSettings = useCallback(async () => (await loadRepoSettings(repo)).resolved, [repo])
@@ -88,12 +93,17 @@ export function NewTaskDialog({ repo, open, onClose }: {
   useLoadWhile(open, loadFactoryModels, setFactoryModels, (cause) => setError(errorMessage(cause, "Could not load the factory models")))
 
   const noFactoryModels = factoryModels?.length === 0
-  const canSubmit = settings !== null && !noFactoryModels && title.trim() !== "" && request.trim() !== ""
+  const { run: start, pending: starting, error: startError } = useAsyncAction(async (overrides: FactoryTaskOverrides) => {
+    // Without images nothing waits, so the dialog closes at once
+    const text = pictures.images.length > 0 ? await pictures.attach(request.trim()) : request.trim()
+    void launchTask({ repo, title: title.trim(), request: text, ...(Object.keys(overrides).length > 0 ? { overrides } : {}) })
+    onClose()
+  }, "Could not store the images")
+  const canSubmit = !starting && settings !== null && !noFactoryModels && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
     if (!canSubmit || settings === null) return
     const overrides = changedOverrides(settings, { branch: branchOrDefault(branch), merge: mergeChoice, review: reviewChoice, models })
-    void launchTask({ repo, title: title.trim(), request: request.trim(), ...(Object.keys(overrides).length > 0 ? { overrides } : {}) })
-    onClose()
+    void start(overrides)
   }
 
   return (
@@ -118,9 +128,11 @@ export function NewTaskDialog({ repo, open, onClose }: {
           placeholder="Request"
           value={request}
           onChange={(event) => setRequest(event.target.value)}
+          onPaste={pictures.onPaste}
           rows={6}
           className={cn(FIELD_CLASS, "resize-none")}
         />
+        <ImageChips images={pictures.images} onRemove={pictures.remove} />
         <div className="grid grid-cols-2 gap-3">
           {AGENTS.map((agent) => (
             <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
@@ -154,8 +166,9 @@ export function NewTaskDialog({ repo, open, onClose }: {
             onChange={setBranch}
           />
         </div>
-        <ErrorText>{error || (noFactoryModels ? NO_FACTORY_MODELS : "")}</ErrorText>
+        <ErrorText>{error || startError || (noFactoryModels ? NO_FACTORY_MODELS : "")}</ErrorText>
         <div className="flex items-center justify-end gap-2 pt-1">
+          <AttachImageButton onPick={pictures.add} disabled={starting} className={cn(QUIET_BUTTON_CLASS, "mr-auto")} />
           <button type="button" onClick={onClose} className={QUIET_BUTTON_CLASS}>Cancel</button>
           <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON_CLASS}>Start</button>
         </div>

@@ -1,6 +1,6 @@
 // Factory routes: every factory action through the core (`POST /api/factory/call`), and the task previews the backend
 // serves itself (`backend/routes/factory_preview.py`).
-import { post, request } from "./http"
+import { fileForm, post, request } from "./http"
 import type { FactoryActionName, FactoryActions, FactoryPreview } from "@/lib/domain/factory"
 
 /**
@@ -32,4 +32,10 @@ export function startFactoryPreview(id: string): Promise<FactoryPreview> {
 
 export function stopFactoryPreview(id: string): Promise<FactoryPreview> {
   return post<FactoryPreview>(`${previewPath(id)}/stop`, {})
+}
+
+/** Store an image for a task's request or message on the host, resolves to its absolute path. */
+export async function uploadFactoryImage(image: File): Promise<string> {
+  const { path } = await request<{ path: string }>("/factory/images", { method: "POST", body: fileForm(image) })
+  return path
 }

@@ -1,12 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Composer } from "@/components/ui/Composer"
+import { Composer, COMPOSER_ICON_BUTTON } from "@/components/ui/Composer"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FilePanel } from "@/features/editor/FilePanel"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { callFactory } from "@/lib/backend/api"
 import type { FactoryTask, FactoryTimelineEntry } from "@/lib/domain/factory"
+import { AttachImageButton, ImageChips, useRequestImages } from "./requestImages"
 import { TaskTimeline } from "./TaskTimeline"
 
 const PANEL_WIDTH_PX = 420
@@ -16,7 +17,7 @@ const PANEL_WIDTH_PX = 420
  *
  * - The timeline comes from `entries` (the owner reads them, the diff follows them too)
  * - A message goes to the core (`tasks.message`): a resting task runs new rounds, a running coder gets it as a
- *   follow-up. Enter sends, Shift+Enter adds a line; disabled while `canMessage` is false (the core refuses `tasks.message`)
+ *   follow-up. Images (picked or pasted) are stored on the host and their paths join the text. Enter sends, Shift+Enter adds a line; disabled while `canMessage` is false (the core refuses `tasks.message`)
  * - `onSent` runs after the core took a message, so the owner reads the task again
  * - `onOpenTask` opens a task the coder started
  */
@@ -30,9 +31,11 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
   onClose: () => void
 }) {
   const [text, setText] = useState("")
+  const pictures = useRequestImages()
   const { run: send, pending, error } = useAsyncAction(async (message: string) => {
-    await callFactory("tasks.message", { id: task.id, text: message })
+    await callFactory("tasks.message", { id: task.id, text: await pictures.attach(message) })
     setText("")
+    pictures.clear()
     onSent()
   }, "Could not send the message")
 
@@ -49,7 +52,12 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
             onSubmit={() => void send(text.trim())}
             disabled={!canMessage}
             busy={pending}
-          />
+            canSend={text.trim().length > 0 || pictures.images.length > 0}
+            onPaste={pictures.onPaste}
+            leading={<AttachImageButton onPick={pictures.add} disabled={!canMessage} className={COMPOSER_ICON_BUTTON} />}
+          >
+            <ImageChips images={pictures.images} onRemove={pictures.remove} />
+          </Composer>
         </div>
       </div>
     </FilePanel>

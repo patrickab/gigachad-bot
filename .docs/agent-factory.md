@@ -42,7 +42,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   `~/.pi/agent`), apart from the user's Pi sessions. Older tasks keep their files in Pi's normal root;
   `GET /api/pi/sessions` drops every session with a `factory` state, so the session picker and sidebar never show a task.
 - **Frontend** (`src/frontend/features/factory/`): board, task view (timeline plus a message box: `tasks.message`),
-  settings; all through `callFactory(action, params)`.
+  settings; all through `callFactory(action, params)`. The core takes text only: images attached to a request or
+  message go to `POST /api/factory/images` (`lib/factory_images.py`, stored in `~/.cache/gigachad/factory-images/`) and
+  their absolute paths are appended to the text for the coder to open (`requestImages.tsx`).
 - **Repo** (`factory.yaml`, `.factory/agents/{coder,reviewer}.md`): hooks, gates, protected paths, preview, role
   prompts. Read from the task's base commit, never from the tree the coder edits.
 

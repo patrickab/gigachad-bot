@@ -5,6 +5,8 @@
 - Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
 - The one behaviour of its own: after a successful `tasks.remove` it stops the removed task's preview
   (`lib.factory_preview`, keyed by the result's `removed`), so a refused removal keeps the preview
+- `POST /api/factory/images` stores an image for a task's request or message (`lib.factory_images`) and answers its
+  absolute `{path}`, which the frontend appends to the text: the core takes text only. No png/jpg/gif/webp 400, over 20 MB 413
 - A core refusal answers `{"detail": {"code", "message", "detail"?}}` (`detail` the core's hint, e.g. `{"force": true}`)
   with 400 `invalid`, 404 `not_found`, 409 `busy`/`refused`, 500 `failed`; 503 `factory_plugin_missing`; a preview that
   does not stop after the removal 502 `failed`. pi-host unreachable 503, an unknown answer 502 (`call_upstream`)
@@ -14,14 +16,16 @@ Host code execution: `host_access_only`.
 
 import asyncio
 from collections.abc import Awaitable
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
+from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
 from backend.routes.upstream import call_upstream
-from lib import factory_preview, pi_host
+from lib import factory_images, factory_preview, pi_host
 
 router = APIRouter(prefix="/api/factory", tags=["factory"], dependencies=[host_access_only("the factory")])
 
@@ -80,3 +84,16 @@ async def post_call(body: FactoryCall) -> Any:  # noqa: ANN401 - the core's JSON
 async def get_actions() -> dict[str, Any]:
     """The core's actions: name -> `{summary, params (JSON schema), mutates}`."""
     return {"actions": await factory_result(pi_host.factory_actions())}
+
+
+@router.post("/images")
+async def post_image(file: Annotated[UploadFile, File()]) -> dict[str, str]:
+    """Store an image attached to a task's request or message, answer its absolute path."""
+    filename = file.filename or ""
+    with http_errors((ValueError, 400, None)):
+        suffix = factory_images.image_suffix(filename, file.content_type)
+    content = await file.read(factory_images.MAX_IMAGE_BYTES + 1)
+    if len(content) > factory_images.MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Images are at most 20 MB")
+    stored = await asyncio.to_thread(factory_images.store_image, filename, suffix, content, datetime.now())
+    return {"path": str(stored)}

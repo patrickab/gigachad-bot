@@ -13,8 +13,9 @@ from backend.routes.deps import get_file_roots
 from lib.file_roots import FileRoots
 from tests.conftest import mounted_roots, route_client
 
-# Longer than the debounce plus the watcher's polling step, so a silence this long means nothing more is coming.
-QUIET = 0.3
+# Longer than the debounce plus the watcher's polling step and its jitter on a busy host (up to ~0.3 s),
+# so a silence this long means nothing more is coming.
+QUIET = 0.8
 
 
 @pytest.fixture(autouse=True)

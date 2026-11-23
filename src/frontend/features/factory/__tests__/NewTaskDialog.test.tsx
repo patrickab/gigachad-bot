@@ -10,6 +10,7 @@ const core = vi.hoisted(() => ({
   getModels: vi.fn<() => Promise<string[]>>(),
 }))
 const api = vi.hoisted(() => ({
+  uploadFactoryImage: vi.fn(async (image: File) => `/stored/${image.name}`),
   callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
     const repo = params.repo as string
     if (action === "models.get") return { models: await core.getModels() }
@@ -65,6 +66,22 @@ describe("NewTaskDialog", () => {
 
     expect(onClose).toHaveBeenCalled()
     expect(core.startTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky" })
+  })
+
+  it("stores attached images and appends their paths to the request", async () => {
+    const onClose = vi.fn()
+    const view = render(<NewTaskDialog repo={REPO} open onClose={onClose} />)
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeChecked())
+    fill(view)
+    fireEvent.change(view.getByLabelText("Image files"), { target: { files: [new File(["x"], "shot.png", { type: "image/png" }), new File(["y"], "notes.txt", { type: "text/plain" })] } })
+    expect(view.getByText("shot.png")).toBeTruthy()
+    expect(view.queryByText("notes.txt")).toBeNull()
+
+    fireEvent.click(view.getByRole("button", { name: "Start" }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(api.uploadFactoryImage).toHaveBeenCalledTimes(1)
+    expect(core.startTask).toHaveBeenCalledWith({ repo: REPO, title: "Fix the header", request: "Make it sticky\n\nImages (open them with the read tool):\n- /stored/shot.png" })
   })
 
   it("sends no choice that equals the repo's setting", async () => {
@@ -138,12 +155,11 @@ describe("NewTaskDialog", () => {
     expect(core.startTask).not.toHaveBeenCalled()
   })
 
-  it("offers no workflow, image, sandbox or backlog control", async () => {
+  it("offers no workflow, sandbox or backlog control", async () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
 
     expect(view.queryByLabelText("Workflow")).toBeNull()
-    expect(view.queryByLabelText("Image files")).toBeNull()
     expect(view.queryByLabelText("Sandbox")).toBeNull()
     expect(view.getAllByRole("button").map((button) => button.textContent)).not.toContain("Save to backlog")
   })

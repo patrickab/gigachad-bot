@@ -3,7 +3,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { factoryTask } from "./factoryTask"
 
-const api = vi.hoisted(() => ({ callFactory: vi.fn<(action: string, params: Record<string, unknown>) => Promise<unknown>>() }))
+const api = vi.hoisted(() => ({
+  callFactory: vi.fn<(action: string, params: Record<string, unknown>) => Promise<unknown>>(),
+  uploadFactoryImage: vi.fn(async (image: File) => `/stored/${image.name}`),
+}))
 
 vi.mock("@/lib/backend/api", () => api)
 vi.mock("@/features/editor/FilePanel", () => ({
@@ -45,6 +48,18 @@ describe("AgentPanel", () => {
     await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("tasks.message", { id: "t1", text: "Also the README" }))
     await waitFor(() => expect(box).toHaveProperty("value", ""))
     expect(onSent).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends a pasted image as a stored path with the message", async () => {
+    const { box } = renderPanel()
+    fireEvent.change(box, { target: { value: "Like this" } })
+    fireEvent.paste(box, { clipboardData: { files: [new File(["x"], "shot.png", { type: "image/png" })] } })
+    expect(screen.getByText("shot.png")).toBeTruthy()
+
+    fireEvent.keyDown(box, { key: "Enter" })
+
+    await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("tasks.message", { id: "t1", text: "Like this\n\nImages (open them with the read tool):\n- /stored/shot.png" }))
+    await waitFor(() => expect(screen.queryByText("shot.png")).toBeNull())
   })
 
   it("keeps the text and shows the core's refusal", async () => {
