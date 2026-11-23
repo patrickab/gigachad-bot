@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react"
 import type { FactoryResolvedSettings, FactoryTaskStart } from "@/lib/domain/factory"
-import type { ModelsResponse } from "@/lib/domain/types"
 
 const core = vi.hoisted(() => ({
   startTask: vi.fn<(body: FactoryTaskStart) => Promise<unknown>>(),
   listTasks: vi.fn<(repo: string) => Promise<unknown[]>>(),
   getSettings: vi.fn<(repo: string) => Promise<FactoryResolvedSettings>>(),
   listBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+  getModels: vi.fn<() => Promise<string[]>>(),
 }))
 const api = vi.hoisted(() => ({
   callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
     const repo = params.repo as string
+    if (action === "models.get") return { models: await core.getModels() }
     if (action === "tasks.start") return core.startTask(params as unknown as FactoryTaskStart)
     if (action === "tasks.list") return { tasks: await core.listTasks(repo) }
     if (action === "settings.get") {
@@ -21,15 +22,10 @@ const api = vi.hoisted(() => ({
     if (action === "branches.list") return { branches: (await core.listBranches(repo)).map((name) => ({ name, default: name === "main", hasConfig: true })) }
     throw new Error(`unexpected ${action}`)
   }),
-  fetchModels: vi.fn<() => Promise<ModelsResponse>>(),
 }))
 
-const CATALOG: ModelsResponse = {
-  ollama: [],
-  providers: [{ label: "Pi", provider_id: "litellm_proxy", source: "pi", models: ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"] }],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
-  tab_order: [],
-} as unknown as ModelsResponse
+/** The factory models list as the core holds it. */
+const MODELS = ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"]
 
 vi.mock("@/lib/backend/api", () => api)
 
@@ -44,7 +40,7 @@ beforeEach(() => {
   core.getSettings.mockReset().mockResolvedValue(SETTINGS)
   core.listTasks.mockReset().mockResolvedValue([])
   core.listBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
-  api.fetchModels.mockReset().mockResolvedValue(CATALOG)
+  core.getModels.mockReset().mockResolvedValue(MODELS)
 })
 
 function fill(view: ReturnType<typeof render>) {
@@ -120,6 +116,26 @@ describe("NewTaskDialog", () => {
 
     await waitFor(() => expect(core.startTask).toHaveBeenCalled())
     expect(core.startTask.mock.calls[0][0].overrides?.models).toEqual({ coder: "anthropic/claude-opus-5-5" })
+  })
+
+  it("offers exactly the factory models list per agent", async () => {
+    const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
+    fireEvent.click(view.getByLabelText("Model of coder"))
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Repo default (Pi default)", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5",
+    ]))
+  })
+
+  it("does not start a task while the factory models list is empty and points at the settings", async () => {
+    core.getModels.mockResolvedValue([])
+    const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
+    expect(await view.findByRole("alert")).toHaveTextContent("No factory models are set (add them in the factory settings)")
+    await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
+
+    fill(view)
+    expect(view.getByRole("button", { name: "Start" })).toBeDisabled()
+    expect(core.startTask).not.toHaveBeenCalled()
   })
 
   it("offers no workflow, image, sandbox or backlog control", async () => {

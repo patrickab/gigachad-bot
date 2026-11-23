@@ -7,10 +7,16 @@ const core = vi.hoisted(() => ({
   getSettings: vi.fn<(repo: string) => Promise<FactoryRepoSettings>>(),
   setSettings: vi.fn<(repo: string, settings: FactoryStoredSettings) => Promise<unknown>>(),
   listBranches: vi.fn<(repo: string) => Promise<string[]>>(),
+  getModels: vi.fn<() => Promise<string[]>>(),
+  setModels: vi.fn<(models: string[]) => Promise<string[]>>(),
+  calls: [] as string[],
 }))
 const api = vi.hoisted(() => ({
   callFactory: vi.fn(async (action: string, params: Record<string, unknown>) => {
     const repo = params.repo as string
+    core.calls.push(action)
+    if (action === "models.get") return { models: await core.getModels() }
+    if (action === "models.set") return { models: await core.setModels(params.models as string[]) }
     if (action === "settings.get") return core.getSettings(repo)
     if (action === "settings.set") return core.setSettings(repo, params.settings as FactoryStoredSettings)
     if (action === "branches.list") return { branches: (await core.listBranches(repo)).map((name) => ({ name, default: name === "main", hasConfig: true })) }
@@ -60,7 +66,13 @@ const CATALOG: ModelsResponse = {
   unavailable: ["openrouter/gone"],
 }
 
+/** The factory models list as the core holds it. */
+const MODELS = ["openai-codex/fast", "openrouter/vendor/model"]
+
 beforeEach(() => {
+  core.calls = []
+  core.getModels.mockReset().mockResolvedValue(MODELS)
+  core.setModels.mockReset().mockImplementation(async (models) => models)
   core.listBranches.mockReset().mockResolvedValue(["develop", "feature/x", "main", "release"])
   core.getSettings.mockReset().mockResolvedValue(settings(STORED))
   api.fetchModels.mockReset().mockResolvedValue(CATALOG)
@@ -141,29 +153,56 @@ describe("FactorySettingsDialog", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("offers every served model of the selector as a gateway id and preserves native selectors with slashes", async () => {
+  it("offers exactly the factory models list per agent, a saved model not on it marked", async () => {
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     fireEvent.click(await view.findByLabelText("Model of coder"))
-    expect(await view.findByRole("option", { name: "openai-codex/fast" })).toBeVisible()
-    expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
-      "Pi default", "google/gemini-pro", "local-model", "openai-codex/fast", "openrouter/hand-added", "openrouter/vendor/model",
-      "old-model (saved, not added)",
-    ])
-    expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Pi default", "openai-codex/fast", "openrouter/vendor/model", "old-model (not in the list)",
+    ]))
+    expect(view.getByRole("option", { name: "old-model (not in the list)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "openrouter/vendor/model" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { coder: "openrouter/vendor/model" } }))
+    expect(core.setModels).not.toHaveBeenCalled()
   })
 
-  it("keeps saved selections when loading models fails and permits clearing them", async () => {
-    api.fetchModels.mockRejectedValue(new Error("Could not load Pi models"))
+  it("edits the factory models list: removes one, adds one gigachad knows, and saves it before the settings", async () => {
+    const onClose = vi.fn()
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    const list = await view.findByRole("list", { name: "Factory models" })
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual(MODELS)
+
+    fireEvent.click(view.getByRole("button", { name: "Remove openai-codex/fast" }))
+    fireEvent.click(view.getByLabelText("Add model"))
+    // The served models of the chat selector as gateway ids, without those already listed or unavailable.
+    await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Add model", "google/gemini-pro", "local-model", "openai-codex/fast", "openrouter/hand-added",
+    ]))
+    fireEvent.click(view.getByRole("option", { name: "google/gemini-pro" }))
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["openrouter/vendor/model", "google/gemini-pro"])
+
+    fireEvent.click(view.getByLabelText("Model of reviewer"))
+    expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Pi default", "openrouter/vendor/model", "google/gemini-pro"])
+    fireEvent.click(view.getByRole("option", { name: "google/gemini-pro" }))
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(core.setModels).toHaveBeenCalledWith(["openrouter/vendor/model", "google/gemini-pro"])
+    expect(core.calls.indexOf("models.set")).toBeLessThan(core.calls.indexOf("settings.set"))
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { coder: "old-model", reviewer: "google/gemini-pro" } })
+  })
+
+  it("keeps saved selections when loading the factory models fails and permits clearing them", async () => {
+    core.getModels.mockRejectedValue(new Error("Could not load the factory models"))
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    expect(await view.findByRole("alert")).toHaveTextContent("Could not load Pi models")
+    expect(await view.findByRole("alert")).toHaveTextContent("Could not load the factory models")
+    expect(view.queryByLabelText("Add model")).toBeNull()
     fireEvent.click(view.getByLabelText("Model of coder"))
-    expect(view.getByRole("option", { name: "old-model (saved, not added)" })).toHaveAttribute("aria-selected", "true")
+    expect(view.getByRole("option", { name: "old-model (not in the list)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: {} }))
+    expect(core.setModels).not.toHaveBeenCalled()
   })
 
   it("picks the branch from the repo's branches, the default saved as no branch", async () => {

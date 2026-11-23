@@ -6,15 +6,13 @@ import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
-import { fetchModels } from "@/lib/backend/api"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { Field } from "@/components/ui/Field"
 import { launchTask } from "./useFactoryTasks"
-import { AGENTS, BranchSelect, branchOrDefault, factoryModelIds, loadBranchNames, loadRepoSettings, MERGE_OPTIONS, PillChoice, SwitchChoice } from "./FactorySettingsDialog"
+import { AGENTS, agentModelOptions, BranchSelect, branchOrDefault, loadBranchNames, loadFactoryModels, loadRepoSettings, MERGE_OPTIONS, NO_FACTORY_MODELS, PillChoice, SwitchChoice } from "./FactorySettingsDialog"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryMergeMode, FactoryModels, FactoryResolvedSettings, FactoryTaskOverrides } from "@/lib/domain/factory"
-import type { ModelsResponse } from "@/lib/domain/types"
 
 const INHERIT = ""
 
@@ -44,6 +42,7 @@ export function changedOverrides(settings: FactoryResolvedSettings, choices: Tas
  * - Start closes the dialog at once: the start runs on as a launch on the board (`launchTask`), which shows a refusal
  * - Everything starts at the repo's settings. Only a choice that differs from them is sent as an override ("Repo
  *   default" names the setting)
+ * - The model selects offer the factory models list; while it is empty the core refuses a start, so Start is off
  */
 export function NewTaskDialog({ repo, open, onClose }: {
   repo: string
@@ -59,7 +58,8 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [branches, setBranches] = useState<string[] | null>(null)
   const [mergeChoice, setMergeChoice] = useState<FactoryMergeMode | null>(null)
   const [models, setModels] = useState<FactoryModels>({})
-  const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
+  /** The factory models list, null until loaded. */
+  const [factoryModels, setFactoryModels] = useState<string[] | null>(null)
   const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
   /** The user's choices, null while the repo's setting applies. */
@@ -77,6 +77,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setBranches(null)
     setMergeChoice(null)
     setModels({})
+    setFactoryModels(null)
     setError("")
   })
 
@@ -84,17 +85,16 @@ export function NewTaskDialog({ repo, open, onClose }: {
   useLoadWhile(open, loadSettings, setSettings, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   const loadBranches = useCallback(() => loadBranchNames(repo), [repo])
   useLoadWhile(open, loadBranches, setBranches, (cause) => setError(errorMessage(cause, "Could not load the branches")))
-  useLoadWhile(open, fetchModels, setCatalog, (cause) => setError(errorMessage(cause, "Could not load Pi models")))
+  useLoadWhile(open, loadFactoryModels, setFactoryModels, (cause) => setError(errorMessage(cause, "Could not load the factory models")))
 
-  const canSubmit = settings !== null && title.trim() !== "" && request.trim() !== ""
+  const noFactoryModels = factoryModels?.length === 0
+  const canSubmit = settings !== null && !noFactoryModels && title.trim() !== "" && request.trim() !== ""
   const submit = () => {
     if (!canSubmit || settings === null) return
     const overrides = changedOverrides(settings, { branch: branchOrDefault(branch), merge: mergeChoice, review: reviewChoice, models })
     void launchTask({ repo, title: title.trim(), request: request.trim(), ...(Object.keys(overrides).length > 0 ? { overrides } : {}) })
     onClose()
   }
-
-  const modelIds = factoryModelIds(catalog)
 
   return (
     <Dialog open={open} onClose={onClose} icon={Factory} title="New factory task" initialFocusRef={titleRef} widthClassName="max-w-lg">
@@ -135,10 +135,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
                   else next[agent] = value
                   return next
                 })}
-                options={[
-                  { value: INHERIT, label: `Repo default (${settings?.models[agent] ?? "Pi default"})` },
-                  ...modelIds.map((model) => ({ value: model, label: model })),
-                ]}
+                options={agentModelOptions(`Repo default (${settings?.models[agent] ?? "Pi default"})`, factoryModels ?? [], models[agent] ?? INHERIT)}
               />
             </Field>
           ))}
@@ -157,7 +154,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
             onChange={setBranch}
           />
         </div>
-        <ErrorText>{error}</ErrorText>
+        <ErrorText>{error || (noFactoryModels ? NO_FACTORY_MODELS : "")}</ErrorText>
         <div className="flex items-center justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className={QUIET_BUTTON_CLASS}>Cancel</button>
           <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON_CLASS}>Start</button>

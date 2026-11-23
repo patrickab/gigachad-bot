@@ -1,12 +1,13 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Settings } from "lucide-react"
+import { Settings, X } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { PillTabs } from "@/components/ui/PillTabs"
 import { Switch } from "@/components/ui/Switch"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
+import { IconButton } from "@/components/ui/IconButton"
 import { errorMessage } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
@@ -14,7 +15,7 @@ import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { callFactory, fetchModels, getFactoryActions } from "@/lib/backend/api"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { gatewayModelId, qualifiedModelIds } from "@/lib/models"
-import type { FactoryActions, FactoryBranch, FactoryMergeMode, FactoryModels, FactoryParamSchema, FactoryRepoSettings, FactoryStoredSettings } from "@/lib/domain/factory"
+import type { FactoryActions, FactoryBranch, FactoryMergeMode, FactoryModelList, FactoryModels, FactoryParamSchema, FactoryRepoSettings, FactoryStoredSettings } from "@/lib/domain/factory"
 import { Field } from "@/components/ui/Field"
 import { COMPACT_FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
@@ -24,12 +25,30 @@ export const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review
 /** The two agents of a task, in pipeline order. */
 export const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
 
-/** Every model of the chat model selector the gateway serves, sorted, as the `<provider>/<id>` Pi's registry resolves. */
+/** Every model of the chat model selector the gateway serves, sorted, as the `<provider>/<id>` Pi's registry resolves: what the factory models list can add. */
 export function factoryModelIds(catalog: ModelsResponse | null): string[] {
   if (!catalog) return []
   const unavailable = new Set(catalog.unavailable)
   const selectors = [...catalog.ollama, ...catalog.providers.flatMap(qualifiedModelIds)]
   return [...new Set(selectors.filter((selector) => !unavailable.has(selector)).map(gatewayModelId))].sort((a, b) => a.localeCompare(b))
+}
+
+/** The user's factory models through the core: the only models a task may use. */
+export async function loadFactoryModels(): Promise<string[]> {
+  return (await callFactory<FactoryModelList>("models.get", {})).models
+}
+
+/** Where a task would start while the factory models list is empty: the core refuses it. */
+export const NO_FACTORY_MODELS = "No factory models are set (add them in the factory settings)"
+
+/**
+ * Options of an agent's model select: `fallback` for no model (the value ""), then the factory models list. A `selected`
+ * model that is not on the list stays selectable, marked.
+ */
+export function agentModelOptions(fallback: string, models: readonly string[], selected: string): { value: string; label: string }[] {
+  const options = [{ value: "", label: fallback }, ...models.map((model) => ({ value: model, label: model }))]
+  if (selected === "" || models.includes(selected)) return options
+  return [...options, { value: selected, label: `${selected} (not in the list)` }]
 }
 
 /** A branch the user filled in, null for an empty field: the default branch. */
@@ -158,16 +177,58 @@ export function SwitchChoice({ label, checked, disabled, onChange }: { label: st
   )
 }
 
-/** Modal that edits the factory settings of the repo at path `repo`: merge, rounds, branch, review, preview and a model per agent. */
+/** The factory models list: each model removable, more added from the models gigachad knows (`known`). */
+function FactoryModelsField({ models, known, onChange }: { models: readonly string[]; known: readonly string[]; onChange: (models: string[]) => void }) {
+  const addable = known.filter((model) => !models.includes(model))
+  return (
+    <Field label="Models">
+      {models.length > 0 && (
+        <ul aria-label="Factory models" className="flex flex-col">
+          {models.map((model) => (
+            <li key={model} className="group flex h-7 items-center gap-2 pl-2.5 text-xs text-ink-muted">
+              <span className="min-w-0 flex-1 truncate">{model}</span>
+              <IconButton
+                icon={X}
+                label={`Remove ${model}`}
+                onClick={() => onChange(models.filter((kept) => kept !== model))}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <StyledSelect
+        quiet
+        ariaLabel="Add model"
+        value=""
+        options={[{ value: "", label: "Add model" }, ...addable.map((model) => ({ value: model, label: model }))]}
+        onChange={(model) => { if (model) onChange([...models, model]) }}
+      />
+    </Field>
+  )
+}
+
+/**
+ * Modal that edits the factory settings of the repo at path `repo` (merge, rounds, branch, review, preview and a model
+ * per agent) and the user's factory models list, which every repo shares: Save stores a changed list before the settings.
+ */
 export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; open: boolean; onClose: () => void }) {
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
   const [modelError, setModelError] = useState("")
+  /** The factory models list as edited and as the core holds it, null until loaded. */
+  const [factoryModels, setFactoryModels] = useState<string[] | null>(null)
+  const [savedFactoryModels, setSavedFactoryModels] = useState<string[] | null>(null)
+  const [factoryModelsError, setFactoryModelsError] = useState("")
   const [branches, setBranches] = useState<string[] | null>(null)
   const [branchError, setBranchError] = useState("")
   const [actions, setActions] = useState<FactoryActions | null>(null)
   const { run: persist, pending: busy, error, setError } = useAsyncAction(async () => {
     if (!draft) return
+    if (factoryModels !== null && factoryModels.join("\n") !== savedFactoryModels?.join("\n")) {
+      const saved = await callFactory<FactoryModelList>("models.set", { models: factoryModels })
+      setSavedFactoryModels(saved.models)
+    }
     await callFactory<FactoryRepoSettings>("settings.set", { repo, settings: storedOf(draft) })
     onClose()
   }, "Could not save the settings")
@@ -177,6 +238,9 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
     setDraft(null)
     setCatalog(null)
     setModelError("")
+    setFactoryModels(null)
+    setSavedFactoryModels(null)
+    setFactoryModelsError("")
     setBranches(null)
     setBranchError("")
     setError("")
@@ -185,6 +249,10 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const loadSettings = useCallback(async () => draftOf(await loadRepoSettings(repo)), [repo])
   useLoadWhile(open, loadSettings, setDraft, (cause) => setError(errorMessage(cause, "Could not load the settings")))
   useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load Pi models")))
+  useLoadWhile(open, loadFactoryModels, (models) => {
+    setFactoryModels(models)
+    setSavedFactoryModels(models)
+  }, (cause) => setFactoryModelsError(errorMessage(cause, "Could not load the factory models")))
   useLoadWhile(open, getFactoryActions, setActions)
   const roundsLimits = maxRoundsLimits(actions)
   const loadBranches = useCallback(() => loadBranchNames(repo), [repo])
@@ -193,11 +261,6 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   const change = (changed: Partial<SettingsDraft>) => setDraft((current) => current && { ...current, ...changed })
   const changeModel = (agent: keyof FactoryModels, selector: string) =>
     setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
-
-  const modelOptions = [
-    { value: "", label: "Pi default" },
-    ...factoryModelIds(catalog).map((model) => ({ value: model, label: model })),
-  ]
 
   const canSave = draft !== null && !busy && validRounds(draft.maxRounds, roundsLimits)
   const save = () => {
@@ -212,9 +275,6 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
             <div className="grid grid-cols-2 gap-3">
               {AGENTS.map((agent) => {
                 const selected = draft.models[agent] ?? ""
-                const options = modelOptions.some((option) => option.value === selected)
-                  ? modelOptions
-                  : [...modelOptions, { value: selected, label: `${selected} (saved, not added)` }]
                 return (
                   <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
                     <StyledSelect
@@ -223,7 +283,7 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                       value={selected}
                       disabled={agent === "reviewer" && !draft.review}
                       onChange={(value) => changeModel(agent, value)}
-                      options={options}
+                      options={agentModelOptions("Pi default", factoryModels ?? [], selected)}
                     />
                   </Field>
                 )
@@ -254,7 +314,9 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
                 />
               </Field>
             </div>
+            {factoryModels && <FactoryModelsField models={factoryModels} known={factoryModelIds(catalog)} onChange={setFactoryModels} />}
             <ErrorText>{branchError}</ErrorText>
+            <ErrorText>{factoryModelsError}</ErrorText>
             <ErrorText>{modelError}</ErrorText>
           </>
         ) : (

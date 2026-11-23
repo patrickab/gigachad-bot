@@ -6,6 +6,7 @@ export type FactoryActionName =
   | "repos.list" | "repos.add" | "repos.remove"
   | "branches.list"
   | "settings.get" | "settings.set"
+  | "models.get" | "models.set"
   | "config.get" | "config.write"
   | "tasks.list" | "tasks.get" | "tasks.timeline" | "tasks.diff" | "tasks.start"
   | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
@@ -46,6 +47,11 @@ export interface FactoryRepoAdd {
 }
 
 export type FactoryMergeMode = "auto" | "review"
+
+/** `models.get` and `models.set`: the user's factory models (`provider/model` ids), the only ones a task may use. */
+export interface FactoryModelList {
+  models: string[]
+}
 
 /** Model ids (`provider/model`) of the two agents of a task, Pi's default where one is missing. */
 export interface FactoryModels {
@@ -211,6 +217,8 @@ export interface FactoryTimelineData {
     wallMs: number
   }
   merge: { ok: boolean; commit: string; error: string; depsSynced: boolean }
+  /** A task the coder started from a follow-up on this merged task. */
+  spawn: { id: string; title: string }
   state: { state: FactoryTaskState; round: number; reason: string }
   coder: { text: string }
   user: { text: string }
