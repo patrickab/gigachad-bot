@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_TRANSCRIPT, messagesOfEntries, reduceTranscript, shownMessages, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
+import { EMPTY_TRANSCRIPT, messagesOfEntries, reduceTranscript, shownMessages, toolRunsOf, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
 import type { AgentMessage, AssistantMessage, UserMessage } from "../types"
 
 const prompt: UserMessage = { role: "user", content: "Fix the bug", timestamp: 1_000 }
@@ -207,5 +207,31 @@ describe("events batch", () => {
       { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ne" } },
     ]
     expect(transcriptReducer(started, { kind: "events", events: records })).toEqual(events(started, records))
+  })
+})
+
+describe("live tool output", () => {
+  const partial = (text: string) => ({ content: [{ type: "text", text }] })
+  const text = (run: { result?: { content: unknown[] } }) => (run.result?.content[0] as { text: string }).text
+
+  it("keeps only the tail of partial output and ignores chunks after the end", () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `line ${i}`).join("\n")
+    const running = events(EMPTY_TRANSCRIPT, [{ type: "tool_execution_start", toolCallId: "c" }, { type: "tool_execution_update", toolCallId: "c", partialResult: partial(lines) }])
+    const kept = text(running.runs.c).split("\n")
+    expect(kept).toHaveLength(200)
+    expect(kept.at(-1)).toBe("line 499")
+    const ended = events(running, [{ type: "tool_execution_end", toolCallId: "c", result: partial("final") }, { type: "tool_execution_update", toolCallId: "c", partialResult: partial("late") }])
+    expect(ended.runs.c.running).toBe(false)
+    expect(text(ended.runs.c)).toBe("final")
+  })
+
+  it("lets a committed result win over a stale running one after a resync, without duplicates", () => {
+    const toolResult: AgentMessage = { role: "toolResult", toolCallId: "c", toolName: "bash", content: [{ type: "text", text: "done" }], isError: false, timestamp: 2_500 }
+    const live = events(EMPTY_TRANSCRIPT, [{ type: "tool_execution_start", toolCallId: "c" }, { type: "tool_execution_update", toolCallId: "c", partialResult: partial("part") }])
+    const resynced = transcriptReducer(live, { kind: "resync", resync: { mode: "append", entries: [messageEntry("t", null, toolResult)], leafId: "t" } })
+    const runs = toolRunsOf(resynced)
+    expect(Object.keys(runs)).toEqual(["c"])
+    expect(runs.c.running).toBe(false)
+    expect(text(runs.c)).toBe("done")
   })
 })

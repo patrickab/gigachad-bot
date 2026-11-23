@@ -442,3 +442,12 @@
 .pi-patch-line[data-type="hunk"] .pi-diff-text {
   color: var(--ink-muted);
 }
+
+.pi-tool-call-live-tail {
+  padding: 0 0.5rem 0.25rem 1.75rem;
+  overflow: hidden;
+  color: var(--ink-subtle);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

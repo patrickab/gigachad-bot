@@ -95,6 +95,7 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
   const content = run?.result?.content ?? []
   const resultText = run?.result ? content.filter((block): block is TextContent => block.type === "text").map((block) => block.text).join("\n") : null
   const resultImages = content.filter((block): block is ImageContent => block.type === "image")
+  const lastLine = isRunning ? (resultText ?? "").trimEnd().split("\n").at(-1)?.trim() : undefined
   const resultIsEmpty = resultText !== null && (resultText.trim() === "" || resultText.trim() === "(no output)")
   const resultDiff = expanded && isDone && !isError ? getResultDiff(run.result?.details) : null
 
@@ -150,6 +151,7 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
         )}
         <ChevronDown size={12} strokeWidth={1.8} aria-hidden className="pi-activity-row-chevron" data-expanded={expanded || undefined} />
       </div>
+      {!expanded && isRunning && lastLine && <div className="pi-tool-call-live-tail" data-tool-live-tail="true">{lastLine}</div>}
       {expanded && (
         <div id={detailsId} className="pi-tool-call-details" data-error={isError || undefined}>
           <div className="pi-tool-call-command">

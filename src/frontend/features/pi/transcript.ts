@@ -230,6 +230,22 @@ function applyStreamUpdate(message: AssistantMessage, update: AssistantMessageEv
   }
 }
 
+/** Most lines of partial tool output kept while a tool runs. */
+export const LIVE_OUTPUT_MAX_LINES = 200
+
+/** A partial result with each text block cut to its last `LIVE_OUTPUT_MAX_LINES` lines, so a chatty tool stays bounded. */
+function tailResult(result: ToolRun["result"]): ToolRun["result"] {
+  if (!result || !Array.isArray(result.content)) return result
+  return {
+    ...result,
+    content: result.content.map((block) => {
+      if (block.type !== "text") return block
+      const lines = block.text.split("\n")
+      return lines.length > LIVE_OUTPUT_MAX_LINES ? { ...block, text: lines.slice(-LIVE_OUTPUT_MAX_LINES).join("\n") } : block
+    }),
+  }
+}
+
 /** The transcript after one Pi stdout record. Records it does not know leave it unchanged. */
 export function reduceTranscript(transcript: Transcript, event: PiEvent): Transcript {
   switch (event.type) {
@@ -257,7 +273,9 @@ export function reduceTranscript(transcript: Transcript, event: PiEvent): Transc
       return { ...transcript, runs: { ...transcript.runs, [event.toolCallId as string]: { running: true, isError: false } } }
     case "tool_execution_update": {
       const id = event.toolCallId as string
-      return { ...transcript, runs: { ...transcript.runs, [id]: { ...transcript.runs[id], running: true, isError: false, result: event.partialResult as ToolRun["result"] } } }
+      // A late chunk never reopens a call that already ended: the final result wins
+      if (transcript.runs[id]?.running === false) return transcript
+      return { ...transcript, runs: { ...transcript.runs, [id]: { ...transcript.runs[id], running: true, isError: false, result: tailResult(event.partialResult as ToolRun["result"]) } } }
     }
     case "tool_execution_end": {
       const run: ToolRun = { running: false, isError: Boolean(event.isError), result: event.result as ToolRun["result"], durationMs: event.durationMs as number | undefined }
@@ -278,7 +296,11 @@ export function toolRunsOf(transcript: Pick<Transcript, "messages" | "unconfirme
     const result = message as ToolResultMessage
     runs[result.toolCallId] = { running: false, isError: result.isError, result: { content: result.content, details: result.details } }
   }
-  return { ...runs, ...transcript.runs }
+  // A live run still "running" next to its committed result is stale (resync after the end was missed): the committed result wins, keeping the duration
+  for (const [id, run] of Object.entries(transcript.runs)) {
+    runs[id] = run.running && runs[id] ? { ...runs[id], durationMs: run.durationMs } : run
+  }
+  return runs
 }
 
 /** One prompt and everything up to the next: `messages[start, end)`, `start` the prompt (or a compaction). */
