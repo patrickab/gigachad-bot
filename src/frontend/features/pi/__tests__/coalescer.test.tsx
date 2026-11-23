@@ -74,3 +74,16 @@ describe("useCoalescedDispatch", () => {
     expect(shown.streaming?.content).toEqual([{ type: "text", text: "x".repeat(50) }])
   })
 })
+
+describe("message_update wire size", () => {
+  it("stays constant per frame (delta-only), where resending the whole message grows with the reply", () => {
+    const bytes = (value: unknown) => JSON.stringify(value).length
+    const deltaFrame = (text: string) => bytes({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text } })
+    const wholeFrame = (so_far: string) => bytes({ type: "message_update", message: { role: "assistant", content: [{ type: "text", text: so_far }] }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "word " } })
+    const words = Array.from({ length: 1000 }, () => "word ").join("")
+    // Before (full message per frame): ~5 KB at word 1000. Delta frame: ~100 B, independent of position.
+    expect(deltaFrame("word ")).toBe(deltaFrame("word "))
+    expect(deltaFrame("word ")).toBeLessThan(120)
+    expect(wholeFrame(words)).toBeGreaterThan(40 * deltaFrame("word "))
+  })
+})
