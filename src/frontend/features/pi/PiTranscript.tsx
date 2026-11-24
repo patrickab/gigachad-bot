@@ -292,7 +292,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     <TurnCard expanded>
       <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
-        {compaction ? <p className="text-xs text-ink-muted">Compacted: {clip(text)}</p> : <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
+        {compaction ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>
