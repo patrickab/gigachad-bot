@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { motion } from "framer-motion"
-import { Archive, ArchiveRestore, GitBranch, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
+import { Archive, ArchiveRestore, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
 import { BoardColumn } from "@/components/ui/BoardColumn"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -113,10 +113,8 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
         {refusal !== null && <span className="line-clamp-3 text-[11px] text-ink-subtle">{refusal}</span>}
         {/* The delete question covers this row, so asking never resizes the card. */}
         <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
-          <GitBranch aria-hidden className="h-3 w-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{task.branch}</span>
           {task.usage && (
-            <span aria-label="Tokens and cost" className="shrink-0 tabular-nums">
+            <span aria-label="Tokens and cost" className="ml-auto shrink-0 tabular-nums">
               {formatTokens(task.usage.input + task.usage.output)} tok · {formatCost(task.usage.cost)}
             </span>
           )}
@@ -160,10 +158,6 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
           <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{failed ? "Could not start" : STATE_LABELS.starting}</span>
         </span>
         {failed && <span className="line-clamp-3 text-[11px] text-ink-subtle">{launch.error}</span>}
-        <span className="flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint">
-          <GitBranch aria-hidden className="h-3 w-3 shrink-0" />
-          <span className="truncate">New worktree</span>
-        </span>
       </div>
       {failed && (
         <div className="absolute right-2 top-2 flex">

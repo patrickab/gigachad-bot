@@ -121,7 +121,7 @@ describe("FactoryBoard", () => {
       .toEqual(["0min", "59min", "1h", "23h", "1d", "6d", "1w", "2w"])
   })
 
-  it("shows a card's title, state and round, the reason of a blocked task only, and the branch", () => {
+  it("shows a card's title, state and round, and the reason of a blocked task only", () => {
     const { card } = renderBoard([
       task("Task blocked", "blocked", { reason: "merge_failed", round: 4, branch: "factory/fix-header", worktree: "/worktrees/fix-header" }),
       task("Task cancelled", "cancelled", { reason: "cancelled by the user", round: 2, branch: "factory/other" }),
@@ -131,10 +131,10 @@ describe("FactoryBoard", () => {
 
     expect(card("Task blocked")).toHaveTextContent("Blocked · round 4")
     expect(card("Task blocked")).toHaveTextContent("merge_failed")
-    expect(card("Task blocked")).toHaveTextContent("factory/fix-header")
+    expect(card("Task blocked")).not.toHaveTextContent("factory/fix-header")
     expect(card("Task cancelled")).toHaveTextContent("Cancelled · round 2")
     expect(card("Task cancelled")).not.toHaveTextContent("cancelled by the user")
-    expect(card("Task cancelled")).toHaveTextContent("factory/other")
+    expect(card("Task cancelled")).not.toHaveTextContent("factory/other")
     expect(card("Task starting")).toHaveTextContent("Launching session")
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
   })
@@ -215,8 +215,8 @@ describe("FactoryBoard", () => {
   })
 
   it("asks in place of the card's last row, so the card keeps its rows", () => {
-    const { view, card } = renderBoard([task("Task done", "done", { branch: "factory/done" })])
-    const marker = view.getByText("factory/done").parentElement!
+    const { view, card } = renderBoard([task("Task done", "done", { usage: { input: 1000, output: 500, cost: 0.1 } })])
+    const marker = view.getByLabelText("Tokens and cost").parentElement!
     expect(marker).not.toHaveClass("invisible")
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
