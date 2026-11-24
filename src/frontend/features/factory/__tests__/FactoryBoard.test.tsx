@@ -26,7 +26,7 @@ const api = vi.hoisted(() => {
 
 vi.mock("@/lib/backend/api", () => api)
 
-import { FactoryBoard } from "@/features/factory/FactoryBoard"
+import { FactoryBoard, formatAge } from "@/features/factory/FactoryBoard"
 import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { factoryTask } from "./factoryTask"
 
@@ -93,7 +93,7 @@ describe("FactoryBoard", () => {
     expect(view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Needs you", "Working", "Merging", "Finished"])
   })
 
-  it("sorts every task into the column of its shown state, a column by state and then by the newest change", () => {
+  it("sorts every task into the column of its shown state, a column newest created first", () => {
     const { titles } = renderBoard([
       task("Task cancelled", "cancelled"),
       task("Task done", "done"),
@@ -111,6 +111,14 @@ describe("FactoryBoard", () => {
     expect(titles("Working")).toEqual(["Task starting", "Task running"])
     expect(titles("Merging")).toEqual(["Task merging"])
     expect(titles("Finished")).toEqual(["Task done", "Task cancelled"])
+  })
+
+  it("formats a task's age in minutes, hours, days, then weeks", () => {
+    const now = Date.parse("2026-03-01T00:00:00Z")
+    const ago = (ms: number) => formatAge(new Date(now - ms).toISOString(), now)
+    const MIN = 60_000
+    expect([0, 59 * MIN, 60 * MIN, 23 * 60 * MIN, 24 * 60 * MIN, 6 * 24 * 60 * MIN, 7 * 24 * 60 * MIN, 15 * 24 * 60 * MIN].map(ago))
+      .toEqual(["0min", "59min", "1h", "23h", "1d", "6d", "1w", "2w"])
   })
 
   it("shows a card's title, state and round, the reason of a blocked task only, and the branch", () => {

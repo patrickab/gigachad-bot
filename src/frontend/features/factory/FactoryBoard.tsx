@@ -20,7 +20,7 @@ import { cn, errorMessage } from "@/lib/utils"
 import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
-import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, shownState, taskStatusLine, taskTone } from "./states"
+import { BOARD_COLUMNS, STATE_LABELS, shownState, taskStatusLine, taskTone } from "./states"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 import { formatCost, formatTokens } from "./usage"
@@ -28,10 +28,19 @@ import { formatCost, formatTokens } from "./usage"
 /** Finished tasks shown before "Show all", the column otherwise grows without bound. */
 const FINISHED_LIMIT = 10
 
-/** Column order of two tasks: by state as the board orders them, then the one whose state changed last. */
+/** Column order of two tasks: the newest first. */
 function boardOrder(left: FactoryTask, right: FactoryTask): number {
-  const byState = STATE_ORDER.indexOf(shownState(left)) - STATE_ORDER.indexOf(shownState(right))
-  return byState || (right.at ?? right.createdAt).localeCompare(left.at ?? left.createdAt)
+  return right.createdAt.localeCompare(left.createdAt)
+}
+
+/** Age of a task as the card shows it: minutes under an hour, hours under a day, days under a week, then weeks. */
+export function formatAge(createdAt: string, now = Date.now()): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 60_000))
+  if (minutes < 60) return `${minutes}min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`
 }
 
 /** The ids in `raw`, empty when it is not a list of strings. */
@@ -94,7 +103,8 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
         <span className="line-clamp-2 pr-6 text-sm font-semibold text-ink">{task.title}</span>
         <span className="flex min-w-0 items-center gap-2 text-[11px]">
           <StatusDot tone={taskTone(task)} />
-          <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
+          <span className={cn("min-w-0 flex-1 truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
+          <span aria-label="Age" className="shrink-0 tabular-nums text-ink-faint">{formatAge(task.createdAt)}</span>
         </span>
         {state === "blocked" && task.reason && <span className="truncate text-[11px] text-ink-subtle">{task.reason}</span>}
         {refusal !== null && <span className="line-clamp-3 text-[11px] text-ink-subtle">{refusal}</span>}
