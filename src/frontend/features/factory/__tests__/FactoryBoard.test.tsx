@@ -186,12 +186,12 @@ describe("FactoryBoard", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
     expect(called("tasks.remove")).toEqual([])
-    fireEvent.click(within(view.getByRole("group", { name: "Delete this task?" })).getByRole("button", { name: "Yes" }))
+    fireEvent.click(within(view.getByRole("group", { name: "Delete and revert its code?" })).getByRole("button", { name: "Yes" }))
 
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
     expect(called("tasks.remove")).toEqual([{ id: tasks[0].id }])
     expect(onOpenTask).not.toHaveBeenCalled()
-    await waitFor(() => expect(view.queryByRole("group", { name: "Delete this task?" })).toBeNull())
+    await waitFor(() => expect(view.queryByRole("group", { name: "Delete and revert its code?" })).toBeNull())
   })
 
   it("keeps the task when the confirmation is declined", () => {
@@ -200,7 +200,7 @@ describe("FactoryBoard", () => {
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
     fireEvent.click(view.getByRole("button", { name: "No" }))
 
-    expect(view.queryByRole("group", { name: "Delete this task?" })).toBeNull()
+    expect(view.queryByRole("group", { name: "Delete and revert its code?" })).toBeNull()
     expect(view.getByRole("button", { name: "Delete Task done" })).toBeInTheDocument()
     expect(called("tasks.remove")).toEqual([])
     expect(refresh).not.toHaveBeenCalled()
@@ -215,7 +215,7 @@ describe("FactoryBoard", () => {
 
     expect(marker).toHaveClass("invisible")
     expect(card("Task done")).toContainElement(marker)
-    expect(view.getByRole("group", { name: "Delete this task?" }).parentElement).toHaveClass("absolute")
+    expect(view.getByRole("group", { name: "Delete and revert its code?" }).parentElement).toHaveClass("absolute")
   })
 
   it("shows the core's refusal of a task with unmerged work and deletes it with force once confirmed again", async () => {

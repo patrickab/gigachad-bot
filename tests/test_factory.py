@@ -44,6 +44,7 @@ class FakePiHost:
     # action -> (code, message) or (code, message, detail) the core answers it with.
     refusals: dict[str, tuple[str, str] | tuple[str, str, dict[str, Any]]] = field(default_factory=dict)
     down: bool = False
+    timeline: list[dict[str, Any]] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         if self.down:
@@ -66,6 +67,8 @@ class FakePiHost:
             case "tasks.get":
                 task = self._task(params["id"])
                 return httpx.Response(200, json={"result": task}) if task else self._unknown(params["id"])
+            case "tasks.timeline":
+                return httpx.Response(200, json={"result": {"entries": self.timeline, "next": 0}})
             case "tasks.remove":
                 task = self._task(params["id"])
                 if task is None:
@@ -168,7 +171,67 @@ def test_remove_stops_the_removed_tasks_preview_by_its_full_id(client, host, sto
     assert response.status_code == 200, response.text
     assert response.json() == {"removed": TASK_ID, "dropped": None}
     assert stopped_previews == [TASK_ID]
-    assert host.calls == [("tasks.remove", {"id": "6f1c", "force": True})]
+    assert host.calls[-1] == ("tasks.remove", {"id": "6f1c", "force": True})
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _repo_with_merged_task(tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "a.txt").write_text("base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    (repo / "feature.txt").write_text("feature\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "task")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+def _merged_host(host: FakePiHost, repo: Path, commit: str) -> None:
+    host.tasks[TASK_ID] = _view() | {"repo": str(repo)}
+    host.timeline = [{"at": "t", "kind": "merge", "data": {"ok": True, "commit": commit}}]
+
+
+def test_removing_a_merged_task_reverts_its_commit(client, host, stopped_previews, tmp_path):
+    repo, commit = _repo_with_merged_task(tmp_path)
+    _merged_host(host, repo, commit)
+
+    response = client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}})
+
+    assert response.status_code == 200, response.text
+    assert not (repo / "feature.txt").exists()
+    assert (repo / "a.txt").exists()
+
+
+def test_a_failed_revert_keeps_the_task(client, host, stopped_previews, tmp_path):
+    repo, commit = _repo_with_merged_task(tmp_path)
+    (repo / "feature.txt").write_text("changed later\n")
+    _git(repo, "commit", "-qam", "later")
+    _merged_host(host, repo, commit)
+
+    response = client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}})
+
+    assert response.status_code == 409
+    assert TASK_ID in host.tasks
+    assert (repo / "feature.txt").read_text() == "changed later\n"
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_a_task_that_merged_nothing_is_removed_without_a_revert(client, host, stopped_previews, tmp_path):
+    repo, commit = _repo_with_merged_task(tmp_path)
+    _merged_host(host, repo, commit)
+    host.tasks[TASK_ID]["reason"] = "no_changes"
+
+    assert client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}}).status_code == 200
+    assert (repo / "feature.txt").exists()
 
 
 def test_a_refused_remove_keeps_the_preview_and_passes_the_cores_detail(client, host, stopped_previews):
@@ -179,9 +242,7 @@ def test_a_refused_remove_keeps_the_preview_and_passes_the_cores_detail(client, 
     response = client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}})
 
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": {"code": "refused", "message": refusal, "detail": {"force": True}}
-    }
+    assert response.json() == {"detail": {"code": "refused", "message": refusal, "detail": {"force": True}}}
     assert stopped_previews == []
 
 
@@ -304,8 +365,14 @@ async def test_the_rows_move_into_the_core_once_each(old_tables, host, stopped_p
     assert host.settings == {"/repo": {"merge": "auto", "maxRounds": 4, "preview": True, "models": {}}}
     assert host.imported == {
         TASK_ID: {
-            "id": TASK_ID, "repo": "/repo", "worktree": "/worktrees/rename", "branch": "rename-6f1c2a3b", "title": "Rename",
-            "sessionId": "s-1", "sessionDir": "/pi/factory/sessions/--repo--", "createdAt": CREATED.isoformat(),
+            "id": TASK_ID,
+            "repo": "/repo",
+            "worktree": "/worktrees/rename",
+            "branch": "rename-6f1c2a3b",
+            "title": "Rename",
+            "sessionId": "s-1",
+            "sessionDir": "/pi/factory/sessions/--repo--",
+            "createdAt": CREATED.isoformat(),
         }
     }
     assert stopped_previews == [HEX_ID]

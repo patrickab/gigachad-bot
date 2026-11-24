@@ -32,7 +32,7 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   pi-host's unit, so a pi-host restart leaves it running. `redeploy.sh` still counts live runners as running
   sessions and does not restart pi-host while one runs.
 - **Backend** (`routes/factory.py`, `lib/pi_host.py`): `POST /api/factory/call` and `GET /api/factory/actions`, a pass
-  through (a refusal keeps the core's `detail`). Its own parts: previews (stopped after a successful `tasks.remove`)
+  through (a refusal keeps the core's `detail`). Its own parts: reverting a merged task's commit before `tasks.remove` (`lib/factory_revert.py`: deleting a `done` task drops its code with `git revert` in the repo's checkout; a conflicting revert is aborted and refuses the delete), previews (stopped after a successful `tasks.remove`)
   and the one-time move of the old Postgres rows (`lib/factory_migration.py`). It stores no factory state.
 - **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.

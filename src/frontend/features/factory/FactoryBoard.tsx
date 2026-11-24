@@ -136,7 +136,7 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
       {confirming && (
         <div className="absolute inset-x-4 bottom-4 grid h-6 items-center">
           {refusal === null
-            ? <InlineConfirm question="Delete this task?" busy={deleting} onYes={() => void remove(false)} onNo={close} />
+            ? <InlineConfirm question={task.state === "done" && task.reason !== "no_changes" ? "Delete and revert its code?" : "Delete this task?"} busy={deleting} onYes={() => void remove(false)} onNo={close} />
             : <InlineConfirm question="Delete anyway?" busy={deleting} onYes={() => void remove(true)} onNo={close} />}
         </div>
       )}
