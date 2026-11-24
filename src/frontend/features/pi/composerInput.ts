@@ -40,7 +40,8 @@ export function composerAction(sent: string, chipTexts: readonly string[]): Comp
     const instructions = compact[1]?.trim()
     return instructions ? { kind: "compact", instructions } : { kind: "compact" }
   }
-  return { kind: "prompt", text: sent }
+  // Pi splits `/skill:<name> <args>` at the first space only: a newline or tab after the name would lose the args
+  return { kind: "prompt", text: sent.replace(/^(\/skill:\S+)\s+/, "$1 ") }
 }
 
 function commandCompletion(name: string, detail: string | undefined, icon: LucideIcon, text: string): ComposerCompletion {
