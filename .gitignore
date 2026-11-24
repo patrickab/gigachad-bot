@@ -11,6 +11,7 @@ src/archive
 .pytest*
 .vscode
 node_modules
+node_modules.partial
 
 # Python virtualenv / linter cache
 .venv
