@@ -106,6 +106,9 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
           <span className={cn("min-w-0 flex-1 truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
           <span aria-label="Age" className="shrink-0 tabular-nums text-ink-faint">{formatAge(task.createdAt)}</span>
         </span>
+        {task.settings?.models.coder && (
+          <span aria-label="Coder model" className="truncate text-[11px] text-ink-faint">{task.settings.models.coder}</span>
+        )}
         {state === "blocked" && task.reason && <span className="truncate text-[11px] text-ink-subtle">{task.reason}</span>}
         {refusal !== null && <span className="line-clamp-3 text-[11px] text-ink-subtle">{refusal}</span>}
         {/* The delete question covers this row, so asking never resizes the card. */}

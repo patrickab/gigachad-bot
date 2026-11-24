@@ -139,6 +139,14 @@ describe("FactoryBoard", () => {
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
   })
 
+  it("shows a card's coder model when the task has one", () => {
+    const settings = { branch: "master", merge: "auto", maxRounds: 3, review: true, models: { coder: "anthropic/claude-opus-4" } } as const
+    const { card } = renderBoard([task("Task modelled", "running", { settings }), task("Task default", "running")])
+
+    expect(within(card("Task modelled")).getByLabelText("Coder model")).toHaveTextContent("anthropic/claude-opus-4")
+    expect(within(card("Task default")).queryByLabelText("Coder model")).toBeNull()
+  })
+
   it("shows a card's tokens and cost once a model answered", () => {
     const { card } = renderBoard([
       task("Task used", "running", { usage: { input: 3_000_000, output: 21_000, cost: 2.903 } }),
