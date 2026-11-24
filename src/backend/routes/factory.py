@@ -3,8 +3,9 @@
 - Consumes `lib.pi_host.factory_call`/`factory_actions`: pi-host runs the action in the factory plugin's core, which owns
   repos, settings, `factory.yaml`, tasks and their runners. This backend keeps no factory state
 - Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
-- Before `tasks.remove` of a merged (`done`) task it reverts the task's merge commit in the repo's checkout
-  (`lib.factory_revert`); a revert that fails (conflict) is aborted and refuses the removal with 409 `refused`
+- `tasks.remove` of a merged (`done`) task: a dry run (`git merge-tree`) first refuses a conflicting revert with 409
+  `refused`, then, after the core removed the task, `git revert` of its merge commit in the repo's checkout
+  (`lib.factory_revert`). Reverting last matters: it rewrites the checkout, which reloads a dev server mid-request
 - Another behaviour of its own: after a successful `tasks.remove` it stops the removed task's preview
   (`lib.factory_preview`, keyed by the result's `removed`), so a refused removal keeps the preview
 - `POST /api/factory/images` stores an image for a task's request or message (`lib.factory_images`) and answers its
@@ -73,29 +74,42 @@ async def _stop_removed_preview(task_id: str) -> None:
         raise _error(502, "failed", f"Task {task_id} was removed, its preview did not stop: {exc}") from exc
 
 
-async def _revert_merged_code(params: dict[str, Any]) -> None:
-    """Revert the task's merge commit in the repo's checkout, so deleting a merged task drops its code."""
+async def _commit_to_revert(params: dict[str, Any]) -> tuple[str, str] | None:
+    """`(repo, commit)` of a merged task's code that deleting it must drop, None when there is none.
+
+    A revert that would conflict refuses the delete here, before anything is removed."""
     task = await factory_result(pi_host.factory_call("tasks.get", {"id": params.get("id")}))
     if task.get("state") != "done" or task.get("reason") == "no_changes":
-        return
+        return None
     timeline = await factory_result(pi_host.factory_call("tasks.timeline", {"id": task["id"]}))
     commit = factory_revert.merged_commit(timeline["entries"])
     if commit is None:
-        return
+        return None
     try:
-        await asyncio.to_thread(factory_revert.revert_merge, task["repo"], commit)
+        pending = await asyncio.to_thread(factory_revert.check_revert, task["repo"], commit)
     except factory_revert.RevertError as exc:
         raise _error(409, "refused", f"{exc}. The task was not deleted") from exc
+    return (task["repo"], commit) if pending else None
+
+
+async def _revert_after_removal(repo: str, commit: str) -> None:
+    """Revert the commit once the task is gone: the revert rewrites the checkout, which reloads a dev server and
+    would cut a request still waiting to delete."""
+    try:
+        await asyncio.to_thread(factory_revert.revert_merge, repo, commit)
+    except factory_revert.RevertError as exc:
+        raise _error(409, "failed", f"The task was deleted, its code stays: {exc}") from exc
 
 
 @router.post("/call")
 async def post_call(body: FactoryCall) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
     """Run the core action *action* with *params*; the answer is its result."""
-    if body.action == "tasks.remove":
-        await _revert_merged_code(body.params)
+    revert = await _commit_to_revert(body.params) if body.action == "tasks.remove" else None
     result = await factory_result(pi_host.factory_call(body.action, body.params))
     if body.action == "tasks.remove":
         await _stop_removed_preview(result["removed"])
+        if revert is not None:
+            await _revert_after_removal(*revert)
     return result
 
 
