@@ -22,6 +22,8 @@ const CARD_WIDTH_PX = 380
 const CARD_GAP_PX = 8
 /** Room a card needs below the selection before it flips above it. */
 const CARD_MIN_ROOM_PX = 260
+/** The extracted text's page, the look of the workbench's rendered Markdown page (`PREVIEW_PAGE`, which the editor feature may not import). */
+const TEXT_PAGE = "rounded-2xl bg-page p-6 shadow-[var(--shadow-md)]"
 /** Narrow, so the pages keep the space. */
 const CHAT_PANEL_WIDTH_PX = 320
 
@@ -111,7 +113,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
       {pdfText.status === "ready" && <InTopBar name="pdf"><PdfTextSwitch showText={showText} onChange={setShowText} /></InTopBar>}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
         {showText && pdfText.status === "ready"
-          ? <div role="region" aria-label="Extracted text" className="h-full overflow-auto px-6 pb-6 pt-14"><div className="mx-auto max-w-3xl"><LaTeXMarkdown content={rewriteImages(pdfText.markdown, baseName(path))} /></div></div>
+          ? <div role="region" aria-label="Extracted text" className="h-full overflow-auto px-6 pb-6 pt-14"><div className={cn("mx-auto max-w-3xl", TEXT_PAGE)}><LaTeXMarkdown content={rewriteImages(pdfText.markdown, baseName(path))} /></div></div>
           : children}
       </div>
       {selected && (
