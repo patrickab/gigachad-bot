@@ -475,9 +475,7 @@ class NeovimSession:
             row, buffer, tick = state["row"], state["buffer"], state["tick"]
             filled = fill_placeholder(state["lines"][row - 1], path)
             if filled is None:
-                inserted = await self._lua(
-                    "return _G.gigachad_insert_at(...)", row, _buffer_lines(reference), row + 1, buffer, tick
-                )
+                inserted = await self._lua("return _G.gigachad_insert_at(...)", row, _buffer_lines(reference), row + 1, buffer, tick)
             else:
                 inserted = await self._lua("return _G.gigachad_set_line(...)", row, filled, buffer, tick)
             if inserted:
