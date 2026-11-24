@@ -15,6 +15,7 @@ import { handleCatalog } from "./catalog/index.ts";
 import { handleFactory } from "./factory.ts";
 import { handleGateway } from "./gateway/index.ts";
 import { stopOmp } from "./gateway/omp.ts";
+import { handleMedia } from "./media.ts";
 import { LocalHost } from "./host/local/index.ts";
 import { loadConfig } from "./supervisor/config.ts";
 import { ResumeState } from "./supervisor/resume.ts";
@@ -63,6 +64,7 @@ export function startServer({ hostname, port, tokens, supervisor }: ServerOption
       const started = performance.now();
       const response =
         (await handleGateway(request, url)) ??
+        (await handleMedia(request, url)) ??
         (await supervisor.handle(request, url)) ??
         (await handleCatalog(request, url, supervisor, supervisor.host)) ??
         (await handleFactory(request, url)) ??

@@ -7,6 +7,11 @@
 
 export interface TextContent { type: "text"; text: string }
 export interface ImageContent { type: "image"; data: string; mimeType: string }
+/** A tool-result image as pi-host sends it: stored under the sha256 of its bytes, fetched from `/api/pi/media/<hash>` (`piMediaUrl`). */
+export interface MediaImage { type: "image"; mimeType: string; hash: string }
+/** An image block of a tool result: a stored one, or inline base64 when pi-host could not store it. */
+export type ToolImage = ImageContent | MediaImage
+
 export interface ThinkingContent { type: "thinking"; thinking: string; redacted?: boolean }
 export interface ToolCall { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
 
@@ -38,7 +43,7 @@ export interface ToolResultMessage {
   role: "toolResult"
   toolCallId: string
   toolName: string
-  content: (TextContent | ImageContent)[]
+  content: (TextContent | ToolImage)[]
   details?: unknown
   isError: boolean
   timestamp: number
@@ -61,7 +66,7 @@ export type AgentMessage =
 /** Live state of one tool call, keyed by `toolCallId`, from `tool_execution_*` events. */
 export interface ToolRun {
   /** Latest partial result while running, the final result once ended. */
-  result?: { content: (TextContent | ImageContent)[]; details?: unknown }
+  result?: { content: (TextContent | ToolImage)[]; details?: unknown }
   isError: boolean
   running: boolean
   durationMs?: number

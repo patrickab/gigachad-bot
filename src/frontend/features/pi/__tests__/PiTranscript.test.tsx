@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript, TURN_PAGE_SIZE } from "../PiTranscript"
 import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
+import type { Attachment } from "@/lib/domain/types"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"
 import type { AgentMessage, AssistantMessage } from "../types"
 
@@ -9,6 +10,14 @@ import type { AgentMessage, AssistantMessage } from "../types"
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   fetchPiSessionMatches: () => Promise.reject(new Error("offline")),
+}))
+
+const preview = vi.hoisted(() => ({ shown: null as Attachment | null }))
+vi.mock("@/features/chat/preview/AttachmentPreview", () => ({
+  AttachmentPreview: ({ attachment }: { attachment: Attachment | null }) => {
+    preview.shown = attachment
+    return attachment ? <div data-testid="lightbox">{attachment.url}</div> : null
+  },
 }))
 
 const fileLinks = { base: "/repo", open: () => {} }
@@ -211,5 +220,62 @@ describe("PiTranscript search hit", () => {
     render(<Harness transcript={transcriptOf(history(2))} />)
     act(() => focusPiSearchHit("s1", "answer", hit("other")))
     expect(scrolled).toEqual([])
+  })
+})
+
+describe("PiTranscript tool images and reads", () => {
+  const HASH = "a".repeat(64)
+  const call = (id: string, name: string, args: Record<string, unknown>): AgentMessage => ({ role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 })
+  const result = (id: string, name: string, content: unknown[]): AgentMessage => ({ role: "toolResult", toolCallId: id, toolName: name, content, isError: false, timestamp: 3 } as AgentMessage)
+  const done: AgentMessage = { role: "assistant", content: [{ type: "text", text: "Done" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 4 }
+
+  it("shows a settled tool's image as an attachment outside the fold and opens it in the lightbox", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Screenshot it", timestamp: 1 },
+      call("t1", "screenshot", {}),
+      result("t1", "screenshot", [{ type: "text", text: "ok" }, { type: "image", mimeType: "image/png", hash: HASH }]),
+      done,
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+
+    const thumb = screen.getByRole("img", { name: `screenshot-${HASH.slice(0, 8)}.png` })
+    expect(thumb.getAttribute("src")).toMatch(new RegExp(`/pi/media/${HASH}/thumb$`))
+    // The fold is closed, the image is not inside it
+    expect(screen.getByRole("button", { name: /Process details/ }).getAttribute("aria-expanded")).not.toBe("true")
+    fireEvent.click(screen.getByRole("button", { name: `screenshot-${HASH.slice(0, 8)}.png` }))
+    expect(screen.getByTestId("lightbox").textContent).toMatch(new RegExp(`/pi/media/${HASH}$`))
+  })
+
+  it("shows an inline image, one that pi-host could not store, from its data URL", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Plot", timestamp: 1 },
+      call("t1", "plot", {}),
+      result("t1", "plot", [{ type: "image", mimeType: "image/png", data: "QUJD" }]),
+      done,
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.getByRole("img", { name: "plot-1.png" }).getAttribute("src")).toBe("data:image/png;base64,QUJD")
+  })
+
+  it("shows a live tool's image from its running result", () => {
+    const messages: AgentMessage[] = [{ role: "user", content: "Look", timestamp: 1 }, call("t1", "read", { path: "a.png" })]
+    const runs = { t1: { running: true, isError: false, result: { content: [{ type: "image" as const, mimeType: "image/png", hash: HASH }] } } }
+    render(<PiTranscript transcript={transcriptOf(messages, { running: true, runs })} fileLinks={fileLinks} />)
+    expect(screen.getByRole("img", { name: `read-${HASH.slice(0, 8)}.png` })).toBeTruthy()
+  })
+
+  it("keeps a read call visible in a settled turn while other tool calls fold", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Look", timestamp: 1 },
+      call("t1", "read", { path: "src/a.ts" }),
+      result("t1", "read", [{ type: "text", text: "code" }]),
+      call("t2", "bash", { command: "ls" }),
+      result("t2", "bash", [{ type: "text", text: "files" }]),
+      done,
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.getByText("src/a.ts")).toBeTruthy()
+    expect(screen.queryByText("ls")).toBeNull()
+    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
   })
 })

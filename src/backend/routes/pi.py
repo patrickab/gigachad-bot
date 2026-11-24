@@ -9,6 +9,9 @@
   composer mentions it and the user's Pi extension `~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) previews it
 - pi-host failures map to HTTP: unreachable 503, unknown shape 502, refusal keeps its status and answers
   `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`, 409 stale state with the current `{revision, data}`)
+- `GET /media/{sha256}` and `/media/{sha256}/thumb`: tool-result images pi-host stored under their content hash, and a
+  480px WebP of one (`lib.pi_media`). The hash is the whole identity, so both answer `ETag` + `immutable` and a repeat
+  with `If-None-Match` is a 304 without asking pi-host
 - `WS /api/pi/ws`: byte-transparent proxy to pi-host's `/ws` (M16), nothing is parsed. Either side closing closes both
 
 Host code execution: `host_access_only` on HTTP, the origin and host-access gate of `is_allowed_websocket` on the socket.
@@ -32,7 +35,7 @@ from backend.reverse_proxy import relay_websocket
 from backend.routes.deps import get_file_roots
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
 import config
-from lib import pi_host, pi_pastes, repository_index
+from lib import pi_host, pi_media, pi_pastes, repository_index
 from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
@@ -55,6 +58,9 @@ class _PassRefusals(APIRoute):
 
 router = APIRouter(prefix="/api/pi", tags=["pi"])
 http_router = APIRouter(dependencies=[host_access_only("pi")], route_class=_PassRefusals)
+
+MediaHash = Annotated[str, Path(pattern=pi_media.HASH_PATTERN)]
+IMMUTABLE = "public, max-age=31536000, immutable"
 
 # Pi session ids are UUIDs, the pattern keeps anything else out of pi-host's URL space.
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]+$")]
@@ -267,6 +273,38 @@ async def post_paste(
     ):
         stored = await asyncio.to_thread(pi_pastes.store_paste, roots, folder, mention, content)
     return PastedVideo(path=str(stored), mention=mention.as_posix())
+
+
+def _cached(request: Request, etag: str, body: bytes, media_type: str) -> Response:
+    """*body* with an immutable `ETag`, a 304 when the client already holds *etag*."""
+    headers = {"ETag": etag, "Cache-Control": IMMUTABLE}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type=media_type, headers=headers)
+
+
+@http_router.get("/media/{media_hash}")
+async def get_media(request: Request, media_hash: MediaHash) -> Response:
+    etag = f'"{media_hash}"'
+    if request.headers.get("if-none-match") == etag:
+        return _cached(request, etag, b"", "")
+    data, media_type = await _call(pi_host.media(media_hash))
+    return _cached(request, etag, data, media_type)
+
+
+@http_router.get("/media/{media_hash}/thumb")
+async def get_media_thumbnail(request: Request, media_hash: MediaHash) -> Response:
+    etag = f'"{media_hash}-{pi_media.THUMB_PX}w"'
+    if request.headers.get("if-none-match") == etag:
+        return _cached(request, etag, b"", "")
+    thumb = pi_media.thumbnail_for(media_hash)
+    if thumb is None:
+        data, media_type = await _call(pi_host.media(media_hash))
+        try:
+            thumb = await asyncio.to_thread(pi_media.thumbnail_for, media_hash, data)
+        except ValueError:
+            return _cached(request, f'"{media_hash}"', data, media_type)  # unreadable for Pillow: the original is the best preview
+    return _cached(request, etag, thumb or b"", "image/webp")
 
 
 @router.websocket("/ws")

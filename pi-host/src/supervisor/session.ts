@@ -15,6 +15,7 @@
  * go out after the replay.
  */
 import type { PiChild } from "../host/index.ts";
+import { withMediaHashes } from "../media.ts";
 import type { SessionLock } from "./lock.ts";
 import type { ProfileSpec } from "./profiles.ts";
 
@@ -462,6 +463,15 @@ export class LiveSession {
       return;
     }
     if (typeof record !== "object" || record === null) return;
+    // Tool-result images reach clients (and the replay buffer) as media hashes, not base64. The one record that
+    // contains an image is re-serialized, every other line stays byte-identical (M16).
+    if (line.includes('"image"')) {
+      const hashed = withMediaHashes(record);
+      if (hashed !== record) {
+        record = hashed;
+        line = JSON.stringify(record);
+      }
+    }
     this.lastActivity = Date.now();
     const type = String(record.type);
     if (type === "response" && typeof record.id === "string" && record.id.startsWith(INTERNAL_ID_PREFIX)) {

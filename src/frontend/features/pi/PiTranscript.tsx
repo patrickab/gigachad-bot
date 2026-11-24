@@ -2,7 +2,7 @@
 
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
@@ -11,7 +11,10 @@ import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useTabActive } from "@/contexts/TabContext"
 import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/components/ui/columnResize"
+import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
+import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { WideModeToggle } from "@/features/chat/WideModeToggle"
+import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { PiSearchBar } from "./PiSearchBar"
 import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
@@ -19,6 +22,7 @@ import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighli
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
+import { toolImageAttachments, toolImagesOf } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
 // Registers the `video-preview` card (`~/.pi/agent/extensions/video-paste.ts`, from `~/.os`)
@@ -38,24 +42,30 @@ type Piece =
   | { kind: "text"; key: string; text: string; entryId?: string }
   | { kind: "thinking"; key: string; text: string; messageKey: string }
   | { kind: "tool"; key: string; call: ToolCall; messageKey: string }
+  /** The images a tool returned, shown as image attachments right after its call, never inside the fold. */
+  | { kind: "images"; key: string; attachments: Attachment[] }
   | { kind: "bash"; key: string; message: BashExecutionMessage }
   | { kind: "custom"; key: string; message: CustomMessage }
   /** `retried`: the error of a failed attempt Pi's auto-retry omitted from context, shown instead of the attempt. */
   | { kind: "mark"; key: string; marks: MessageMarks; retried?: string }
   | { kind: "error"; key: string; text: string }
 
-/** Folds into "Process details" when settled; a tool with a `standalone` renderer stays between the texts. */
+/** Calls of these tools are always visible between the texts, never folded (a `read` shows what the agent looked at). */
+const ALWAYS_VISIBLE_TOOLS = new Set(["read"])
+
+/** Folds into "Process details" when settled; a tool with a `standalone` renderer, and a `read`, stay between the texts. */
 function isActivity(piece: Piece): boolean {
-  return piece.kind === "thinking" || piece.kind === "bash" || (piece.kind === "tool" && toolPlacement(piece.call.name) === "inline")
+  return piece.kind === "thinking" || piece.kind === "bash" || (piece.kind === "tool" && toolPlacement(piece.call.name) === "inline" && !ALWAYS_VISIBLE_TOOLS.has(piece.call.name))
 }
 
-function assistantPieces(message: AssistantMessage, messageKey: string): Piece[] {
-  const pieces = message.content.map((block, index): Piece | null => {
+function assistantPieces(message: AssistantMessage, messageKey: string, runs: Record<string, ToolRun>): Piece[] {
+  const pieces = message.content.flatMap((block, index): Piece[] => {
     const key = `${messageKey}-${index}`
-    if (block.type === "text") return block.text.trim() ? { kind: "text", key, text: block.text } : null
-    if (block.type === "thinking") return block.thinking.trim() ? { kind: "thinking", key, text: block.thinking, messageKey } : null
-    return { kind: "tool", key, call: block, messageKey }
-  }).filter((piece): piece is Piece => piece !== null)
+    if (block.type === "text") return block.text.trim() ? [{ kind: "text", key, text: block.text }] : []
+    if (block.type === "thinking") return block.thinking.trim() ? [{ kind: "thinking", key, text: block.thinking, messageKey }] : []
+    const attachments = toolImageAttachments(block.name, toolImagesOf(runs[block.id]))
+    return [{ kind: "tool", key, call: block, messageKey }, ...(attachments.length > 0 ? [{ kind: "images" as const, key: `${key}-images`, attachments }] : [])]
+  })
   if (message.stopReason === "error" || message.stopReason === "aborted") {
     pieces.push({ kind: "error", key: `${messageKey}-error`, text: message.errorMessage || (message.stopReason === "aborted" ? "Aborted" : "Error") })
   }
@@ -82,7 +92,7 @@ function retriedError(message: AgentMessage, marks: MessageMarks | undefined): s
 }
 
 /** The answer's pieces: committed messages after the prompt (each edited one after its marks), then the streaming reply when live. A retried attempt is only its mark. */
-function answerPieces(messages: AgentMessage[], turn: Turn, streaming: AssistantMessage | null, confirmed: Confirmed): Piece[] {
+function answerPieces(messages: AgentMessage[], turn: Turn, streaming: AssistantMessage | null, confirmed: Confirmed, runs: Record<string, ToolRun>): Piece[] {
   const pieces: Piece[] = []
   for (let index = turn.start + 1; index < turn.end; index++) {
     const message = messages[index]
@@ -94,12 +104,12 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
     if (retried) continue
     if (message.role === "assistant") {
       const entryId = index < confirmed.count ? confirmed.entryIds[index] : undefined
-      pieces.push(...assistantPieces(message as AssistantMessage, key).map((piece) => (piece.kind === "text" && entryId ? { ...piece, entryId } : piece)))
+      pieces.push(...assistantPieces(message as AssistantMessage, key, runs).map((piece) => (piece.kind === "text" && entryId ? { ...piece, entryId } : piece)))
     }
     if (message.role === "bashExecution") pieces.push({ kind: "bash", key, message: message as BashExecutionMessage })
     if (message.role === "custom" && (message as CustomMessage).display) pieces.push({ kind: "custom", key, message: message as CustomMessage })
   }
-  if (streaming) pieces.push(...assistantPieces(streaming, "streaming"))
+  if (streaming) pieces.push(...assistantPieces(streaming, "streaming", runs))
   return pieces
 }
 
@@ -115,6 +125,14 @@ function ThinkingBlock({ text }: { text: string }) {
       {open && <p className="mt-1 whitespace-pre-wrap pl-5 leading-5">{text}</p>}
     </div>
   )
+}
+
+const PreviewContext = createContext<(attachment: Attachment) => void>(() => {})
+
+/** A tool's images as the chat's image attachments, a click opens the lightbox (the file panel). */
+function ToolImages({ attachments }: { attachments: Attachment[] }) {
+  const open = useContext(PreviewContext)
+  return <MessageAttachments attachments={attachments} onClick={open} />
 }
 
 function BashBlock({ message }: { message: BashExecutionMessage }) {
@@ -145,6 +163,7 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
       const row = () => <ToolCallRow call={piece.call} run={run} streaming={live} defaultCollapsed onOpenFile={(path) => fileLinks.open(resolveLocalFileHref(path, fileLinks.base) ?? path)} />
       return <Fragment key={piece.key}>{renderToolCall(piece.call, run, row)}</Fragment>
     }
+    case "images": return <ToolImages key={piece.key} attachments={piece.attachments} />
     case "bash": return <BashBlock key={piece.key} message={piece.message} />
     case "custom": {
       const text = () => <LaTeXMarkdown content={textOf(piece.message.content)} fileLinks={fileLinks} />
@@ -157,7 +176,7 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
 
 /**
  * The answer like omp-web shows it: text stays visible, every run of activity (thinking, tool calls, shell commands) between
- * texts folds into "Process details". A live turn stays flat so tool progress is in view, it folds once settled.
+ * texts folds into "Process details". `read` calls and the images tools returned (image attachments) are never folded. A live turn stays flat so tool progress is in view, it folds once settled.
  */
 function Answer({ pieces, runs, live, fileLinks }: { pieces: Piece[]; runs: Record<string, ToolRun>; live: boolean; fileLinks: FileLinks }) {
   if (live) return <>{pieces.map((piece) => renderPiece(piece, runs, live, fileLinks))}</>
@@ -237,7 +256,7 @@ interface PiTurnProps {
 const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks, onResizeStart }: PiTurnProps) {
   const prompt = messages[turn.start]
   const { text, compaction } = promptOf(prompt)
-  const pieces = answerPieces(messages, turn, streaming, confirmed)
+  const pieces = answerPieces(messages, turn, streaming, confirmed, runs)
   const promptMarks = marksAt(confirmed, turn.start)
   const promptEntryId = turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined
   const icon = compaction ? <FoldVertical size={14} aria-hidden="true" /> : undefined
@@ -325,6 +344,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   /** First mounted turn while the reader is away from the end, null while following the end. */
   const [anchor, setAnchor] = useState<number | null>(null)
   const [wide, setWide] = useState(false)
+  const [preview, setPreview] = useState<Attachment | null>(null)
   const { width: columnWidth, startResize } = useColumnWidth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const earlierRef = useRef<HTMLButtonElement>(null)
@@ -422,6 +442,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   const liveTail = running || streaming !== null || optimistic !== null
 
   return (
+    <PreviewContext.Provider value={setPreview}>
     <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
       {search && <PiSearchBar search={search} />}
       <div ref={onColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
@@ -453,6 +474,8 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
         <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
       </div>
       <WideModeToggle wide={wide} onToggle={() => setWide((current) => !current)} />
+      <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
     </div>
+    </PreviewContext.Provider>
   )
 }

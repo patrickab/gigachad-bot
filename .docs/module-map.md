@@ -71,7 +71,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files, SyncTeX search and slide gaps, template sets and primitive previews
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
-|   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, the session WebSocket relay to pi-host (host access)
+|   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, tool-image media (`/media/<sha256>`, `/thumb`), the session WebSocket relay to pi-host (host access)
 |   |       |-- factory.py            `/api/factory/call`, `/api/factory/actions`: factory core pass-through, preview stop after `tasks.remove` (host access)
 |   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
@@ -132,6 +132,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- pi_host.py                pi-host URL/response-contract owner: sessions, WebSocket, gateway URL and token, factory core calls
 |   |   |-- pi_models.py              Pi model catalog for local chats, stored selector -> gateway id (`gateway_model_id`)
 |   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
+|   |   |-- pi_media.py               480px WebP thumbnails of Pi tool-result images (Pillow, in-memory cache)
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
 |   |   |-- factory_migration.py      One-time move of the old `factory_repo_settings`/`factory_tasks` rows into the factory core, per row (`migrated_at`)
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
@@ -456,7 +457,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
-| Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
+| Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/` (`src/media.ts`: tool-image store), `src/lib/pi_media.py`, `features/pi/toolImages.ts`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
 | Factory pipeline, tasks or preview UI | `~/.pi/agent/extensions/factory/` (source in `~/.os`, `core.ts` is the API), `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `src/lib/factory_migration.py`, `factory.yaml`; the plugin's own tests in `~/.os`, `tests/test_factory*.py`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |

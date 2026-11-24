@@ -259,20 +259,6 @@
   color: var(--ink-subtle);
   font-size: 12px;
 }
-.pi-tool-call-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
-}
-.pi-tool-call-image {
-  display: block;
-  max-width: 240px;
-  max-height: 240px;
-  border: 1px solid var(--divider);
-  border-radius: 6px;
-  object-fit: contain;
-}
 .pi-tool-call-output {
   max-height: 260px;
   overflow: auto;

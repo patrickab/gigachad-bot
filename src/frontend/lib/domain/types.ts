@@ -10,6 +10,8 @@ export interface Attachment {
   name: string
   mime: string
   url: string
+  /** Smaller preview of an image (`url` is the full one), shown in the message tiles. */
+  thumbUrl?: string
   content?: string
   parsedMd?: string
   active: boolean

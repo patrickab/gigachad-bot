@@ -48,11 +48,11 @@ describe("patch parsing", () => {
 })
 
 describe("ToolCallRow", () => {
-  it("shows a finished edit as a paired diff when expanded", () => {
+  it("shows a finished edit as a paired diff, open without a click", () => {
     const run: ToolRun = { running: false, isError: false, durationMs: 1200, result: { content: [{ type: "text", text: "Successfully replaced 1 block(s)" }], details: { diff: "- 1 old\n+ 1 new" } } }
     render(<ToolCallRow call={editCall} run={run} />)
     expect(screen.getByText("1.2s")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /done edit/ }))
+    expect(screen.getByRole("button", { name: /done edit/ }).getAttribute("aria-expanded")).toBe("true")
     expect(screen.getByText("old")).toBeTruthy()
     expect(screen.getByText("new")).toBeTruthy()
     expect(screen.queryByText("Successfully replaced 1 block(s)")).toBeNull()
@@ -63,7 +63,7 @@ describe("ToolCallRow", () => {
     render(<ToolCallRow call={editCall} onOpenFile={onOpenFile} />)
     fireEvent.click(screen.getByRole("button", { name: "src/app.ts" }))
     expect(onOpenFile).toHaveBeenCalledWith("src/app.ts")
-    expect(screen.getByRole("button", { name: /not run edit/ }).getAttribute("aria-expanded")).toBe("false")
+    expect(screen.getByRole("button", { name: /not run edit/ }).getAttribute("aria-expanded")).toBe("true")
   })
 
   it("shows live output of a running call and the placeholder before any", () => {

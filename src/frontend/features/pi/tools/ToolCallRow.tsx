@@ -3,7 +3,7 @@
 
 import { memo, useId, useState, type JSX, type MouseEvent } from "react"
 import { Bot, Check, CheckSquare, ChevronDown, CircleAlert, CircleSlash, Code2, FileEdit, FileText, Globe, LoaderCircle, Search, Terminal, Wrench, type LucideIcon } from "lucide-react"
-import type { ImageContent, TextContent, ToolCall, ToolRun } from "../types"
+import type { TextContent, ToolCall, ToolRun } from "../types"
 import { getResultDiff, PairedDiffResult, PairedResult } from "./DiffView"
 import {
   formatDuration,
@@ -96,10 +96,11 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
 
   const content = run?.result?.content ?? []
   const resultText = run?.result ? content.filter((block): block is TextContent => block.type === "text").map((block) => block.text).join("\n") : null
-  const resultImages = content.filter((block): block is ImageContent => block.type === "image")
   const lastLine = isRunning ? (resultText ?? "").trimEnd().split("\n").at(-1)?.trim() : undefined
+  // Images are not shown here: the transcript shows every tool image as an attachment outside the fold (`toolImages.ts`)
+  const hasImages = content.some((block) => block.type === "image")
   const resultIsEmpty = resultText !== null && (resultText.trim() === "" || resultText.trim() === "(no output)")
-  const alwaysOpen = getToolCategory(call.name) === "edit" || resultImages.length > 0
+  const alwaysOpen = getToolCategory(call.name) === "edit"
   const isOpen = userToggled ?? (alwaysOpen || expanded)
   const resultDiff = isOpen && isDone && !isError ? getResultDiff(run.result?.details) : null
 
@@ -197,15 +198,7 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
               <PairedDiffResult text={resultDiff} />
             ) : (
               <>
-                {resultImages.length > 0 && (
-                  <div className="pi-tool-call-images">
-                    {resultImages.map((image, index) => (
-                      // eslint-disable-next-line @next/next/no-img-element -- inline base64 tool output, nothing for next/image to optimize
-                      <img key={index} src={`data:${image.mimeType};base64,${image.data}`} alt="" className="pi-tool-call-image" />
-                    ))}
-                  </div>
-                )}
-                {!(resultIsEmpty && resultImages.length > 0) && (
+                {!(resultIsEmpty && hasImages) && (
                   <PairedResult text={resultText ?? ""} isEmpty={resultIsEmpty} isError={isError} />
                 )}
               </>

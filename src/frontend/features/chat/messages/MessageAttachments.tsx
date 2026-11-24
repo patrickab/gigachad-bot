@@ -21,7 +21,7 @@ function ImageThumbnail({ attachment }: { attachment: Attachment }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export
     <img
-      src={attachment.url}
+      src={attachment.thumbUrl ?? attachment.url}
       alt={attachment.name}
       loading="lazy"
       draggable={false}

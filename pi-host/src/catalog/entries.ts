@@ -11,6 +11,7 @@
  *     thinking), what the coder said in each round
  */
 import type { Host, SessionEntries } from "../host/index.ts";
+import { withMediaHashes } from "../media.ts";
 
 /** Which cut of the file to answer: `turns` excludes the other three. */
 export type EntriesQuery = { turns?: number; customType?: string; since?: string; assistant?: boolean };
@@ -110,7 +111,8 @@ export async function sessionEntries(host: Host, sessionPath: string, query: Ent
   const cached = cache.get(sessionPath);
   if (cached && cached.modifiedAt === modifiedAt && cached.query === queryKey) return cached.answer;
   const all = await host.readEntries(sessionPath);
-  const answer = turns === undefined ? entriesAfter(all, customType, since, assistant) : branchTail(all, turns);
+  const cut = turns === undefined ? entriesAfter(all, customType, since, assistant) : branchTail(all, turns);
+  const answer = cut && withMediaHashes(cut);
   if (!answer) return undefined;
   cache.delete(sessionPath);
   cache.set(sessionPath, { modifiedAt, query: queryKey, answer });

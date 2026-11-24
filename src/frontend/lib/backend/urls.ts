@@ -49,6 +49,11 @@ export function fileViewerRawUrl(path: string): string {
   return `${getApiBase()}/fileviewer/raw?path=${encodeURIComponent(path)}`
 }
 
+/** URL of a Pi tool-result image stored under `hash` (sha256), or of its 480px WebP thumbnail. Content-addressed, cached forever. */
+export function piMediaUrl(hash: string, thumbnail = false): string {
+  return `${getApiBase()}/pi/media/${hash}${thumbnail ? "/thumb" : ""}`
+}
+
 /** URL of the preview image of slide primitive `id` (`<group>/<name>`) of template set `theme`, `version` changes whenever it is re-rendered. */
 export function latexPreviewUrl(theme: string, id: string, version: number): string {
   return `${getApiBase()}/latex/templates/${encodeURIComponent(theme)}/previews/${encodePath(id)}.png${toQuery({ v: version })}`

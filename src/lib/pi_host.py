@@ -6,6 +6,7 @@
   backend's system prompt, P3), a WebSocket opener for the `/ws` proxy and the gateway URL
 - Provides the factory core's actions (`factory_call`, `factory_actions`): pi-host runs them in the factory plugin's
   `core.ts`, a refusal is `FactoryCallError` with the core's code, a missing plugin `FactoryPluginMissing`
+- Provides `media`: the content-addressed tool-result images pi-host stores (`pi-host/src/media.ts`)
 - `SessionInfo.factory`: a session that is a factory task carries its state, so the session picker can hide it
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
 - Failures are `PiHostUnavailable` (503), `PiHostBadResponse` (502) or `PiHostRejected` (pi-host's own status and body)
@@ -375,6 +376,12 @@ async def _request[Result](
         return validate_answer(result, response.content, label=LABEL, path=path)
     except UpstreamContractError as exc:
         raise PiHostBadResponse(str(exc)) from exc
+
+
+async def media(media_hash: str) -> tuple[bytes, str]:
+    """The tool image stored under *media_hash* (sha256 of its bytes) and its content type. `PiHostRejected` 404 if unknown."""
+    response = await _send("GET", f"/media/{media_hash}")
+    return response.content, response.headers.get("content-type", "application/octet-stream")
 
 
 async def health() -> Health:
