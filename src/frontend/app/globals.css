@@ -129,46 +129,6 @@
     --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.7);
   }
 
-/* KITTY
-   The pink theme (`.kitty` on <html>, the Kitty switch in settings): pink role tokens in both modes (`.kitty` over dark, `.light.kitty`
-   over light) and a tiled cartoon-cat picture on the page, inlined so it needs no asset path (a preview serves the app under a base path).
-   The animated background gives way to it. */
-:root.kitty {
-  --ink:        oklch(94% 0.025 350);
-  --ink-muted:  oklch(78% 0.035 350);
-  --ink-subtle: oklch(64% 0.04 350);
-  --ink-faint:  oklch(52% 0.04 350);
-  --paper:            oklch(18% 0.035 350);
-  --surface:          oklch(21% 0.04 350);
-  --surface-elevated: oklch(25% 0.045 350);
-  --page:             oklch(25% 0.045 350);
-  --chip-raised:      oklch(21% 0.04 350);
-  --overlay:          oklch(15% 0.03 350);
-  --divider:        color-mix(in oklab, var(--ink) 14%, transparent);
-  --divider-strong: color-mix(in oklab, var(--ink) 26%, transparent);
-}
-
-:root.light.kitty {
-  --ink:        oklch(30% 0.06 350);
-  --ink-muted:  oklch(44% 0.06 350);
-  --ink-subtle: oklch(54% 0.055 350);
-  --ink-faint:  oklch(70% 0.04 350);
-  --paper:            oklch(93% 0.05 350);
-  --surface:          oklch(96.5% 0.03 350);
-  --surface-elevated: oklch(98.5% 0.015 350);
-  --page:             oklch(96.5% 0.03 350);
-  --chip-raised:      oklch(98.5% 0.015 350);
-  --overlay:          oklch(95% 0.035 350);
-  --divider:        color-mix(in oklab, var(--ink) 22%, transparent);
-  --divider-strong: color-mix(in oklab, var(--ink) 40%, transparent);
-}
-
-.kitty body {
-  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22240%22%20height%3D%22240%22%20viewBox%3D%220%200%20240%20240%22%3E%3Cg%20stroke%3D%22%23d6457f%22%20stroke-width%3D%223%22%20stroke-linejoin%3D%22round%22%20stroke-linecap%3D%22round%22%20opacity%3D%22.5%22%3E%3Cpath%20d%3D%22M70%2082L76%2036L110%2064ZM170%2082L164%2036L130%2064Z%22%20fill%3D%22%23ff9fc4%22%2F%3E%3Cellipse%20cx%3D%22120%22%20cy%3D%22100%22%20rx%3D%2252%22%20ry%3D%2244%22%20fill%3D%22%23ffb8d2%22%2F%3E%3Ccircle%20cx%3D%22101%22%20cy%3D%2293%22%20r%3D%2211%22%20fill%3D%22%23fff%22%2F%3E%3Ccircle%20cx%3D%22106%22%20cy%3D%2297%22%20r%3D%225%22%20fill%3D%22%235a2340%22%20stroke%3D%22none%22%2F%3E%3Ccircle%20cx%3D%22140%22%20cy%3D%2296%22%20r%3D%227%22%20fill%3D%22%23fff%22%2F%3E%3Ccircle%20cx%3D%22138%22%20cy%3D%2293%22%20r%3D%223%22%20fill%3D%22%235a2340%22%20stroke%3D%22none%22%2F%3E%3Cpath%20d%3D%22M114%20107h12l-6%206z%22%20fill%3D%22%23ff5d96%22%2F%3E%3Cpath%20d%3D%22M120%20113q-6%209-13%204M120%20113q6%209%2013%204%22%20fill%3D%22none%22%2F%3E%3Cpath%20d%3D%22M113%20119q2%2022%2012%206z%22%20fill%3D%22%23ff7aa8%22%2F%3E%3Cpath%20d%3D%22M82%20102l-26-6M82%20108l-26%206M158%20102l26-6M158%20108l26%206%22%20fill%3D%22none%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%23ff7aa8%22%20opacity%3D%22.45%22%3E%3Ccircle%20cx%3D%2234%22%20cy%3D%22196%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%22182%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%2234%22%20cy%3D%22176%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%2248%22%20cy%3D%22182%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%22206%22%20cy%3D%22212%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%22192%22%20cy%3D%22198%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%22206%22%20cy%3D%22192%22%20r%3D%224.5%22%2F%3E%3Ccircle%20cx%3D%22220%22%20cy%3D%22198%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
-  background-size: 240px 240px;
-  background-attachment: fixed;
-}
-
 /* TAILWIND V4 TOKEN MAPPING
    `--color-*: initial` wipes the default palette so leftover `text-zinc-400` etc. compile to nothing. */
 @theme {

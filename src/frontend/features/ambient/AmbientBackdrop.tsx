@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react"
 import { readSceneAnchor, startNightOcean, type NightOceanFrame } from "deepfocus-ambient"
 import { useAnimatedBackground } from "@/contexts/SettingsContext"
-import { useKittyMode } from "@/hooks/useKittyMode"
 import { useThemeName } from "@/hooks/useThemeName"
 import { setAmbientCanvas } from "@/lib/ambientCanvas"
 import { readToken } from "@/lib/palette"
@@ -35,14 +34,12 @@ function toRgb(cssColor: string): [number, number, number] {
  * - One fixed canvas under everything: it shows wherever the shell paints no surface of its own
  * - The scene follows the newest `anchorScene` on screen (an empty conversation's composer) and stays where that left it
  * - Reduced motion gets a still sea
- * - The kitty theme replaces it with its own picture on the page
  * - The canvas is hidden while it has no picture (before the first frame, after a lost graphics context), the page color shows. A context that stays lost gets a fresh canvas,
  *   and a canvas the browser gives no context (WebGL refused after a GPU reset) is retried with a growing wait
  */
 export function AmbientBackdrop() {
   // Nothing is drawn until the stored setting is known, so a user who turned it off never sees it start
-  const kitty = useKittyMode()
-  return useAnimatedBackground() && !kitty ? <NightOcean /> : null
+  return useAnimatedBackground() ? <NightOcean /> : null
 }
 
 function NightOcean() {

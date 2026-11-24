@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Blend, Cat, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket, RotateCcw } from "lucide-react"
+import { Blend, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket, RotateCcw } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -13,7 +13,6 @@ import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { setGlassMode, useGlassMode } from "@/hooks/useGlassMode"
-import { setKittyMode, useKittyMode } from "@/hooks/useKittyMode"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { useAnimatedBackground, useHostAccess, usePiAutoResume, useSetAnimatedBackground, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 import { startRedeploy } from "@/lib/backend/api"
@@ -61,7 +60,6 @@ export function SettingsMenu({
   const [promptOpen, setPromptOpen] = useState(false)
   const neovim = useNeovimSetting()
   const glass = useGlassMode()
-  const kitty = useKittyMode()
   const hostAccess = useHostAccess()
   const animatedBackground = useAnimatedBackground()
   const setAnimatedBackground = useSetAnimatedBackground()
@@ -229,14 +227,6 @@ export function SettingsMenu({
                   Glass
                 </div>
                 <Switch label="Glass" checked={glass} onToggle={() => setGlassMode(!glass)} />
-              </div>
-
-              <div className={ROW_CLASS}>
-                <div className={ROW_LABEL_CLASS}>
-                  <Cat className="h-3.5 w-3.5" />
-                  Kitty
-                </div>
-                <Switch label="Kitty" checked={kitty} onToggle={() => setKittyMode(!kitty)} />
               </div>
 
               {animatedBackground !== null && (
