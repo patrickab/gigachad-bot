@@ -84,7 +84,7 @@ function pastedImage(clipboard: DataTransfer | null): Blob | null {
 /** Run one backend Neovim session for `document`, which is its first buffer.
  *
  * - `:w` of any buffer calls `save(text, path)`, whose resolved text replaces that buffer if it differs
- * - Yanks (`y`) are copied to the browser clipboard
+ * - Yanks (`y`) and deletes (`x`, `d`, `c`) are copied to the browser clipboard
  * - Esc in normal mode gives focus back to the app (`leave`): the closest focusable element around the terminal, else the page
  * - `:q` with exit code 0 calls `onQuit`
  * - `send(command)` sends a `NeovimCommand`, true when the session took it, false without a session

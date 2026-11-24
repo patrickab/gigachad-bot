@@ -8,7 +8,7 @@
   `save(path, text)`, which persists it and returns what was stored
 - `base` is the text Neovim and the stored file last agreed on, per document (open, save, `set_text`). Edits made
   elsewhere merge into unsaved ones (`lib.text_merge.merge_theirs`, a conflict takes the other side's text)
-- A `TextYankPost` autocmd notifies the caller's `on_yank` with the yanked text
+- A `TextYankPost` autocmd notifies the caller's `on_yank` with the yanked or deleted text
 - With an `on_selection` callback, visual-mode `<leader>a` reports the selected lines and their document
 - With an `on_forward_search` callback, normal-mode `<leader>v` in a `.tex` document reports the document and its cursor line
 - `on_switched` hears of a document Neovim itself put on screen (`:bnext`, `:b`), not of one `open_file` showed

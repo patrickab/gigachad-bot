@@ -221,7 +221,7 @@ async def _shows(session: NeovimSession, text: str) -> None:
 
 
 @requires_nvim
-async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
+async def test_yank_and_delete_notify_with_linewise_and_charwise_text(neovim_home):
     yanked: asyncio.Queue[str] = asyncio.Queue()
 
     async def save(path: str, text: str) -> str:
@@ -235,9 +235,11 @@ async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
         assert await asyncio.wait_for(yanked.get(), 10) == "alpha "
         session.write_input(b"yj")
         assert await asyncio.wait_for(yanked.get(), 10) == "alpha beta\ngamma\n"
-        session.write_input(b"dd")  # deletes are not yanks to the clipboard
+        session.write_input(b"dd")  # deletes reach the clipboard like yanks
+        assert await asyncio.wait_for(yanked.get(), 10) == "alpha beta\n"
+        session.write_input(b"\"_x")  # the black hole register does not
         session.write_input(b"yy")
-        assert await asyncio.wait_for(yanked.get(), 10) == "gamma\n"
+        assert await asyncio.wait_for(yanked.get(), 10) == "amma\n"
     finally:
         await session.close()
         await drain

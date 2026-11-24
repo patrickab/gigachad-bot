@@ -6,7 +6,7 @@
   `Saved, merged with the agent's edits` when the answer says edits made elsewhere changed the text
 - A `BufEnter` autocmd sends a `switched` notification with the id when the window shows another tracked buffer, except for
   the switch `_G.gigachad_open` and `_G.gigachad_show` made. A `BufDelete` autocmd forgets the buffer
-- A `TextYankPost` autocmd sends a `yank` notification with the yanked text
+- A `TextYankPost` autocmd sends a `yank` notification with the yanked or deleted (`x`, `d`, `c`) text
 - Normal-mode `<Esc>` sends a `leave` notification (the browser gives focus back to the app), after running the user's own
   normal-mode `<Esc>` mapping (`:noh`)
 - Each of the `keymaps` sends its `event` notification from every tracked buffer whose id ends in its `suffix` (any without one),
@@ -481,7 +481,9 @@ vim.api.nvim_create_autocmd("BufDelete", {
 
 vim.api.nvim_create_autocmd("TextYankPost", {
   callback = function()
-    if vim.v.event.operator ~= "y" then return end
+    -- Deletes (`x`, `d`, `c`) reach the clipboard like Neovim's `unnamedplus` does: only through the unnamed, `+` or `*` register
+    local event = vim.v.event
+    if event.operator ~= "y" and event.regname ~= "" and event.regname ~= "+" and event.regname ~= "*" then return end
     local text = table.concat(vim.v.event.regcontents, "\n")
     if vim.v.event.regtype == "V" then text = text .. "\n" end
     vim.rpcnotify(channel, "yank", text)
