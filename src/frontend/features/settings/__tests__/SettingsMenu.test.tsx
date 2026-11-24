@@ -39,4 +39,20 @@ describe("SettingsMenu", () => {
     expect(localStorage.getItem("glass")).toBe("off")
     vi.unstubAllGlobals()
   })
+
+  it("switches the kitty theme on <html> and remembers it", async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) })
+    render(<SettingsMenu prompts={{}} config={config} onConfigChange={vi.fn()} models={null} researchEnabled={false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }))
+
+    fireEvent.click(screen.getByRole("switch", { name: "Kitty" }))
+    expect(document.documentElement.classList.contains("kitty")).toBe(true)
+    expect(localStorage.getItem("kitty")).toBe("on")
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Kitty", checked: true }))
+    expect(document.documentElement.classList.contains("kitty")).toBe(false)
+    expect(localStorage.getItem("kitty")).toBe("off")
+    vi.unstubAllGlobals()
+  })
 })

@@ -27,4 +27,5 @@ export const REASONING_LEVELS = ["none", "low", "medium", "high"] as const
 
 export const STORAGE_KEY_THEME = "theme"
 export const STORAGE_KEY_GLASS = "glass"
+export const STORAGE_KEY_KITTY = "kitty"
 export const STORAGE_KEY_NEOVIM = "neovim"

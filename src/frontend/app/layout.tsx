@@ -46,7 +46,7 @@ export const metadata: Metadata = {
   },
 }
 
-// Runs before hydration so the saved theme and glass mode apply without a flash. Default is dark, without glass.
+// Runs before hydration so the saved theme, glass mode and kitty theme apply without a flash. Default is dark, without glass or kitty.
 const THEME_SCRIPT = `
   (function() {
     try {
@@ -54,6 +54,7 @@ const THEME_SCRIPT = `
       var theme = stored === 'light' ? 'light' : 'dark'
       document.documentElement.classList.toggle('light', theme === 'light')
       document.documentElement.classList.toggle('glass', localStorage.getItem('glass') === 'on')
+      document.documentElement.classList.toggle('kitty', localStorage.getItem('kitty') === 'on')
     } catch(e) {
       document.documentElement.classList.toggle('light', false)
     }
