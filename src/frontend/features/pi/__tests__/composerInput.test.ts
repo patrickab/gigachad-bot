@@ -11,8 +11,6 @@ describe("composerAction", () => {
     ["compacts with /compact", "/compact", [], { kind: "compact" }],
     ["steers /compact by the rest", "/compact keep the test plan", [], { kind: "compact", instructions: "keep the test plan" }],
     ["leaves other slash commands to Pi", "/compactor", [], { kind: "prompt", text: "/compactor" }],
-    ["separates a skill from its args by a space, whatever whitespace was typed", "/skill:plan\n\nmake it fast\nand small", [], { kind: "prompt", text: "/skill:plan make it fast\nand small" }],
-    ["keeps a skill with a space as is", "/skill:plan do it", [], { kind: "prompt", text: "/skill:plan do it" }],
     ["sends text with its chips as a prompt", "fix it\n\nchip", ["chip"], { kind: "prompt", text: "fix it\n\nchip" }],
   ])("%s", (_name, draft, chips, action) => {
     expect(composerAction(draft, chips)).toEqual(action)

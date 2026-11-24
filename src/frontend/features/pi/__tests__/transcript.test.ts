@@ -235,3 +235,12 @@ describe("live tool output", () => {
     expect(text(runs.c)).toBe("done")
   })
 })
+
+describe("splitSkill", () => {
+  it("splits Pi's skill expansion into the skill and the args", async () => {
+    const { splitSkill } = await import("../PiTranscript")
+    expect(splitSkill('<skill name="gitlab" location="/x/SKILL.md">\nReferences.\n\nbody\n</skill>\n\nread #4')).toEqual({ skill: { name: "gitlab", body: "References.\n\nbody" }, text: "read #4" })
+    expect(splitSkill('<skill name="gitlab" location="/x">\nbody\n</skill>')).toEqual({ skill: { name: "gitlab", body: "body" }, text: "" })
+    expect(splitSkill("plain")).toEqual({ text: "plain" })
+  })
+})

@@ -3,7 +3,7 @@
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Square, TerminalSquare, Volume2 } from "lucide-react"
+import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Sparkles, Square, TerminalSquare, Volume2 } from "lucide-react"
 import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
@@ -231,9 +231,32 @@ function clip(text: string): string {
   return firstLine.length <= MAX_LABEL_LENGTH ? firstLine : `${firstLine.slice(0, MAX_LABEL_LENGTH)}\u2026`
 }
 
-function promptOf(message: AgentMessage): { text: string; compaction: boolean } {
+interface SkillBlock { name: string; body: string }
+
+/** Pi's expansion of `/skill:<name> <args>`: the skill's file in a `<skill>` block, then the args. */
+export function splitSkill(text: string): { skill?: SkillBlock; text: string } {
+  const match = /^<skill name="([^"]*)"[^>]*>\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]*))?$/.exec(text)
+  return match ? { skill: { name: match[1], body: match[2] }, text: match[3] ?? "" } : { text }
+}
+
+function promptOf(message: AgentMessage): { text: string; compaction: boolean; skill?: SkillBlock } {
   if (message.role === "compactionSummary") return { text: (message as CompactionSummaryMessage).summary, compaction: true }
-  return { text: textOf((message as { content: string | { type: string; text?: string }[] }).content), compaction: false }
+  return { ...splitSkill(textOf((message as { content: string | { type: string; text?: string }[] }).content)), compaction: false }
+}
+
+/** The skill a prompt loaded, folded like "Thinking": its name, the skill file on expand. */
+function SkillFold({ skill, fileLinks }: { skill: SkillBlock; fileLinks: FileLinks }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="my-1 text-xs text-ink-muted">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:text-ink focus-visible:outline focus-visible:outline-1">
+        <Sparkles size={12} aria-hidden="true" />
+        <ChevronRight size={12} aria-hidden="true" className={open ? "rotate-90 transition-transform" : "transition-transform"} />
+        Skill · {skill.name}
+      </button>
+      {open && <div className="mt-1 pl-5"><LaTeXMarkdown content={skill.body} fileLinks={fileLinks} /></div>}
+    </div>
+  )
 }
 
 interface PiTurnProps {
@@ -255,7 +278,7 @@ interface PiTurnProps {
 /** One turn; memoized so a streamed delta re-renders the newest turn only. */
 const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks, onResizeStart }: PiTurnProps) {
   const prompt = messages[turn.start]
-  const { text, compaction } = promptOf(prompt)
+  const { text, compaction, skill } = promptOf(prompt)
   const pieces = answerPieces(messages, turn, streaming, confirmed, runs)
   const promptMarks = marksAt(confirmed, turn.start)
   const promptEntryId = turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined
@@ -267,7 +290,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   if (!expanded) {
     return (
       <TurnCard expanded={false}>
-        <TurnHeader label={compaction ? "Compaction" : clip(text) || "(empty)"} icon={icon} onExpand={toggle} />
+        <TurnHeader label={compaction ? "Compaction" : clip(text) || (skill ? `/skill:${skill.name}` : "(empty)")} icon={icon} onExpand={toggle} />
         <TurnPreview tools={[]}>{pieces.length > 0 ? <Answer pieces={pieces} runs={runs} live={false} fileLinks={fileLinks} /> : null}</TurnPreview>
       </TurnCard>
     )
@@ -292,7 +315,8 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     <TurnCard expanded>
       <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
-        {compaction ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div>}
+        {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
+        {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>
