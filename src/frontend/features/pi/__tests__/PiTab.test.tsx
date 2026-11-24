@@ -26,12 +26,15 @@ vi.mock("../PiTranscript", () => ({
 }))
 
 const { send, session } = vi.hoisted(() => ({ send: vi.fn(async () => {}), session: { transcript: null as Transcript | null } }))
+// Stable identities, like the real hook
+const NO_WIDGETS = {}
+const inspectSubagent = vi.fn()
 vi.mock("../usePiSession", () => ({
   usePiSession: () => ({
     transcript: session.transcript ?? EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
     state: { model: null, thinkingLevel: "medium", isStreaming: false, sessionId: "s1", sessionFile: "/sessions/s1.jsonl" },
-    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null, models: [], thinkingLevels: [], stats: null,
+    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, widgets: NO_WIDGETS, inspectSubagent, editorText: null, models: [], thinkingLevels: [], stats: null,
     send, abort: async () => [], runBash: async () => {}, compact: async () => {}, setModel: async () => {}, setThinking: async () => {},
     answerDialog: () => {}, notify: () => {},
   }),

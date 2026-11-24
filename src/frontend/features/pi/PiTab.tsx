@@ -15,7 +15,9 @@ import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiCompos
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { usePiSearchFocus } from "./searchFocus"
+import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
+import type { SubagentRow } from "./subagents"
 import { textOf } from "./transcript"
 import type { AgentMessage, PiCommand, PiModel } from "./types"
 import { usePiSession, type Notice } from "./usePiSession"
@@ -171,6 +173,9 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
   const [column, setColumn] = useState<HTMLDivElement | null>(null)
+  const roster = useSubagentRoster(transcript.runs, session.widgets, transcript.running)
+  const { inspectSubagent } = session
+  const inspectRow = useCallback((row: SubagentRow) => inspectSubagent(row.inspect!), [inspectSubagent])
 
   const { messages } = transcript
   // Known to be empty only once attached: a connecting session keeps the composer at the bottom, like a chat whose history loads
@@ -255,6 +260,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
           queue={transcript.queue}
           notices={notices}
           statusLines={session.statusLines}
+          roster={<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} />}
           editorText={session.editorText}
           insertion={insertion}
           onInserted={onInserted}

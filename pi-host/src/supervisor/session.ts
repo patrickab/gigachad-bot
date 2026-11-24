@@ -34,6 +34,8 @@ export type Resync = { mode: "append" | "replace"; entries: SessionEntry[]; leaf
 const INTERNAL_ID_PREFIX = "pi-host:";
 /** An extension keeps its idle session alive by setting a non-empty status under this key (M17). */
 export const LIVENESS_STATUS_KEY = "session-liveness";
+/** pi-subagents answers `/subagents-inspect-rpc` with one emit-then-retract widget on this key, the client reads it live. */
+const TRANSIENT_WIDGET_KEY = "subagent-inspect";
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 /** Commands that would move the child to another session file, breaking M1 locking and id addressing. */
 const SESSION_SWITCHING_COMMANDS = new Set(["new_session", "switch_session", "fork", "clone"]);
@@ -53,7 +55,7 @@ const CLOSE_TRY_AGAIN_LATER = 1013;
 
 type BufferedRecord = { line: string; type: string; toolCallId?: string };
 type Dialog = { record: PiRecord; timer?: Timer };
-type UiState = { dialogs: PiRecord[]; statuses: Record<string, string>; queue: Queue };
+type UiState = { dialogs: PiRecord[]; statuses: Record<string, string>; widgets: Record<string, string[]>; queue: Queue };
 type Queue = { steering: unknown[]; followUp: unknown[] };
 type EntriesData = { entries: SessionEntry[]; leafId: string | null };
 type PendingSnapshot = {
@@ -143,6 +145,8 @@ export class LiveSession {
   private readonly pending = new Map<FrameSink, PendingSnapshot>();
   private readonly dialogs = new Map<string, Dialog>();
   private readonly statuses = new Map<string, string>();
+  /** Open `setWidget` text widgets by key (the subagent roster's source). Replies on the transient `subagent-inspect` key are not state. */
+  private readonly widgets = new Map<string, string[]>();
   private queue: Queue = { steering: [], followUp: [] };
   private replay: BufferedRecord[] = [];
   private replayBytes = 0;
@@ -410,6 +414,7 @@ export class LiveSession {
     return {
       dialogs: [...this.dialogs.values()].map((dialog) => dialog.record),
       statuses: Object.fromEntries(this.statuses),
+      widgets: Object.fromEntries(this.widgets),
       queue: this.queue,
     };
   }
@@ -543,6 +548,13 @@ export class LiveSession {
     if (method === "setStatus" && typeof record.statusKey === "string") {
       if (typeof record.statusText === "string" && record.statusText) this.statuses.set(record.statusKey, record.statusText);
       else this.statuses.delete(record.statusKey);
+      return true;
+    }
+    if (method === "setWidget" && typeof record.widgetKey === "string") {
+      if (record.widgetKey === TRANSIENT_WIDGET_KEY) return false;
+      const lines = Array.isArray(record.widgetLines) ? record.widgetLines.filter((line): line is string => typeof line === "string") : [];
+      if (lines.length > 0) this.widgets.set(record.widgetKey, lines);
+      else this.widgets.delete(record.widgetKey);
       return true;
     }
     return false;

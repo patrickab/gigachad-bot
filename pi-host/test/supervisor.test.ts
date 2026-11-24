@@ -226,7 +226,7 @@ describe("live sessions", () => {
       const { attached, replay } = await attaching.attach(sessionId);
       expect(attached.state).toMatchObject({ sessionId, isStreaming: false, thinkingLevel: "high", model: { id: "faux-2" } });
       expect(attached.entries).toEqual({ entries: [], leafId: null });
-      expect(attached.ui).toEqual({ dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } });
+      expect(attached.ui).toEqual({ dialogs: [], statuses: {}, widgets: {}, queue: { steering: [], followUp: [] } });
       expect(replay).toEqual([]);
     }
     first.command(sessionId, { id: "from-first", type: "prompt", message: "hello" });
@@ -632,7 +632,7 @@ describe("resync", () => {
     expect(full.resync.entries.map((entry: any) => entry.message.role)).toEqual(["user", "assistant"]);
     expect(full.resync.leafId).toBe(full.resync.entries[1].id);
     expect(full.resync.state).toMatchObject({ sessionId, isStreaming: false });
-    expect(full.resync.ui).toEqual({ dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } });
+    expect(full.resync.ui).toEqual({ dialogs: [], statuses: {}, widgets: {}, queue: { steering: [], followUp: [] } });
     expect(full.replay).toEqual([]);
 
     const cursor = full.resync.leafId;
@@ -787,6 +787,28 @@ describe("LiveSession against a scripted child", () => {
     ]);
     expect(frames[0]!.ui.statuses).toEqual({ build: "on" });
     expect(frames.map((frame) => frame.sequence)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    scripted.exit(0);
+    await session.exited;
+  });
+
+  test("setWidget text widgets are session state, the transient inspect reply is not", async () => {
+    const scripted = scriptedChild();
+    const session = new LiveSession(scripted.child, "/", { profile: "coding" }, undefined, () => undefined);
+    session.identify("scripted", join(root, "missing.jsonl"));
+    const widget = (widgetKey: string, widgetLines?: string[]) =>
+      scripted.emit({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setWidget", widgetKey, widgetLines });
+    widget("subagent-async", ["PI_SUBAGENT_ASYNC_JSON:{}"]);
+    widget("subagent-inspect", ["PI_SUBAGENT_INSPECT_JSON:{}"]);
+    widget("subagent-inspect");
+    widget("gone", ["x"]);
+    widget("gone");
+    const frames: Frame[] = [];
+    session.attach({ send: (data: string) => frames.push(JSON.parse(data)) });
+    scripted.emit({ type: "response", id: scripted.commands[0]!.id, command: "get_entries", success: true, data: { entries: [], leafId: null } });
+    const stateRequest = await until(() => scripted.commands.find((command) => command.type === "get_state"));
+    scripted.emit({ type: "response", id: stateRequest.id, command: "get_state", success: true, data: {} });
+    const attached = await until(() => frames.find((frame) => frame.type === "attached"));
+    expect(attached.ui.widgets).toEqual({ "subagent-async": ["PI_SUBAGENT_ASYNC_JSON:{}"] });
     scripted.exit(0);
     await session.exited;
   });

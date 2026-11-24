@@ -6,6 +6,7 @@ import { useCoalescedDispatch } from "./coalescer"
 import { confirmedIds, heldOf, hold, patchHeld, removeHeld, takeHeld, useHeld, type HeldMessage } from "./outbox"
 import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "./piSocket"
 import { SessionResync } from "./resync"
+import { INSPECT_WIDGET_KEY, inspectCommand, parseInspectReply, type InspectReply, type SubagentRow } from "./subagents"
 import { EMPTY_TRANSCRIPT, textOf, transcriptReducer, type ResyncEntries, type SessionEntries, type Transcript } from "./transcript"
 import type { ExtensionDialog, ImageContent, PiCommand, PiModel, PiState, UserMessage } from "./types"
 
@@ -31,10 +32,14 @@ type Queue = Transcript["queue"]
 interface AttachedUi {
   dialogs: PiRecord[]
   statuses: Record<string, string>
+  /** Open text widgets by key; absent from an older pi-host. */
+  widgets?: Record<string, string[]>
   queue: Queue
 }
 
 const NOTICE_LIFETIME_MS = 6_000
+const INSPECT_TIMEOUT_MS = 15_000
+const NO_WIDGETS: Record<string, string[]> = {}
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
 const EMPTY_QUEUE: Queue = { steering: [], followUp: [] }
 /** Distinguishes this tab's command ids from other clients' on the same session, their responses reach every attached client. */
@@ -75,6 +80,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
   const [dialogs, setDialogs] = useState<ExtensionDialog[]>([])
   const [notices, setNotices] = useState<Notice[]>([])
   const [statusLines, setStatusLines] = useState<Record<string, string>>({})
+  const [widgets, setWidgets] = useState<Record<string, string[]>>(NO_WIDGETS)
   const [editorText, setEditorText] = useState<{ text: string } | null>(null)
   const [models, setModels] = useState<PiModel[]>([])
   const [thinkingLevels, setThinkingLevels] = useState<string[]>([])
@@ -82,6 +88,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
   const [btwThreads, setBtwThreads] = useState<BtwThread[]>([])
   const pendingRef = useRef(new Map<string, (response: Response) => void>())
   const nextIdRef = useRef(0)
+  const inspectsRef = useRef(new Map<string, (reply: InspectReply) => void>())
   const syncRef = useRef<SessionResync | null>(null)
   const openFile = useEffectEvent(onOpenFile)
 
@@ -145,10 +152,25 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
           const rest = Object.fromEntries(Object.entries(current).filter(([existing]) => existing !== key))
           return typeof record.statusText === "string" && record.statusText ? { ...rest, [key]: record.statusText } : rest
         }); break
-        case "setWidget":
-          // The btw widget is parsed, never shown as text; other widgets are not rendered
-          if (record.widgetKey === BTW_WIDGET_KEY) setBtwThreads((current) => parseBtwWidget(record) ?? current)
+        case "setWidget": {
+          const key = String(record.widgetKey)
+          const lines = Array.isArray(record.widgetLines) ? record.widgetLines.filter((line): line is string => typeof line === "string") : []
+          // The inspect reply is a one-shot answer to `inspectSubagent`, not widget state
+          if (key === INSPECT_WIDGET_KEY) {
+            const reply = parseInspectReply(lines)
+            if (reply) inspectsRef.current.get(reply.requestId)?.(reply)
+            break
+          }
+          if (key === BTW_WIDGET_KEY) {
+            setBtwThreads((current) => parseBtwWidget(record) ?? current)
+            break
+          }
+          setWidgets((current) => {
+            if (lines.length === 0) return key in current ? Object.fromEntries(Object.entries(current).filter(([existing]) => existing !== key)) : current
+            return { ...current, [key]: lines }
+          })
           break
+        }
         case "set_editor_text": setEditorText({ text: String(record.text ?? "") }); break
       }
     }
@@ -182,6 +204,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     const applyUi = (ui: AttachedUi) => {
       setDialogs(ui.dialogs.filter(isDialogRequest) as unknown as ExtensionDialog[])
       setStatusLines(ui.statuses)
+      setWidgets(ui.widgets ?? NO_WIDGETS)
     }
 
     const handleFrame = (frame: HostFrame) => {
@@ -370,13 +393,29 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     setState((current) => current && { ...current, thinkingLevel: level })
   }, [command, notify])
 
+  /** A background subagent's task, transcript window and output, read through its extension's `/subagents-inspect-rpc` command (no model turn). */
+  const inspectSubagent = useCallback(async (target: NonNullable<SubagentRow["inspect"]>): Promise<InspectReply> => {
+    const requestId = `${CLIENT_ID}-i${++nextIdRef.current}`
+    const failed = (message: string): InspectReply => ({ requestId, error: { code: "unavailable", message } })
+    const waiters = inspectsRef.current
+    const { promise, resolve } = Promise.withResolvers<InspectReply>()
+    const timer = setTimeout(() => resolve(failed("No answer from the subagent extension")), INSPECT_TIMEOUT_MS)
+    waiters.set(requestId, resolve)
+    const response = await command("prompt", { message: inspectCommand(requestId, target) })
+    if (!response.success) resolve(failed(response.error ?? "Inspection refused"))
+    const reply = await promise
+    clearTimeout(timer)
+    waiters.delete(requestId)
+    return reply
+  }, [command])
+
   const answerDialog = useCallback((id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => {
     sendPiCommand(sessionId, { type: "extension_ui_response", id, ...answer })
     setDialogs((current) => current.filter((dialog) => dialog.id !== id))
   }, [sessionId])
 
   return {
-    transcript, status, state, commands, dialogs, notices, statusLines, editorText, models, thinkingLevels, stats,
-    btw, held, retryHeld, deleteHeld, send, abort, runBash, compact, setModel, setThinking, answerDialog, notify,
+    transcript, status, state, commands, dialogs, notices, statusLines, widgets, editorText, models, thinkingLevels, stats,
+    btw, held, retryHeld, deleteHeld, send, abort, runBash, compact, setModel, setThinking, answerDialog, inspectSubagent, notify,
   }
 }

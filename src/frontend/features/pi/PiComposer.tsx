@@ -103,6 +103,8 @@ interface PiComposerProps {
   notices: Notice[]
   statusLines: Record<string, string>
   editorText: { text: string } | null
+  /** Pinned above the notices, e.g. the subagent roster. */
+  roster?: ReactNode
   insertion?: PiInsertion | null
   onInserted?: () => void
   /** Controls of the action row after the "+" menu, e.g. the session's folder. */
@@ -123,7 +125,7 @@ interface PiComposerProps {
  * - A pasted, dropped or attached video is stored in the session folder's `.pi/pastes/` and mentioned as `@<path>`,
  *   the user's Pi extension `~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) turns the mention into frames
  */
-export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, insertion = null, onInserted, leading, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
+export function PiComposer({ sessionKey, files: fileScope, running, disabled, commands, dialog, queue, notices, statusLines, editorText, roster, insertion = null, onInserted, leading, onSubmit, onAbort, onAnswerDialog }: PiComposerProps) {
   const inputRef = useRef<ChatInputHandle>(null)
   const draftKey = `pi:${sessionKey}`
   const chips = useComposerChips(draftKey)
@@ -179,6 +181,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
 
   return (
     <div onKeyDownCapture={handleKeyDownCapture} onKeyDown={() => { followUpRef.current = false }}>
+      {roster}
       {/* Floats over the transcript with the composer, so it masks the turns beneath */}
       <div className="mx-auto mb-2 flex w-full max-w-2xl flex-col gap-1 rounded-xl bg-paper px-3 py-1.5 text-xs empty:hidden">
         <ErrorText>{pasteError}</ErrorText>

@@ -20,12 +20,15 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
 vi.mock("../PiTranscript", () => ({ PiTranscript: () => null }))
 
 const { send, runBash } = vi.hoisted(() => ({ send: vi.fn(async () => {}), runBash: vi.fn(async () => {}) }))
+// Stable identities, like the real hook
+const NO_WIDGETS = {}
+const inspectSubagent = vi.fn()
 vi.mock("../usePiSession", () => ({
   usePiSession: () => ({
     transcript: EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
     state: { model: { provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }, thinkingLevel: "medium", isStreaming: false, sessionId: "d1", sessionName: "Notes chat" },
-    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, editorText: null,
+    btw: { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }, commands: [], dialogs: [], notices: [], statusLines: {}, widgets: NO_WIDGETS, inspectSubagent, editorText: null,
     models: [{ provider: "anthropic", id: "claude-haiku-4-5", name: "Claude Haiku 4.5", reasoning: true }],
     thinkingLevels: ["off", "low", "medium", "high"],
     stats: { cost: 0.12, contextUsage: { tokens: 20_000, contextWindow: 200_000, percent: 10 } },

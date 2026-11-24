@@ -4,7 +4,7 @@ import type { HostFrame, SessionSubscriber } from "../piSocket"
 import { clearOutbox } from "../outbox"
 import { OPEN_FILE_NOTICE_PREFIX, usePiSession } from "../usePiSession"
 
-const socket = vi.hoisted(() => ({ subscriber: null as SessionSubscriber | null, connected: true, sent: [] as Record<string, unknown>[] }))
+const socket = vi.hoisted(() => ({ subscriber: null as SessionSubscriber | null, connected: true, sent: [] as Record<string, unknown>[], onSend: undefined as ((command: Record<string, unknown>) => void) | undefined }))
 vi.mock("../piSocket", () => ({
   subscribePiSession: (_sessionId: string, subscriber: SessionSubscriber) => {
     socket.subscriber = subscriber
@@ -13,6 +13,7 @@ vi.mock("../piSocket", () => ({
   sendPiCommand: (_sessionId: string, command: Record<string, unknown>) => {
     if (!socket.connected) return false
     socket.sent.push(command)
+    socket.onSend?.(command)
     return true
   },
   sendPiFrame: () => true,
@@ -26,6 +27,7 @@ describe("usePiSession notify", () => {
   afterEach(() => {
     cleanup()
     socket.subscriber = null
+    socket.onSend = undefined
   })
 
   it("opens an open-file notice's path instead of showing it", () => {
@@ -119,5 +121,55 @@ describe("usePiSession held messages", () => {
     })
     expect(back).toEqual(["a"])
     expect(result.current.held).toEqual([])
+  })
+})
+
+function widgetFrame(widgetKey: string, widgetLines?: string[]): HostFrame {
+  return { type: "pi", sessionId: "s1", record: { type: "extension_ui_request", id: "w1", method: "setWidget", widgetKey, widgetLines } }
+}
+
+describe("usePiSession subagent widgets", () => {
+  afterEach(() => {
+    cleanup()
+    socket.subscriber = null
+    socket.onSend = undefined
+    socket.connected = true
+  })
+
+  it("keeps text widgets by key, a cleared one goes", () => {
+    const { result } = renderHook(() => usePiSession("s1", vi.fn()))
+    act(() => socket.subscriber!.onFrame(widgetFrame("subagent-async", ["PI_SUBAGENT_ASYNC_JSON:{}"])))
+    expect(result.current.widgets).toEqual({ "subagent-async": ["PI_SUBAGENT_ASYNC_JSON:{}"] })
+    act(() => socket.subscriber!.onFrame(widgetFrame("subagent-async")))
+    expect(result.current.widgets).toEqual({})
+  })
+
+  it("answers an inspect request from the transient reply widget without keeping it", async () => {
+    let requestId = ""
+    socket.onSend = (command) => {
+      if (command.type === "prompt") {
+        const [name, id, asyncId, childId] = String(command.message).split(" ")
+        expect([name, asyncId, childId]).toEqual(["/subagents-inspect-rpc", "run1", "step1"])
+        requestId = id!
+        // The command answers first, then emits the reply
+        queueMicrotask(() => {
+          socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record: { type: "response", id: command.id, command: "prompt", success: true } })
+          socket.subscriber!.onFrame(widgetFrame("subagent-inspect", [`PI_SUBAGENT_INSPECT_JSON:${JSON.stringify({ requestId, task: "Review it", finalOutput: "LGTM" })}`]))
+        })
+      }
+    }
+    const { result } = renderHook(() => usePiSession("s1", vi.fn()))
+    let reply: Awaited<ReturnType<typeof result.current.inspectSubagent>> | undefined
+    await act(async () => { reply = await result.current.inspectSubagent({ asyncId: "run1", childId: "step1" }) })
+    expect(reply).toMatchObject({ task: "Review it", finalOutput: "LGTM" })
+    expect(result.current.widgets).toEqual({})
+  })
+
+  it("fails an inspect request when not connected", async () => {
+    socket.connected = false
+    const { result } = renderHook(() => usePiSession("s1", vi.fn()))
+    let reply: Awaited<ReturnType<typeof result.current.inspectSubagent>> | undefined
+    await act(async () => { reply = await result.current.inspectSubagent({ asyncId: "run1" }) })
+    expect(reply?.error?.message).toBe("Not connected")
   })
 })
