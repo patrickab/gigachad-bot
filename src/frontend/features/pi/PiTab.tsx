@@ -197,12 +197,23 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   }, [lead])
 
   const commands = useComposerCommands(session.commands, shellCommands)
+  // `/compact` sent with Alt+Enter while a run is active waits for the run to settle: compacting now would abort it
+  const pendingCompact = useRef<{ instructions?: string } | null>(null)
+  useEffect(() => {
+    if (transcript.running || !pendingCompact.current) return
+    const { instructions } = pendingCompact.current
+    pendingCompact.current = null
+    void compact(instructions)
+  }, [transcript.running, compact])
   const submit = useCallback(async (request: PiSubmit) => {
     if (await runShellCommand(request, shellCommands)) return
     const { action } = request
     if (action.kind === "prompt" && isBtwCommand(action.text)) void send(action.text, [])
     else if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
-    else if (action.kind === "compact") void compact(action.instructions)
+    else if (action.kind === "compact") {
+      if (request.mode === "followUp" && transcript.running) pendingCompact.current = { instructions: action.instructions }
+      else void compact(action.instructions)
+    }
     else {
       const text = withLead(action.text, lead !== sentLead.current ? lead : undefined)
       void send(text, request.images, request.mode)
@@ -211,7 +222,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
         onLeadSent?.()
       }
     }
-  }, [runBash, compact, send, shellCommands, lead, onLeadSent])
+  }, [runBash, compact, send, shellCommands, lead, onLeadSent, transcript.running])
 
   const firstSent = useRef(false)
   useEffect(() => {
