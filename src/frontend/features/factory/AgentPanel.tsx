@@ -45,7 +45,7 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
     <FilePanel label="Agent" bare onClose={onClose} width={PANEL_WIDTH_PX}>
       <div className="flex min-h-0 flex-1 flex-col">
         <TaskTimeline entries={entries} usage={task.usage} error={timelineError} onOpenTask={onOpenTask} />
-        {task.kind !== "merge_request" && <div className="shrink-0 px-3 pb-3">
+        <div className="shrink-0 px-3 pb-3">
           <ErrorText className="px-1 pb-1 text-[11px]">{error}</ErrorText>
           <Composer
             label="Message to the coder"
@@ -60,7 +60,7 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
           >
             <ImageChips images={pictures.images} onRemove={pictures.remove} />
           </Composer>
-        </div>}
+        </div>
       </div>
     </FilePanel>
   )

@@ -28,7 +28,7 @@ vi.mock("@/lib/backend/api", () => api)
 
 import { FactoryBoard, formatAge } from "@/features/factory/FactoryBoard"
 import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
-import { factoryTask } from "./factoryTask"
+import { factoryTask, factoryWave, waveTask } from "./factoryTask"
 
 const REPO = "/home/me/git/gigachad-bot"
 
@@ -62,7 +62,7 @@ function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof Fact
     <TopBarSlotProvider>
       <TopBarSlot name="title">{(ref) => <div ref={ref} />}</TopBarSlot>
       <TopBarSlot name="center">{(ref) => <div ref={ref} />}</TopBarSlot>
-      <FactoryBoard repo={REPO} tasks={tasks} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />
+      <FactoryBoard repo={REPO} tasks={tasks} waves={[]} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />
     </TopBarSlotProvider>,
   )
   const titles = (column: string) => within(view.getByRole("region", { name: column })).queryAllByRole("button", { name: /^Task / }).map((card) => within(card).getByText(/^Task /).textContent)
@@ -125,32 +125,30 @@ describe("FactoryBoard", () => {
     expect(within(card("Task running")).queryByLabelText("Question")).toBeNull()
   })
 
-  it("shows a merge request's kind and source branch on its card", () => {
-    const { card } = renderBoard([
-      task("Task merge", "running", { kind: "merge_request", branch: "wave/w1" }),
-      task("Task coded", "running", { branch: "factory/coded" }),
-    ])
+  it("moves a wave's tasks out of the columns into the wave tree, tasks without a wave stay whatever their tag", () => {
+    const planned = task("Task planned", "running", { tag: "plugin/m1/w1", wave: "wave1" })
+    const tasks = [planned, task("Task tagged", "running", { tag: "plugin/m1/w2" }), task("Task mine", "running", { tag: "noob" })]
+    const waves = [factoryWave("wave1", { tag: "plugin/m1/w1", tasks: [waveTask("a", { taskId: planned.id, state: "running" })] })]
+    const { view, titles, onOpenTask } = renderBoard(tasks, { waves })
 
-    expect(within(card("Task merge")).getByLabelText("Merge request")).toHaveTextContent("merge request · wave/w1")
-    expect(within(card("Task coded")).queryByLabelText("Merge request")).toBeNull()
+    expect(titles("Working")).toEqual(["Task mine", "Task tagged"])
+    const tree = within(view.getByRole("region", { name: "Waves" }))
+    expect(tree.queryByRole("button", { name: /^w2/ })).toBeNull()
+    fireEvent.click(tree.getByRole("button", { name: /^plugin/ }))
+    fireEvent.click(tree.getByRole("button", { name: /^m1/ }))
+    fireEvent.click(tree.getByRole("button", { name: /^w1/ }))
+    fireEvent.click(tree.getByRole("button", { name: /^Task planned/ }))
+    expect(onOpenTask).toHaveBeenCalledWith(planned.id)
   })
 
-  it("moves tasks tagged with a plan path out of the columns into the plan tree, a username's stay", () => {
-    const tasks = [task("Task planned", "running", { tag: "plugin/m1/w1" }), task("Task mine", "running", { tag: "noob" })]
-    const { view, titles, onOpenTask } = renderBoard(tasks)
-
-    expect(titles("Working")).toEqual(["Task mine"])
-    const plans = within(view.getByRole("region", { name: "Plans" }))
-    fireEvent.click(plans.getByRole("button", { name: /^plugin/ }))
-    fireEvent.click(plans.getByRole("button", { name: /^m1/ }))
-    fireEvent.click(plans.getByRole("button", { name: /^w1/ }))
-    fireEvent.click(plans.getByRole("button", { name: /^Task planned/ }))
-    expect(onOpenTask).toHaveBeenCalledWith(tasks[0].id)
+  it("keeps a task in the columns whose wave the list does not hold", () => {
+    const { titles } = renderBoard([task("Task orphan", "running", { wave: "gone" })])
+    expect(titles("Working")).toEqual(["Task orphan"])
   })
 
-  it("shows no plan tree without planned tasks", () => {
+  it("shows no wave tree without waves", () => {
     const { view } = renderBoard([task("Task mine", "running")])
-    expect(view.queryByRole("region", { name: "Plans" })).toBeNull()
+    expect(view.queryByRole("region", { name: "Waves" })).toBeNull()
   })
 
   it("formats a task's age in minutes, hours, days, then weeks", () => {

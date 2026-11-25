@@ -57,16 +57,6 @@ describe("TaskTimeline", () => {
     expect(first.getByText("Waiting for supervisor")).toBeTruthy()
   })
 
-  it("names a merge request's source and target branch, nothing for a coder's task", () => {
-    const settings = { merge: "auto", maxRounds: 3, review: true, models: {}, branch: "master" }
-    const task = { at: "", kind: "task", data: { title: "M", request: "", settings, branch: "wave/w1", mainBranch: "master", baseSha: "a", kind: "merge_request", source: "wave/w1" } }
-    const view = render(<TaskTimeline entries={[task] as unknown as FactoryTimelineEntry[]} usage={null} error="" onOpenTask={vi.fn()} />)
-
-    expect(view.getByLabelText("Merge request")).toHaveTextContent("merge requestwave/w1 → master")
-    view.unmount()
-    expect(render(<TaskTimeline entries={ENTRIES} usage={null} error="" onOpenTask={vi.fn()} />).queryByLabelText("Merge request")).toBeNull()
-  })
-
   it("shows the totals and each round with its trigger and status", () => {
     const view = render(<TaskTimeline entries={ENTRIES} usage={{ input: 10, output: 5, cost: 0.25 }} error="" onOpenTask={vi.fn()} />)
 

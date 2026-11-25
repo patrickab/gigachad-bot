@@ -242,17 +242,11 @@ export function TaskTimeline({ entries, usage, error, onOpenTask }: {
   error: string
   onOpenTask: (taskId: string) => void
 }) {
-  const { rounds, review, mergeRequest } = useMemo(() => groupTimeline(entries), [entries])
+  const { rounds, review } = useMemo(() => groupTimeline(entries), [entries])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
       <div className="flex flex-col gap-4">
         <ErrorText className="text-[11px]">{error}</ErrorText>
-        {mergeRequest && (
-          <p aria-label="Merge request" className="flex min-w-0 items-baseline gap-2 text-[11px]">
-            <span className="shrink-0 text-ink-subtle">merge request</span>
-            <code className="min-w-0 truncate font-mono text-ink-muted">{mergeRequest.source} → {mergeRequest.target}</code>
-          </p>
-        )}
         {rounds.length > 0 && (
           <p aria-label="Totals" className="text-[11px] tabular-nums text-ink-subtle">
             {rounds.length} {rounds.length === 1 ? "round" : "rounds"}

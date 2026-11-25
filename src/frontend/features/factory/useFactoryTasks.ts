@@ -1,18 +1,19 @@
-// Task lists of the factory repos, shared by the board and the task view, and the starts still on their way. Consumes
-// the core's `tasks.list` and `tasks.start` and pi-host's `sessions_changed` notice, provides `useFactoryTasks`,
+// Task and wave lists of the factory repos, shared by the board and the task view, and the starts still on their way.
+// Consumes the core's `tasks.list`, `waves.list` and `tasks.start` and pi-host's `sessions_changed` notice, provides `useFactoryTasks`,
 // `useFactoryTask`, `useFactoryLaunches`, `launchTask`, `retryLaunch` and `dismissLaunch`.
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { observePiSocket, type HostEvent } from "@/features/pi/piSocket"
 import { callFactory } from "@/lib/backend/api"
-import type { FactoryTask, FactoryTaskStart } from "@/lib/domain/factory"
+import type { FactoryTask, FactoryTaskStart, FactoryWave } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
 interface TaskList {
   tasks: FactoryTask[]
+  waves: FactoryWave[]
   error: string | null
 }
 
-const EMPTY: TaskList = { tasks: [], error: null }
+const EMPTY: TaskList = { tasks: [], waves: [], error: null }
 
 /** Last read of each repo, by path. Kept after the last hook unmounts, so a reopened board shows it until the next read. */
 const lists = new Map<string, TaskList>()
@@ -38,12 +39,28 @@ function setList(repo: string, list: TaskList) {
   for (const listener of listeners) listener()
 }
 
+/** Whether `cause` is the core refusing an action it does not have: a factory older than waves. */
+function isUnknownAction(cause: unknown): boolean {
+  return cause instanceof Error && cause.message.includes("unknown action")
+}
+
+/** The waves of `repo`, none from a factory without `waves.list`. */
+async function fetchWaves(repo: string): Promise<FactoryWave[]> {
+  try {
+    return (await callFactory<{ waves: FactoryWave[] }>("waves.list", { repo })).waves
+  } catch (cause) {
+    if (isUnknownAction(cause)) return []
+    throw cause
+  }
+}
+
 async function fetchList(repo: string): Promise<void> {
   try {
-    const { tasks } = await callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo })
-    setList(repo, { tasks: [...tasks].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), error: null })
+    const [{ tasks }, waves] = await Promise.all([callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }), fetchWaves(repo)])
+    setList(repo, { tasks: [...tasks].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), waves, error: null })
   } catch (cause) {
-    setList(repo, { tasks: lists.get(repo)?.tasks ?? [], error: errorMessage(cause, "Factory is unreachable") })
+    const last = lists.get(repo) ?? EMPTY
+    setList(repo, { tasks: last.tasks, waves: last.waves, error: errorMessage(cause, "Factory is unreachable") })
   }
 }
 
@@ -53,7 +70,7 @@ function startRead(repo: string): Promise<void> {
   return read.current
 }
 
-/** Read the tasks of `repo` again. An ask during a read waits for one more read after it, so it never settles on older data. */
+/** Read the tasks and waves of `repo` again. An ask during a read waits for one more read after it, so it never settles on older data. */
 function readTasks(repo: string): Promise<void> {
   const read = reading.get(repo)
   if (!read) return startRead(repo)
@@ -100,14 +117,15 @@ function watchRepo(repo: string): () => void {
 }
 
 /**
- * Tasks of the repo at path `repo`, newest first, every task the core holds for it (started here or from the CLI).
+ * Tasks of the repo at path `repo`, newest first, every task the core holds for it (started here or from the CLI), and
+ * its waves. A factory without waves (`waves.list` unknown) has none.
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket. No
  *   polling
  * - `refresh` reads again, for a change this page made itself
- * - A failed read keeps the last tasks and sets `error`, the next successful one clears it
+ * - A failed read keeps the last tasks and waves and sets `error`, the next successful one clears it
  */
-export function useFactoryTasks(repo: string): { tasks: FactoryTask[]; error: string | null; refresh: () => Promise<void> } {
+export function useFactoryTasks(repo: string): { tasks: FactoryTask[]; waves: FactoryWave[]; error: string | null; refresh: () => Promise<void> } {
   const list = useSyncExternalStore(subscribe, () => lists.get(repo) ?? EMPTY, () => EMPTY)
 
   useEffect(() => {
@@ -117,7 +135,7 @@ export function useFactoryTasks(repo: string): { tasks: FactoryTask[]; error: st
   }, [repo])
 
   const refresh = useCallback(() => readTasks(repo), [repo])
-  return { tasks: list.tasks, error: list.error, refresh }
+  return { tasks: list.tasks, waves: list.waves, error: list.error, refresh }
 }
 
 function findTask(id: string): FactoryTask | undefined {

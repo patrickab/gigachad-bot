@@ -14,18 +14,18 @@ import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { useStoredJson } from "@/hooks/useStoredJson"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { ApiError, callFactory } from "@/lib/backend/api"
-import type { FactoryConfig, FactoryTask, FactoryTaskRemoval } from "@/lib/domain/factory"
+import type { FactoryConfig, FactoryTask, FactoryTaskRemoval, FactoryWave } from "@/lib/domain/factory"
 import { baseName } from "@/lib/paths"
 import { cn, errorMessage } from "@/lib/utils"
 import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, STATE_LABELS, shownState, taskStatusLine, taskTone } from "./states"
-import { groupByTag } from "./tagGroups"
-import { TagTree } from "./TagTree"
+import { treeOfWaves } from "./waveTree"
+import { WaveTree } from "./WaveTree"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
-import { formatCost, formatTokens } from "./usage"
+import { formatSpend } from "./usage"
 
 /** Finished tasks shown before "Show all", the column otherwise grows without bound. */
 const FINISHED_LIMIT = 10
@@ -108,9 +108,6 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
           <span className={cn("min-w-0 flex-1 truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
           <span aria-label="Age" className="shrink-0 tabular-nums text-ink-faint">{formatAge(task.createdAt)}</span>
         </span>
-        {task.kind === "merge_request" && (
-          <span aria-label="Merge request" className="truncate text-[11px] text-ink-subtle">merge request · <code className="font-mono">{task.branch}</code></span>
-        )}
         {task.settings?.models.coder && (
           <span aria-label="Coder model" className="truncate text-[11px] text-ink-faint">{task.settings.models.coder}</span>
         )}
@@ -121,7 +118,7 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
         <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
           {task.usage && (
             <span aria-label="Tokens and cost" className="ml-auto shrink-0 tabular-nums">
-              {formatTokens(task.usage.input + task.usage.output)} tok · {formatCost(task.usage.cost)}
+              {formatSpend(task.usage)}
             </span>
           )}
         </span>
@@ -177,11 +174,13 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
 
 /**
  * Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is
- * finished. Tasks tagged with a plan path leave the columns for the plan tree above them (`TagTree`).
+ * finished. The waves show as a tree above them (`WaveTree`), their tasks inside it; tasks outside a wave (or of a wave
+ * the list does not hold) stay in the columns.
  */
-export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
+export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask }: {
   repo: string
   tasks: FactoryTask[]
+  waves: FactoryWave[]
   /** Why the last read of the tasks failed, null when it did not. */
   error: string | null
   /** Read the tasks again, after a change this board made. */
@@ -206,7 +205,12 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
     await callFactory<FactoryTaskRemoval>("tasks.remove", force ? { id, force } : { id })
     await refresh()
   }
-  const { groups, ungrouped } = useMemo(() => groupByTag(tasks), [tasks])
+  const tree = useMemo(() => treeOfWaves(waves), [waves])
+  const ungrouped = useMemo(() => {
+    const listed = new Set(waves.map((wave) => wave.id))
+    // `== null`: a TaskView of an older plugin has no `wave` at all.
+    return tasks.filter((task) => task.wave == null || !listed.has(task.wave))
+  }, [tasks, waves])
 
   return (
     // Lanes start at --surface, the level of the sidebar beside them
@@ -231,11 +235,12 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
         {missingConfig && config.draft !== null && (
           <ConfigDraft repo={repo} draft={config.draft} onSaved={(text) => setConfig({ exists: true, text, draft: null, source: [] })} />
         )}
-        {!missingConfig && groups.length > 0 && (
+        {!missingConfig && waves.length > 0 && (
           // Bounded and scrolling on its own, so open groups never squeeze the columns away
           <div className="max-h-[40vh] shrink-0 overflow-y-auto px-16 pt-6 scrollbar-thin">
-            <TagTree
-              groups={groups}
+            <WaveTree
+              root={tree}
+              tasks={tasks}
               renderTask={(task) => (
                 <TaskCard
                   task={task}

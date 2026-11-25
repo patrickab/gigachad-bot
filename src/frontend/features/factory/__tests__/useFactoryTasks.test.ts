@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { SocketObserver } from "@/features/pi/piSocket"
-import type { FactoryTask } from "@/lib/domain/factory"
-import { factoryTask as task } from "./factoryTask"
+import type { FactoryTask, FactoryWave } from "@/lib/domain/factory"
+import { factoryTask as task, factoryWave } from "./factoryTask"
 
 const core = vi.hoisted(() => ({
   listTasks: vi.fn<(repo: string) => Promise<FactoryTask[]>>(),
+  listWaves: vi.fn<(repo: string) => Promise<FactoryWave[]>>(),
 }))
 const api = vi.hoisted(() => ({
   callFactory: vi.fn(async (action: string, params: Record<string, unknown> = {}) => {
+    if (action === "waves.list") return { waves: await core.listWaves(params.repo as string) }
     if (action !== "tasks.list") throw new Error(`unexpected ${action}`)
     return { tasks: await core.listTasks(params.repo as string) }
   }),
@@ -41,6 +43,7 @@ beforeEach(() => {
   count += 1
   repo = `/git/repo-${count}`
   core.listTasks.mockReset().mockResolvedValue([])
+  core.listWaves.mockReset().mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -56,6 +59,40 @@ describe("useFactoryTasks", () => {
     await waitFor(() => expect(result.current.tasks.map((one) => one.id)).toEqual(["cli00001", "old00001"]))
     expect(api.callFactory).toHaveBeenCalledWith("tasks.list", { repo })
     expect(result.current.error).toBeNull()
+  })
+
+  it("reads the repo's waves next to its tasks, and again with them", async () => {
+    core.listWaves.mockResolvedValue([factoryWave("wave1")])
+    const { result } = renderHook(() => useFactoryTasks(repo))
+
+    await waitFor(() => expect(result.current.waves.map((wave) => wave.id)).toEqual(["wave1"]))
+    expect(api.callFactory).toHaveBeenCalledWith("waves.list", { repo })
+
+    core.listWaves.mockResolvedValue([factoryWave("wave1"), factoryWave("wave2")])
+    await act(() => result.current.refresh())
+    expect(result.current.waves.map((wave) => wave.id)).toEqual(["wave1", "wave2"])
+    expect(core.listWaves).toHaveBeenCalledTimes(2)
+  })
+
+  it("has no waves and no error with a factory that does not know waves.list", async () => {
+    core.listTasks.mockResolvedValue([task("task0010")])
+    core.listWaves.mockRejectedValue(Object.assign(new Error('unknown action "waves.list"'), { code: "invalid" }))
+    const { result } = renderHook(() => useFactoryTasks(repo))
+
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
+    expect(result.current.waves).toEqual([])
+    expect(result.current.error).toBeNull()
+  })
+
+  it("keeps the last waves and shows the error when waves.list fails otherwise", async () => {
+    core.listWaves.mockResolvedValue([factoryWave("wave1")])
+    const { result } = renderHook(() => useFactoryTasks(repo))
+    await waitFor(() => expect(result.current.waves).toHaveLength(1))
+
+    core.listWaves.mockRejectedValueOnce(new Error("Factory is down"))
+    await act(() => result.current.refresh())
+    expect(result.current.error).toBe("Factory is down")
+    expect(result.current.waves.map((wave) => wave.id)).toEqual(["wave1"])
   })
 
   it("reads again on sessions_changed and on a reopened socket, holding the socket while mounted", async () => {

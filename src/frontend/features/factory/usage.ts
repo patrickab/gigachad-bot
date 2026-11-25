@@ -1,4 +1,4 @@
-// Token and dollar figures of a factory task, shared by its timeline and its board card.
+// Token and dollar figures of a factory task or wave, shared by the timeline, the board's cards and its wave tree.
 
 /** Dollars, to the tenth of a cent below ten cents: a review on a small model costs less than one cent. */
 export function formatCost(cost: number): string {
@@ -14,4 +14,9 @@ export function formatTokens(count: number): string {
 
 export function formatUsage(usage: { input: number; output: number }): string {
   return `${formatTokens(usage.input)} in / ${formatTokens(usage.output)} out`
+}
+
+/** Tokens in and out together, then dollars: a card's and a wave row's spend. */
+export function formatSpend(usage: { input: number; output: number; cost: number }): string {
+  return `${formatTokens(usage.input + usage.output)} tok · ${formatCost(usage.cost)}`
 }

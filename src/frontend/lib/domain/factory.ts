@@ -10,6 +10,8 @@ export type FactoryActionName =
   | "config.get" | "config.write"
   | "tasks.list" | "tasks.get" | "tasks.wait" | "tasks.timeline" | "tasks.diff" | "tasks.start"
   | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
+  | "waves.start" | "waves.add" | "waves.get" | "waves.list" | "waves.timeline"
+  | "waves.retry" | "waves.approve" | "waves.cancel" | "waves.remove"
 
 /** Codes of the core's refusals, in the `detail.code` of a failed call. */
 export type FactoryErrorCode = "invalid" | "not_found" | "busy" | "refused" | "failed" | "factory_plugin_missing"
@@ -98,9 +100,6 @@ export interface FactoryConfig {
 
 export type FactoryTaskState = "running" | "waiting_approve" | "waiting_answer" | "blocked" | "merging" | "done" | "cancelled"
 
-/** A coder's task, or a merge request: an existing branch rebased, gated, reviewed and merged without a coder turn. */
-export type FactoryTaskKind = "task" | "merge_request"
-
 /** Tokens and dollars of the coder and the reviews; `input` is uncached input tokens. */
 export interface FactoryUsage {
   input: number
@@ -114,14 +113,15 @@ export interface FactoryTask {
   /** Path of the repo's primary checkout. */
   repo: string
   worktree: string
-  /** The task's branch; a merge request's is its source branch. */
+  /** The task's branch. */
   branch: string
   title: string
-  /** Segments joined by `/`: a login or system user alone, or a plan's path down to its wave (`plugin/m1/w1`). */
+  /** Segments joined by `/`: a login or system user alone, or, in a wave, the wave's tag (`plugin/m1/w1`). */
   tag: string
   /** The memory_store of the plan the task belongs to, null without one. */
   plan: string | null
-  kind: FactoryTaskKind
+  /** The id of the wave the task belongs to, null outside a wave. */
+  wave: string | null
   /** The coder's open question while the state is `waiting_answer`, else null. */
   question: string | null
   createdAt: string
@@ -208,10 +208,6 @@ export interface FactoryTimelineData {
     branch: string
     mainBranch: string
     baseSha: string
-    /** Missing in the records of tasks started before merge requests existed. */
-    kind?: FactoryTaskKind
-    /** A merge request's source branch. */
-    source?: string | null
   }
   round: { round: number; trigger: FactoryRoundTrigger }
   gate: {
@@ -254,4 +250,69 @@ export type FactoryTimelineEntry = {
 export interface FactoryTimeline {
   entries: FactoryTimelineEntry[]
   next: number
+}
+
+/** Where a wave is: building its tasks, in review, merging, or resting in one of the others. */
+export type FactoryWaveStage = "building" | "reviewing" | "rejected" | "merging" | "waiting_approve" | "merged" | "blocked" | "cancelled"
+
+/** One declared task of a wave and, once started, its task (`taskId`) and state ("pending" before the start). */
+export interface FactoryWaveTask {
+  key: string
+  title: string
+  after: string[]
+  taskId: string | null
+  sessionId: string | null
+  state: string
+  usage: FactoryUsage | null
+}
+
+/** One review of a wave's whole diff. */
+export interface FactoryWaveReview {
+  round: number
+  at: string
+  sessionId: string | null
+  model: string | null
+  verdict: "approved" | "rejected" | "failed"
+  status: string
+  findings: { severity: "blocker" | "major" | "minor"; file: string; line: number | null; text: string }[]
+  usage: FactoryUsage | null
+  wallMs: number
+}
+
+/** A wave as every client sees it (the core's `WaveView`): tasks on one branch, reviewed and merged as a whole. */
+export interface FactoryWave {
+  id: string
+  repo: string
+  /** Segments joined by `/`: the prefixes are its track and milestone, the last one the wave (`plugin/m1/w1`). */
+  tag: string
+  /** The memory_store of the plan the wave belongs to, null without one. */
+  plan: string | null
+  title: string
+  /** The reviewer's instructions. */
+  request: string
+  branch: string
+  target: string
+  /** The commit the wave branched from. */
+  base: string
+  /** The declaring Pi session's id. */
+  origin: string | null
+  createdAt: string
+  stage: FactoryWaveStage
+  /** Only when blocked. */
+  reason: "conflict" | "gates" | "dirty" | "infra" | "review_failed" | null
+  running: boolean
+  /** Not resting and no runner. */
+  interrupted: boolean
+  tasks: FactoryWaveTask[]
+  /** Cancelled tasks are in neither. */
+  counts: { total: number; done: number }
+  reviews: FactoryWaveReview[]
+  gates: { at: string; phase: "review" | "merge"; passed: boolean; wallMs: number; log: string | null }[]
+  /** The commit range that reached the target. */
+  merge: { at: string; from: string; to: string; queueMs: number } | null
+  remote: { number: number | null; url: string | null; pushed: string | null; error: string | null } | null
+  /** Reviews and tasks, summed. */
+  usage: FactoryUsage | null
+  /** The `waves.*` actions valid now. */
+  actions: string[]
 }

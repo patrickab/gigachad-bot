@@ -81,12 +81,6 @@ describe("AgentPanel", () => {
     await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("tasks.message", { id: "t1", text: "Drop it" }))
   })
 
-  it("offers no message box for a merge request", () => {
-    renderPanel(false, factoryTask("t1", { kind: "merge_request", actions: ["tasks.cancel"] }))
-    expect(screen.getByText("Added the toggle.")).toBeTruthy()
-    expect(screen.queryByLabelText("Message to the coder")).toBeNull()
-  })
-
   it("disables the box while the task takes no message", () => {
     const { box } = renderPanel(false)
     expect(box).toBeDisabled()

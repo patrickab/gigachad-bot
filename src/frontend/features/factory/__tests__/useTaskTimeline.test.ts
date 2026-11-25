@@ -102,14 +102,6 @@ describe("groupTimeline", () => {
     ])
   })
 
-  it("reads a merge request's source and target from its task entry, none for a coder's task", () => {
-    const settings = { merge: "auto", maxRounds: 3, review: true, models: {}, branch: "master" } as const
-    const request = entry("task", { title: "M", request: "R", settings, branch: "wave/w1", mainBranch: "master", baseSha: "abc", kind: "merge_request", source: "wave/w1" })
-
-    expect(groupTimeline([request]).mergeRequest).toEqual({ source: "wave/w1", target: "master" })
-    expect(groupTimeline(ENTRIES).mergeRequest).toBeNull()
-  })
-
   it("keeps a step whose round entry was not read, without a trigger", () => {
     expect(groupTimeline([gate(3, 0)]).rounds).toEqual([{ round: 3, trigger: null, steps: [gate(3, 0)], messages: [], state: null }])
   })

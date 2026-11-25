@@ -25,18 +25,10 @@ export interface TimelineRound {
   state: FactoryTimelineData["state"] | null
 }
 
-/** A merge request's branches, from its `task` entry. */
-export interface TimelineMergeRequest {
-  source: string
-  target: string
-}
-
 export interface Timeline {
   rounds: TimelineRound[]
   /** Every review: tokens and dollars. */
   review: FactoryUsage
-  /** Null for a coder's task. */
-  mergeRequest: TimelineMergeRequest | null
 }
 
 /**
@@ -57,7 +49,6 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
     return group
   }
   const review: FactoryUsage = { input: 0, output: 0, cost: 0 }
-  let mergeRequest: TimelineMergeRequest | null = null
   for (const entry of entries) {
     switch (entry.kind) {
       case "coder":
@@ -84,12 +75,9 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
       case "state":
         roundOf(entry.data.round).state = entry.data
         break
-      case "task":
-        if (entry.data.kind === "merge_request" && entry.data.source) mergeRequest = { source: entry.data.source, target: entry.data.mainBranch }
-        break
     }
   }
-  return { rounds, review, mergeRequest }
+  return { rounds, review }
 }
 
 interface TimelineReader {

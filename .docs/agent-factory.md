@@ -70,10 +70,11 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   A plain message to a resting task opens new rounds.
 - **Questions**: the coder may ask (`factory_ask_supervisor`): the task waits in `waiting_answer` with its `question`,
   and the next message answers it, continuing the same round.
-- **Merge requests** (`kind: "merge_request"`, `source` an existing branch): no coder turn. The source is rebased
-  without squashing, gated, always reviewed and merged by the queue; a rejection, conflict or failed gate blocks it,
-  `retry` runs it again. It takes no message.
-- **Tags**: every task has a `tag`, a login or a plan path down to its wave (`plugin/m1/w1`), and may name its plan's
+- **Waves**: a supervisor declares a wave (`waves.start`): a tag, a title, the reviewer's instructions and its tasks
+  with which waits for which. The factory builds them on the wave's own branch, then reviews and merges the whole
+  branch. A task joins a wave only through `waves.start`/`waves.add` and carries its `wave` id; the core has no merge
+  request kind any more.
+- **Tags**: every task has a `tag`, a login or, in a wave, the wave's tag (`plugin/m1/w1`), and may name its plan's
   memory_store (`plan`).
 
 ## Branches
@@ -130,16 +131,18 @@ One per repository, shared by every task's session through ticket files in `<git
 
 ## Observability
 
-- **Board card**: state, round, blocked reason, the open question, a merge request's source branch, total tokens and
-  cost (coder plus reviews). `waiting_answer` sits in Waiting.
-- **Plan tree** (above the columns, `tagGroups.ts`, `TagTree.tsx`): tasks whose tag has two or more segments leave the
-  columns. One closed row per segment (name, task count; a wave also its counts per state), an open wave lists its
-  task cards. A group's description is the document `plan/<tag prefix>.md` of the plan's memory_store
-  (`GET /api/memory/read`), read when the group opens; its `Description` row appears only for a non-empty document.
-  Tasks tagged with a login, or without a tag (an older plugin), stay in the columns.
-- **Timeline** (task view): a merge request's source and target, then per round the trigger, the coder's turn (model,
-  tokens, cost, last message, earlier ones collapsed), its questions, each gate with duration and failed output, the
-  review with findings, the merge. A merge request's view has no message box.
+- **Board card**: state, round, blocked reason, the open question, total tokens and cost (coder plus reviews).
+  `waiting_answer` sits in Waiting.
+- **Wave tree** (above the columns, `waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on
+  the same refresh events. Tracks and milestones are the prefixes of the waves' tags, each row with the sums of its
+  waves (`done/total`, tokens and cost). A wave's row: name, title, `done/total`, stage, tokens and cost. Opened: its
+  description, its tasks (`task.wave`) as task cards sorted by state, a declared task not started yet as a quiet row
+  with its title. A description is the document `plan/<tag or prefix>.md` of the plan's memory_store
+  (`GET /api/memory/read`), read when the row opens; its `Description` row appears only for a non-empty document.
+  Tasks without a wave (or of a wave the list lacks) stay in the columns whatever their tag. A factory without
+  `waves.list` (`unknown action`) shows no tree and no error.
+- **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message, earlier ones
+  collapsed), its questions, each gate with duration and failed output, the review with findings, the merge.
 - Tokens count cache reads and writes as input; cost is the provider's figure.
 - Logs: the backend logs failed or slow (> 5 s) pi-host calls, pi-host slow RPCs, requests and event-loop stalls.
 
