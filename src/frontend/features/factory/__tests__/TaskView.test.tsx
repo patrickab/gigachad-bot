@@ -54,6 +54,7 @@ const CORE_ACTIONS: Record<FactoryTaskState | "none", FactoryTaskAction[]> = {
   running: ["tasks.cancel", "tasks.message"],
   merging: ["tasks.cancel"],
   waiting_approve: ["tasks.approve", "tasks.cancel", "tasks.remove", "tasks.message"],
+  waiting_answer: ["tasks.message", "tasks.cancel"],
   blocked: ["tasks.retry", "tasks.cancel", "tasks.remove", "tasks.message"],
   done: ["tasks.remove", "tasks.message"],
   cancelled: ["tasks.retry", "tasks.remove", "tasks.message"],

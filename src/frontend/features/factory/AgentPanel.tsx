@@ -13,11 +13,13 @@ import { TaskTimeline } from "./TaskTimeline"
 const PANEL_WIDTH_PX = 420
 
 /**
- * A task's agent in the tab's file panel, beside the diff: its timeline and a message box to the coder.
+ * A task's agent in the tab's file panel, beside the diff: its timeline and a message box to the coder, none for a
+ * merge request (no coder runs it).
  *
  * - The timeline comes from `entries` (the owner reads them, the diff follows them too)
  * - A message goes to the core (`tasks.message`): a resting task runs new rounds, a running coder gets it as a
- *   follow-up. Images (picked or pasted) are stored on the host and their paths join the text. Enter sends, Shift+Enter adds a line; disabled while `canMessage` is false (the core refuses `tasks.message`)
+ *   follow-up. Images (picked or pasted) are stored on the host and their paths join the text. Enter sends, Shift+Enter adds a line; disabled while `canMessage` is false (the core refuses `tasks.message`). In
+ *   `waiting_answer` the message answers the coder's question
  * - `onSent` runs after the core took a message, so the owner reads the task again
  * - `onOpenTask` opens a task the coder started
  */
@@ -43,7 +45,7 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
     <FilePanel label="Agent" bare onClose={onClose} width={PANEL_WIDTH_PX}>
       <div className="flex min-h-0 flex-1 flex-col">
         <TaskTimeline entries={entries} usage={task.usage} error={timelineError} onOpenTask={onOpenTask} />
-        <div className="shrink-0 px-3 pb-3">
+        {task.kind !== "merge_request" && <div className="shrink-0 px-3 pb-3">
           <ErrorText className="px-1 pb-1 text-[11px]">{error}</ErrorText>
           <Composer
             label="Message to the coder"
@@ -58,7 +60,7 @@ export function AgentPanel({ task, entries, timelineError, canMessage, onSent, o
           >
             <ImageChips images={pictures.images} onRemove={pictures.remove} />
           </Composer>
-        </div>
+        </div>}
       </div>
     </FilePanel>
   )

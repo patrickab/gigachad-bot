@@ -41,6 +41,32 @@ describe("TaskTimeline", () => {
     expect(view.getByLabelText("Totals").textContent).toBe("2 rounds · 4.5k in / 605 out · $1.75 (review $0.25)")
   })
 
+  it("shows the coder's question in its round, then the answer", () => {
+    const entries = [
+      ENTRIES[0],
+      { at: "", kind: "question", data: { text: "Keep the old flag?" } },
+      { at: "", kind: "state", data: { state: "waiting_answer", round: 1, reason: "question" } },
+      { at: "", kind: "user", data: { text: "Drop it." } },
+    ] as unknown as FactoryTimelineEntry[]
+
+    const first = within(render(<TaskTimeline entries={entries} usage={null} error="" onOpenTask={vi.fn()} />).getByLabelText("Round 1"))
+
+    expect(first.getByText("question")).toBeTruthy()
+    expect(first.getByText("Keep the old flag?")).toBeTruthy()
+    expect(first.getByText("Drop it.")).toBeTruthy()
+    expect(first.getByText("Question")).toBeTruthy()
+  })
+
+  it("names a merge request's source and target branch, nothing for a coder's task", () => {
+    const settings = { merge: "auto", maxRounds: 3, review: true, models: {}, branch: "master" }
+    const task = { at: "", kind: "task", data: { title: "M", request: "", settings, branch: "wave/w1", mainBranch: "master", baseSha: "a", kind: "merge_request", source: "wave/w1" } }
+    const view = render(<TaskTimeline entries={[task] as unknown as FactoryTimelineEntry[]} usage={null} error="" onOpenTask={vi.fn()} />)
+
+    expect(view.getByLabelText("Merge request")).toHaveTextContent("merge requestwave/w1 → master")
+    view.unmount()
+    expect(render(<TaskTimeline entries={ENTRIES} usage={null} error="" onOpenTask={vi.fn()} />).queryByLabelText("Merge request")).toBeNull()
+  })
+
   it("shows the totals and each round with its trigger and status", () => {
     const view = render(<TaskTimeline entries={ENTRIES} usage={{ input: 10, output: 5, cost: 0.25 }} error="" onOpenTask={vi.fn()} />)
 

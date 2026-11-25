@@ -32,7 +32,8 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   pi-host's unit, so a pi-host restart leaves it running. `redeploy.sh` still counts live runners as running
   sessions and does not restart pi-host while one runs.
 - **Backend** (`routes/factory.py`, `lib/pi_host.py`): `POST /api/factory/call` and `GET /api/factory/actions`, a pass
-  through (a refusal keeps the core's `detail`). Its own parts: reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert reloads the dev server), previews (stopped after a successful `tasks.remove`)
+  through (a refusal keeps the core's `detail`). A `tasks.start` without `tag` gets the requesting login as its tag
+  (the core would fall back to the host's system user, shared by every login). Its own parts: reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert reloads the dev server), previews (stopped after a successful `tasks.remove`)
   and the one-time move of the old Postgres rows (`lib/factory_migration.py`). It stores no factory state.
 - **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.
@@ -59,9 +60,16 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 4. **Merge**: the merge queue below.
 5. **End**: `done` (merged, or `no_changes` when the diff is empty), else `blocked` with a reason.
 
-- States: `running`, `waiting_approve`, `merging`, `done`, `blocked`, `cancelled`.
+- States: `running`, `waiting_approve`, `waiting_answer`, `merging`, `done`, `blocked`, `cancelled`.
 - Commands: `approve` (from `waiting_approve`), `retry` (from `blocked`/`cancelled`, a fresh round budget), `cancel`.
   A plain message to a resting task opens new rounds.
+- **Questions**: the coder may ask (`factory_ask_supervisor`): the task waits in `waiting_answer` with its `question`,
+  and the next message answers it, continuing the same round.
+- **Merge requests** (`kind: "merge_request"`, `source` an existing branch): no coder turn. The source is rebased
+  without squashing, gated, always reviewed and merged by the queue; a rejection, conflict or failed gate blocks it,
+  `retry` runs it again. It takes no message.
+- **Tags**: every task has a `tag`, a login or a plan path down to its wave (`plugin/m1/w1`), and may name its plan's
+  memory_store (`plan`).
 
 ## Branches
 
@@ -117,9 +125,11 @@ One per repository, shared by every task's session through ticket files in `<git
 
 ## Observability
 
-- **Board card**: state, round, blocked reason, branch, total tokens and cost (coder plus reviews).
-- **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message, earlier ones
-  collapsed), each gate with duration and failed output, the review with findings, the merge.
+- **Board card**: state, round, blocked reason, the open question, a merge request's source branch, total tokens and
+  cost (coder plus reviews). `waiting_answer` sits in Needs you.
+- **Timeline** (task view): a merge request's source and target, then per round the trigger, the coder's turn (model,
+  tokens, cost, last message, earlier ones collapsed), its questions, each gate with duration and failed output, the
+  review with findings, the merge. A merge request's view has no message box.
 - Tokens count cache reads and writes as input; cost is the provider's figure.
 - Logs: the backend logs failed or slow (> 5 s) pi-host calls, pi-host slow RPCs, requests and event-loop stalls.
 

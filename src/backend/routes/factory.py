@@ -3,6 +3,8 @@
 - Consumes `lib.pi_host.factory_call`/`factory_actions`: pi-host runs the action in the factory plugin's core, which owns
   repos, settings, `factory.yaml`, tasks and their runners. This backend keeps no factory state
 - Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
+- `tasks.start` without a `tag` gets the requesting login as its tag: the core would fall back to the host's system
+  user, which every login shares
 - `tasks.remove` of a merged (`done`) task: a dry run (`git merge-tree`) first refuses a conflicting revert with 409
   `refused`, then, after the core removed the task, `git revert` of its merge commit in the repo's checkout
   (`lib.factory_revert`). Reverting last matters: it rewrites the checkout, which reloads a dev server mid-request
@@ -22,11 +24,11 @@ from collections.abc import Awaitable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
 from backend.http_plumbing import http_errors
-from backend.identity import host_access_only
+from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.routes.upstream import call_upstream
 from lib import factory_images, factory_preview, factory_revert, pi_host
 
@@ -102,10 +104,11 @@ async def _revert_after_removal(repo: str, commit: str) -> None:
 
 
 @router.post("/call")
-async def post_call(body: FactoryCall) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
+async def post_call(body: FactoryCall, identity: Annotated[RequestIdentity, Depends(get_request_identity)]) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
     """Run the core action *action* with *params*; the answer is its result."""
-    revert = await _commit_to_revert(body.params) if body.action == "tasks.remove" else None
-    result = await factory_result(pi_host.factory_call(body.action, body.params))
+    params = {"tag": identity.login} | body.params if body.action == "tasks.start" else body.params
+    revert = await _commit_to_revert(params) if body.action == "tasks.remove" else None
+    result = await factory_result(pi_host.factory_call(body.action, params))
     if body.action == "tasks.remove":
         await _stop_removed_preview(result["removed"])
         if revert is not None:

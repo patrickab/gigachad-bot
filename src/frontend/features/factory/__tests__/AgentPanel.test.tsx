@@ -15,11 +15,11 @@ vi.mock("@/features/editor/FilePanel", () => ({
 
 import { AgentPanel } from "@/features/factory/AgentPanel"
 
-function renderPanel(canMessage = true) {
+function renderPanel(canMessage = true, task = factoryTask("t1")) {
   const onSent = vi.fn()
   const entries = [{ at: "", kind: "coder", data: { text: "Added the toggle." } }] as const
-  render(<AgentPanel task={factoryTask("t1")} entries={entries} timelineError="" canMessage={canMessage} onSent={onSent} onOpenTask={vi.fn()} onClose={vi.fn()} />)
-  return { onSent, box: screen.getByLabelText("Message to the coder") }
+  render(<AgentPanel task={task} entries={entries} timelineError="" canMessage={canMessage} onSent={onSent} onOpenTask={vi.fn()} onClose={vi.fn()} />)
+  return { onSent, box: screen.queryByLabelText("Message to the coder")! }
 }
 
 beforeEach(() => {
@@ -71,6 +71,20 @@ describe("AgentPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("task t1 is merging")
     expect(box).toHaveProperty("value", "Wait")
     expect(onSent).not.toHaveBeenCalled()
+  })
+
+  it("answers a coder's question with the message", async () => {
+    const { box } = renderPanel(true, factoryTask("t1", { state: "waiting_answer", running: false, question: "Keep the flag?" }))
+    fireEvent.change(box, { target: { value: "Drop it" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+
+    await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("tasks.message", { id: "t1", text: "Drop it" }))
+  })
+
+  it("offers no message box for a merge request", () => {
+    renderPanel(false, factoryTask("t1", { kind: "merge_request", actions: ["tasks.cancel"] }))
+    expect(screen.getByText("Added the toggle.")).toBeTruthy()
+    expect(screen.queryByLabelText("Message to the coder")).toBeNull()
   })
 
   it("disables the box while the task takes no message", () => {

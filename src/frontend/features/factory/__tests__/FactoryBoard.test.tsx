@@ -113,6 +113,28 @@ describe("FactoryBoard", () => {
     expect(titles("Finished")).toEqual(["Task done", "Task cancelled"])
   })
 
+  it("puts a task asking a question in Needs you, its card showing the question", () => {
+    const { titles, card } = renderBoard([
+      task("Task asking", "waiting_answer", { question: "Keep the old flag?" }),
+      task("Task running", "running"),
+    ])
+
+    expect(titles("Needs you")).toEqual(["Task asking"])
+    expect(card("Task asking")).toHaveTextContent("Question · round 1")
+    expect(within(card("Task asking")).getByLabelText("Question")).toHaveTextContent("Keep the old flag?")
+    expect(within(card("Task running")).queryByLabelText("Question")).toBeNull()
+  })
+
+  it("shows a merge request's kind and source branch on its card", () => {
+    const { card } = renderBoard([
+      task("Task merge", "running", { kind: "merge_request", branch: "wave/w1" }),
+      task("Task coded", "running", { branch: "factory/coded" }),
+    ])
+
+    expect(within(card("Task merge")).getByLabelText("Merge request")).toHaveTextContent("merge request · wave/w1")
+    expect(within(card("Task coded")).queryByLabelText("Merge request")).toBeNull()
+  })
+
   it("formats a task's age in minutes, hours, days, then weeks", () => {
     const now = Date.parse("2026-03-01T00:00:00Z")
     const ago = (ms: number) => formatAge(new Date(now - ms).toISOString(), now)

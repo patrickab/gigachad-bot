@@ -119,13 +119,31 @@ def client(host, stopped_previews) -> TestClient:
 
 
 def test_a_call_runs_the_core_action_and_answers_its_result_as_it_is(client, host):
-    params = {"repo": "/repo", "title": "Rename", "request": "Call it Library", "overrides": {"maxRounds": 1}}
+    params = {"repo": "/repo", "title": "Rename", "request": "Call it Library", "overrides": {"maxRounds": 1}, "tag": "plugin/m1/w1"}
 
     response = client.post("/api/factory/call", json={"action": "tasks.start", "params": params})
 
     assert response.status_code == 200, response.text
     assert response.json() == {"action": "tasks.start", "params": params}
     assert host.calls == [("tasks.start", params)]
+
+
+def test_a_start_without_a_tag_is_tagged_with_the_requesting_login(client, host):
+    params = {"repo": "/repo", "title": "Rename", "request": "Call it Library"}
+
+    response = client.post("/api/factory/call", json={"action": "tasks.start", "params": params})
+
+    assert response.status_code == 200, response.text
+    assert host.calls == [("tasks.start", params | {"tag": "me@example.test"})]
+
+
+def test_only_a_start_gets_a_tag(client, host):
+    host.tasks[TASK_ID] = _view()
+
+    assert client.post("/api/factory/call", json={"action": "tasks.get", "params": {"id": "6f1c"}}).status_code == 200
+    assert client.post("/api/factory/call", json={"action": "tasks.list", "params": {"repo": "/repo"}}).status_code == 200
+
+    assert host.calls == [("tasks.get", {"id": "6f1c"}), ("tasks.list", {"repo": "/repo"})]
 
 
 def test_a_call_without_params_sends_an_empty_object(client, host):

@@ -8,7 +8,7 @@ export type FactoryActionName =
   | "settings.get" | "settings.set"
   | "models.get" | "models.set"
   | "config.get" | "config.write"
-  | "tasks.list" | "tasks.get" | "tasks.timeline" | "tasks.diff" | "tasks.start"
+  | "tasks.list" | "tasks.get" | "tasks.wait" | "tasks.timeline" | "tasks.diff" | "tasks.start"
   | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
 
 /** Codes of the core's refusals, in the `detail.code` of a failed call. */
@@ -96,7 +96,10 @@ export interface FactoryConfig {
   source: string[]
 }
 
-export type FactoryTaskState = "running" | "waiting_approve" | "blocked" | "merging" | "done" | "cancelled"
+export type FactoryTaskState = "running" | "waiting_approve" | "waiting_answer" | "blocked" | "merging" | "done" | "cancelled"
+
+/** A coder's task, or a merge request: an existing branch rebased, gated, reviewed and merged without a coder turn. */
+export type FactoryTaskKind = "task" | "merge_request"
 
 /** Tokens and dollars of the coder and the reviews; `input` is uncached input tokens. */
 export interface FactoryUsage {
@@ -111,8 +114,16 @@ export interface FactoryTask {
   /** Path of the repo's primary checkout. */
   repo: string
   worktree: string
+  /** The task's branch; a merge request's is its source branch. */
   branch: string
   title: string
+  /** Segments joined by `/`: a login or system user alone, or a plan's path down to its wave (`plugin/m1/w1`). */
+  tag: string
+  /** The memory_store of the plan the task belongs to, null without one. */
+  plan: string | null
+  kind: FactoryTaskKind
+  /** The coder's open question while the state is `waiting_answer`, else null. */
+  question: string | null
   createdAt: string
   sessionId: string
   sessionPath: string | null
@@ -141,6 +152,8 @@ export interface FactoryTaskStart {
   title: string
   request: string
   overrides?: FactoryTaskOverrides
+  /** Omitted: the backend tags the task with the requesting login. */
+  tag?: string
 }
 
 /** Transitions the core takes with the task id alone (`tasks.<command>`). */
@@ -195,6 +208,10 @@ export interface FactoryTimelineData {
     branch: string
     mainBranch: string
     baseSha: string
+    /** Missing in the records of tasks started before merge requests existed. */
+    kind?: FactoryTaskKind
+    /** A merge request's source branch. */
+    source?: string | null
   }
   round: { round: number; trigger: FactoryRoundTrigger }
   gate: {
@@ -222,6 +239,8 @@ export interface FactoryTimelineData {
   state: { state: FactoryTaskState; round: number; reason: string }
   coder: { text: string }
   user: { text: string }
+  /** The coder asked the user (`factory_ask_supervisor`); the next message answers it. */
+  question: { text: string }
 }
 
 export type FactoryTimelineKind = keyof FactoryTimelineData

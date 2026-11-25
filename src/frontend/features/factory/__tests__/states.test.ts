@@ -17,14 +17,14 @@ describe("shownState", () => {
     expect(shownState(task(state, { running: true }))).toBe(state)
   })
 
-  it.each<FactoryTaskState>(["waiting_approve", "blocked", "done", "cancelled"])("shows a %s task as it is", (state) => {
+  it.each<FactoryTaskState>(["waiting_approve", "waiting_answer", "blocked", "done", "cancelled"])("shows a %s task as it is", (state) => {
     expect(shownState(task(state))).toBe(state)
   })
 })
 
 describe("board order", () => {
   it("puts what waits on the user before what runs, and that before what is finished", () => {
-    expect(STATE_ORDER).toEqual(["waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"])
+    expect(STATE_ORDER).toEqual(["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"])
     expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Needs you", "Working", "Merging", "Finished"])
   })
 
@@ -40,6 +40,7 @@ describe("task status", () => {
     expect(taskStatusLine(task("running", { round: 0 }))).toBe("Working")
     expect(taskStatusLine(task("waiting_approve", { round: 2 }))).toBe("Ready for review · round 2")
     expect(taskStatusLine(task("merging", { round: 3, interrupted: true }))).toBe("Interrupted · round 3")
+    expect(taskStatusLine(task("waiting_answer", { round: 1 }))).toBe("Question · round 1")
   })
 
   it("pulses the dot only while a runner holds the task", () => {
@@ -50,6 +51,7 @@ describe("task status", () => {
     expect(taskTone(task("running", { interrupted: true }))).toBe("error")
     expect(taskTone(task("blocked"))).toBe("error")
     expect(taskTone(task("waiting_approve"))).toBe("attention")
+    expect(taskTone(task("waiting_answer"))).toBe("attention")
     expect(taskTone(task("done"))).toBe("done")
     expect(taskTone(task("cancelled"))).toBe("idle")
   })

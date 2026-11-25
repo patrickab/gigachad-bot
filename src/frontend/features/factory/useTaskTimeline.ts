@@ -11,31 +11,39 @@ export const TIMELINE_POLL_MS = 2000
 /** What ran in a round: a hook or gate, the review, the merge, a task the coder started. */
 export type TimelineStep = Extract<FactoryTimelineEntry, { kind: "gate" | "review" | "merge" | "spawn" }>
 
-/** A message of the round's conversation: the user's or the coder's text. */
-export type TimelineMessage = Extract<FactoryTimelineEntry, { kind: "coder" | "user" }>
+/** A message of the round's conversation: the user's or the coder's text, or the coder's question to the user. */
+export type TimelineMessage = Extract<FactoryTimelineEntry, { kind: "coder" | "user" | "question" }>
 
 export interface TimelineRound {
   round: number
   /** What opened the round, null when its `round` entry was not read. */
   trigger: FactoryRoundTrigger | null
   steps: TimelineStep[]
-  /** What the user and the coder wrote in the round, in order. */
+  /** What the user and the coder wrote in the round, the coder's questions too, in order. */
   messages: TimelineMessage[]
   /** The newest state recorded in the round. */
   state: FactoryTimelineData["state"] | null
+}
+
+/** A merge request's branches, from its `task` entry. */
+export interface TimelineMergeRequest {
+  source: string
+  target: string
 }
 
 export interface Timeline {
   rounds: TimelineRound[]
   /** Every review: tokens and dollars. */
   review: FactoryUsage
+  /** Null for a coder's task. */
+  mergeRequest: TimelineMergeRequest | null
 }
 
 /**
  * Group timeline entries in append order by round.
  *
- * - Gates, reviews and states join the round they name, a merge, a started task and a message (they name none) the newest round:
- *   the extension records a round before the coder turn it opens
+ * - Gates, reviews and states join the round they name, a merge, a started task, a message and a question (they name
+ *   none) the newest round: the extension records a round before the coder turn it opens, and an answer continues it
  * - A round's `state` is the last one written for it: the approval and the merge of a round stay in its group
  */
 export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timeline {
@@ -49,10 +57,12 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
     return group
   }
   const review: FactoryUsage = { input: 0, output: 0, cost: 0 }
+  let mergeRequest: TimelineMergeRequest | null = null
   for (const entry of entries) {
     switch (entry.kind) {
       case "coder":
       case "user":
+      case "question":
         roundOf(rounds.at(-1)?.round ?? 1).messages.push(entry)
         break
       case "round":
@@ -75,10 +85,11 @@ export function groupTimeline(entries: readonly FactoryTimelineEntry[]): Timelin
         roundOf(entry.data.round).state = entry.data
         break
       case "task":
+        if (entry.data.kind === "merge_request" && entry.data.source) mergeRequest = { source: entry.data.source, target: entry.data.mainBranch }
         break
     }
   }
-  return { rounds, review }
+  return { rounds, review, mergeRequest }
 }
 
 interface TimelineReader {

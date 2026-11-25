@@ -43,8 +43,8 @@ function Verdict({ ok, children }: { ok: boolean; children: string }) {
   return <span className={cn("shrink-0", ok ? "text-diff-added" : "text-diff-removed")}>{children}</span>
 }
 
-/** Consecutive coder messages of a round are one turn, a user message stands alone. */
-type Said = { kind: "user"; text: string } | { kind: "coder"; texts: string[] }
+/** Consecutive coder messages of a round are one turn, a user message and a coder's question stand alone. */
+type Said = { kind: "user" | "question"; text: string } | { kind: "coder"; texts: string[] }
 
 function conversation(messages: readonly TimelineMessage[]): Said[] {
   const said: Said[] = []
@@ -52,7 +52,7 @@ function conversation(messages: readonly TimelineMessage[]): Said[] {
     const text = message.data.text.trim()
     if (!text) continue
     const last = said.at(-1)
-    if (message.kind === "user") said.push({ kind: "user", text })
+    if (message.kind !== "coder") said.push({ kind: message.kind, text })
     else if (last?.kind === "coder") last.texts.push(text)
     else said.push({ kind: "coder", texts: [text] })
   }
@@ -67,6 +67,21 @@ function UserStep({ text }: { text: string }) {
       <p className={cn(SAID_CLASS, "min-w-0 flex-1")}>{text}</p>
     </li>
   )
+}
+
+/** The coder's question to the user, which the next message answers. */
+function QuestionStep({ text }: { text: string }) {
+  return (
+    <li className={ROW_CLASS}>
+      <span className={KIND_CLASS}>question</span>
+      <p className={cn(SAID_CLASS, "min-w-0 flex-1 text-ink")}>{text}</p>
+    </li>
+  )
+}
+
+function SaidStep({ said }: { said: Said }) {
+  if (said.kind === "coder") return <CoderStep texts={said.texts} />
+  return said.kind === "user" ? <UserStep text={said.text} /> : <QuestionStep text={said.text} />
 }
 
 /**
@@ -205,7 +220,7 @@ function Round({ round, current, onOpenTask }: { round: TimelineRound; current: 
       </div>
       {(said.length > 0 || round.steps.length > 0) && (
         <ul className="mt-1.5 flex flex-col gap-1.5 text-[11px]">
-          {said.map((one, index) => one.kind === "user" ? <UserStep key={`said-${index}`} text={one.text} /> : <CoderStep key={`said-${index}`} texts={one.texts} />)}
+          {said.map((one, index) => <SaidStep key={`said-${index}`} said={one} />)}
           {round.steps.map((step, index) => <Step key={`step-${index}`} step={step} current={current} onOpenTask={onOpenTask} />)}
         </ul>
       )}
@@ -214,8 +229,8 @@ function Round({ round, current, onOpenTask }: { round: TimelineRound; current: 
 }
 
 /**
- * A task's pipeline, compact: totals, then each round with its trigger, status, what the user and the coder wrote,
- * gates, review, merge and the tasks the coder started.
+ * A task's pipeline, compact: a merge request's branches, totals, then each round with its trigger, status, what the
+ * user and the coder wrote, the coder's questions, gates, review, merge and the tasks the coder started.
  *
  * - `entries` are the task's timeline in append order (`useTaskTimeline`), `usage` the core's total of the task
  * - A started task's title opens it (`onOpenTask`)
@@ -227,11 +242,17 @@ export function TaskTimeline({ entries, usage, error, onOpenTask }: {
   error: string
   onOpenTask: (taskId: string) => void
 }) {
-  const { rounds, review } = useMemo(() => groupTimeline(entries), [entries])
+  const { rounds, review, mergeRequest } = useMemo(() => groupTimeline(entries), [entries])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
       <div className="flex flex-col gap-4">
         <ErrorText className="text-[11px]">{error}</ErrorText>
+        {mergeRequest && (
+          <p aria-label="Merge request" className="flex min-w-0 items-baseline gap-2 text-[11px]">
+            <span className="shrink-0 text-ink-subtle">merge request</span>
+            <code className="min-w-0 truncate font-mono text-ink-muted">{mergeRequest.source} → {mergeRequest.target}</code>
+          </p>
+        )}
         {rounds.length > 0 && (
           <p aria-label="Totals" className="text-[11px] tabular-nums text-ink-subtle">
             {rounds.length} {rounds.length === 1 ? "round" : "rounds"}

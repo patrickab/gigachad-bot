@@ -4,7 +4,7 @@
 import type { StatusTone } from "@/components/ui/StatusDot"
 import type { FactoryTask, FactoryTaskState } from "@/lib/domain/factory"
 
-/** A task's state as shown: one of the six the session records, or `starting` (none yet) or `interrupted`. */
+/** A task's state as shown: one of the seven the session records, or `starting` (none yet) or `interrupted`. */
 export type FactoryShownState = FactoryTaskState | "starting" | "interrupted"
 
 /**
@@ -22,6 +22,7 @@ export const STATE_LABELS: Record<FactoryShownState, string> = {
   starting: "Launching session",
   running: "Working",
   waiting_approve: "Ready for review",
+  waiting_answer: "Question",
   blocked: "Blocked",
   interrupted: "Interrupted",
   merging: "Merging",
@@ -30,7 +31,7 @@ export const STATE_LABELS: Record<FactoryShownState, string> = {
 }
 
 /** Board order: what waits on the user first, then what runs, then what is finished. */
-export const STATE_ORDER: readonly FactoryShownState[] = ["waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"]
+export const STATE_ORDER: readonly FactoryShownState[] = ["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"]
 
 interface BoardColumn {
   id: string
@@ -42,7 +43,7 @@ interface BoardColumn {
 
 /** Board columns in display order, every shown state belongs to exactly one. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = [
-  { id: "needs-you", title: "Needs you", states: ["waiting_approve", "blocked", "interrupted"], tone: "attention" },
+  { id: "needs-you", title: "Needs you", states: ["waiting_answer", "waiting_approve", "blocked", "interrupted"], tone: "attention" },
   { id: "working", title: "Working", states: ["starting", "running"], tone: "ready" },
   { id: "merging", title: "Merging", states: ["merging"], tone: "ready" },
   { id: "finished", title: "Finished", states: ["done", "cancelled"], tone: "done" },
@@ -61,7 +62,7 @@ export function taskStatusLine(task: Pick<FactoryTask, "state" | "interrupted" |
 /** Visual weight of a state: what is running, what waits on the user, what failed. */
 export function statusTone(state: FactoryShownState): StatusTone {
   if (state === "starting" || state === "running" || state === "merging") return "active"
-  if (state === "waiting_approve") return "attention"
+  if (state === "waiting_approve" || state === "waiting_answer") return "attention"
   if (state === "blocked" || state === "interrupted") return "error"
   if (state === "done") return "done"
   return "idle"
