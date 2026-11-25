@@ -131,12 +131,16 @@ One per repository, shared by every task's session through ticket files in `<git
 
 ## Observability
 
-- **Board card**: state, round, blocked reason, the open question, total tokens and cost (coder plus reviews).
-  `waiting_answer` sits in Waiting.
+- **Board**: three columns, Working, Merging, Finished. What waits on the supervisor or the user (tasks
+  `waiting_answer`, `waiting_approve`, `blocked`, interrupted; waves in Waiting below; refused starts) sits in a Waiting
+  block atop Working, absent while nothing waits and outside Working's count. The gap between columns is a drag handle
+  (and arrow keys) for one shared gap, 0 to 64px, stored in `localStorage` (`gigachad:factory-column-gap`).
+- **Board card**: state, round, blocked reason, the open question, tokens in/out and cost (`formatFlow`, coder plus
+  reviews).
 - **Waves on the board** (`waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on the same
   refresh events. Nothing sits above the columns: a wave is a card-shaped container inside a column (`waveColumn`):
   `building` (once a task of it is done), `reviewing`, `merging` in Merging; `rejected`, `blocked`, `waiting_approve`
-  or interrupted in Waiting; `merged`, `cancelled` in Finished, closed by default. Its header (a `Disclosure`):
+  or interrupted in the Waiting block; `merged`, `cancelled` in Finished, closed by default. Its header (a `Disclosure`):
   `done/total`, the wave's title, stage, tokens and cost. Inside: the wave's done tasks as task cards (they leave
   Finished), then a link to the declaring supervisor's Pi session (`origin`), the outcome (`WaveOutcome.tsx`): reviews
   newest first in the task timeline's review row (`ReviewStep.tsx`; model, usage, duration, verdict, findings, a link

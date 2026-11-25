@@ -25,7 +25,7 @@ describe("shownState", () => {
 describe("board order", () => {
   it("puts what waits on the user before what runs, and that before what is finished", () => {
     expect(STATE_ORDER).toEqual(["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"])
-    expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Waiting", "Working", "Merging", "Finished"])
+    expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Working", "Merging", "Finished"])
   })
 
   it("gives every shown state a label and exactly one column, in the same order", () => {

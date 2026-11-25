@@ -90,7 +90,7 @@ describe("FactoryBoard", () => {
   it("names the repo by its folder and orders the columns from what waits on the user to what is finished", () => {
     const { view } = renderBoard([])
     expect(view.getByRole("heading", { level: 2 })).toHaveTextContent("Factory · gigachad-bot")
-    expect(view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Waiting", "Working", "Merging", "Finished"])
+    expect(view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Working", "Merging", "Finished"])
   })
 
   it("sorts every task into the column of its shown state, a column newest created first", () => {
@@ -108,7 +108,7 @@ describe("FactoryBoard", () => {
     ])
 
     expect(titles("Waiting")).toEqual(["Task waiting new", "Task waiting old", "Task blocked", "Task lost merge", "Task lost child"])
-    expect(titles("Working")).toEqual(["Task starting", "Task running"])
+    expect(titles("Working")).toEqual(["Task waiting new", "Task waiting old", "Task blocked", "Task lost merge", "Task lost child", "Task starting", "Task running"])
     expect(titles("Merging")).toEqual(["Task merging"])
     expect(titles("Finished")).toEqual(["Task done", "Task cancelled"])
   })
@@ -123,6 +123,73 @@ describe("FactoryBoard", () => {
     expect(card("Task asking")).toHaveTextContent("Waiting for supervisor · round 1")
     expect(within(card("Task asking")).getByLabelText("Question")).toHaveTextContent("Keep the old flag?")
     expect(within(card("Task running")).queryByLabelText("Question")).toBeNull()
+  })
+
+  /** The count beside a column's title, null when it shows none. */
+  const columnCount = (view: ReturnType<typeof renderBoard>["view"], column: string) =>
+    within(view.getByRole("region", { name: column })).getByRole("heading", { level: 3 }).nextElementSibling?.textContent ?? null
+
+  it("renders no Waiting block while nothing waits", () => {
+    const { view, titles } = renderBoard([task("Task running", "running")])
+    expect(view.queryByRole("region", { name: "Waiting" })).toBeNull()
+    expect(view.queryByRole("heading", { name: /^Waiting/ })).toBeNull()
+    expect(titles("Working")).toEqual(["Task running"])
+  })
+
+  it("shows a blocked task and a rejected wave in the Waiting block atop Working, out of Working's count", () => {
+    const { view, titles } = renderBoard([task("Task blocked", "blocked"), task("Task running", "running"), task("Task rejected", "done", { wave: "r" })], {
+      waves: [factoryWave("r", { tag: "r1", title: "Rejected wave", stage: "rejected", counts: { total: 1, done: 1 } })],
+    })
+    const waiting = within(view.getByRole("region", { name: "Waiting" }))
+    expect(waiting.getByRole("heading", { level: 4 })).toHaveTextContent("Waiting 2")
+    // The open wave container holds its done task's card
+    expect(titles("Waiting")).toEqual(["Task rejected", "Task blocked"])
+    expect(waiting.getByRole("group", { name: "Rejected wave" })).toBeInTheDocument()
+    expect(within(view.getByRole("region", { name: "Working" })).getByRole("region", { name: "Waiting" })).toBeInTheDocument()
+    expect(columnCount(view, "Working")).toBe("1")
+  })
+
+  describe("column gap", () => {
+    const stored = new Map<string, string>()
+    beforeEach(() => {
+      stored.clear()
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => { stored.set(key, value) },
+        removeItem: (key: string) => { stored.delete(key) },
+      })
+      return () => vi.unstubAllGlobals()
+    })
+
+    it("is a separator between every two columns, the arrow keys changing the one gap of all of them", async () => {
+      const { view } = renderBoard([])
+      const gaps = view.getAllByRole("separator", { name: "Resize column gap" })
+      expect(gaps).toHaveLength(2)
+      expect(gaps[0]).toHaveAttribute("aria-valuenow", "64")
+
+      fireEvent.keyDown(gaps[1], { key: "ArrowLeft" })
+      await waitFor(() => expect(gaps[0]).toHaveAttribute("aria-valuenow", "56"))
+      expect(gaps[1]).toHaveAttribute("aria-valuenow", "56")
+      expect(gaps[0].parentElement).toHaveStyle({ width: "56px" })
+      expect(stored.get("gigachad:factory-column-gap")).toBe("56")
+
+      fireEvent.keyDown(gaps[0], { key: "Home" })
+      await waitFor(() => expect(gaps[0]).toHaveAttribute("aria-valuenow", "0"))
+      fireEvent.keyDown(gaps[0], { key: "ArrowLeft" })
+      fireEvent.keyDown(gaps[0], { key: "End" })
+      await waitFor(() => expect(gaps[0]).toHaveAttribute("aria-valuenow", "64"))
+      fireEvent.keyDown(gaps[0], { key: "ArrowRight" })
+      expect(gaps[0]).toHaveAttribute("aria-valuenow", "64")
+    })
+
+    it("restores the gap from storage, clamped to the default", () => {
+      stored.set("gigachad:factory-column-gap", "24")
+      const { view } = renderBoard([])
+      expect(view.getAllByRole("separator")[0]).toHaveAttribute("aria-valuenow", "24")
+      view.unmount()
+      stored.set("gigachad:factory-column-gap", "500")
+      expect(renderBoard([]).view.getAllByRole("separator")[0]).toHaveAttribute("aria-valuenow", "64")
+    })
   })
 
   describe("waves", () => {
@@ -191,7 +258,7 @@ describe("FactoryBoard", () => {
     it("renders nothing above the columns", () => {
       const { view } = renderBoard([], { waves: [factoryWave("a", { tag: "w1", stage: "merged" })] })
       expect(view.queryByRole("region", { name: "Waves" })).toBeNull()
-      expect(view.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["Waiting", "Working", "Merging", "Finished"])
+      expect(view.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["Working", "Merging", "Finished"])
     })
   })
 
@@ -221,12 +288,10 @@ describe("FactoryBoard", () => {
     expect(card("Task lost child")).toHaveTextContent("Interrupted · round 3")
   })
 
-  it("shows a card's coder model when the task has one", () => {
+  it("shows no model line on a card", () => {
     const settings = { branch: "master", merge: "auto", maxRounds: 3, review: true, models: { coder: "anthropic/claude-opus-4" } } as const
-    const { card } = renderBoard([task("Task modelled", "running", { settings }), task("Task default", "running")])
-
-    expect(within(card("Task modelled")).getByLabelText("Coder model")).toHaveTextContent("anthropic/claude-opus-4")
-    expect(within(card("Task default")).queryByLabelText("Coder model")).toBeNull()
+    const { card } = renderBoard([task("Task modelled", "running", { settings })])
+    expect(card("Task modelled")).not.toHaveTextContent("anthropic/claude-opus-4")
   })
 
   it("shows a card's tokens and cost once a model answered", () => {
@@ -235,7 +300,7 @@ describe("FactoryBoard", () => {
       task("Task fresh", "running"),
     ])
 
-    expect(within(card("Task used")).getByLabelText("Tokens and cost")).toHaveTextContent("3.0M tok · $2.90")
+    expect(within(card("Task used")).getByLabelText("Tokens and cost")).toHaveTextContent("↑3.0M ↓21k · $2.90")
     expect(within(card("Task fresh")).queryByLabelText("Tokens and cost")).toBeNull()
   })
 
@@ -439,7 +504,7 @@ describe("FactoryBoard", () => {
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    const needsYou = view.getByRole("region", { name: "Waiting" })
+    const needsYou = await view.findByRole("region", { name: "Waiting" })
     await waitFor(() => expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("Could not start"))
     expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("the checkout already has a task")
 

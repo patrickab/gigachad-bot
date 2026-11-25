@@ -41,10 +41,12 @@ interface BoardColumn {
   tone: StatusTone
 }
 
-/** Board columns in display order, every shown state belongs to exactly one. */
+/** States that wait on the supervisor or the user: the Waiting block at the top of Working. */
+export const WAITING_STATES: readonly FactoryShownState[] = ["waiting_answer", "waiting_approve", "blocked", "interrupted"]
+
+/** Board columns in display order, every shown state belongs to exactly one. Working holds the waiting states too, in its Waiting block. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = [
-  { id: "waiting", title: "Waiting", states: ["waiting_answer", "waiting_approve", "blocked", "interrupted"], tone: "attention" },
-  { id: "working", title: "Working", states: ["starting", "running"], tone: "ready" },
+  { id: "working", title: "Working", states: [...WAITING_STATES, "starting", "running"], tone: "ready" },
   { id: "merging", title: "Merging", states: ["merging"], tone: "ready" },
   { id: "finished", title: "Finished", states: ["done", "cancelled"], tone: "done" },
 ]
