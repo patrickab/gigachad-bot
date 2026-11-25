@@ -80,7 +80,7 @@ Implementation, persistence, access boundaries, contracts and failure semantics:
 - With Neovim and host access, `.md` project and mounted files and `.tex`, `.bib`, `.sty`, `.cls` files open in the workbench: Neovim, rendered view, Pi chat drawer. Otherwise they open in the regular editor; notes always do. Switch editor only, split or preview only (remembered per device).
 - A stored project document moves to disk on first open (`GIGACHAD_BASE_DIR/workbench/<kind>/<project>/<name>/`) and stays there. Mounted files are edited in place; new LaTeX documents are created on disk.
 - Markdown renders live from saved text, including Mermaid and mind-map documents. A failed LaTeX build keeps the last good PDF.
-- Visual-mode `<leader>a` quotes selected lines into the chat draft. Each chat keeps a session list shared by all devices. Workbench chats use a short Markdown or LaTeX prompt without coding rules or `AGENTS.md`.
+- Visual-mode `<leader>a` quotes selected lines into the chat draft. Each chat keeps a session list shared by all devices. Workbench chats run the user's full Pi, including the cwd's `AGENTS.md`, with a short Markdown or LaTeX prompt appended.
 - Every text editor follows its file live: edits by an agent, terminal or another device merge into Neovim's unsaved edits or reload a clean editor. Unsaved edits on lines the incoming change touches or adjoins are replaced without notice, so save before an agent edits those lines. A save never overwrites an unseen agent edit: `:w` merges first and reports "Saved, merged with the agent's edits".
 
 ## LaTeX projects and presentations
@@ -129,7 +129,7 @@ Implementation, persistence, access boundaries, contracts and failure semantics:
 - Pi coding sessions open as workspace tabs. The sidebar lists sessions per repository and mount (worktrees under their main repository) with running, waiting-on-a-dialog and unread state. A session can start in any folder: Git checkouts, `~/git`, `~/dev` folders and mounted folders are offered.
 - Branch from any turn into a new session. Returned file links open under the shell's file-access policy; an extension command can open a file too (e.g. `/files`).
 - The composer supports prompts, images, abort, model/thinking selection, and `/` or `@` completion. While the agent runs, Enter steers and Alt+Enter queues a follow-up; Esc or Stop aborts.
-- The transcript folds agent-directed content (skills, compactions, factory notices, subagent results, intercom messages) into lines that open to their text. The session's subagents and declared factory waves sit above the composer.
+- The transcript folds agent-directed content (skills, compactions, factory notices, subagent results) into lines that open to their text. The session's subagents and declared factory waves sit above the composer.
 - From an empty chat, the composer's project selector (`None` by default; host access only) starts a Pi session: no folder is a plain chat, a folder turns the first message into a Pi session and the tab into a Pi tab. The session picker (Alt+A; host access only) lists running, recent and older sessions with full-text search.
 - Pi features require host access and a running pi-host. Runs continue while no tab shows them and across backend reloads. Old omp sessions are not shown; they stay reachable through the `omp` CLI.
 

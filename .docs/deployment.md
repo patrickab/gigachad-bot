@@ -229,7 +229,7 @@ Development: `run.sh` no longer starts omp-web. An instance an earlier `run.sh` 
 
 ### Provision learn mode (LearnHarness)
 
-Units, environment, gate, backup and restore: `.docs/integration-learnharness.md`, "Production deployment".
+Units, environment, gate, backup and restore: `.docs/integration-learnharness.md`, "Production".
 
 ### Provision the agent factory
 
@@ -365,7 +365,7 @@ systemctl --user restart gigachad-bot.service
 6. Deploy the frontend with the matching API base and authorized origin.
 7. Run the verification below before use.
 
-- Back up PostgreSQL and the shared Documents/PDF mirror before state-affecting updates. LearnHarness data has its own daily backup (`.docs/integration-learnharness.md`, "Back up and restore LearnHarness data"); the launcher snapshots it before a ref bump.
+- Back up PostgreSQL and the shared Documents/PDF mirror before state-affecting updates. LearnHarness data has its own daily backup (`.docs/integration-learnharness.md`, "Backup and restore"); the launcher snapshots it before a ref bump.
 - Avoid destructive backup synchronization.
 - Code worktrees are not application-data backups.
 
@@ -428,6 +428,6 @@ LearnHarness rollback (upstream keeps no backward compatibility for data a newer
 1. Stop the LearnHarness unit.
 2. Move its home aside.
 3. Copy the matching `snapshots/<old-sha>-<utc>/` back into a new home (its `data/`, `auth.json` and credential files) and write `<old-sha>` to its `served-commit` — or restore a backup taken under that commit.
-4. Start it (`.docs/integration-learnharness.md`, "Back up and restore LearnHarness data").
+4. Start it (`.docs/integration-learnharness.md`, "Backup and restore").
 
 Repeat health, CORS, SSE and persistence verification before resuming use.
