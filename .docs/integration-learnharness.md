@@ -277,7 +277,7 @@ systemctl --user restart gigachad-bot.service
 - First start runs `npm ci` and `next build` (~2 min).
 - **Never publish LH directly**: no login, answers any origin. The gate forwards only logins granted `gigachad.local/cap/host` and refuses writes to LH's provider keys, custom endpoint and subscriptions.
 - Development's `run.sh` reuses production's LH on the default port, same data. If a development instance holds `30181` when the unit starts, the unit exits inactive: stop the development one and start the unit again.
-- Check: `curl -sf http://127.0.0.1:30181/` succeeds; `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30182/` → 403; `/api/config` lists `learnharness_url` for a host login.
+- Check: `curl -sf http://127.0.0.1:30181/` succeeds; `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:30182/` → 403; `/api/config` lists `learnharness_url` for a host login. From a permitted device, open Learn in the sidebar and start a disposable session.
 - Logs: `journalctl --user -u gigachad-bot-learnharness.service` (launcher + LH output via `systemd-run --pipe`), `-u gigachad-learnharness-30181.service` (start/stop).
 
 ### Backup and restore

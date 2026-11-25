@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the Pi transcript's subagent/intercom message cards (`features/pi/SubagentMessages.tsx`), which these docs describe.
+Generated from bd63559a on 2026-11-25.
 Reduced by hand on 2026-11-25.
 
 # System overview
@@ -41,7 +41,7 @@ Implementation, persistence, access boundaries, contracts and failure semantics:
 - Stream replies, revisit histories, branch from a message, merge branches back. A request on a dead connection is sent again (at worst a reply is generated twice); a transport failure shows in the reply.
 - Projects organize chats and artifacts, with a lightweight task board (separate from factory boards). A chat's containing project, not the selected one, determines its project memory.
 - Rename projects, learn sessions, project files and mounted files from the sidebar. Every reference follows, open tabs on all devices move, an open Neovim keeps unsaved text, a name in use is refused, a LaTeX project rebuilds. A project rename moves its chats, documents, canvases, architecture, memory and attachments to the new slug; a taken slug is refused.
-- Archive projects (and, per device, Code directories); restore from the archive list. A tab picker (Space outside text fields) searches open tabs.
+- Archive projects (and, per device, Code directories); restore from the archive list. A tab picker (Space outside text fields) searches open tabs; Delete at the search's end or Alt+W closes the highlighted tab, Alt+T opens a background tab, and the picker stays open.
 - Attach uploads, mounted files, documents, architecture sources, or drawings. Toggle attachments out of context without deleting them; open them to preview or edit. Generated tool artifacts can be reused as documents; web research keeps source references.
 - Remove turns or attachments from context with undo; resource deletion has a deferred undo window.
 - Deleting a project, chat (with branches), canvas, project file or chat upload also deletes what derived from it (uploads, library PDF copy, annotation canvas) once nothing else uses it. Annotations of a mounted PDF stay while the file keeps its bytes; extracted Markdown and images are kept; mounted disk files are never deleted. Deleting a workbench document removes its whole folder from disk (undo only until the deferred delete fires).

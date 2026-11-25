@@ -1,5 +1,5 @@
 Generated from bd63559a on 2026-11-25.
-Reduced by hand on 2026-11-25
+Reduced by hand on 2026-11-25.
 
 # Architecture
 
@@ -22,7 +22,7 @@ change log + SSE        LikeC4   pi-host
 | --- | --- |
 | Frontend | Workspace tabs, feature state, API clients. Uses server-issued paths, never browser filesystem authority. |
 | FastAPI | Identity, per-user storage, filesystem access, integrations. Routes stay at the HTTP/WebSocket boundary and reuse domain services. Store and file IO blocks: a handler calling it is a plain `def` or uses `asyncio.to_thread`; a blocking call in `async def` stalls every request and SSE stream (`tests/test_route_concurrency.py`). |
-| Startup | Reap orphaned host processes, sync Pi's `ollama` provider in an executor thread, apply migrations, start extraction and change brokers. `openai` and GPT-Researcher load lazily on first use; a module-level import moves their cost into startup. Shutdown closes clients/pool, stops workers, MinerU children, the Jupyter Server and owned host processes. |
+| Startup | Reap orphaned host processes, sync Pi's `ollama` provider in an executor thread, apply migrations, start extraction and change brokers. `openai` and GPT-Researcher load lazily on first use; a module-level import moves their cost into startup (`python -X importtime -c "import backend.server"` shows it). Shutdown closes clients/pool, stops workers, MinerU children, the Jupyter Server and owned host processes. |
 | LikeC4 | Stateless model parsing and syntax-tree operations. The launcher starts it and waits for health before FastAPI; failed startup health fails the launch, a LikeC4 exit tears down/restarts both. Architecture routes return 503 while unavailable. |
 
 | Listener | Development | Production |
@@ -61,6 +61,7 @@ Every long-lived child ends with the backend, also when it dies without shutdown
 - Freshness: lists with change rows (notes, project documents, all documents) are invalidated by `watchDocumentLists` (mounted once in `AppShell`) from the change feed, own device included, and file events. Values without change rows revalidate on tab activation (`revalidateOnActivation`). Provider usage polls once in `AppShell`.
 - `ProjectProvider` keeps the project list's identity when a refresh is unchanged. `TabSidebar` is memoized beside the chat state owner so streamed tokens never re-render navigation: keep its props referentially stable, and keep `memo` on the wrapper (React 19.2 kept stale `useEffectEvent` closures in a directly memoized `Sidebar`).
 - Startup reads only what the first view needs: `GET /api/fileroots/enabled` (no walk) at startup, `/fileroots/files` only when the picker opens.
+- Measure first-load JS with `next build --webpack`: the `<script>` chunks in `.next/server/app/index.html`, except `polyfills-*.js`.
 - Heavy surfaces load on first use through a `Lazy*` module (own file, `next/dynamic`, `ssr: false`); callers and test mocks use the `Lazy*` module, since a static import of the target defeats the split:
 
 | Module | Loaded through |
@@ -257,7 +258,7 @@ Bun service (`pi-host/`, `run-pi-host.sh`, `gigachad-bot-pi-host.service`): one 
 
 - Only `src/lib/pi_host.py` knows pi-host URLs, shapes and token. `/api/pi/*` (`routes/pi.py`, host access) lists repositories and sessions and relays `/api/pi/ws`. Unavailable 503, unknown shape 502, refusals pass through.
 - Start folders (under `~/git`, `~/dev`, Git checkouts within 4 levels of `~`) come from the `repositories` table (`lib/repository_index.py`): rescanned in the background at startup (inline when empty), a missing name rescans once before 404, clones are added at once. Any absolute folder may hold sessions and is stored when used.
-- `POST /api/pi/pastes?repo=|cwd=` (multipart `file`, `lib/pi_pastes.py`): mp4/webm/mov/mkv, 413 above 200 MB, folder inside the file roots else 404, no symlinks. Stored as `<cwd>/.pi/pastes/<YYYYMMDD-HHMMSS>-<name>.<ext>` beside a `.gitignore` of `*`; the draft gets `@<relative path> `. The previewing extension is the user's (`~/.pi/agent/extensions/video-paste.ts`), emitting a `video-preview` message rendered by `features/pi/VideoPreview.tsx`; sessions without it keep the mention as text.
+- `POST /api/pi/pastes?repo=|cwd=` (multipart `file`, `lib/pi_pastes.py`): mp4/webm/mov/mkv, 413 above 200 MB, folder inside the file roots else 404, no symlinks. Stored as `<cwd>/.pi/pastes/<YYYYMMDD-HHMMSS>-<name>.<ext>` beside a `.gitignore` of `*`; the draft gets `@<relative path> `. The previewing extension is the user's (`~/.pi/agent/extensions/video-paste.ts`), emitting a `video-preview` message (`details.videos`: path, duration, size, fps, `frames` with `seconds` and image) rendered by `features/pi/VideoPreview.tsx`; the card still renders the single 4x3 grid image older sessions stored; sessions without it keep the mention as text.
 - `/api/pi/files?cwd=` serves `@` completion for a cwd inside the file roots or `WORKBENCH`.
 
 ### Frontend
@@ -265,6 +266,7 @@ Bun service (`pi-host/`, `run-pi-host.sh`, `gigachad-bot-pi-host.service`): one 
 - Only `features/pi/` knows Pi's protocol (`sessionStore`/`usePiSession`, `PiTab`, `PiComposer`, `PiSessionPicker`, tool rows in `tools/`); `features/workbench/` reuses it. `features/pi` never imports `features/factory`; shared shapes live in `lib/domain/factory.ts`.
 - Search: `GET /api/pi/search` returns `(entryId, ordinal)` hits, `GET /api/pi/sessions/{id}/matches` a session's ranked hits, `GET /api/pi/sessions/{id}/entries` a preview without attaching. `searchMatch.ts` is the browser copy of pi-host's span matching, kept equal by a test.
 - `renderers.ts` registers native UI per tool or `custom` message type (e.g. `factory-notice` in `FactoryNotices.tsx`, `video-preview`).
+- `pi-extensions/files.ts` sends the RPC notice `Open file: <abs path>`; `usePiSession` routes it to the file panel through `OPEN_FILE_NOTICE_PREFIX` instead of a toast.
 - `/btw` is the user's Pi extension (`~/.pi/agent/extensions/btw/`): `usePiSession` parses `setWidget` record `btw_state` (version 1, whole state, unknown versions ignored), sends `/btw-list` after attach when `get_commands` lists it; `/btw*` prompts bypass the held/steer/follow-up queue.
 - Model selector: offers catalog models Pi offers the session (`get_available_models`); a pick sends `set_model` for the session's own provider, else `gateway` (`piModelFor`). An empty tab offers `/api/models/pi`.
 - During a run Enter steers, Alt+Enter queues a follow-up, Esc/Stop aborts and returns queued messages to the draft. Messages sent during a run are held in memory (`outbox.ts`) until the queue snapshot or user message confirms them; flushed in order after re-attach; a delivery cut by a drop shows as not sent and is never resent automatically.
@@ -277,7 +279,7 @@ Bun service (`pi-host/`, `run-pi-host.sh`, `gigachad-bot-pi-host.service`): one 
 - Model-chat Pi selections are ordinary gateway completions. `GET /api/models/pi` returns the gateway catalog (`GIGACHAD_PI_HOST_URL`, default `http://127.0.0.1:8300`, plus `/v1`); picks land in one catalog row `Pi` with `source: "pi"`, selectors stay `litellm_proxy/<provider>/<model>`.
 - `ModelProviderStore` rewrites pre-Pi rows (`source: "omp"`) and a tab-order `OMP` into `Pi` on load.
 - An unreachable gateway returns an offline catalog with a reason (distinct from a failed generation). Catalog and effort ladders cache 60 s.
-- Ollama is Pi's custom provider `ollama` in `models.json` (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`). `lib/ollama_models.py` reads `OLLAMA_BASE_URL` (embedding models excluded) and replaces only that entry via `lib/pi_models_json.py` (locked, atomic, unreadable file never overwritten) at startup and on `GET /api/models`; the only write into Pi's agent dir.
+- Ollama is Pi's custom provider `ollama` in `models.json` (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`). `lib/ollama_models.py` reads `OLLAMA_BASE_URL` (embedding models excluded) and replaces only that entry via `lib/pi_models_json.py` (locked, atomic, unreadable file never overwritten) at startup and on `GET /api/models`; the only write into Pi's agent dir. A hand-entered model Pi's registry lacks runs only when the user's own `models.json` declares it.
 
 ## Agent factory
 
@@ -298,7 +300,8 @@ The factory is the agent-factory package; behaviour, states, checks and failures
 - `neovim_available` from `/api/config` requires host access, `nvim` on the backend `PATH` and `$XDG_CONFIG_HOME/nvim` (default `~/.config/nvim`). Opt-in is per device. Treat as host code execution; WebSocket origins must match `GIGACHAD_CORS_ORIGINS` (loopback for dev `*`).
 - One `nvim -n` PTY per `WS /api/neovim/session`, rendered by xterm.js. Each document is a private temporary copy in its own directory with its own buffer; switching never saves. Cwd: innermost containing mount, home for database documents. Copies go on `:q`, close or disconnect; unsaved edits are lost.
 - `:w` goes over RPC to the browser's normal document API (architecture validation included): per-buffer `BufWriteCmd`, frame `save`. Rewritten text replaces the buffer; failure leaves it modified.
-- The session keeps `base` per document (text Neovim and storage last agreed on). `set_content` replaces an unmodified buffer and merges into a modified one with `text_merge.merge_theirs` (`git merge-file -p --theirs`), deliberately without conflict markers or notice, rewriting only changed hunks so the cursor stays. `:w` of a disk file whose disk text differs from `base` saves the merge; unreadable/non-UTF-8 disk text or a refused merge fails the save.
+- The session keeps `base` per document (text Neovim and storage last agreed on). `set_content` replaces an unmodified buffer and merges into a modified one with `text_merge.merge_theirs` (`git merge-file -p --theirs`), deliberately without conflict markers or notice, rewriting only changed hunks so the cursor stays. `:w` of a disk file whose disk text differs from `base` saves the merge; unreadable/non-UTF-8 disk text or a refused merge fails the save. `set_text` waits for a running `:w` of its document, `set_content` frames run as ordered tasks so a save's reply is never blocked.
+- The clipboard read runs beside other requests, so a waiting paste holds up no `set_content`, `:w` or `insert_lines`; a denied permission answers `error: "Clipboard access denied"`.
 - After the user's config: `more` off and `messagesopt=wait:2000,history:500` (a hit-enter prompt would block RPC); a global normal-mode `<Esc>` runs the user's mapping then sends `leave`; `vim.g.clipboard` becomes the gigachad provider for `+`/`*` (the browser is the clipboard, never the server).
 - Keymaps notifying the browser are one list (`neovim_session._KEYMAPS`, `{mode, lhs, event, suffix?}`) installed per tracked buffer by `install_keymaps`; `suffix` limits to matching paths. Visual `<leader>a` reports `selection`; `<leader>v` in `.tex` reports `forward_search`.
 - Incoming control frames are pydantic `_Control` models in `routes/neovim.py`, dispatched by one `handlers` dict; malformed frames are ignored, failing session work is logged (`_guarded`). Outgoing events use an ordered notice queue (`_BrowserSaves.notify`). Frontend types: `features/editor/neovimProtocol.ts`; hook `useNeovimTerminal` (`features/editor/NeovimEditor.tsx`). While connecting, `open_file` and `renamed` queue (`QUEUES_WHILE_CONNECTING`), `set_content` keeps the latest per path, others are refused.
@@ -311,7 +314,7 @@ The factory is the agent-factory package; behaviour, states, checks and failures
 | `insert_lines {text}` | Insert below the cursor of the shown buffer |
 | `insert_frame`, `insert_image` | See Presentations |
 | `background {light}` | Sets `'background'` so the user's colorscheme reloads |
-| `clipboard {id, text|error}` | Answer to `clipboard_read` |
+| `clipboard {id, text\|error}` | Answer to `clipboard_read` |
 
 | Event (backend -> browser) | Meaning |
 | --- | --- |
@@ -323,7 +326,7 @@ The factory is the agent-factory package; behaviour, states, checks and failures
 | `clipboard_read {id, path}` | Paste: answered from `navigator.clipboard.read()` within 15 s, else Neovim pastes its own last yank. Text ending in newline pastes linewise. A PNG without text is stored as an image (see Workbench). |
 | `message {text}` | Error without a request |
 
-- Notebook text (`open` with `"notebook": true`, path `<notebook>.ipynb<ext>`, `ext` `\.[A-Za-z0-9]{1,8}`, notebook readable under the file roots, else close 1003): the buffer gets the virtual name `<resolved notebook><ext>` so the user's LSP finds the project and filetype, but nothing is read from or written to it. `BufReadCmd` loads `base` via RPC; `BufWriteCmd` sends `:w`/`:w!`/`:up` as `save`; partial writes, appends and `:r` are refused; no swap/undo file, no disk merge. `:sav`/`:file` restore the virtual name. `buftype` stays empty on purpose (with `acwrite` `vim.fs.root` ignores the name and LSP loses the project). Backings: `_PrivateCopy` vs `_NotebookText` (`neovim_session.py`); only private copies are renamed or unlinked.
+- Notebook text (`open` with `"notebook": true`, path `<notebook>.ipynb<ext>`, `ext` `\.[A-Za-z0-9]{1,8}`, notebook readable under the file roots, else close 1003): the buffer gets the virtual name `<resolved notebook><ext>` so the user's LSP finds the project and filetype, but nothing is read from or written to it. `nvim` starts on an empty placeholder, never without a file argument, so session-restore and dashboard plugins stay idle. With a stale file at the virtual name a plain `:w` fails with E13, `:w!` still saves. `BufReadCmd` loads `base` via RPC; `BufWriteCmd` sends `:w`/`:w!`/`:up` as `save`; partial writes, appends and `:r` are refused; no swap/undo file, no disk merge. `:sav`/`:file` restore the virtual name. `buftype` stays empty on purpose (with `acwrite` `vim.fs.root` ignores the name and LSP loses the project). Backings: `_PrivateCopy` vs `_NotebookText` (`neovim_session.py`); only private copies are renamed or unlinked.
 - Notebook keymaps (normal and insert): `<C-CR>` saves and, only when stored, sends `run_cell` with the cursor line; `<S-CR>` also moves to the next `# %%` cell, appending one if none. xterm cannot tell these from Enter, so `NeovimEditor` sends CSI-u (`ESC[13;2u`, `ESC[13;5u`) for notebook documents only.
 
 ## Shell terminal
@@ -359,7 +362,7 @@ Rules and the adapter exception: `AGENTS.md`, "Jupyter notebooks". All routes ne
   - Disk changes go through `applyIncomingNotebook(model, base, incoming)` / `diffNotebook`. Policy "merge theirs" per field: editor-only changes stay, file or both changes take the file. Cells match by id (by position when ids are missing or repeated); file deletions delete, editor-only additions stay, the file's order wins; a type or attachments change replaces the cell.
 - **Neovim beside the notebook** (per device): `WorkbenchFrame` with Neovim and the notebook, both kept mounted. The Yjs model in the browser is the single source of truth; Neovim holds one projection.
   - Percent text (`features/notebook/notebookText.ts`): marker lines `# %%`, `# %% [markdown]` (or `[md]`), `# %% [raw]`; cells joined by one blank line, trailing `\n`, empty notebook `""`, no outputs; markdown/raw lines prefixed `# ` (`#` when empty). Marker regex `^# %%(\s.*)?$` (Lua `is_marker` agrees). Text before the first marker is a code cell; a code line matching the marker splits its cell; trailing blank lines of code cells are lost on round trip. `cellAtLine(text, line)` maps a 1-based line to a cell.
-  - Text to model (`applyNotebookText`) matches cells (exact type+source, then similar lines, then position) so matched cells keep id, metadata and outputs; applied through `diffNotebook` ops (`notebookSync.ts`).
+  - Text to model (`applyNotebookText`) matches cells (exact type+source, then similar lines, then position; model cells by synthetic `cell-<index>` keys because `toJSON` drops ids below nbformat 4.5) so matched cells keep id, metadata and outputs; applied through `diffNotebook` ops (`notebookSync.ts`).
   - Text store (`notebookTextStore.ts`, one per Neovim session key, keyed `<tab>:<generation>`, path `<notebook path><extension>`, extension from `metadata.language_info.file_extension` else `.py`): pushes model changes to Neovim 150 ms after the last ydoc update. `save(text)` rejects while unbound and when the model moved since the last handout ("The notebook changed, write again"), so `:w` never reverts an unseen change; else applies and persists immediately. `runAt(line)` runs the cell at that line of the last saved text.
 - **Cell highlighting fork**: `features/notebook/syntaxHighlight.ts` passes one factory through the `Notebook` `editorExtensions` prop, kept in a module-level array (the library rebuilds when array identity changes; factory names must be unique). The prop exists only in the fork tarball (upstream PR https://github.com/datalayer/jupyter-ui/pull/515). Once released on npm: set the npm version, drop the URL, refresh the lockfile.
   - Fork release runbook (repo `~/git/jupyter-ui`, remotes `origin` upstream and `fork` patrickab, Node >= 20):
