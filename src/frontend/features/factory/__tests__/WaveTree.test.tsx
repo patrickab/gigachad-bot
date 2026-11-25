@@ -67,6 +67,15 @@ describe("WaveContainers", () => {
     expect(within(wave).getByLabelText("Tokens and cost")).toHaveTextContent("2.0k tok · $0.42")
   })
 
+  it("draws a wave alone in its track without the track's frame, two waves with it", () => {
+    const { unmount } = renderTree([factoryWave("a", { tag: "plugin/w1", title: "Only wave" })])
+    expect(screen.getByRole("group", { name: "Only wave" })).toBeTruthy()
+    expect(screen.queryByRole("group", { name: "plugin" })).toBeNull()
+    unmount()
+    renderTree([factoryWave("a", { tag: "plugin/w1", title: "First" }), factoryWave("b", { tag: "plugin/w2", title: "Second" })])
+    expect(screen.getByRole("group", { name: "plugin" })).toBeTruthy()
+  })
+
   it("names an interrupted wave so, and a blocked one's reason", () => {
     expect(waveStageLabel({ stage: "building", reason: null, interrupted: true })).toBe("interrupted")
     expect(waveStageLabel({ stage: "blocked", reason: "gates", interrupted: false })).toBe("blocked · gates")
@@ -94,7 +103,7 @@ describe("WaveContainers", () => {
       if (path === "plan/plugin.md") return { kind: "document", text: "# Plugin track\n\nBody" }
       throw MISSING
     })
-    renderTree([factoryWave("a", { tag: "plugin/m1/w1", title: "Wave", plan: PLAN })])
+    renderTree([factoryWave("a", { tag: "plugin/m1/w1", title: "Wave", plan: PLAN }), factoryWave("b", { tag: "plugin/m1/w2", title: "Wave two", plan: PLAN })])
     expect(await screen.findByRole("group", { name: "Plugin track" })).toBeTruthy()
     expect(screen.getByRole("group", { name: "m1" })).toBeTruthy()
     expect(api.readMemory).toHaveBeenCalledWith(PLAN, "plan/plugin/m1.md")

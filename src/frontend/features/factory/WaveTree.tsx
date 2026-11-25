@@ -131,12 +131,16 @@ function GroupContainer({ group, ...props }: ContainerProps & { group: WaveGroup
 
 /**
  * The waves of one column in their containers: a container per prefix of their tags (track, milestone) wrapping one
- * per wave. A wave with a one-segment tag has no outer container.
+ * per wave. A wave with a one-segment tag has no outer container, nor has a wave alone in its group.
  */
 export function WaveContainers({ group, ...props }: ContainerProps & { group: WaveGroup }) {
   return (
     <>
-      {group.children.map((child) => <GroupContainer key={child.path} group={child} {...props} />)}
+      {group.children.map((child) => {
+        // A group holding only one wave adds a frame around it and nothing else: draw the wave itself.
+        const only = child.children.length === 0 && child.waves.length === 1 ? child.waves[0] : null
+        return only ? <WaveContainer key={child.path} wave={only} {...props} /> : <GroupContainer key={child.path} group={child} {...props} />
+      })}
       {group.waves.map((wave) => <WaveContainer key={wave.id} wave={wave} {...props} />)}
     </>
   )
