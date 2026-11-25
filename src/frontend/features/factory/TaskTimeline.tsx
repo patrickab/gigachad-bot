@@ -8,6 +8,7 @@ import { formatDuration } from "@/features/pi/tools/format"
 import type { FactoryRoundTrigger, FactoryTimelineData, FactoryTimelineEntry, FactoryUsage } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
 import { STATE_LABELS, statusTone } from "./states"
+import { KIND_CLASS, METER_CLASS, OUTPUT_CLASS, ReviewStep, reviewFailure, ROW_CLASS, SUMMARY_CLASS, Verdict } from "./ReviewStep"
 import { formatCost, formatUsage } from "./usage"
 import { groupTimeline, type TimelineMessage, type TimelineRound, type TimelineStep } from "./useTaskTimeline"
 
@@ -24,24 +25,7 @@ const TRIGGER_LABELS: Record<FactoryRoundTrigger, string> = {
 
 const PHASE_LABELS: Record<FactoryTimelineData["gate"]["phase"], string> = { hooks: "hook", gates: "gate", merge_gates: "merge gate", after_merge: "after merge" }
 
-const REVIEW_FAILURES: Record<Exclude<FactoryTimelineData["review"]["status"], "ok">, string> = {
-  malformed: "malformed verdict",
-  timeout: "timed out",
-  aborted: "aborted",
-  failed: "failed",
-  no_diff: "no diff",
-}
-
-const ROW_CLASS = "flex items-baseline gap-2"
-const KIND_CLASS = "w-16 shrink-0 text-ink-subtle"
-const METER_CLASS = "shrink-0 tabular-nums text-ink-faint"
-const SUMMARY_CLASS = "cursor-pointer text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-const OUTPUT_CLASS = "mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-elevated p-2 font-mono text-[10px] text-ink-muted scrollbar-thin"
 const SAID_CLASS = "whitespace-pre-wrap break-words text-ink-muted"
-
-function Verdict({ ok, children }: { ok: boolean; children: string }) {
-  return <span className={cn("shrink-0", ok ? "text-diff-added" : "text-diff-removed")}>{children}</span>
-}
 
 /** Consecutive coder messages of a round are one turn, a user message and a coder's question stand alone. */
 type Said = { kind: "user" | "question"; text: string } | { kind: "coder"; texts: string[] }
@@ -130,35 +114,10 @@ function GateStep({ gate }: { gate: FactoryTimelineData["gate"] }) {
   )
 }
 
-/** The review: verdict, cost and duration, its findings open while the round is the current one. */
-function ReviewStep({ review, current }: { review: FactoryTimelineData["review"]; current: boolean }) {
-  const count = review.findings.length
-  return (
-    <li>
-      <div className={ROW_CLASS}>
-        <span className={KIND_CLASS}>review</span>
-        <span className="min-w-0 flex-1 truncate text-ink-muted">{review.model}</span>
-        <span className={METER_CLASS}>{formatUsage(review.usage)} · {formatCost(review.usage.cost)} · {formatDuration(review.wallMs)}</span>
-        <Verdict ok={review.approved}>{review.status !== "ok" ? REVIEW_FAILURES[review.status] : review.approved ? "approved" : "rejected"}</Verdict>
-      </div>
-      {count > 0 && (
-        <details className="mt-1" open={current}>
-          <summary className={SUMMARY_CLASS}>{count} {count === 1 ? "finding" : "findings"}</summary>
-          <ul className="mt-1 flex flex-col gap-1.5">
-            {review.findings.map((finding, index) => (
-              <li key={index}>
-                <div className={ROW_CLASS}>
-                  <code className="min-w-0 flex-1 truncate font-mono text-ink-muted">{finding.file}:{finding.line}</code>
-                  <span className={cn("shrink-0", finding.severity === "minor" ? "text-ink-subtle" : "text-diff-removed")}>{finding.severity}</span>
-                </div>
-                <p className="whitespace-pre-wrap break-words text-ink-muted">{finding.text}</p>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </li>
-  )
+/** A round's review in the shared review row, its findings open while the round is the current one. */
+function TaskReviewStep({ review, current }: { review: FactoryTimelineData["review"]; current: boolean }) {
+  const outcome = review.status !== "ok" ? reviewFailure(review.status) : review.approved ? "approved" : "rejected"
+  return <ReviewStep review={{ ...review, ok: review.approved, outcome }} open={current} />
 }
 
 /** The merge: the commit it made or its error behind a disclosure. */
@@ -192,7 +151,7 @@ function SpawnStep({ spawn, onOpenTask }: { spawn: FactoryTimelineData["spawn"];
 
 function Step({ step, current, onOpenTask }: { step: TimelineStep; current: boolean; onOpenTask: (taskId: string) => void }) {
   if (step.kind === "gate") return <GateStep gate={step.data} />
-  if (step.kind === "review") return <ReviewStep review={step.data} current={current} />
+  if (step.kind === "review") return <TaskReviewStep review={step.data} current={current} />
   if (step.kind === "spawn") return <SpawnStep spawn={step.data} onOpenTask={onOpenTask} />
   return <MergeStep merge={step.data} />
 }

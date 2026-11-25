@@ -177,7 +177,7 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
  * finished. The waves show as a tree above them (`WaveTree`), their tasks inside it; tasks outside a wave (or of a wave
  * the list does not hold) stay in the columns.
  */
-export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask }: {
+export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, onOpenSession }: {
   repo: string
   tasks: FactoryTask[]
   waves: FactoryWave[]
@@ -186,6 +186,8 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask }:
   /** Read the tasks again, after a change this board made. */
   refresh: () => Promise<void>
   onOpenTask: (taskId: string) => void
+  /** Opens a Pi session (a wave's supervisor or reviewer) in the workspace. */
+  onOpenSession: (sessionId: string) => void
 }) {
   useTabWorkingDirectory(repo)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
@@ -241,6 +243,7 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask }:
             <WaveTree
               root={tree}
               tasks={tasks}
+              onOpenSession={onOpenSession}
               renderTask={(task) => (
                 <TaskCard
                   task={task}

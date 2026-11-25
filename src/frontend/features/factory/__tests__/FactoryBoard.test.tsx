@@ -62,7 +62,7 @@ function renderBoard(tasks: FactoryTask[], props: Partial<Parameters<typeof Fact
     <TopBarSlotProvider>
       <TopBarSlot name="title">{(ref) => <div ref={ref} />}</TopBarSlot>
       <TopBarSlot name="center">{(ref) => <div ref={ref} />}</TopBarSlot>
-      <FactoryBoard repo={REPO} tasks={tasks} waves={[]} error={null} refresh={refresh} onOpenTask={onOpenTask} {...props} />
+      <FactoryBoard repo={REPO} tasks={tasks} waves={[]} error={null} refresh={refresh} onOpenTask={onOpenTask} onOpenSession={vi.fn()} {...props} />
     </TopBarSlotProvider>,
   )
   const titles = (column: string) => within(view.getByRole("region", { name: column })).queryAllByRole("button", { name: /^Task / }).map((card) => within(card).getByText(/^Task /).textContent)

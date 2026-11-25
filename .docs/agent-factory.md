@@ -135,10 +135,15 @@ One per repository, shared by every task's session through ticket files in `<git
   `waiting_answer` sits in Waiting.
 - **Wave tree** (above the columns, `waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on
   the same refresh events. Tracks and milestones are the prefixes of the waves' tags, each row with the sums of its
-  waves (`done/total`, tokens and cost). A wave's row: name, title, `done/total`, stage, tokens and cost. Opened: its
-  description, its tasks (`task.wave`) as task cards sorted by state, a declared task not started yet as a quiet row
-  with its title. A description is the document `plan/<tag or prefix>.md` of the plan's memory_store
-  (`GET /api/memory/read`), read when the row opens; its `Description` row appears only for a non-empty document.
+  waves (`done/total`, tokens and cost). A wave's row: name, `done/total`, stage, tokens and cost. Opened: its title
+  (with a link to the declaring supervisor's Pi session, `origin`), description, its tasks (`task.wave`) as task cards
+  sorted by state, a declared task not started yet as a quiet row with its title, then the wave's outcome
+  (`WaveOutcome.tsx`): its reviews newest first in the task timeline's review row (`ReviewStep.tsx`; model, usage,
+  duration, verdict, findings, a link to the reviewer's session), failed gate runs only, the merged commit range
+  (`from..to`, short) and the remote request's link. A session link appears only when its id exists and opens the
+  session as a Pi workspace item (`piSessionItem`). A description is the document `plan/<tag or prefix>.md` of the
+  plan's memory_store (`GET /api/memory/read`), read when the row opens; its `Description` row appears only for a
+  non-empty document.
   Tasks without a wave (or of a wave the list lacks) stay in the columns whatever their tag. A factory without
   `waves.list` (`unknown action`) shows no tree and no error.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message, earlier ones
