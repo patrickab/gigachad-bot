@@ -22,7 +22,8 @@ interface ChatInputProps {
   chatId: string
   /** Conversation the unsent text and staged chips are kept for (`useComposerDraft`, `composerChips`), none keeps them in memory only. */
   draftKey?: string | null
-  onSend: (text: string, attachments: Attachment[]) => void
+  /** A send that settles `false` (or rejects) was refused: the draft, chips and attachments come back into the composer. */
+  onSend: (text: string, attachments: Attachment[]) => void | boolean | Promise<boolean | void>
   disabled?: boolean
   extracting?: boolean
   isStreaming?: boolean
@@ -137,10 +138,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     const trimmed = text.trim()
     if (!trimmed && attachments.length === 0 && chips.chips.length === 0) return
     completions.close()
-    onSend(withChips(trimmed, chips.chips), attachments)
+    const sentChips = chips.chips
+    const sentAttachments = attachments
+    const result = onSend(withChips(trimmed, sentChips), sentAttachments)
     setText("")
     drafts.clear()
     chips.clear()
+    if (result === undefined || result === true) return
+    // Refused: put the draft back, ahead of anything typed meanwhile
+    const restore = () => {
+      setText((current) => (current ? `${trimmed}\n\n${current}` : trimmed))
+      sentChips.forEach((chip) => chips.stage({ label: chip.label, text: chip.text }))
+      sentAttachments.forEach(drafts.add)
+    }
+    if (result === false) restore()
+    else void Promise.resolve(result).then((ok) => { if (ok === false) restore() }, restore)
   }
 
   // Escape layers (completion menu, dialogs) take Escape first, a free Escape leaves the draft

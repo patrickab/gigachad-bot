@@ -109,7 +109,8 @@ interface PiComposerProps {
   onInserted?: () => void
   /** Controls of the action row after the "+" menu, e.g. the session's folder. */
   leading?: ReactNode
-  onSubmit: (submit: PiSubmit) => void
+  /** Settles `false` when the send was refused (e.g. its session could not start), the composer then takes the draft back. */
+  onSubmit: (submit: PiSubmit) => void | Promise<boolean>
   onAbort: () => Promise<string[]>
   onAnswerDialog: (id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => void
 }
@@ -149,7 +150,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
     if (textDialog?.method === "editor" && textDialog.prefill) inputRef.current?.updateText(() => textDialog.prefill ?? "")
   }, [textDialog])
 
-  const handleSend = async (text: string, attachments: Attachment[]) => {
+  const handleSend = async (text: string, attachments: Attachment[]): Promise<boolean | void> => {
     const mode: QueueMode = followUpRef.current ? "followUp" : "steer"
     if (textDialog) return onAnswerDialog(textDialog.id, { value: text })
     const staged = chips.chips
@@ -157,7 +158,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
     // `ChatInput` clears the chips right after this send: a command did not use them, so they wait for the next message
     if (action.kind === "bash" && staged.length > 0) queueMicrotask(() => staged.forEach((chip) => stageChip(draftKey, chip)))
     const images = action.kind === "prompt" ? await Promise.all(attachments.filter((attachment) => attachment.mime.startsWith("image/")).map(imageOf)) : []
-    onSubmit({ action, images, mode })
+    return (await onSubmit({ action, images, mode })) ?? true
   }
 
   const handleAbort = async () => {
@@ -205,7 +206,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
         ref={inputRef}
         chatId={draftKey}
         draftKey={draftKey}
-        onSend={(text, attachments) => void handleSend(text, attachments)}
+        onSend={handleSend}
         disabled={disabled}
         extracting={pasting}
         isStreaming={running}

@@ -295,7 +295,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   }, [sessionId, repo, opened?.sessionId, resumeAttempt])
 
   const { model: chosenModel, thinking: chosenThinking } = choice
-  const start = useCallback(async (submit: PiSubmit) => {
+  const start = useCallback(async (submit: PiSubmit): Promise<boolean> => {
     setError(null)
     setStarting(true)
     try {
@@ -305,8 +305,10 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
       setFirstSubmit(submit)
       setOpened({ sessionId: session.sessionId, cwd: session.cwd })
       onViewChange({ repo, sessionId: session.sessionId })
+      return true
     } catch (reason) {
       setError(piOpenError(reason, repo))
+      return false
     } finally {
       setStarting(false)
     }
@@ -390,7 +392,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
           statusLines={{}}
           editorText={null}
           leading={<PiRepoLabel repo={repo} />}
-          onSubmit={(submit) => void start(submit)}
+          onSubmit={start}
           onAbort={async () => []}
           onAnswerDialog={() => {}}
         />
