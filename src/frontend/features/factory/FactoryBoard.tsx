@@ -195,7 +195,7 @@ function TaskCard({ task, archived, waveLabel, onArchive, onOpen, onDelete, onDe
         onClick={onOpen}
         className="flex w-full flex-col gap-2 rounded-xl p-4 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
       >
-        <span className="line-clamp-2 pr-6 text-sm font-semibold text-ink">{task.title}</span>
+        <span className="break-words pr-6 text-sm font-semibold text-ink">{task.title}</span>
         <span className="flex min-w-0 items-center gap-2 text-[11px]">
           <StatusDot tone={taskTone(task)} />
           <span className={cn("min-w-0 flex-1 truncate", failed ? "text-danger" : "text-ink-subtle")}>{taskStatusLine(task)}</span>
@@ -246,7 +246,7 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
   return (
     <ElevatedContainer className="relative rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
       <div role="group" aria-label={title} className="flex w-full flex-col gap-2 rounded-xl p-4">
-        <span className="line-clamp-2 pr-14 text-sm font-semibold text-ink">{title}</span>
+        <span className="break-words pr-14 text-sm font-semibold text-ink">{title}</span>
         <span role="status" className="flex min-w-0 items-center gap-2 text-[11px]">
           <StatusDot tone={failed ? "error" : "active"} />
           <span className={cn("truncate", failed ? "text-danger" : "text-ink-subtle")}>{failed ? "Could not start" : STATE_LABELS.starting}</span>

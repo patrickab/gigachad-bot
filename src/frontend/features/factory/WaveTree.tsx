@@ -85,7 +85,7 @@ function Container({ label, count, description, meta, defaultOpen, children }: {
         summaryClassName="h-auto items-baseline rounded-xl px-3 pb-1 pt-2.5"
         summary={
           <>
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{label}</span>
+            <span className="min-w-0 flex-1 break-words text-xs font-semibold text-ink">{label}</span>
             <span aria-label="Progress" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{count}</span>
           </>
         }
