@@ -200,3 +200,27 @@ describe("ToolCallElement learn sessions", () => {
     expect(screen.queryByRole("button", { name: "Understand Fourier series" })).not.toBeInTheDocument()
   })
 })
+
+describe("ToolCallElement memory calls", () => {
+  const opsCall: ToolCallRecord = {
+    id: "mem-1",
+    name: "apply_memory_ops",
+    arguments: { memory_store: "user", ops: [{ op: "add", path: "preferences/food", text: "likes oat milk" }, { op: "retire", path: "preferences/food", id: "k2p" }] },
+    status: "done",
+    summary: "2/2 applied",
+  }
+
+  it("summarises the ops collapsed and shows one line per op opened", () => {
+    render(<ToolCallElement call={opsCall} />)
+    expect(screen.getByText("2 changes · preferences/food")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { expanded: false }))
+    const lines = [...document.querySelectorAll("[data-memory-op]")].map((line) => line.textContent)
+    expect(lines).toEqual(["+likes oat milk", "−k2pretired"])
+    expect(screen.queryByText("ops")).toBeNull()
+  })
+
+  it("keeps the first argument for malformed memory arguments", () => {
+    render(<ToolCallElement call={{ ...opsCall, name: "read_memories", arguments: { memory_store: "user", paths: "x" } }} />)
+    expect(screen.getByText("user")).toBeTruthy()
+  })
+})

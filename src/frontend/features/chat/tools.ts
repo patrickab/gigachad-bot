@@ -1,4 +1,5 @@
 import { Brain, Globe, GraduationCap, LineChart, Network, Search, Sigma, Terminal, Workflow, Wrench, type LucideIcon } from "lucide-react"
+import { MEMORY_TOOL_NAMES } from "@/lib/domain/memoryTool"
 import type { ToolName } from "@/lib/domain/types"
 
 interface ToolMeta {
@@ -33,12 +34,10 @@ export function availableTools(hostAccess: boolean): readonly ToolMeta[] {
   return hostAccess ? TOOLS : TOOLS.filter((tool) => !tool.hostOnly)
 }
 
-/** The tool names the backend expands the `memory` toggle into, saved calls carry these. */
-const MEMORY_CALL_NAMES = ["list_memories", "read_memories", "apply_memory_ops"]
-
 /** Keyed for lookup by a saved call's name, which an older chat may no longer match. */
 const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]))
-for (const name of MEMORY_CALL_NAMES) TOOL_META[name] = TOOL_META.memory
+// Saved calls carry the tool names the backend expands the `memory` toggle into.
+for (const name of MEMORY_TOOL_NAMES) TOOL_META[name] = TOOL_META.memory
 
 /** Icon and card label of a saved call's tool. Unknown saved names keep the raw name and a neutral icon. */
 export function toolDisplay(name: string): { icon: LucideIcon; label: string } {

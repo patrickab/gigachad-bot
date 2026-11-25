@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { toolDisplay } from "@/features/chat/tools"
 import { toolPayload } from "@/features/chat/toolCalls"
 import { LearnSessionLink } from "@/features/learn/LearnSessionLink"
+import { memoryToolView } from "@/lib/domain/memoryTool"
 import type { ToolCallRecord } from "@/lib/domain/types"
 import { useThemeName } from "@/hooks/useThemeName"
 import { PlotElement } from "@/components/content/PlotElement"
@@ -70,7 +71,8 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   }, [runningStage])
   const { icon: Icon, label } = toolDisplay(call.name)
   // A plot, diagram, or mind map is its own headline, so the header carries no argument.
-  const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
+  const memory = memoryToolView(call.name, call.arguments)
+  const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : memory?.summary ?? primaryArgument(call.arguments)
   // A running stage already names itself inline beside the card label.
   const status = call.status === "running" ? (stages.length > 0 ? "" : "running") : call.status === "error" ? "failed" : call.summary
 
@@ -198,14 +200,24 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
 
       {open && !flat && (
         <div className="space-y-2 px-6 pb-5 pl-[4.5rem]">
-          <dl className="space-y-1">
+          {memory && memory.ops.length > 0 ? (
+            <ul className="space-y-1">
+              {memory.ops.map((op, index) => (
+                <li key={index} className="flex gap-2 text-[10px]" data-memory-op={op.marker}>
+                  <span className="shrink-0 font-medium text-ink-subtle">{op.marker}</span>
+                  {op.ref && <span className="shrink-0 text-ink-faint">{op.ref}</span>}
+                  <span className="min-w-0 break-words text-ink-muted">{op.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <dl className="space-y-1">
             {Object.entries(call.arguments).map(([key, value]) => (
               <div key={key} className="flex gap-2 text-[10px]">
                 <dt className="shrink-0 font-medium uppercase tracking-wide text-ink-faint">{key}</dt>
                 <dd className="min-w-0 break-words text-ink-muted">{typeof value === "string" ? value : JSON.stringify(value)}</dd>
               </div>
             ))}
-          </dl>
+          </dl>}
 
           {call.error && <p className="text-[10px] text-danger">{call.error}</p>}
 
