@@ -191,7 +191,7 @@ describe("PiTab", () => {
   it("reads the session's waves for its absolute cwd when the view names the checkout", async () => {
     vi.mocked(fetchPiSessions).mockResolvedValue([sessionInfo("s1")])
     vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
-    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} onOpenSession={vi.fn()} />)
+    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} onOpenTask={vi.fn()} />)
 
     await waitFor(() => expect(callFactory).toHaveBeenCalledWith("waves.list", { repo: "/home/u/git/repo" }))
     expect(callFactory).not.toHaveBeenCalledWith("waves.list", { repo: "repo" })

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { SocketObserver } from "@/features/pi/piSocket"
-import type { FactoryWave, FactoryWaveTask } from "@/lib/domain/factory"
+import type { FactoryTask, FactoryWave, FactoryWaveTask } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({ callFactory: vi.fn() }))
 const socket = vi.hoisted(() => ({ observers: new Set<SocketObserver>() }))
@@ -14,7 +14,7 @@ vi.mock("@/features/pi/piSocket", () => ({
   },
 }))
 
-import { SessionWaves, SessionWavesPanel } from "../SessionWaves"
+import { SessionWaves, SessionWavesPanel, taskModels } from "../SessionWaves"
 
 afterEach(() => {
   cleanup()
@@ -33,9 +33,9 @@ function wave(id: string, fields: Partial<FactoryWave> = {}): FactoryWave {
   }
 }
 
-function renderPanel(onOpenSession = vi.fn()) {
-  render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenSession={onOpenSession} />)
-  return onOpenSession
+function renderPanel(onOpenTask = vi.fn()) {
+  render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={onOpenTask} />)
+  return onOpenTask
 }
 
 describe("SessionWaves", () => {
@@ -71,7 +71,7 @@ describe("SessionWaves", () => {
   it("collapses to the header with only finished waves", () => {
     render(<SessionWaves
       waves={[wave("w4", { stage: "merged", usage: { input: 1, output: 1, cost: 1 } }), wave("w5", { stage: "cancelled", usage: { input: 1, output: 1, cost: 2 } })]}
-      onOpenSession={vi.fn()}
+      onOpenTask={vi.fn()}
     />)
     const header = screen.getByRole("button", { name: /^Factory/ })
     expect(header.textContent).toContain("Factory · 2 finished")
@@ -93,7 +93,7 @@ describe("SessionWaves", () => {
         wave("m1", { stage: "merged", counts: { total: 2, done: 2 }, createdAt: "2026-01-01T00:00:00Z" }),
         wave("m2", { stage: "cancelled", createdAt: "2026-01-04T00:00:00Z" }),
       ]}
-      onOpenSession={vi.fn()}
+      onOpenTask={vi.fn()}
     />)
     expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 3 active · 1 needs you")
     const tags = screen.getAllByText(/^p\//).map((node) => node.textContent)
@@ -108,15 +108,15 @@ describe("SessionWaves", () => {
     expect(screen.getByRole("button", { name: /p\/m1/ })).toBeTruthy()
   })
 
-  it("opens a wave to its tasks, unfinished first, a started one opens its session", () => {
-    const onOpenSession = vi.fn()
+  it("opens a wave to its tasks with model and tokens, unfinished first, a started one opens its task", () => {
+    const onOpenTask = vi.fn()
     const tasks = [
-      task("a", { title: "feat: running one", state: "running", taskId: "t-a", sessionId: "s-a" }),
+      task("a", { title: "feat: running one", state: "running", taskId: "t-a", sessionId: "s-a", usage: { input: 200, output: 3400, cost: 1, cacheRead: 54800, cacheWrite: 0 } }),
       task("b", { title: "feat: pending one" }),
       task("c", { title: "feat: done one", state: "done", taskId: "t-c", sessionId: "s-c" }),
       task("d", { title: "feat: cancelled one", state: "cancelled", taskId: "t-d", sessionId: "s-d" }),
     ]
-    render(<SessionWaves waves={[wave("w1", { tasks })]} onOpenSession={onOpenSession} />)
+    render(<SessionWaves waves={[wave("w1", { tasks })]} models={{ "t-a": "claude-opus-5-5" }} onOpenTask={onOpenTask} />)
     expect(screen.queryByText("feat: running one")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /p\/w1/ }))
     const list = screen.getByRole("list", { name: "p/w1 tasks" })
@@ -125,22 +125,23 @@ describe("SessionWaves", () => {
     expect(list.textContent).toContain("feat: pending one")
     expect(list.textContent).toContain("pending")
     expect(Array.from(list.querySelectorAll("li")).map((row) => row.textContent?.match(/feat: \w+ one/)?.[0])).toEqual(["feat: running one", "feat: pending one", "feat: done one", "feat: cancelled one"])
-    const open = screen.getAllByRole("button", { name: "Open session" })
+    expect(list.querySelector("li")?.textContent).toContain("claude-opus-5-5 · ↑55.0k ↓3.4k · running")
+    const open = screen.getAllByRole("button", { name: "Open task" })
     expect(open).toHaveLength(3)
     fireEvent.click(open[0])
-    expect(onOpenSession).toHaveBeenCalledWith("s-a")
+    expect(onOpenTask).toHaveBeenCalledWith("t-a")
   })
 
   it("renders nothing without waves", async () => {
     api.callFactory.mockResolvedValue({ waves: [] })
-    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenSession={vi.fn()} />)
+    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(api.callFactory).toHaveBeenCalled())
     expect(container.innerHTML).toBe("")
   })
 
   it("renders nothing when the factory has no waves.list", async () => {
     api.callFactory.mockRejectedValue(new Error("unknown action: waves.list"))
-    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenSession={vi.fn()} />)
+    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(api.callFactory).toHaveBeenCalled())
     await act(async () => {})
     expect(container.innerHTML).toBe("")
@@ -150,7 +151,7 @@ describe("SessionWaves", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const cause = new Error("invalid: repo must be an absolute path")
     api.callFactory.mockRejectedValue(cause)
-    render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenSession={vi.fn()} />)
+    render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(error).toHaveBeenCalledWith("waves.list failed", cause))
     error.mockRestore()
   })
@@ -163,5 +164,16 @@ describe("SessionWaves", () => {
       for (const observer of socket.observers) observer.onHostEvent?.({ type: "sessions_changed", sessionPaths: ["/agent/factory/waves/w1.jsonl"] })
     })
     expect(await screen.findByRole("button", { name: /p\/w1/ })).toBeTruthy()
+  })
+})
+
+describe("taskModels", () => {
+  it("names each task's coder model without its provider", () => {
+    const listed = [
+      { id: "t-a", settings: { models: { coder: "anthropic/claude-opus-5-5" } } },
+      { id: "t-b", settings: { models: { big: "x/y/z" } } },
+      { id: "t-c", settings: null },
+    ] as unknown as FactoryTask[]
+    expect(taskModels(listed)).toEqual({ "t-a": "claude-opus-5-5", "t-b": "z" })
   })
 })

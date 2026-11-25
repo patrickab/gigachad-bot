@@ -322,7 +322,8 @@ settings once at `waves.start`.
   session declared. Its header counts the active waves, those that need the user (warning colour) and their cost, or
   `<n> finished` without active ones, and collapses the element (open while a wave is active). Active waves come first, those
   needing the user at the top; merged and cancelled waves sit behind one collapsed `<n> finished` row. Every wave
-  opens to its tasks, unfinished ones first, each started one with a button to open its session. Display only.
+  opens to its tasks, unfinished ones first: the coder's model (from `tasks.list`), tokens in and out, state. A started
+  one has a button that opens its task view (the coder's session, brief and handoff). Display only.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message), its
   questions, each gate with duration and failed output, the review with findings, the merge.
 - **Terminal**: `factory-tui` (read-only), or `factory waves.list`, `factory tasks.list`, `factory waves.get`.

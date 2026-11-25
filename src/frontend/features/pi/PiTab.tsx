@@ -258,17 +258,17 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
  * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
  * - The repo and live dot sit in the composer's action row, where an empty chat picks its project
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
- * - With `onOpenSession`, the unfinished factory waves the session declared sit above the composer, a wave task's session opens through it.
+ * - With `onOpenTask`, the factory waves the session declared sit above the composer, a wave's task opens through it (`repo`, task id).
  *   They are read for the session's cwd (absolute, the core maps it to its checkout), never the view's repo, which may be a checkout name
  */
-export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched, onOpenSession }: {
+export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched, onOpenTask }: {
   view: PiView
   onViewChange: (view: PiView) => void
   modelProps: PiCatalogProps
   slots?: PiTopBarSlots
   launch?: PiLaunch | null
   onLaunched?: () => void
-  onOpenSession?: (sessionId: string) => void
+  onOpenTask?: (repo: string, taskId: string) => void
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
   const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
@@ -351,7 +351,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         onBranch={branch}
         insertion={insertion}
         onInserted={clearInsertion}
-        waves={onOpenSession && <SessionWavesPanel repo={shown.cwd} sessionId={shown.sessionId} onOpenSession={onOpenSession} />}
+        waves={onOpenTask && <SessionWavesPanel repo={shown.cwd} sessionId={shown.sessionId} onOpenTask={(taskId) => onOpenTask(shown.cwd, taskId)} />}
       />
     )
   }

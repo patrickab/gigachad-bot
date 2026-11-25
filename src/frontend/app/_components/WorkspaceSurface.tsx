@@ -30,7 +30,7 @@ import type { PiInsertion } from "@/features/pi/PiComposer"
 import { ChatContextUsage } from "@/features/chat/ContextUsage"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
-import { piSessionItem } from "@/features/pi/usePiSidebar"
+import { factoryItem as factoryTaskItem } from "@/features/factory/items"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -294,7 +294,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     },
     pi: () => {
       const piItem = itemOf(tab, "pi")
-      const piRepo = piItem?.pi?.repo ?? ""
       return {
         // The Pi tab renders its thinking, model and usage into the places a chat's bar has its own
         ...conversationBar({
@@ -304,7 +303,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         }),
         body: piItem?.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} slots={piSlots} launch={launch} onLaunched={onLaunched} onOpenSession={(sessionId) => setWorkspaceItem(piSessionItem({ sessionId }, piRepo, null))} />
+            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} slots={piSlots} launch={launch} onLaunched={onLaunched} onOpenTask={(repo, taskId) => setWorkspaceItem(factoryTaskItem(repo, taskId))} />
           </div>
         ) : chatBody,
       }
