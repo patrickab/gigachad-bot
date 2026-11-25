@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { motion } from "framer-motion"
 import { Archive, ArchiveRestore, Plus, RotateCcw, Settings, Trash2, X } from "lucide-react"
@@ -21,6 +21,8 @@ import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, STATE_LABELS, shownState, taskStatusLine, taskTone } from "./states"
+import { groupByTag } from "./tagGroups"
+import { TagTree } from "./TagTree"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 import { formatCost, formatTokens } from "./usage"
@@ -173,7 +175,10 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
   )
 }
 
-/** Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is finished. */
+/**
+ * Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is
+ * finished. Tasks tagged with a plan path leave the columns for the plan tree above them (`TagTree`).
+ */
 export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
   repo: string
   tasks: FactoryTask[]
@@ -201,6 +206,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
     await callFactory<FactoryTaskRemoval>("tasks.remove", force ? { id, force } : { id })
     await refresh()
   }
+  const { groups, ungrouped } = useMemo(() => groupByTag(tasks), [tasks])
 
   return (
     // Lanes start at --surface, the level of the sidebar beside them
@@ -225,9 +231,27 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
         {missingConfig && config.draft !== null && (
           <ConfigDraft repo={repo} draft={config.draft} onSaved={(text) => setConfig({ exists: true, text, draft: null, source: [] })} />
         )}
+        {!missingConfig && groups.length > 0 && (
+          // Bounded and scrolling on its own, so open groups never squeeze the columns away
+          <div className="max-h-[40vh] shrink-0 overflow-y-auto px-16 pt-6 scrollbar-thin">
+            <TagTree
+              groups={groups}
+              renderTask={(task) => (
+                <TaskCard
+                  task={task}
+                  archived={null}
+                  onArchive={() => {}}
+                  onOpen={() => onOpenTask(task.id)}
+                  onDelete={(force) => deleteTask(task.id, force)}
+                  onDeleteError={setDeleteError}
+                />
+              )}
+            />
+          </div>
+        )}
         <div className={cn("min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin", missingConfig ? "hidden" : "flex")}>
           {BOARD_COLUMNS.map((column) => {
-            const inColumn = tasks.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            const inColumn = ungrouped.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
             const isFinished = column.id === "finished"
             const archivedCount = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id)).length : 0
             // Finished shows what waits for inspection, or the archive while that is opened.

@@ -135,6 +135,24 @@ describe("FactoryBoard", () => {
     expect(within(card("Task coded")).queryByLabelText("Merge request")).toBeNull()
   })
 
+  it("moves tasks tagged with a plan path out of the columns into the plan tree, a username's stay", () => {
+    const tasks = [task("Task planned", "running", { tag: "plugin/m1/w1" }), task("Task mine", "running", { tag: "noob" })]
+    const { view, titles, onOpenTask } = renderBoard(tasks)
+
+    expect(titles("Working")).toEqual(["Task mine"])
+    const plans = within(view.getByRole("region", { name: "Plans" }))
+    fireEvent.click(plans.getByRole("button", { name: /^plugin/ }))
+    fireEvent.click(plans.getByRole("button", { name: /^m1/ }))
+    fireEvent.click(plans.getByRole("button", { name: /^w1/ }))
+    fireEvent.click(plans.getByRole("button", { name: /^Task planned/ }))
+    expect(onOpenTask).toHaveBeenCalledWith(tasks[0].id)
+  })
+
+  it("shows no plan tree without planned tasks", () => {
+    const { view } = renderBoard([task("Task mine", "running")])
+    expect(view.queryByRole("region", { name: "Plans" })).toBeNull()
+  })
+
   it("formats a task's age in minutes, hours, days, then weeks", () => {
     const now = Date.parse("2026-03-01T00:00:00Z")
     const ago = (ms: number) => formatAge(new Date(now - ms).toISOString(), now)

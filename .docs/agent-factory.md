@@ -127,6 +127,10 @@ One per repository, shared by every task's session through ticket files in `<git
 
 - **Board card**: state, round, blocked reason, the open question, a merge request's source branch, total tokens and
   cost (coder plus reviews). `waiting_answer` sits in Needs you.
+- **Plan tree** (above the columns, `tagGroups.ts`, `TagTree.tsx`): tasks whose tag has two or more segments leave the
+  columns. One closed row per segment (name, task count; a wave also its counts per state), an open wave lists its
+  task cards. A group's description, on demand, is the document `plan/<tag prefix>.md` of the plan's memory_store
+  (`GET /api/memory/read`); missing, it shows nothing. Tasks tagged with a login stay in the columns.
 - **Timeline** (task view): a merge request's source and target, then per round the trigger, the coder's turn (model,
   tokens, cost, last message, earlier ones collapsed), its questions, each gate with duration and failed output, the
   review with findings, the merge. A merge request's view has no message box.
