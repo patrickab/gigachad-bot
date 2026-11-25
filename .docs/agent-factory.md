@@ -166,9 +166,13 @@ One per repository, shared by every task's session through ticket files in `<git
 ## Settings
 
 Per repo in the core (`settings.get|set`, one file per repo, which also registers it), overridable per task:
-`merge`, `maxRounds`, `review`, `models` per role (`coder`, `reviewer`), `branch`; defaults and resolution are the
-core's (`settings.get` answers `{stored, resolved, defaults}`). `preview` (boolean) is stored there for gigachad only.
+`merge`, `maxRounds`, `review`, `models` (`small`, `big`, `coder`, `reviewer`), `branch`; defaults and resolution are
+the core's (`settings.get` answers `{stored, resolved, defaults}`). `preview` (boolean) is stored there for gigachad only.
 A task keeps the settings it started with.
+
+- **Models**: easy tasks of a wave run on `small`, everything else and the reviewer on `big` (`settings.get` answers
+  `big` equal to `coder`). The settings dialog shows two pickers, Small model and Big model; it reads big as
+  `big ?? coder` and saves `models: {small, big, reviewer: <big>}`, an empty picker leaving its keys out.
 
 - **Moved from Postgres**: at backend start, each row of `factory_repo_settings` / `factory_tasks` not yet marked in
   `migrated_at` moves: a repo's settings go to `settings.set`, starting from the old defaults (merge `review`, 3

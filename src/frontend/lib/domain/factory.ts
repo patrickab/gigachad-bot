@@ -55,10 +55,15 @@ export interface FactoryModelList {
   models: string[]
 }
 
-/** Model ids (`provider/model`) of the two agents of a task, Pi's default where one is missing. */
+/**
+ * Model ids (`provider/model`), Pi's default where one is missing: per agent of a task, and the project's two sizes
+ * (easy tasks of a wave run on `small`, everything else on `big`; `settings.get` answers `big` equal to `coder`).
+ */
 export interface FactoryModels {
   coder?: string
   reviewer?: string
+  small?: string
+  big?: string
 }
 
 /** The settings a task runs with (the core's `Settings`): `branch` is the one it starts from and merges into. */

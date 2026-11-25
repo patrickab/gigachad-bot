@@ -90,18 +90,16 @@ describe("FactorySettingsDialog", () => {
     const pill = (group: string, name: string) => within(view.getByRole("group", { name: group })).getByRole("button", { name })
     fireEvent.change(rounds, { target: { value: "5" } })
     fireEvent.click(pill("Merge", "Auto"))
-    // The reviewer's model is picked while review is on: off, its select is disabled.
-    fireEvent.click(view.getByLabelText("Model of reviewer"))
+    fireEvent.click(view.getByLabelText("Small model"))
     fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))
     fireEvent.click(view.getByRole("switch", { name: "Review" }))
-    expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
     fireEvent.click(view.getByRole("switch", { name: "Preview" }))
-    fireEvent.click(view.getByLabelText("Model of coder"))
+    fireEvent.click(view.getByLabelText("Big model"))
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(core.setSettings).toHaveBeenCalledWith(REPO, { merge: "auto", maxRounds: 5, review: false, preview: false, models: { reviewer: "openai-codex/fast" } })
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, { merge: "auto", maxRounds: 5, review: false, preview: false, models: { small: "openai-codex/fast" } })
   })
 
   it("edits nothing of the old engine: no sandbox, timeouts, scout, planner or agent markdown", async () => {
@@ -153,16 +151,73 @@ describe("FactorySettingsDialog", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("offers exactly the factory models list per agent, a saved model not on it marked", async () => {
+  it("shows a Small and a Big model picker in place of the coder and reviewer pickers", async () => {
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    fireEvent.click(await view.findByLabelText("Model of coder"))
+    await view.findByLabelText("Big model")
+    expect(view.getByLabelText("Small model")).toHaveTextContent("Pi default")
+    for (const label of ["Model of coder", "Model of reviewer"]) expect(view.queryByLabelText(label)).toBeNull()
+  })
+
+  it("reads big from big, an old coder-only file's big from its coder", async () => {
+    core.getSettings.mockResolvedValue(settings({ models: { small: "openai-codex/fast", big: "openrouter/vendor/model", coder: "openrouter/vendor/model", reviewer: "other" } }))
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
+    await waitFor(() => expect(view.getByLabelText("Big model")).toHaveTextContent("openrouter/vendor/model"))
+    expect(view.getByLabelText("Small model")).toHaveTextContent("openai-codex/fast")
+    view.unmount()
+
+    core.getSettings.mockResolvedValue(settings(STORED))
+    const old = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
+    await waitFor(() => expect(old.getByLabelText("Big model")).toHaveTextContent("old-model"))
+    expect(old.getByLabelText("Small model")).toHaveTextContent("Pi default")
+  })
+
+  it("saves models as {small, big, reviewer: big}", async () => {
+    const onClose = vi.fn()
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    fireEvent.click(await view.findByLabelText("Small model"))
+    fireEvent.click(await view.findByRole("option", { name: "openai-codex/fast" }))
+    fireEvent.click(view.getByLabelText("Big model"))
+    fireEvent.click(view.getByRole("option", { name: "openrouter/vendor/model" }))
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, {
+      ...STORED,
+      models: { small: "openai-codex/fast", big: "openrouter/vendor/model", reviewer: "openrouter/vendor/model" },
+    })
+  })
+
+  it("leaves out the keys of an empty picker", async () => {
+    core.getSettings.mockResolvedValue(settings({ models: { small: "openai-codex/fast", big: "openrouter/vendor/model" } }))
+    const onClose = vi.fn()
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    await waitFor(() => expect(view.getByLabelText("Small model")).toHaveTextContent("openai-codex/fast"))
+    fireEvent.click(view.getByLabelText("Small model"))
+    fireEvent.click(view.getByRole("option", { name: "Pi default" }))
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(core.setSettings).toHaveBeenLastCalledWith(REPO, { models: { big: "openrouter/vendor/model", reviewer: "openrouter/vendor/model" } })
+
+    core.getSettings.mockResolvedValue(settings({ models: { big: "openrouter/vendor/model" } }))
+    view.unmount()
+    const next = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    await waitFor(() => expect(next.getByLabelText("Big model")).toHaveTextContent("openrouter/vendor/model"))
+    fireEvent.click(next.getByLabelText("Big model"))
+    fireEvent.click(next.getByRole("option", { name: "Pi default" }))
+    fireEvent.click(next.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledTimes(2))
+    expect(core.setSettings).toHaveBeenLastCalledWith(REPO, { models: {} })
+  })
+
+  it("offers exactly the factory models list per picker, a saved model not on it marked", async () => {
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
+    fireEvent.click(await view.findByLabelText("Big model"))
     await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Pi default", "openai-codex/fast", "openrouter/vendor/model", "old-model (not in the list)",
     ]))
     expect(view.getByRole("option", { name: "old-model (not in the list)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "openrouter/vendor/model" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { coder: "openrouter/vendor/model" } }))
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { big: "openrouter/vendor/model", reviewer: "openrouter/vendor/model" } }))
     expect(core.setModels).not.toHaveBeenCalled()
   })
 
@@ -181,7 +236,7 @@ describe("FactorySettingsDialog", () => {
     fireEvent.click(view.getByRole("option", { name: "google/gemini-pro" }))
     expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["openrouter/vendor/model", "google/gemini-pro"])
 
-    fireEvent.click(view.getByLabelText("Model of reviewer"))
+    fireEvent.click(view.getByLabelText("Small model"))
     expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual(["Pi default", "openrouter/vendor/model", "google/gemini-pro"])
     fireEvent.click(view.getByRole("option", { name: "google/gemini-pro" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))
@@ -189,7 +244,7 @@ describe("FactorySettingsDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(core.setModels).toHaveBeenCalledWith(["openrouter/vendor/model", "google/gemini-pro"])
     expect(core.calls.indexOf("models.set")).toBeLessThan(core.calls.indexOf("settings.set"))
-    expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { coder: "old-model", reviewer: "google/gemini-pro" } })
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, { ...STORED, models: { small: "google/gemini-pro", big: "old-model", reviewer: "old-model" } })
   })
 
   it("keeps saved selections when loading the factory models fails and permits clearing them", async () => {
@@ -197,7 +252,7 @@ describe("FactorySettingsDialog", () => {
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     expect(await view.findByRole("alert")).toHaveTextContent("Could not load the factory models")
     expect(view.queryByLabelText("Add model")).toBeNull()
-    fireEvent.click(view.getByLabelText("Model of coder"))
+    fireEvent.click(view.getByLabelText("Big model"))
     expect(view.getByRole("option", { name: "old-model (not in the list)" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(view.getByRole("option", { name: "Pi default" }))
     fireEvent.click(view.getByRole("button", { name: "Save" }))

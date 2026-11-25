@@ -25,6 +25,22 @@ export const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review
 /** The two agents of a task, in pipeline order. */
 export const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
 
+/** The project's two model sizes: easy tasks of a wave run on small, everything else and the reviewer on big. */
+export const MODEL_SIZES = [{ key: "small", label: "Small model" }, { key: "big", label: "Big model" }] as const
+
+/** The sizes the dialog edits, "" for none. */
+type SizeModels = Record<(typeof MODEL_SIZES)[number]["key"], string>
+
+/** The sizes of stored `models`: big falls back to the coder of settings saved before there were sizes. */
+export function sizeModelsOf(models: FactoryModels): SizeModels {
+  return { small: models.small ?? "", big: models.big ?? models.coder ?? "" }
+}
+
+/** The stored `models` of the sizes: the reviewer runs on big, an empty size is left out (Pi's default). */
+export function storedModelsOf({ small, big }: SizeModels): FactoryModels {
+  return { ...(small.trim() ? { small } : {}), ...(big.trim() ? { big, reviewer: big } : {}) }
+}
+
 /** Every model of the chat model selector the gateway serves, sorted, as the `<provider>/<id>` Pi's registry resolves: what the factory models list can add. */
 export function factoryModelIds(catalog: ModelsResponse | null): string[] {
   if (!catalog) return []
@@ -105,7 +121,7 @@ interface SettingsDraft {
   maxRounds: number
   review: boolean
   preview: boolean
-  models: FactoryModels
+  models: SizeModels
   branch: string
   /** The branch an unset one falls back to (the repo's default). */
   defaultBranch: string
@@ -119,7 +135,7 @@ function draftOf({ stored, resolved, defaults }: FactoryRepoSettings): SettingsD
     maxRounds: resolved.maxRounds,
     review: resolved.review,
     preview: resolved.preview,
-    models: stored.models ?? {},
+    models: sizeModelsOf(stored.models ?? {}),
     branch: stored.branch ?? "",
     defaultBranch: defaults.branch,
     loaded: { stored, resolved, defaults },
@@ -139,7 +155,7 @@ function storedOf(draft: SettingsDraft): FactoryStoredSettings {
   const kept = RESOLVED_KEYS.filter((key) => stored[key] !== undefined || draft[key] !== resolved[key])
   return {
     ...Object.fromEntries(kept.map((key) => [key, draft[key]])),
-    models: Object.fromEntries(Object.entries(draft.models).filter(([, selector]) => selector !== undefined && selector.trim() !== "")),
+    models: storedModelsOf(draft.models),
     ...(branch ? { branch } : {}),
   }
 }
@@ -259,8 +275,8 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
   useLoadWhile(open, loadBranches, setBranches, (cause) => setBranchError(errorMessage(cause, "Could not load the branches")))
 
   const change = (changed: Partial<SettingsDraft>) => setDraft((current) => current && { ...current, ...changed })
-  const changeModel = (agent: keyof FactoryModels, selector: string) =>
-    setDraft((current) => current && { ...current, models: { ...current.models, [agent]: selector } })
+  const changeModel = (size: keyof SizeModels, selector: string) =>
+    setDraft((current) => current && { ...current, models: { ...current.models, [size]: selector } })
 
   const canSave = draft !== null && !busy && validRounds(draft.maxRounds, roundsLimits)
   const save = () => {
@@ -273,16 +289,15 @@ export function FactorySettingsDialog({ repo, open, onClose }: { repo: string; o
         {draft ? (
           <>
             <div className="grid grid-cols-2 gap-3">
-              {AGENTS.map((agent) => {
-                const selected = draft.models[agent] ?? ""
+              {MODEL_SIZES.map(({ key, label }) => {
+                const selected = draft.models[key]
                 return (
-                  <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
+                  <Field key={key} label={label}>
                     <StyledSelect
                       quiet
-                      ariaLabel={`Model of ${agent}`}
+                      ariaLabel={label}
                       value={selected}
-                      disabled={agent === "reviewer" && !draft.review}
-                      onChange={(value) => changeModel(agent, value)}
+                      onChange={(value) => changeModel(key, value)}
                       options={agentModelOptions("Pi default", factoryModels ?? [], selected)}
                     />
                   </Field>
