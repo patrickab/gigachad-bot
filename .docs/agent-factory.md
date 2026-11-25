@@ -8,8 +8,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 - **Not in this repo.** The factory is the package `agent-factory`, a repository of its own:
   [`patrickab/agent-factory`](https://github.com/patrickab/agent-factory) (locally `~/git/agent-factory`). It ships the
   core (`src/core.ts`), the `factory` CLI, the `factory-mcp` server and the Pi extension (`src/pi/`).
-- **Installed** from a clone: its `factory` CLI on the PATH of pi-host's user (env `AGENT_FACTORY_CLI` names another
-  executable), and the clone registered as a Pi package (`pi install <clone>`), so every Pi session loads the extension.
+- **Installed** from a clone: its `factory` CLI on pi-host's PATH (the shell's under `run.sh`, the pi-host unit's in
+  production) or named by env `AGENT_FACTORY_CLI` (production: `.docs/deployment.md`, "Provision the agent factory"),
+  and the clone registered as a Pi package (`pi install <clone>`), so every Pi session loads the extension.
   Tasks the old plugin location (`~/.pi/agent/extensions/factory/`) started keep running.
 - **Why**: it runs in any Pi session on any repo (the `factory` tool, `/factory` commands), with or without gigachad.
   It is the factory core: repos, settings, `factory.yaml`, tasks, their runners and files. gigachad is a thin client.

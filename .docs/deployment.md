@@ -284,8 +284,16 @@ runs factory tasks:
 
 | Dependency | Source | Installed as | Without it |
 | --- | --- | --- | --- |
-| `agent-factory` (core, `factory` CLI, Pi extension) | [patrickab/agent-factory](https://github.com/patrickab/agent-factory) | a clone; its `factory` CLI on the service's `PATH` (or env `AGENT_FACTORY_CLI` in the pi-host unit), the clone registered with `pi install <clone>` | No task starts, the board reports `factory_plugin_missing` with this link |
+| `agent-factory` (core, `factory` CLI, Pi extension) | [patrickab/agent-factory](https://github.com/patrickab/agent-factory) | a clone registered with `pi install <clone>`; its `factory` CLI named in the environment file (below) | No task starts, the board reports `factory_plugin_missing` with this link |
 | `agent-worktree` | [`.os`: `chezmoi/dot_local/bin/executable_agent-worktree`](https://github.com/patrickab/.os/blob/master/chezmoi/dot_local/bin/executable_agent-worktree) | `~/.local/bin/agent-worktree` (`chezmoi apply`, or copy the script to a directory on the service's `PATH`) | No worktree task starts (tasks in the checkout still do) |
+
+The pi-host unit finds the CLI through one line in `~/.config/gigachad-bot/env`:
+`AGENT_FACTORY_CLI=<absolute path of the factory binary>` (a clone's binary is `<clone>/src/cli.ts`).
+`run-production-pi-host.sh` loads that file through `deploy/load-env.sh` before it starts pi-host; a variable the unit
+already sets wins over the file. pi-host reads it at start, so restart `gigachad-bot-pi-host.service` after the change.
+Without the line pi-host looks for `factory` on the unit's `PATH` (set in `gigachad-bot-pi-host.service`, not the login
+shell's), which has no `~/.bun/bin`, where `bun install -g` and `bun link` put it. The binary's `#!/usr/bin/env bun`
+finds `bun` on the unit's `PATH` through mise's shims or linuxbrew, as pi-host itself does.
 
 pi-host runs `factory --core-path` once and imports the file it prints. A package update reaches a task when its
 runner next starts; pi-host imports `core.ts` again when its mtime changes, a change only in another module of the

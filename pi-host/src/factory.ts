@@ -43,11 +43,28 @@ let cachedCorePath: { cli: string; path: string } | undefined;
 /** The core's path from `<cli> --core-path`; throws with the reason when the CLI is missing, fails or names none. */
 async function factoryCorePath(cli: string): Promise<string> {
   if (cachedCorePath?.cli === cli) return cachedCorePath.path;
-  const child = Bun.spawn([cli, "--core-path"], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: CORE_PATH_TIMEOUT_MS });
-  const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  const child = Bun.spawn([cli, "--core-path"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  // A timer, not spawn's `timeout`: a wrapper script without `exec` leaves a grandchild holding stdout open after the
+  // kill, and reading stdout would wait for it.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`\`${cli} --core-path\` timed out after ${CORE_PATH_TIMEOUT_MS / 1000} s`));
+    }, CORE_PATH_TIMEOUT_MS);
+  });
+  let stdout: string, stderr: string, exitCode: number;
+  try {
+    [stdout, stderr, exitCode] = await Promise.race([
+      Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]),
+      timedOut,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   if (exitCode !== 0) throw new Error(`\`${cli} --core-path\` exited with ${exitCode}${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
   const path = stdout.trim();
-  if (!isAbsolute(path)) throw new Error(`\`${cli} --core-path\` printed no absolute path`);
+  if (!isAbsolute(path)) throw new Error(`\`${cli} --core-path\` printed no absolute path: ${JSON.stringify(path.slice(0, 200))}`);
   cachedCorePath = { cli, path };
   return path;
 }

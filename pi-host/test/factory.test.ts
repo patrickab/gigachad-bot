@@ -1,6 +1,6 @@
 /** Factory routes against a stand-in `factory` CLI and core in a scratch dir (never the installed package). */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleFactory } from "../src/factory.ts";
@@ -85,12 +85,17 @@ describe("factory routes", () => {
   }
 
   test("without the factory CLI both routes answer 503 naming the package's source", async () => {
-    await expectMissing(`posix_spawn '${cli}'`);
+    await expectMissing(cli);
   });
 
   test("a failing CLI is a missing factory", async () => {
     await writeCli('echo "broken install" >&2; exit 3');
     await expectMissing("exited with 3: broken install");
+  });
+
+  test("a CLI printing no absolute path is a missing factory, the answer shows what it printed", async () => {
+    await writeCli('echo "warning: something"; echo "src/core.ts"');
+    await expectMissing('printed no absolute path: "warning: something\\nsrc/core.ts"');
   });
 
   test("a CLI naming a core that does not exist is a missing factory", async () => {
@@ -133,6 +138,20 @@ describe("factory routes", () => {
     await utimes(core, later, later);
 
     expect(Object.keys((await call("GET", "/factory/actions")).json.actions as object)).toEqual(["repos.add"]);
+  });
+
+  test("a moved core answers 503 once, then the CLI is asked again", async () => {
+    const moved = join(scratch, "moved-core.ts");
+    await rename(core, moved);
+    await writeCli(`echo "${moved}"`);
+    const runs = await cliRuns();
+
+    const first = await call("GET", "/factory/actions");
+    expect(first.status).toBe(503);
+    expect(first.json.message).toContain(core);
+    expect(await cliRuns()).toBe(runs);
+    expect((await call("GET", "/factory/actions")).status).toBe(200);
+    expect(await cliRuns()).toBe(runs + 1);
   });
 
   test("a body without an action is invalid, a wrong method is refused, other paths are not the factory's", async () => {
