@@ -22,7 +22,7 @@ import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighli
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
-import { toolImageAttachments, toolImagesOf } from "./toolImages"
+import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
 import "./FactoryNotices"
@@ -284,6 +284,7 @@ interface PiTurnProps {
 const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks, onResizeStart }: PiTurnProps) {
   const prompt = messages[turn.start]
   const { text, compaction, skill } = promptOf(prompt)
+  const promptImages = useMemo(() => userImageAttachments((prompt as { content?: unknown }).content), [prompt])
   const pieces = answerPieces(messages, turn, streaming, confirmed, runs)
   const promptMarks = marksAt(confirmed, turn.start)
   const promptEntryId = turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined
@@ -322,6 +323,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
         {promptMarks && <MarksLine marks={promptMarks} />}
         {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
         {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
+        {promptImages.length > 0 && <ToolImages attachments={promptImages} />}
       </TurnRegion>
       {pieces.length > 0 && (
         <TurnSurface>

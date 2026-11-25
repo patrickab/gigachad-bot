@@ -33,3 +33,9 @@ export function toolImageAttachments(toolName: string, images: ToolImage[]): Att
   }
   return attachments
 }
+
+/** The image blocks of a user message as chat image attachments (none for a plain-text message). */
+export function userImageAttachments(content: unknown): Attachment[] {
+  if (!Array.isArray(content)) return []
+  return toolImageAttachments("image", content.filter((block): block is ToolImage => block?.type === "image"))
+}

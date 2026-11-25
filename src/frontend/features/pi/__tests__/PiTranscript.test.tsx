@@ -279,3 +279,24 @@ describe("PiTranscript tool images and reads", () => {
     expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
   })
 })
+
+describe("PiTranscript user images", () => {
+  const reply: AgentMessage = { role: "assistant", content: [{ type: "text", text: "Seen" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 2 }
+
+  it("shows a user message's image block as a chat attachment", () => {
+    const content = [{ type: "text" as const, text: "Look" }, { type: "image" as const, mimeType: "image/png", data: "QUJD" }]
+    render(<PiTranscript transcript={transcriptOf([{ role: "user", content, timestamp: 1 }, reply])} fileLinks={fileLinks} />)
+    expect(screen.getByRole("img", { name: "image-1.png" }).getAttribute("src")).toBe("data:image/png;base64,QUJD")
+  })
+
+  it("shows the image of an optimistic prompt", () => {
+    const optimistic: AgentMessage = { role: "user", content: [{ type: "text", text: "Look" }, { type: "image", mimeType: "image/png", data: "QUJD" }], timestamp: 1 }
+    render(<PiTranscript transcript={transcriptOf([], { optimistic: optimistic as never })} fileLinks={fileLinks} />)
+    expect(screen.getByRole("img", { name: "image-1.png" })).toBeTruthy()
+  })
+
+  it("shows none for a message without images", () => {
+    render(<PiTranscript transcript={transcriptOf([{ role: "user", content: "Hi", timestamp: 1 }, reply])} fileLinks={fileLinks} />)
+    expect(screen.queryByRole("img")).toBeNull()
+  })
+})
