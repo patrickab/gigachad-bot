@@ -19,10 +19,10 @@ export function sessionWaves(waves: readonly FactoryWave[], sessionId: string): 
 }
 
 /**
- * The unfinished waves session `sessionId` declared in `repo`, from the core's `waves.list`.
+ * The unfinished waves session `sessionId` declared in `repo` (an absolute path), from the core's `waves.list`.
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket, as the board does
- * - A factory without waves (`unknown action`) has none, another failed read keeps the last list
+ * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
  */
 export function useSessionWaves(repo: string, sessionId: string): FactoryWave[] {
   const [waves, setWaves] = useState<FactoryWave[]>([])
@@ -34,7 +34,11 @@ export function useSessionWaves(repo: string, sessionId: string): FactoryWave[] 
       const current = () => !cancelled && call === latest
       callFactory<{ waves: FactoryWave[] }>("waves.list", { repo }).then(
         (answer) => { if (current()) setWaves(answer.waves) },
-        (cause: unknown) => { if (current() && isUnknownAction(cause)) setWaves([]) },
+        (cause: unknown) => {
+          if (!current()) return
+          if (isUnknownAction(cause)) setWaves([])
+          else console.error("waves.list failed", cause)
+        },
       )
     }
     read()

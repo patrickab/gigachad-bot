@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiSessionInfo } from "@/lib/backend/api"
+import { ApiError, callFactory, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiSessionInfo } from "@/lib/backend/api"
 import type { ModelsResponse, PiCatalog } from "@/lib/domain/types"
 import { PiTab } from "../PiTab"
 import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
@@ -19,8 +19,10 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
   fetchPiCatalog: vi.fn(),
   openPiSession: vi.fn(),
   restorePiSession: vi.fn(),
+  callFactory: vi.fn(async () => ({ waves: [] })),
 }))
 vi.mock("../sessionStore", () => ({ refreshPiSessions: vi.fn() }))
+vi.mock("../piSocket", async (importOriginal) => ({ ...await importOriginal<typeof import("../piSocket")>(), observePiSocket: () => () => {} }))
 vi.mock("../PiTranscript", () => ({
   PiTranscript: ({ onBranch }: { onBranch?: (entryId: string) => void }) => onBranch ? <button type="button" onClick={() => onBranch("entry-7")}>Branch</button> : null,
 }))
@@ -184,5 +186,14 @@ describe("PiTab", () => {
 
     await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ repo: "repo", sessionId: "s2" }))
     expect(openPiSession).toHaveBeenCalledWith("repo", { forkOf: { sessionPath: "/sessions/s1.jsonl", entryId: "entry-7" } })
+  })
+
+  it("reads the session's waves for its absolute cwd when the view names the checkout", async () => {
+    vi.mocked(fetchPiSessions).mockResolvedValue([sessionInfo("s1")])
+    vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
+    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} onOpenSession={vi.fn()} />)
+
+    await waitFor(() => expect(callFactory).toHaveBeenCalledWith("waves.list", { repo: "/home/u/git/repo" }))
+    expect(callFactory).not.toHaveBeenCalledWith("waves.list", { repo: "repo" })
   })
 })

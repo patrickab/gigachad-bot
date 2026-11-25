@@ -101,6 +101,15 @@ describe("SessionWaves", () => {
     expect(container.innerHTML).toBe("")
   })
 
+  it("reports any other failed read", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const cause = new Error("invalid: repo must be an absolute path")
+    api.callFactory.mockRejectedValue(cause)
+    render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenSession={vi.fn()} />)
+    await waitFor(() => expect(error).toHaveBeenCalledWith("waves.list failed", cause))
+    error.mockRestore()
+  })
+
   it("reads again on a factory change", async () => {
     api.callFactory.mockResolvedValueOnce({ waves: [] }).mockResolvedValueOnce({ waves: [wave("w1")] })
     renderPanel()
