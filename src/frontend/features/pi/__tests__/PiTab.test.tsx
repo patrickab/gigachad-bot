@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiSessionInfo } from "@/lib/backend/api"
 import type { ModelsResponse, PiCatalog } from "@/lib/domain/types"
-import { piSessionHistory, PiTab } from "../PiTab"
+import { PiTab } from "../PiTab"
 import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
@@ -63,7 +63,7 @@ const MODELS: ModelsResponse = {
     { label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-haiku-4-5"], source: "pi" },
     { label: "OpenRouter", provider_id: "openrouter", models: ["acme/model-x", "acme/gone"] },
   ],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+  defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
   tab_order: ["Pi", "OpenRouter"],
   unavailable: ["openrouter/acme/gone"],
 }
@@ -150,38 +150,6 @@ describe("PiTab", () => {
     render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} />)
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "half a thought" } })
     expect(stored.get("gigachad:draft:pi:new:repo")).toBe("half a thought")
-  })
-
-  it("runs a shell command (/memorize) instead of starting a session with it", async () => {
-    const run = vi.fn(async (text: string) => text === "/memorize")
-    render(<PiTab view={{ repo: "repo", sessionId: null }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} shellCommands={{ names: ["memorize"], run }} />)
-    sendText("/memorize")
-
-    await waitFor(() => expect(run).toHaveBeenCalledWith("/memorize"))
-    expect(openPiSession).not.toHaveBeenCalled()
-  })
-
-  it("runs /memorize in an open session through the shell, and exposes the session's prompts and replies for it", async () => {
-    vi.mocked(fetchPiSessions).mockResolvedValue([sessionInfo("s1")])
-    vi.mocked(openPiSession).mockResolvedValue(sessionInfo("s1"))
-    session.transcript = {
-      ...EMPTY_TRANSCRIPT,
-      messages: [
-        { role: "user", content: "fix the bug", timestamp: 1 },
-        { role: "assistant", content: [{ type: "thinking", thinking: "hm" }, { type: "text", text: "Fixed." }], timestamp: 2 } as never,
-        { role: "toolResult", toolCallId: "t", toolName: "bash", content: [], isError: false, timestamp: 3 } as never,
-      ],
-    }
-    const run = vi.fn(async (text: string) => text === "/memorize")
-    render(<PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={vi.fn()} modelProps={MODEL_PROPS} shellCommands={{ names: ["memorize"], run }} />)
-    await screen.findByRole("textbox")
-    await waitFor(() => expect(piSessionHistory("s1")).toEqual([{ role: "user", content: "fix the bug" }, { role: "assistant", content: "Fixed." }]))
-
-    sendText("/memorize")
-    await waitFor(() => expect(run).toHaveBeenCalledWith("/memorize"))
-    expect(send).not.toHaveBeenCalled()
-    cleanup()
-    expect(piSessionHistory("s1")).toBeNull()
   })
 
   it("restores an archived session before reopening it", async () => {

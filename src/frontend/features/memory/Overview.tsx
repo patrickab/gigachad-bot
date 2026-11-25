@@ -1,116 +1,87 @@
 "use client"
 
-import { useState } from "react"
-import { ChevronDown, ChevronRight, ListOrdered, Plus, Shuffle, Trash2 } from "lucide-react"
+import type { ReactNode } from "react"
+import { FileText, Folder, List } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { EditableText } from "@/features/memory/EditableText"
-import { formatTopicHeading, formatUpdated } from "@/features/memory/memoryUtils"
-import { topicRows, type ScopeMemory, type TopicRow } from "@/features/memory/scopeEdits"
+import { formatUpdated, relativeTo, type MemoryLocation } from "@/features/memory/memoryUtils"
+import type { MemorySection } from "@/features/memory/useMemoryLibrary"
 
-const SECTION_ACTION_CLASS = "rounded-md p-1 text-ink-subtle opacity-0 transition-opacity hover:bg-hover hover:text-ink group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-
-/** Every scope with its topics: "You" first, then collapsible projects. */
-export function Overview({ scopes, expanded, onToggle, onOpen, onCreate, onDelete, onRegroup, onRank }: {
-  scopes: ScopeMemory[]
-  expanded: Set<string>
-  onToggle: (scopeKey: string) => void
-  onOpen: (scopeKey: string, name: string) => void
-  onCreate: (scopeKey: string, title: string) => string | void
-  onDelete: (scopeKey: string, name: string) => void
-  onRegroup: (scopeKey: string) => void
-  onRank: (scopeKey: string) => void
+/** The listed level: at the root a section per memory_store, else the one memory_store or directory. Rows open nested levels, memories and documents. */
+export function Overview({ sections, showHeadings, onOpenLocation, onOpenPage }: {
+  sections: MemorySection[]
+  showHeadings: boolean
+  onOpenLocation: (location: MemoryLocation) => void
+  onOpenPage: (memoryStore: string, path: string) => void
 }) {
-  const [creatingIn, setCreatingIn] = useState<string | null>(null)
-  const [you, ...projects] = scopes
-
-  const rows = (scope: ScopeMemory, indent: boolean) => (
-    <>
-      {topicRows(scope).map((row) => (
-        <TopicListRow key={row.topic.name} row={row} indent={indent}
-          onOpen={() => onOpen(scope.key, row.topic.name)}
-          onDelete={() => onDelete(scope.key, row.topic.name)} />
-      ))}
-      {creatingIn === scope.key && (
-        <div className={cn("border-b border-divider/40 px-3 py-2", indent && "pl-9")}>
-          <EditableText value="" label={`New topic in ${scope.label}`} startEditing className="text-sm text-ink"
-            onCommit={(title) => onCreate(scope.key, title)} onDone={() => setCreatingIn(null)} />
-        </div>
-      )}
-    </>
-  )
-
-  const actions = (scope: ScopeMemory) => (
-    <div className="flex items-center gap-0.5">
-      {scope.memories.length > 1 && (
-        <>
-          <button onClick={(e) => { e.stopPropagation(); onRank(scope.key) }} aria-label={`Relevance order in ${scope.label}`} className={SECTION_ACTION_CLASS}>
-            <ListOrdered className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onRegroup(scope.key) }} aria-label={`Regroup topics in ${scope.label}`} className={SECTION_ACTION_CLASS}>
-            <Shuffle className="h-3.5 w-3.5" />
-          </button>
-        </>
-      )}
-      <button onClick={(e) => { e.stopPropagation(); setCreatingIn(scope.key) }} aria-label={`New topic in ${scope.label}`} className={SECTION_ACTION_CLASS}>
-        <Plus className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  )
-
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
-      <section aria-label="You" className="group/section">
-        <div className="flex items-center justify-between px-3 pb-2 pt-4">
-          <h3 className="text-sm font-semibold text-ink">You</h3>
-          {actions(you)}
-        </div>
-        {rows(you, false)}
-      </section>
-
-      {projects.length > 0 && (
-        <section aria-label="Projects">
-          <h3 className="px-3 pb-2 pt-8 text-sm font-semibold text-ink">Projects</h3>
-          {projects.map((project) => {
-            const isExpanded = expanded.has(project.key)
-            return (
-              <div key={project.key} className="group/section">
-                <div className="flex items-center rounded-lg pr-2 transition-colors hover:bg-hover">
-                  <button onClick={() => onToggle(project.key)} aria-expanded={isExpanded}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />}
-                    <span className="truncate">{project.label}</span>
-                  </button>
-                  {actions(project)}
-                </div>
-                {(isExpanded || creatingIn === project.key) && rows(project, true)}
-              </div>
-            )
-          })}
+      {sections.map((section) => (
+        <section key={`${section.memoryStore}:${section.path}`} aria-label={section.memoryStore}>
+          {showHeadings && (
+            <button onClick={() => onOpenLocation({ memoryStore: section.memoryStore, path: "" })}
+              className="mx-1 mb-1 mt-4 rounded-md px-2 py-0.5 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+              {section.memoryStore}
+            </button>
+          )}
+          <SectionRows section={section} onOpenLocation={onOpenLocation} onOpenPage={onOpenPage} />
         </section>
-      )}
+      ))}
     </div>
   )
 }
 
-function TopicListRow({ row, indent, onOpen, onDelete }: {
-  row: TopicRow
-  indent: boolean
-  onOpen: () => void
-  onDelete: () => void
+function SectionRows({ section, onOpenLocation, onOpenPage }: {
+  section: MemorySection
+  onOpenLocation: (location: MemoryLocation) => void
+  onOpenPage: (memoryStore: string, path: string) => void
 }) {
-  const title = formatTopicHeading(row.topic.name)
+  const { memoryStore, path, listing } = section
+  const empty = !listing.memory_stores.length && !listing.directories.length && !listing.memories.length && !listing.documents.length
+  if (empty) return <p className="px-3 py-2.5 text-sm text-ink-faint">Empty</p>
+
   return (
-    <div className="group/row flex items-center rounded-lg border-b border-divider/40 transition-colors hover:border-transparent hover:bg-hover">
-      <button onClick={onOpen} aria-label={`Open ${title}`}
-        className={cn("grid min-w-0 flex-1 grid-cols-[minmax(0,14rem)_minmax(0,1fr)_9rem] items-center gap-4 rounded-lg px-3 py-2.5 text-left text-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted", indent && "pl-9")}>
-        <span className="truncate text-ink">{title}</span>
-        <span className="truncate text-ink-muted">{row.topic.summary}</span>
-        <span className="truncate text-ink-subtle">{formatUpdated(row.updatedAt)}</span>
-      </button>
-      <button onClick={onDelete} aria-label={`Delete ${title}`}
-        className="mr-2 rounded-md p-1.5 text-ink-subtle opacity-0 transition-opacity hover:text-danger group-hover/row:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
+    <>
+      {listing.memory_stores.map((nested) => (
+        <Row key={`store:${nested}`} icon={Folder} name={relativeTo(nested, memoryStore)}
+          onOpen={() => onOpenLocation({ memoryStore: nested, path: "" })} />
+      ))}
+      {listing.directories.map((directory) => (
+        <Row key={`dir:${directory}`} icon={Folder} name={relativeTo(directory, path)}
+          onOpen={() => onOpenLocation({ memoryStore, path: directory })} />
+      ))}
+      {listing.memories.map((memory) => (
+        <Row key={`memory:${memory.path}`} icon={List} name={relativeTo(memory.path, path)}
+          secondary={memory.error ? <span className="text-danger">Unreadable</span> : memory.description}
+          updated={formatUpdated(memory.updated)}
+          onOpen={() => onOpenPage(memoryStore, memory.path)} />
+      ))}
+      {listing.documents.map((document) => (
+        <Row key={`doc:${document.path}`} icon={FileText} name={relativeTo(document.path, path)}
+          updated={formatUpdated(document.modified)}
+          onOpen={() => onOpenPage(memoryStore, document.path)} />
+      ))}
+    </>
+  )
+}
+
+function Row({ icon: Icon, name, secondary, updated, onOpen }: {
+  icon: LucideIcon
+  name: string
+  secondary?: ReactNode
+  updated?: string
+  onOpen: () => void
+}) {
+  return (
+    <button onClick={onOpen} aria-label={`Open ${name}`}
+      className={cn("grid w-full min-w-0 grid-cols-[minmax(0,14rem)_minmax(0,1fr)_9rem] items-center gap-4 rounded-lg border-b border-divider/40 px-3 py-2.5 text-left text-sm transition-colors",
+        "hover:border-transparent hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted")}>
+      <span className="flex min-w-0 items-center gap-2 text-ink">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
+        <span className="truncate">{name}</span>
+      </span>
+      <span className="truncate text-ink-muted">{secondary}</span>
+      <span className="truncate text-ink-subtle">{updated}</span>
+    </button>
   )
 }

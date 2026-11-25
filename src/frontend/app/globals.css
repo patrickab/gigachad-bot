@@ -25,7 +25,7 @@
  :root {
   /* Stacking layers of the app's overlays, bottom to top. The tab picker sits above floating windows, so a window
      open in the active tab never covers it, and below dialogs.
-     --z-floating   FloatingWindow (MemoryPanel 80 and MemoryViewer 95 shift it within the band)
+     --z-floating   FloatingWindow (MemoryViewer 95 shifts it within the band)
      --z-picker     the tab picker's dimmed page and preview window (components/ui/CommandPicker.tsx)
      --z-picker-frame  a shared frame over a previewed tab's slot (hooks/useFrameOverSlot.ts)
      --z-picker-tab the previewed tab, scaled into the window at full layout size (TabManager)

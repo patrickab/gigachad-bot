@@ -24,7 +24,6 @@ import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
 import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { writeRootFile } from "@/lib/backend/api"
-import { MemoryCommandLayer } from "./MemoryCommandLayer"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
@@ -107,7 +106,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const canvas = useCanvasView()
   const {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, shellCommands, turns, attachmentActions, attachMenuItems, onBranch,
+    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onBranch,
   } = useTabChat({ focus, onOpenChat, onOpenItem })
   const { models } = chat
   const { standaloneFile } = filePicker
@@ -174,7 +173,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           totalUsage={chat.totalUsage}
           chatColumn={chatColumn}
           chatBody={chatBody}
-          shellCommands={shellCommands}
           launch={launch}
           onLaunched={() => setLaunch(null)}
           onOpenItem={onOpenItem}
@@ -231,7 +229,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
         />
       )}
       <TabPicker />
-      <MemoryCommandLayer bar={memory} items={menuItems} onRun={runMenuCommand} />
     </div>
   )
 }

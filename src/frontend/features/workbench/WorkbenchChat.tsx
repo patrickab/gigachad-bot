@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react"
 import type { PiInsertion } from "@/features/pi/PiComposer"
-import type { PiShellCommands } from "@/features/pi/PiTab"
 import type { PiCatalogProps } from "@/features/pi/PiTopBar"
 import { DocumentChat } from "./DocumentChat"
 import { useDocumentChat, type DocumentChat as DocumentChatState } from "./useDocumentChat"
@@ -14,7 +13,6 @@ export interface WorkbenchChatProps {
   onChatSessionChange: (sessionId: string) => void
   drawerOpen: boolean
   onDrawerOpenChange: (open: boolean) => void
-  shellCommands: PiShellCommands
   modelProps: PiCatalogProps
 }
 
@@ -43,14 +41,13 @@ export function useWorkbenchChat(key: string, lead: (cwd: string) => string, { c
 }
 
 /** The chat drawer of a workbench in the tab's file panel. Its header holds the session's model and thinking controls, a chat's dropdown and selector. */
-export function WorkbenchChat({ state, drawerOpen, onDrawerOpenChange, shellCommands, modelProps }: Pick<WorkbenchChatProps, "drawerOpen" | "onDrawerOpenChange" | "shellCommands" | "modelProps"> & { state: WorkbenchChatState }) {
+export function WorkbenchChat({ state, drawerOpen, onDrawerOpenChange, modelProps }: Pick<WorkbenchChatProps, "drawerOpen" | "onDrawerOpenChange" | "modelProps"> & { state: WorkbenchChatState }) {
   if (!drawerOpen) return null
   return (
     <DocumentChat
       chat={state.chat}
       width={DRAWER_WIDTH_PX}
       onClose={() => onDrawerOpenChange(false)}
-      shellCommands={shellCommands}
       modelProps={modelProps}
       insertion={state.insertion}
       onInserted={state.onInserted}

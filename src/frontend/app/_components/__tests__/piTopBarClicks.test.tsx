@@ -47,7 +47,6 @@ describe("WorkspaceSurface Pi top bar", () => {
             totalUsage={{} as never}
             chatColumn={null}
             chatBody={null}
-            shellCommands={{} as never}
             launch={null}
             onLaunched={noop}
             onOpenItem={noop}

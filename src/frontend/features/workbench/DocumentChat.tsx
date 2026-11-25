@@ -7,7 +7,7 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { MenuPopover } from "@/components/ui/MenuPopover"
 import { FilePanel } from "@/features/editor/FilePanel"
 import type { PiInsertion } from "@/features/pi/PiComposer"
-import { PiSessionView, type PiShellCommands } from "@/features/pi/PiTab"
+import { PiSessionView } from "@/features/pi/PiTab"
 import { PiPanelBar, type PiCatalogProps, type PiSessionControls, type PiSessionHeader } from "@/features/pi/PiTopBar"
 import { archivePiSession, fetchWorkbenchChats, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import { cn, errorMessage } from "@/lib/utils"
@@ -121,11 +121,10 @@ function SessionMenu({ chat, onNew }: { chat: DocumentChatState; onNew: () => vo
  * - `insertion` (a quote, a canvas screenshot) goes into the composer once the session is ready
  * - A PDF whose text is still extracted shows that instead of the session until it is ready (`pending`)
  */
-export function DocumentChat({ chat, width, onClose, shellCommands, modelProps, insertion, onInserted }: {
+export function DocumentChat({ chat, width, onClose, modelProps, insertion, onInserted }: {
   chat: DocumentChatState
   width: number
   onClose: () => void
-  shellCommands?: PiShellCommands
   modelProps: PiCatalogProps
   insertion?: PiInsertion | null
   onInserted?: () => void
@@ -148,7 +147,6 @@ export function DocumentChat({ chat, width, onClose, shellCommands, modelProps, 
           cwd={opened.cwd}
           files={{ cwd: opened.cwd }}
           renderHeader={inBar}
-          shellCommands={shellCommands}
           insertion={insertion}
           onInserted={onInserted}
           lead={chat.lead}

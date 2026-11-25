@@ -1,144 +1,172 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useProject } from "@/contexts/ProjectContext"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { getMemories, getTopics, saveMemories, saveTopics } from "@/lib/backend/api"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { applyMemoryOps, listMemories, readMemory } from "@/lib/backend/api"
+import type { Fact, MemoryListing, MemoryOp, MemoryOpResult, MemoryRead } from "@/lib/domain/memory"
 import { errorMessage } from "@/lib/utils"
-import { formatTopicHeading, memoryScopeKey, normalizeMemoryTopic } from "@/features/memory/memoryUtils"
-import { deleteMemory, deleteTopic, restoreMemory, restoreTopic, type ScopeChange, type ScopeMemory } from "@/features/memory/scopeEdits"
+import { newestFirst, ROOT_LOCATION, type MemoryLocation } from "@/features/memory/memoryUtils"
 
-type ScopeTarget = Omit<ScopeMemory, "topics" | "memories">
-
-async function loadScope(target: ScopeTarget): Promise<ScopeMemory> {
-  const [topicsResponse, memoriesResponse] = await Promise.all([
-    getTopics(target.scope, target.projectSlug),
-    getMemories(target.scope, target.projectSlug),
-  ])
-  return { ...target, topics: topicsResponse.topics, memories: memoriesResponse.memories }
+/** One listed level: the root shows a section per top-level memory_store, any other location one section. */
+export interface MemorySection extends MemoryLocation {
+  listing: MemoryListing
 }
 
-const sameContent = (a: ScopeMemory, b: ScopeMemory) => JSON.stringify([a.topics, a.memories]) === JSON.stringify([b.topics, b.memories])
+/** The memory or document open in the window. */
+export interface MemoryPageTarget {
+  memoryStore: string
+  path: string
+}
 
-/** Load every scope, apply changes locally, write each scope in order and reload a scope when another writer changes it. */
+export type MemoryPage =
+  | { kind: "memory"; description: string; facts: Fact[] }
+  | { kind: "document"; text: string }
+
+async function loadSections(location: MemoryLocation): Promise<MemorySection[]> {
+  if (location.memoryStore) return [{ ...location, listing: await listMemories(location.memoryStore, location.path) }]
+  const root = await listMemories()
+  return Promise.all(root.memory_stores.map(async (memoryStore) => ({ memoryStore, path: "", listing: await listMemories(memoryStore) })))
+}
+
+function toPage(read: MemoryRead): MemoryPage {
+  return read.kind === "memory" ? { ...read, facts: newestFirst(read.facts) } : read
+}
+
+const sameTarget = (a: MemoryPageTarget | null, b: MemoryPageTarget) => a?.memoryStore === b.memoryStore && a.path === b.path
+const retireKey = (at: MemoryPageTarget, id: string) => `memory-fact:${at.memoryStore}:${at.path}:${id}`
+
+/**
+ * Browse the memory root and edit the open memory.
+ *
+ * - Edits show at once and are written in order, one batch at a time; the memory is read again once no write is pending
+ * - A retire waits out the undo window, undo brings the fact back; a read meanwhile keeps the fact hidden
+ */
 export function useMemoryLibrary() {
-  const { projects } = useProject()
-  const { schedule } = useUndoDelete()
-  const [scopes, setScopes] = useState<ScopeMemory[] | null>(null)
+  const { schedule, pending } = useUndoDelete()
+  const [trail, setTrail] = useState<MemoryLocation[]>([ROOT_LOCATION])
+  const [sections, setSections] = useState<MemorySection[] | null>(null)
+  const [target, setTarget] = useState<MemoryPageTarget | null>(null)
+  const [storedPage, setPage] = useState<MemoryPage | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const latest = useRef<ScopeMemory[]>([])
-  const writes = useRef(new Map<string, Promise<void>>())
-  const savesInFlight = useRef(new Map<string, number>())
-  const localEdits = useRef(new Map<string, number>())
+  const [listVersion, setListVersion] = useState(0)
+  const location = trail[trail.length - 1]
 
-  // Reload only when the set of visible projects changes, not on every catalog refresh.
-  const projectList = projects.filter((p) => !p.archived).map((p) => `${p.slug}\n${p.name}`).join("\n\n")
-  const targets = useMemo(() => [
-    { key: "global", scope: "global" as const, projectSlug: null, label: "You" },
-    ...(projectList ? projectList.split("\n\n") : []).map((entry) => {
-      const [slug, name] = entry.split("\n")
-      return { key: `project:${slug}`, scope: "project" as const, projectSlug: slug, label: name }
-    }),
-  ], [projectList])
+  const currentTarget = useRef<MemoryPageTarget | null>(null)
+  const writes = useRef<Promise<unknown>>(Promise.resolve())
+  const pendingWrites = useRef(0)
+  // A shown fact keeps its id while its add or update is written; this maps it to the latest stored id.
+  const [storedIds] = useState(() => new Map<string, string>())
+  const localIds = useRef(0)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all(targets.map(loadScope))
-      .then((loaded) => {
-        if (cancelled) return
-        latest.current = loaded
-        setScopes(loaded)
-      })
+    loadSections(location)
+      .then((loaded) => { if (!cancelled) setSections(loaded) })
       .catch((e) => { if (!cancelled) setError(errorMessage(e, "Failed to load memory")) })
     return () => { cancelled = true }
-  }, [targets])
+  }, [location, listVersion])
 
-  // Memorize commits and other devices rewrite the memory documents. A reload yields to any local edit made meanwhile.
-  useEffect(() => {
-    let disposed = false
-    const timers = new Map<string, ReturnType<typeof setTimeout>>()
-    const reload = async (target: ScopeTarget) => {
-      const editsBefore = localEdits.current.get(target.key) ?? 0
-      try {
-        const fresh = await loadScope(target)
-        const edited = (localEdits.current.get(target.key) ?? 0) !== editsBefore || (savesInFlight.current.get(target.key) ?? 0) > 0
-        const current = latest.current.find((s) => s.key === target.key)
-        if (disposed || edited || !current || sameContent(current, fresh)) return
-        latest.current = latest.current.map((s) => s.key === target.key ? fresh : s)
-        setScopes(latest.current)
-      } catch (e) {
-        if (!disposed) setError(errorMessage(e, "Failed to refresh memory"))
-      }
+  const refresh = useCallback(async (at: MemoryPageTarget) => {
+    try {
+      const read = await readMemory(at.memoryStore, at.path)
+      if (sameTarget(currentTarget.current, at)) setPage(toPage(read))
+    } catch (e) {
+      if (sameTarget(currentTarget.current, at)) setError(errorMessage(e, "Failed to load memory"))
     }
-    const unsubscribe = subscribeToChanges((event) => {
-      const key = event.resource_kind === "document" ? memoryScopeKey(event.resource_key) : null
-      const target = targets.find((t) => t.key === key)
-      if (!target) return
-      clearTimeout(timers.get(target.key))
-      timers.set(target.key, setTimeout(() => void reload(target), 150))
-    })
-    return () => {
-      disposed = true
-      unsubscribe()
-      timers.forEach(clearTimeout)
+  }, [])
+
+  const openLocation = useCallback((next: MemoryLocation) => {
+    setSections(null)
+    setTrail((current) => [...current, next])
+  }, [])
+
+  const openPage = useCallback((memoryStore: string, path: string) => {
+    const at = { memoryStore, path }
+    currentTarget.current = at
+    setPage(null)
+    setTarget(at)
+    void refresh(at)
+  }, [refresh])
+
+  /** Leave the open page for its listing, else go up one location. */
+  const back = useCallback(() => {
+    if (target) {
+      currentTarget.current = null
+      setTarget(null)
+      setPage(null)
+      setListVersion((version) => version + 1)
+    } else if (trail.length > 1) {
+      setSections(null)
+      setTrail((current) => current.slice(0, -1))
     }
-  }, [targets])
+  }, [target, trail.length])
 
-  const change = useCallback((key: string, apply: ScopeChange) => {
-    localEdits.current.set(key, (localEdits.current.get(key) ?? 0) + 1)
-    latest.current = latest.current.map((s) => s.key === key ? { ...s, ...apply(s) } : s)
-    setScopes(latest.current)
-  }, [])
-
-  // Writes queue per scope and read the newest state when they run, so rapid edits never land out of order.
-  const save = useCallback((key: string): Promise<void> => {
-    const previous = writes.current.get(key) ?? Promise.resolve()
-    savesInFlight.current.set(key, (savesInFlight.current.get(key) ?? 0) + 1)
-    const write = previous.catch(() => {}).then(async () => {
-      const scope = latest.current.find((s) => s.key === key)
-      if (!scope) return
-      await saveTopics(scope.scope, scope.topics, scope.projectSlug)
-      await saveMemories(scope.scope, scope.memories, scope.projectSlug)
-    }).finally(() => savesInFlight.current.set(key, (savesInFlight.current.get(key) ?? 1) - 1))
-    writes.current.set(key, write)
-    return write
-  }, [])
-
-  const reportError = useCallback((e: unknown) => {
-    setError(`Could not save memory: ${errorMessage(e, "unknown error")}`)
-  }, [])
-
-  const update = useCallback((key: string, apply: ScopeChange) => {
-    change(key, apply)
-    save(key).catch(reportError)
-  }, [change, save, reportError])
-
-  const scopeOf = useCallback((key: string) => scopes?.find((s) => s.key === key), [scopes])
-
-  /** Remove content optimistically; the delete is written when the undo window ends, `restore` puts it back and writes again. */
-  const removeWithUndo = useCallback((scopeKey: string, undoKey: string, label: string, remove: ScopeChange, restore: ScopeChange) => {
-    change(scopeKey, remove)
-    schedule(undoKey, label, () => save(scopeKey), () => {
-      change(scopeKey, restore)
-      save(scopeKey).catch(reportError)
+  /** Queue a batch; `ops` is built when the batch runs, so local ids resolve to the ids stored meanwhile. Rejects when an op fails. */
+  const write = useCallback((at: MemoryPageTarget, ops: () => MemoryOp[], onResults?: (results: MemoryOpResult[]) => void): Promise<void> => {
+    pendingWrites.current += 1
+    const run = writes.current.then(async () => {
+      const results = await applyMemoryOps(at.memoryStore, ops())
+      onResults?.(results)
+      const failed = results.find((result) => !result.ok)
+      if (failed && !failed.ok) throw new Error(failed.message)
+    }).finally(() => {
+      pendingWrites.current -= 1
+      if (pendingWrites.current === 0) void refresh(at)
     })
-  }, [change, save, schedule, reportError])
+    writes.current = run.catch(() => {})
+    return run
+  }, [refresh])
 
-  const removeTopic = useCallback((scopeKey: string, name: string) => {
-    const scope = scopeOf(scopeKey)
-    if (!scope) return
-    const index = scope.topics.findIndex((t) => t.name === name)
-    const memories = scope.memories.filter((m) => normalizeMemoryTopic(m) === name)
-    removeWithUndo(scopeKey, `memory-topic:${scopeKey}:${name}`, formatTopicHeading(name), deleteTopic(name), restoreTopic(index, scope.topics[index], memories))
-  }, [scopeOf, removeWithUndo])
+  const reportError = useCallback((e: unknown) => setError(`Could not save memory: ${errorMessage(e, "unknown error")}`), [])
+  const storedId = (id: string) => storedIds.get(id) ?? id
 
-  const removeMemory = useCallback((scopeKey: string, memoryId: string) => {
-    const scope = scopeOf(scopeKey)
-    const index = scope?.memories.findIndex((m) => m.id === memoryId) ?? -1
-    if (!scope || index < 0) return
-    removeWithUndo(scopeKey, `memory:${memoryId}`, "memory", deleteMemory(memoryId), restoreMemory(index, scope.memories[index]))
-  }, [scopeOf, removeWithUndo])
+  const patchMemory = (change: (page: MemoryPage & { kind: "memory" }) => MemoryPage) =>
+    setPage((current) => current?.kind === "memory" ? change(current) : current)
 
-  return { scopes, error, setError, scopeOf, update, removeTopic, removeMemory }
+  const add = (text: string) => {
+    const at = target
+    if (!at) return
+    const now = new Date().toISOString()
+    localIds.current += 1
+    const localId = `local-${localIds.current}`
+    patchMemory((memory) => ({ ...memory, facts: [{ id: localId, text, created: now, updated: now }, ...memory.facts] }))
+    write(at, () => [{ op: "add", path: at.path, text }], ([result]) => {
+      if (result?.ok && result.id) storedIds.set(localId, result.id)
+    }).catch(reportError)
+  }
+
+  const update = (id: string, text: string) => {
+    const at = target
+    if (!at) return
+    const now = new Date().toISOString()
+    patchMemory((memory) => ({ ...memory, facts: newestFirst(memory.facts.map((fact) => fact.id === id ? { ...fact, text, updated: now } : fact)) }))
+    write(at, () => [{ op: "update", path: at.path, id: storedId(id), text }], ([result]) => {
+      if (result?.ok && result.id) storedIds.set(id, result.id)
+    }).catch(reportError)
+  }
+
+  const retire = (id: string) => {
+    const at = target
+    if (!at) return
+    patchMemory((memory) => ({ ...memory, facts: memory.facts.filter((fact) => fact.id !== id) }))
+    schedule(retireKey(at, id), "fact",
+      () => write(at, () => [{ op: "retire", path: at.path, id: storedId(id) }]),
+      () => void refresh(at))
+  }
+
+  const describe = (description: string) => {
+    const at = target
+    if (!at) return
+    patchMemory((memory) => ({ ...memory, description }))
+    write(at, () => [{ op: "describe", path: at.path, description }]).catch(reportError)
+  }
+
+  // A read during a retire's undo window (e.g. after another edit) still has the fact; it stays hidden until undone.
+  const shownIds = (id: string) => [id, ...[...storedIds].filter(([, stored]) => stored === id).map(([shown]) => shown)]
+  const hidden = (fact: Fact) => target !== null && shownIds(fact.id).some((id) => pending(retireKey(target, id)))
+  const page = storedPage?.kind === "memory" && storedPage.facts.some(hidden)
+    ? { ...storedPage, facts: storedPage.facts.filter((fact) => !hidden(fact)) }
+    : storedPage
+
+  return { location, trail, sections, target, page, error, setError, openLocation, openPage, back, add, update, retire, describe }
 }

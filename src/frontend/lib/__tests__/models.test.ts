@@ -42,7 +42,7 @@ describe("selectorIdOf", () => {
       { label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash"] },
       { label: "Pi", provider_id: PI_LITELLM_ID, models: ["anthropic/claude-sonnet-5"], source: "pi" },
     ],
-    defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+    defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
     tab_order: [],
     unavailable: [],
   }

@@ -41,7 +41,7 @@ function defaultTools(): ToolName[] {
 }
 
 /** Tools added after lists were saved as a bare array of names, which recorded no `known`. */
-const ADDED_AFTER_BARE_LISTS: readonly ToolName[] = ["start_learn_session"]
+const ADDED_AFTER_BARE_LISTS: readonly ToolName[] = ["start_learn_session", "memory"]
 
 /** What storage holds: the enabled tools and every tool the list's owner could choose from when it was saved. */
 interface SavedTools {

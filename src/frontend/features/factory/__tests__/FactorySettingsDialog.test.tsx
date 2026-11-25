@@ -61,7 +61,7 @@ const CATALOG: ModelsResponse = {
     { label: "OpenRouter", provider_id: "openrouter", models: ["hand-added", "gone"] },
     { label: "Gemini", provider_id: "gemini", models: ["gemini-pro"] },
   ],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+  defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
   tab_order: [],
   unavailable: ["openrouter/gone"],
 }

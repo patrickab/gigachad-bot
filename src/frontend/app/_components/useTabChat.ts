@@ -5,42 +5,20 @@ import type { ChatFocus } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 import { useBranches } from "@/features/navigation/BranchContext"
-import { itemOf, useTab, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
 import { useChatTurns } from "@/features/chat/useChatTurns"
 import { useFilePicker } from "@/features/chat/useFilePicker"
-import { useMemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
-import type { MemorizeSource } from "@/features/memory/useMemorizeFlow"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
-import { useSlashCommands } from "@/features/navigation/useSlashCommands"
-import { piSessionHistory, type PiShellCommands } from "@/features/pi/PiTab"
 import { loadChatHistory } from "@/lib/backend/api"
-import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
-import { isEditableTarget, isModKey, isTerminalKeyEvent } from "@/lib/utils"
+import { isTerminalKeyEvent } from "@/lib/utils"
 import { useBusyCount } from "@/hooks/useBusyCount"
 import { useEventListener } from "@/hooks/useEventListener"
 
-/** The open Pi session `sessionId`'s history, or why there is none. */
-async function piSource(sessionId: string): Promise<MemorizeSource> {
-  const messages = piSessionHistory(sessionId)
-  if (!messages) throw new Error("The Pi session is not open yet")
-  return { messages, conversationId: sessionId }
-}
-
-/** What `/memorize` reads in `tab`: the Pi session an agent tab shows, else the chat, never a branch chat. Null when there is none. */
-export function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branchMessageIdx: number | null): (() => Promise<MemorizeSource>) | null {
-  const { appMode } = tab
-  const piSessionId = appMode === "pi" ? itemOf(tab, "pi")?.pi?.sessionId ?? null : null
-  return useMemo(() => {
-    if (appMode === "pi") return piSessionId ? () => piSource(piSessionId) : null
-    return branchMessageIdx == null ? async () => ({ messages, conversationId: chatId }) : null
-  }, [appMode, piSessionId, branchMessageIdx, messages, chatId])
-}
-
-/** Run one tab's chat (history, turns, attachments, memory commands, shortcuts); called in every mode so the chat survives mode switches. */
+/** Run one tab's chat (history, turns, attachments, shortcuts); called in every mode so the chat survives mode switches. */
 export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus; onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
   const { tab, isActive, updateConfig, setHistoryFile, setTitle } = useTab()
   const { projectSlug, config, appMode } = tab
@@ -65,13 +43,6 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
   const filesEnabled = filePicker.rootFiles.enabled
   const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, track })
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
-  const memory = useMemoryCommandBar({ loadSource: useMemorizeSource(tab, messages, chatId, branchMessageIdx) })
-  const { menuItems, runSlashCommand } = useSlashCommands({
-    filesEnabled: filesEnabled && appMode === "chat",
-    openFilePicker: filePicker.openFilePicker,
-    memorize: memory.memorize,
-  })
-  const shellCommands = useMemo<PiShellCommands>(() => ({ names: menuItems.map((item) => item.command.slice(1)), run: runSlashCommand }), [menuItems, runSlashCommand])
   const turns = useChatTurns({
     chat,
     chatId,
@@ -80,7 +51,6 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
     reasoningEffort,
     prompts,
     autosave: persistence.handleAutosave,
-    runSlashCommand,
   })
   const { syncReferences } = turns
 
@@ -122,14 +92,9 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
     return () => { stale = true }
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage, syncReferences])
 
-  // Capture phase so the shortcuts win over handlers inside focused editors. A Pi tab keeps only Alt+M (memorize its session), the rest belong to the chat.
+  // Capture phase so the shortcuts win over handlers inside focused editors.
   useEventListener("window", "keydown", (e) => {
     if (isTerminalKeyEvent(e)) return
-    if (e.altKey && e.key.toLowerCase() === "m") {
-      e.preventDefault()
-      if (memory.isIdle) void memory.memorize()
-    }
-    if (appMode !== "chat") return
     if (e.altKey && e.key === "s") {
       e.preventDefault()
       if (persistence.isTitled) persistence.handleQuickSave()
@@ -140,27 +105,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
       e.preventDefault()
       if (filesEnabled) filePicker.openFilePicker()
     }
-
-    const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
-    const isCtrlK = isModKey(e) && e.key.toLowerCase() === "k"
-
-    if (isSlash || isCtrlK) {
-      if (isSlash && isEditableTarget(e.target)) return
-      e.preventDefault()
-      e.stopPropagation()
-      e.stopImmediatePropagation()
-      if (memory.isIdle) {
-        memory.openMenu()
-      }
-    }
-  }, { active: isActive && (appMode === "chat" || appMode === "pi"), capture: true })
-
-  // Picking a menu entry always closes the menu first; memorizing then replaces it with the review panel.
-  const { closeMenu: closeMemoryMenu } = memory
-  const runMenuCommand = useCallback((command: string) => {
-    closeMemoryMenu()
-    void runSlashCommand(command)
-  }, [closeMemoryMenu, runSlashCommand])
+  }, { active: isActive && appMode === "chat", capture: true })
 
   const attachmentActions = useMemo(() => ({
     onToggleActive: turns.handleToggleAttachmentActive,
@@ -185,7 +130,7 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
 
   return {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, shellCommands, turns, attachmentActions, attachMenuItems,
+    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems,
     onBranch: tab.historyFile ? handleBranch : undefined,
   }
 }

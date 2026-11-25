@@ -7,7 +7,7 @@ import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
 import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
-import type { Attachment, Message, PiCatalog, PiView } from "@/lib/domain/types"
+import type { Attachment, PiCatalog, PiView } from "@/lib/domain/types"
 import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
 import { BtwPanel } from "./BtwPanel"
 import { isBtwCommand } from "./btw"
@@ -18,8 +18,7 @@ import { usePiSearchFocus } from "./searchFocus"
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import type { SubagentRow } from "./subagents"
-import { textOf } from "./transcript"
-import type { AgentMessage, PiCommand, PiModel } from "./types"
+import type { PiCommand, PiModel } from "./types"
 import { usePiSession, type Notice } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
@@ -47,38 +46,6 @@ function piOpenError(reason: unknown, repo?: string): string {
   if (reason instanceof ApiError && reason.status === 409) return "Another Pi process holds this session"
   if (reason instanceof ApiError && reason.status === 404 && repo !== undefined && reason.message.startsWith("Unknown repository")) return `${repo} is not a folder`
   return reason instanceof Error ? reason.message : String(reason)
-}
-
-/** Commands the tab's shell runs itself (`/memorize`), offered in the composer's `/` menu. */
-export interface PiShellCommands {
-  /** Command names without the `/`. */
-  names: string[]
-  /** Run `text` if it is one of them and report whether it was. */
-  run: (text: string) => Promise<boolean>
-}
-
-/** Confirmed messages of each open session view, by session id, for `/memorize`. */
-const openTranscripts = new Map<string, AgentMessage[]>()
-
-/** The prompts and replies of the open session `sessionId` as a memorization reads them, null while no view shows it. */
-export function piSessionHistory(sessionId: string): Pick<Message, "role" | "content">[] | null {
-  const messages = openTranscripts.get(sessionId)
-  if (!messages) return null
-  return messages.flatMap((message) => {
-    if (message.role !== "user" && message.role !== "assistant") return []
-    const content = textOf(message.content).trim()
-    return content ? [{ role: message.role, content }] : []
-  })
-}
-
-/** Run `submit` as one of the tab's shell commands (`/memorize`) when it is one, reporting whether it was. */
-async function runShellCommand(submit: PiSubmit, shellCommands: PiShellCommands | undefined): Promise<boolean> {
-  return submit.action.kind === "prompt" && !!shellCommands && shellCommands.run(submit.action.text.trim())
-}
-
-/** `shellCommands` listed with Pi's commands in the composer's `/` menu. */
-function useComposerCommands(commands: PiCommand[], shellCommands: PiShellCommands | undefined): PiCommand[] {
-  return useMemo(() => [...commands, ...(shellCommands?.names ?? []).map((name): PiCommand => ({ name, source: "extension" }))], [commands, shellCommands])
 }
 
 /** Session `sessionId` of `repo` to resume: a listed one, or an archived one restored first. */
@@ -150,7 +117,7 @@ export function withLead(text: string, lead: string | undefined): string {
  * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
  */
-export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, shellCommands, insertion, onInserted, lead, onLeadSent, docked = false }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, insertion, onInserted, lead, onLeadSent, docked = false }: {
   sessionId: string
   cwd: string
   files: PiFileScope
@@ -159,7 +126,6 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   firstSubmit?: PiSubmit | null
   onFirstSubmitted?: () => void
   onBranch?: (fork: PiFork, prompt?: string) => Promise<void>
-  shellCommands?: PiShellCommands
   insertion?: PiInsertion | null
   onInserted?: () => void
   lead?: string
@@ -183,12 +149,6 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const dock = useComposerDock(empty && !docked)
   const { mountColumn } = dock
   const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
-  useEffect(() => {
-    openTranscripts.set(sessionId, messages)
-    return () => {
-      if (openTranscripts.get(sessionId) === messages) openTranscripts.delete(sessionId)
-    }
-  }, [sessionId, messages])
 
   // The lead already sent: one the owner has not cleared yet never leads a second prompt
   const sentLead = useRef<string | null>(null)
@@ -196,7 +156,6 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
     if (!lead) sentLead.current = null
   }, [lead])
 
-  const commands = useComposerCommands(session.commands, shellCommands)
   // `/compact` sent with Alt+Enter while a run is active waits for the run to settle: compacting now would abort it
   const pendingCompact = useRef<{ instructions?: string } | null>(null)
   useEffect(() => {
@@ -206,7 +165,6 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
     void compact(instructions)
   }, [transcript.running, compact])
   const submit = useCallback(async (request: PiSubmit) => {
-    if (await runShellCommand(request, shellCommands)) return
     const { action } = request
     if (action.kind === "prompt" && isBtwCommand(action.text)) void send(action.text, [])
     else if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
@@ -222,7 +180,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
         onLeadSent?.()
       }
     }
-  }, [runBash, compact, send, shellCommands, lead, onLeadSent, transcript.running])
+  }, [runBash, compact, send, lead, onLeadSent, transcript.running])
 
   const firstSent = useRef(false)
   useEffect(() => {
@@ -266,7 +224,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
           files={files}
           running={transcript.running}
           disabled={status.kind !== "ready" && !(status.kind === "connecting" && transcript.running)}
-          commands={commands}
+          commands={session.commands}
           dialog={session.dialogs[0]}
           queue={transcript.queue}
           notices={notices}
@@ -294,19 +252,17 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
  * - The top bar picks the model from the user's catalog (`modelProps`, the chats' dropdown with Manage models) among those Pi offers, the thinking
  *   level from the model's ladder
  * - A tab with a session resumes it (spawns its Pi process when none runs), an archived one is restored first
- * - `shellCommands` (`/memorize`) share the composer's `/` menu, the shell runs them instead of sending them
  * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
  * - The repo and live dot sit in the composer's action row, where an empty chat picks its project
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  */
-export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched, shellCommands }: {
+export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched }: {
   view: PiView
   onViewChange: (view: PiView) => void
   modelProps: PiCatalogProps
   slots?: PiTopBarSlots
   launch?: PiLaunch | null
   onLaunched?: () => void
-  shellCommands?: PiShellCommands
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
   const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
@@ -334,7 +290,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
 
   const { model: chosenModel, thinking: chosenThinking } = choice
   const start = useCallback(async (submit: PiSubmit) => {
-    if (await runShellCommand(submit, shellCommands)) return
     setError(null)
     setStarting(true)
     try {
@@ -349,7 +304,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
     } finally {
       setStarting(false)
     }
-  }, [repo, onViewChange, shellCommands, chosenModel, chosenThinking])
+  }, [repo, onViewChange, chosenModel, chosenThinking])
 
   const branch = useCallback(async (forkOf: PiFork, prompt?: string) => {
     const session = await openPiSession(repo, { forkOf })
@@ -371,7 +326,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
 
   const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
   const clearInsertion = useCallback(() => setInsertion(null), [])
-  const newCommands = useComposerCommands(NO_COMMANDS, shellCommands)
   const shown = opened && opened.sessionId === sessionId ? opened : null
   useTabWorkingDirectory(shown?.cwd)
   const dock = useComposerDock(!sessionId)
@@ -389,7 +343,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
         onBranch={branch}
-        shellCommands={shellCommands}
         insertion={insertion}
         onInserted={clearInsertion}
       />
@@ -423,7 +376,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
           files={{ repo }}
           running={false}
           disabled={starting}
-          commands={newCommands}
+          commands={NO_COMMANDS}
           dialog={undefined}
           queue={EMPTY_QUEUE}
           notices={error ? [{ id: "start", text: error, tone: "error" }] : NO_NOTICES}

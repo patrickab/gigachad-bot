@@ -49,7 +49,7 @@ function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record
   }
 }
 
-/** Send, regenerate and edit chat turns: slash commands, attachment intake, tool artifacts, autosave, and undoable pair/attachment removal. */
+/** Send, regenerate and edit chat turns: attachment intake, tool artifacts, autosave, and undoable pair/attachment removal. */
 export function useChatTurns({
   chat,
   chatId,
@@ -58,7 +58,6 @@ export function useChatTurns({
   reasoningEffort,
   prompts,
   autosave,
-  runSlashCommand,
 }: {
   chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "removePair" | "setMessages" | "replaceMessages">
   chatId: string
@@ -67,8 +66,6 @@ export function useChatTurns({
   reasoningEffort: string
   prompts: Record<string, string>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
-  /** Resolves true when `text` was a slash command and has been handled. */
-  runSlashCommand: (text: string) => Promise<boolean>
 }) {
   const { messages, isStreaming, send, regenerateAt, removePair, setMessages, replaceMessages } = chat
   const { schedule: scheduleDelete } = useUndoDelete()
@@ -114,7 +111,6 @@ export function useChatTurns({
   }, [setMessages])
 
   const handleSend = useCallback(async (text: string, attachments: Attachment[]) => {
-    if (await runSlashCommand(text.trim())) return
     const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
     if (draft.length === 0) {
@@ -149,7 +145,7 @@ export function useChatTurns({
 
     updateMessageAt(setMessages, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
     await finishTurn(await send(built.request, true))
-  }, [runSlashCommand, refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
+  }, [refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
   const handleRegenerate = useCallback(async (globalIndex: number) => {
     if (isStreaming) return

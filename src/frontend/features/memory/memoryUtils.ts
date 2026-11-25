@@ -1,55 +1,34 @@
-import type { MemoryTopic, StoredMemory } from "@/lib/domain/memory"
+import type { Fact } from "@/lib/domain/memory"
 
-/** Backend fallback topic of a fact without one. */
-const FALLBACK_TOPIC = "note"
-
-/** Display title of a stored topic name: `dev_environment` -> `Dev Environment`. */
-export function formatTopicHeading(name: string): string {
-  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+/** A level of the memory window: the root when `memoryStore` is empty, else a memory_store or one of its directories. */
+export interface MemoryLocation {
+  memoryStore: string
+  path: string
 }
 
-/** Stored topic name of a typed title, mirrors the backend `topic_name`: `Dev Environment` -> `dev_environment`. */
-export function topicNameFromTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, "_").replace(/^_+|_+$/g, "")
+export const ROOT_LOCATION: MemoryLocation = { memoryStore: "", path: "" }
+
+/** Breadcrumb label of a location: `gigachad-bot/memory-store-v1 / map`, `Memory` for the root. */
+export function locationLabel(location: MemoryLocation): string {
+  if (!location.memoryStore) return "Memory"
+  return location.path ? `${location.memoryStore} / ${location.path}` : location.memoryStore
 }
 
-export function normalizeMemoryTopic(memory: StoredMemory): string {
-  return memory.topic || FALLBACK_TOPIC
+/** `path` without the `prefix/` it was listed under: `map/auth` under `map` -> `auth`. */
+export function relativeTo(path: string, prefix: string): string {
+  return prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path
 }
 
-/** Locally unique id for a manually added memory. */
-export function newManualMemoryId(): string {
-  return `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`
+/** Breadcrumb label of `child` opened from `parent`, without the part `parent` already names. */
+export function childLabel(parent: MemoryLocation, child: MemoryLocation): string {
+  if (child.memoryStore === parent.memoryStore) return relativeTo(child.path, parent.path)
+  if (parent.memoryStore && !child.path) return relativeTo(child.memoryStore, parent.memoryStore)
+  return locationLabel(child)
 }
 
-const GLOBAL_MEMORY_KEYS = new Set(["memory/global-topics.json", "memory/global-profile.json"])
-const PROJECT_MEMORY_KEY = /^memory\/project\/([^/]+)\/memory\/(?:topics|memory)\.json$/
-
-/** Library scope key (`global`, `project:<slug>`) a changed storage key belongs to, null for pending buffers and watermarks. */
-export function memoryScopeKey(storageKey: string): string | null {
-  if (GLOBAL_MEMORY_KEYS.has(storageKey)) return "global"
-  const slug = PROJECT_MEMORY_KEY.exec(storageKey)?.[1]
-  return slug ? `project:${slug}` : null
-}
-
-/** Group memories by topic in stored topic order (empty topics included), then topics only facts reference. */
-export function groupByTopicOrder(topics: MemoryTopic[], memories: StoredMemory[]): { topic: MemoryTopic; items: StoredMemory[] }[] {
-  const byTopic = new Map<string, StoredMemory[]>()
-  for (const memory of memories) {
-    const name = normalizeMemoryTopic(memory)
-    byTopic.set(name, [...(byTopic.get(name) ?? []), memory])
-  }
-  const known = new Set(topics.map((t) => t.name))
-  return [
-    ...topics.map((topic) => ({ topic, items: byTopic.get(topic.name) ?? [] })),
-    ...[...byTopic].filter(([name]) => !known.has(name)).map(([name, items]) => ({ topic: { name, summary: "" }, items })),
-  ]
-}
-
-/** Apply `patch` to topic `name`, adding it when only memories reference it. */
-export function patchTopic(topics: MemoryTopic[], name: string, patch: Partial<MemoryTopic>): MemoryTopic[] {
-  if (!topics.some((t) => t.name === name)) return [...topics, { name, summary: "", ...patch }]
-  return topics.map((t) => t.name === name ? { ...t, ...patch } : t)
+/** Active facts newest `updated` first; ties keep their order. */
+export function newestFirst(facts: Fact[]): Fact[] {
+  return [...facts].sort((a, b) => b.updated.localeCompare(a.updated))
 }
 
 const DAY_MS = 86_400_000

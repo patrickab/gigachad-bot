@@ -18,7 +18,7 @@ describe("learnSelectorModels", () => {
       { label: "Gemini", provider_id: "gemini", models: ["gemini-3.5-flash", "gemini-3.1-pro"] },
       { label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-sonnet-5"], source: "pi" },
     ],
-    defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+    defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
     tab_order: ["Pi"],
     unavailable: [],
   }

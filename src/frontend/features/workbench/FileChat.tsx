@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FilePanel } from "@/features/editor/FilePanel"
 import type { PiInsertion } from "@/features/pi/PiComposer"
-import type { PiShellCommands } from "@/features/pi/PiTab"
 import type { PiCatalogProps } from "@/features/pi/PiTopBar"
 import { prepareWorkbench } from "@/lib/backend/api"
 import { errorMessage } from "@/lib/utils"
@@ -15,7 +14,6 @@ import { useDocumentChat } from "./useDocumentChat"
 interface FileChatProps {
   width: number
   onClose: () => void
-  shellCommands?: PiShellCommands
   /** The chats' model catalog, for the header's model dropdown. */
   modelProps: PiCatalogProps
   /** Names the file to a new session in `cwd`, by default its `File:` line. */

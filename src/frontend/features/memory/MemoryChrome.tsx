@@ -1,7 +1,6 @@
 "use client"
 
 import { ArrowLeft, Loader2 } from "lucide-react"
-import type { ScopeMemory } from "@/features/memory/scopeEdits"
 
 /** Centered loading indicator of a memory view. */
 export function Spinner({ label }: { label: string }) {
@@ -12,15 +11,15 @@ export function Spinner({ label }: { label: string }) {
   )
 }
 
-/** Back link to the memory overview, naming the project of a project scope. */
-export function PageHeader({ scope, onBack }: { scope: ScopeMemory; onBack: () => void }) {
+/** Breadcrumb back link: the parent level to return to, then the current one. */
+export function PageHeader({ parent, current, onBack }: { parent: string; current: string; onBack: () => void }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 px-5 pb-2 pt-5 text-sm">
-      <button onClick={onBack}
-        className="flex items-center gap-2 rounded-md px-1 py-0.5 text-ink-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-        <ArrowLeft className="h-4 w-4" />Memory
+    <div className="flex min-w-0 items-center gap-2 text-sm">
+      <button onClick={onBack} aria-label={`Back to ${parent}`}
+        className="flex shrink-0 items-center gap-2 rounded-md px-1 py-0.5 text-ink-muted transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+        <ArrowLeft className="h-4 w-4" />{parent}
       </button>
-      {scope.scope === "project" && <span className="truncate text-ink-subtle">/ {scope.label}</span>}
+      <span className="truncate text-ink-subtle">/ {current}</span>
     </div>
   )
 }

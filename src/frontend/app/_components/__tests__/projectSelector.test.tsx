@@ -35,7 +35,6 @@ vi.mock("@/features/chat/ChatContainer", () => ({
 }))
 vi.mock("@/features/navigation/Sidebar", () => ({ Sidebar: () => null }))
 vi.mock("../WorkspaceSurface", () => ({ WorkspaceSurface: ({ chatBody }: { chatBody: ReactNode }) => <>{chatBody}</> }))
-vi.mock("../MemoryCommandLayer", () => ({ MemoryCommandLayer: () => null }))
 vi.mock("@/features/navigation/TabPicker", () => ({ TabPicker: () => null }))
 vi.mock("@/features/editor/FilePanel", () => ({ FilePanelSlot: () => null }))
 vi.mock("@/features/settings/PromptEditor", () => ({ PromptEditor: () => null }))
@@ -48,7 +47,7 @@ vi.mock("../useTabChat", () => ({
     chat: { messages: [], isStreaming: false, models: null, totalUsage: undefined },
     historyLoading: false,
     filePicker: { standaloneFile: null, rootFiles: { enabled: false } },
-    docs: {}, persistence: {}, turns: { handleSend: fixtures.handleSend }, memory: {}, menuItems: [],
+    docs: {}, persistence: {}, turns: { handleSend: fixtures.handleSend },
   }),
 }))
 

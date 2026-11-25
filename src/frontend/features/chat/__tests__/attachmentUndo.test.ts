@@ -34,7 +34,6 @@ function renderChat() {
       reasoningEffort: "none",
       prompts: {},
       autosave: async () => {},
-      runSlashCommand: async () => false,
     })
     return { chat, turns }
   })

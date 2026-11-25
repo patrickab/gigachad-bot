@@ -12,7 +12,7 @@ const MODELS: ModelsResponse = {
     { label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-haiku-4-5", "anthropic/claude-opus-4-5"], source: "pi" },
     { label: "OpenRouter", provider_id: "openrouter", models: ["acme/model-x", "acme/gone"] },
   ],
-  defaults: { default_model: "", small_model: "", vision_model: "", memory_model: "", sandbox_model: "" },
+  defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
   tab_order: ["Pi", "OpenRouter"],
   unavailable: ["openrouter/acme/gone"],
 }

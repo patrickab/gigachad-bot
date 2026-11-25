@@ -80,7 +80,7 @@ function Harness({ chatKey, lead, sessionId, onSessionChange = () => {}, quoted 
     setItemSession(next)
     onSessionChange(next)
   }
-  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen, onDrawerOpenChange: setDrawerOpen, shellCommands: { names: [], run: async () => false }, modelProps: MODEL_PROPS }
+  const props = { chatSessionId: itemSession, onChatSessionChange, drawerOpen, onDrawerOpenChange: setDrawerOpen, modelProps: MODEL_PROPS }
   const state = useWorkbenchChat(chatKey, lead, props)
   return <>
     <button type="button" onClick={() => state.quote(quoted)}>quote</button>

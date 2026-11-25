@@ -22,7 +22,7 @@ export interface Attachment {
 }
 
 /** The tools this build can actually offer the model. */
-export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent" | "start_learn_session"
+export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent" | "start_learn_session" | "memory"
 
 /** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
  *  while only `ToolName` may be sent as an offered tool. */
@@ -184,7 +184,7 @@ export interface ModelsResponse {
 /** Ordered `reasoning_effort` values the model accepts, `none` = off, empty = can't reason. */
 export interface ReasoningLevels { levels: string[] }
 
-export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string; sandbox_model: string }
+export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; sandbox_model: string }
 
 export interface ModelProvider {
   label: string
@@ -226,7 +226,6 @@ export interface PiCatalog {
 export interface BackendConfig {
   small_model: string
   vision_model: string
-  memory_model: string
   default_model: string
   downscale_images: boolean
   neovim_available: boolean

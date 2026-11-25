@@ -52,13 +52,13 @@ describe("useEnabledTools", () => {
     localStorage.setItem("gigachad-enabled-tools", JSON.stringify(["web_search"]))
 
     const before = renderTools()
-    expect(before.result.current.enabledTools).toEqual(["web_search", "start_learn_session"])
+    expect(before.result.current.enabledTools).toEqual(["web_search", "memory", "start_learn_session"])
     act(() => before.result.current.toggleTool("start_learn_session"))
-    expect(before.result.current.enabledTools).toEqual(["web_search"])
+    expect(before.result.current.enabledTools).toEqual(["web_search", "memory"])
     before.unmount()
 
     const after = renderTools()
-    expect(after.result.current.enabledTools).toEqual(["web_search"])
+    expect(after.result.current.enabledTools).toEqual(["web_search", "memory"])
   })
 
   it("keeps an opted-out default tool off across reloads", () => {

@@ -1,49 +1,50 @@
-export type MemoryScope = "global" | "project"
+// Shapes of the memory-store REST API (`/api/memory`): memory_stores hold directories, memories (fact lists) and documents (markdown).
 
-/** Atomic memory: one stored fact within a topic. */
-export interface StoredMemory {
+/** A memory in a listing: `path` is memory_store-relative without extension, `error` marks a file the store could not read. */
+export interface MemoryEntry {
+  path: string
+  description: string
+  facts: number
+  updated: string | null
+  error?: "corrupt"
+}
+
+/** A document in a listing: `path` is memory_store-relative and ends in `.md`. */
+export interface DocumentEntry {
+  path: string
+  bytes: number
+  modified: string
+}
+
+/** One level of a root or memory_store: `memory_stores` are root-relative, everything else memory_store-relative. */
+export interface MemoryListing {
+  memory_stores: string[]
+  directories: string[]
+  memories: MemoryEntry[]
+  documents: DocumentEntry[]
+}
+
+/** An active fact of a memory. */
+export interface Fact {
   id: string
   text: string
-  topic: string
-  scope: MemoryScope
-  created_at?: string
-  updated_at?: string
+  created: string
+  updated: string
 }
 
-/** Complete memory: a named subject bundling atomic memories. */
-export interface MemoryTopic {
-  name: string
-  summary: string
-}
+export type MemoryRead =
+  | { kind: "memory"; description: string; facts: Fact[] }
+  | { kind: "document"; text: string }
 
-/** Proposed change to one fact, `target_*` name the stored fact an update or delete replaces. `index` is the 0-based place in the relevance order, null appends an add and keeps an update in place. */
-export interface MemoryOperation {
-  id: string
-  op: "add" | "update" | "delete"
-  scope: MemoryScope
-  topic: string
-  text: string
-  target_id: string | null
-  target_text: string | null
-  index: number | null
-}
+/** One write of a batch. `update` replaces a fact under a new id, `retire` hides it, `describe` sets a memory's description. */
+export type MemoryOp =
+  | { op: "add"; path: string; text: string; description?: string }
+  | { op: "update"; path: string; id: string; text: string; description?: string }
+  | { op: "retire"; path: string; id: string; description?: string }
+  | { op: "describe"; path: string; description: string }
+  | { op: "write_doc"; path: string; text: string }
 
-/** New topic (`previous_summary` null) or a revised summary of an existing one. */
-export interface TopicProposal {
-  scope: MemoryScope
-  name: string
-  summary: string
-  previous_summary: string | null
-}
-
-export interface ScopeProposal {
-  operations: MemoryOperation[]
-  topics: TopicProposal[]
-}
-
-/** A scope is null when it was not extracted. */
-export interface MemoryExtractResponse {
-  review_id: string
-  global: ScopeProposal | null
-  project: ScopeProposal | null
-}
+/** Outcome of one op, in batch order; `id` is the new fact's id for add and update. */
+export type MemoryOpResult =
+  | { ok: true; op: MemoryOp["op"]; path: string; id?: string }
+  | { ok: false; op: string | null; path: string | null; error: string; message: string }
