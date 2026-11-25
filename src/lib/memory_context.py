@@ -14,10 +14,6 @@ if TYPE_CHECKING:
 USER_MEMORY_STORE = "user"
 # Read in full into every prompt; the rest of `user` and the project only as an index.
 PINNED_USER_MEMORIES = ("profile", "preferences")
-# Per-turn prompt bounds: each pinned memory's characters and each index's memories (newest first).
-PINNED_MAX_CHARS = 4000
-INDEX_MAX_MEMORIES = 60
-CUT_NOTICE = "Some memory was cut here; use `list_memories` / `read_memories` for the rest."
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 MEMORY_RULES = (
@@ -50,26 +46,22 @@ def project_memory_store(project: dict | None, slug: str | None) -> str | None:
     return unreserved_memory_store(name) if name else name
 
 
-def _pinned(root: Path, path: str) -> tuple[str, bool]:
-    """The pinned memory *path* of `user` without ids, and whether it was cut to `PINNED_MAX_CHARS`."""
-    text = store.read_memories(USER_MEMORY_STORE, [path], ids=False, root=root).rstrip()
-    if len(text) <= PINNED_MAX_CHARS:
-        return text, False
-    return text[:PINNED_MAX_CHARS].rstrip() + " …", True
+def _pinned(root: Path, path: str) -> str:
+    """The pinned memory *path* of `user`, in full and without ids."""
+    return store.read_memories(USER_MEMORY_STORE, [path], ids=False, root=root).rstrip()
 
 
-def _index(memory_store: str, listing: dict) -> tuple[str, bool]:
-    """The index of *listing*, its newest `INDEX_MAX_MEMORIES` memories first, and whether some were left out."""
+def _index(memory_store: str, listing: dict) -> str:
+    """The index of *listing*, newest memory first."""
     memories = sorted(listing["memories"], key=lambda entry: entry.get("updated") or "", reverse=True)
-    shown = {**listing, "memories": memories[:INDEX_MAX_MEMORIES]}
-    return f"## Index of `{memory_store}`\n{store.render_list(shown).rstrip()}", len(memories) > INDEX_MAX_MEMORIES
+    return f"## Index of `{memory_store}`\n{store.render_list({**listing, 'memories': memories}).rstrip()}"
 
 
 def memory_prompt(root: Path, project_memory_store: str | None) -> str:
     """Create `user` and the project's memory_store when missing, then render the system-prompt memory block.
 
     A project name the store cannot address (e.g. a folder with spaces) leaves the project out.
-    Pinned memories and indexes are bounded (`PINNED_MAX_CHARS`, `INDEX_MAX_MEMORIES`); a cut adds `CUT_NOTICE`.
+    Pinned memories are read in full and every memory is in its index: nothing is cut.
     """
     store.create_memory_store(USER_MEMORY_STORE, root=root)
     if project_memory_store is not None:
@@ -86,9 +78,7 @@ def memory_prompt(root: Path, project_memory_store: str | None) -> str:
     if project_memory_store is not None:
         parts.append(_index(project_memory_store, store.list_memories(project_memory_store, root=root)))
         names += f" and `{project_memory_store}` (this project)"
-    sections = ["# Memory", *(text for text, _ in parts)]
-    if any(cut for _, cut in parts):
-        sections.append(CUT_NOTICE)
+    sections = ["# Memory", *parts]
     sections.append(f"Use the memory_stores {names}. Read a memory before you answer from it.")
     sections.append(MEMORY_RULES)
     return "\n\n".join(sections)

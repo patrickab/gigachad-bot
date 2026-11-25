@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from memory_store import store
 
-from lib.memory_context import CUT_NOTICE, INDEX_MAX_MEMORIES, PINNED_MAX_CHARS, memory_prompt, memory_root, project_memory_store
+from lib.memory_context import memory_prompt, memory_root, project_memory_store
 
 
 def test_the_host_login_uses_the_memory_store_default_root() -> None:
@@ -77,21 +77,13 @@ def test_memory_prompt_without_a_project_names_only_user(tmp_path: Path) -> None
     assert store.list_memories(root=tmp_path)["memory_stores"] == ["user"]
 
 
-def test_memory_prompt_bounds_pinned_memories_and_indexes_and_says_where_the_rest_is(tmp_path: Path) -> None:
+def test_memory_prompt_cuts_nothing(tmp_path: Path) -> None:
     memory_prompt(tmp_path, None)
-    long_fact = {"op": "add", "path": "profile", "description": "Who", "text": "x" * (PINNED_MAX_CHARS * 3)}
-    many = [{"op": "add", "path": f"topic-{n:03d}", "description": f"Topic {n}", "text": "t"} for n in range(INDEX_MAX_MEMORIES + 5)]
+    long_fact = {"op": "add", "path": "profile", "description": "Who", "text": "x" * 20_000}
+    many = [{"op": "add", "path": f"topic-{n:03d}", "description": f"Topic {n}", "text": "t"} for n in range(100)]
     store.apply_memory_ops("user", [long_fact, *many], root=tmp_path)
 
     prompt = memory_prompt(tmp_path, None)
 
-    assert len(prompt) < PINNED_MAX_CHARS + INDEX_MAX_MEMORIES * 200
-    assert prompt.count(" · 1 facts") == INDEX_MAX_MEMORIES
-    assert CUT_NOTICE in prompt
-
-
-def test_memory_prompt_within_bounds_has_no_cut_notice(tmp_path: Path) -> None:
-    memory_prompt(tmp_path, None)
-    store.apply_memory_ops("user", [{"op": "add", "path": "profile", "description": "Who", "text": "Named Ada"}], root=tmp_path)
-
-    assert CUT_NOTICE not in memory_prompt(tmp_path, None)
+    assert "x" * 20_000 in prompt
+    assert prompt.count(" · 1 facts") == 101
