@@ -204,8 +204,20 @@ describe("resume after an interruption", () => {
     const session = await interruptedRun(first.supervisor, dir);
     await crash(first.supervisor, session.sessionPath);
 
-    const holder = Bun.spawn(["flock", "--nonblock", "--no-fork", session.sessionPath, "sleep", "30"]);
+    const holder = Bun.spawn(["flock", "--nonblock", "--no-fork", session.sessionPath, "sh", "-c", "echo locked; exec sleep 30"], { stdout: "pipe" });
     try {
+      // The holder prints only once it holds the lock.
+      const reader = holder.stdout.getReader();
+      const deadline = Date.now() + 10_000;
+      let seen = "";
+      while (!seen.includes("locked")) {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new Error("lock holder did not report the lock");
+        const chunk = await Promise.race([reader.read(), Bun.sleep(left).then(() => undefined)]);
+        if (!chunk) continue;
+        if (chunk.done) throw new Error("lock holder exited early");
+        seen += new TextDecoder().decode(chunk.value);
+      }
       const { supervisor, state } = await supervise(dir, 7002, true);
       await state.setAutoResume(true);
       const outcomes = await supervisor.resumeInterrupted();
