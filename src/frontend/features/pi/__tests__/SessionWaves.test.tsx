@@ -39,14 +39,12 @@ function renderPanel(onOpenSession = vi.fn()) {
 }
 
 describe("SessionWaves", () => {
-  it("shows only this session's unfinished waves", async () => {
+  it("shows only this session's waves, the active ones open", async () => {
     api.callFactory.mockResolvedValue({
       waves: [
         wave("w1", { counts: { total: 8, done: 2 }, usage: { input: 1, output: 1, cost: 4.1 } }),
         wave("w2", { origin: "other" }),
         wave("w3", { origin: null }),
-        wave("w4", { stage: "merged" }),
-        wave("w5", { stage: "cancelled" }),
         wave("w6", { stage: "rejected", running: false }),
       ],
     })
@@ -57,9 +55,57 @@ describe("SessionWaves", () => {
     expect(row.textContent).toContain("2/8")
     expect(row.textContent).toContain("building")
     expect(row.textContent).toContain("$4.10")
+    const header = screen.getByRole("button", { name: /^Factory/ })
+    expect(header.getAttribute("aria-expanded")).toBe("true")
+    expect(header.textContent).toContain("Factory · 2 active · 1 needs you")
+    expect(header.textContent).toContain("$4.10")
+    expect(screen.getByText("1 needs you").className).toContain("text-warning")
     expect(screen.getByText("rejected").className).toContain("text-warning")
     expect(screen.getByText("building").className).not.toContain("text-warning")
-    for (const hidden of ["p/w2", "p/w3", "p/w4", "p/w5"]) expect(screen.queryByText(hidden)).toBeNull()
+    expect(screen.queryByText(/finished/)).toBeNull()
+    for (const hidden of ["p/w2", "p/w3"]) expect(screen.queryByText(hidden)).toBeNull()
+    fireEvent.click(header)
+    expect(screen.queryByText("p/w1")).toBeNull()
+  })
+
+  it("collapses to the header with only finished waves", () => {
+    render(<SessionWaves
+      waves={[wave("w4", { stage: "merged", usage: { input: 1, output: 1, cost: 1 } }), wave("w5", { stage: "cancelled", usage: { input: 1, output: 1, cost: 2 } })]}
+      onOpenSession={vi.fn()}
+    />)
+    const header = screen.getByRole("button", { name: /^Factory/ })
+    expect(header.textContent).toContain("Factory · 2 finished")
+    expect(header.textContent).not.toContain("needs you")
+    expect(header.getAttribute("aria-expanded")).toBe("false")
+    expect(screen.queryByText("p/w4")).toBeNull()
+    fireEvent.click(header)
+    const finished = screen.getByRole("button", { name: /^2 finished/ })
+    expect(finished.textContent).toContain("$3.00")
+    expect(finished.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("orders active waves needing the user first and keeps finished ones behind their row", () => {
+    render(<SessionWaves
+      waves={[
+        wave("old", { createdAt: "2026-01-01T00:00:00Z" }),
+        wave("new", { createdAt: "2026-01-03T00:00:00Z" }),
+        wave("stuck", { stage: "blocked", reason: "gates", running: false, createdAt: "2026-01-02T00:00:00Z" }),
+        wave("m1", { stage: "merged", counts: { total: 2, done: 2 }, createdAt: "2026-01-01T00:00:00Z" }),
+        wave("m2", { stage: "cancelled", createdAt: "2026-01-04T00:00:00Z" }),
+      ]}
+      onOpenSession={vi.fn()}
+    />)
+    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 3 active · 1 needs you")
+    const tags = screen.getAllByText(/^p\//).map((node) => node.textContent)
+    expect(tags).toEqual(["p/stuck", "p/new", "p/old"])
+    const finished = screen.getByRole("button", { name: /^2 finished/ })
+    expect(screen.queryByText("p/m1")).toBeNull()
+    fireEvent.click(finished)
+    const list = screen.getByRole("list", { name: "Finished waves" })
+    expect(list.textContent).toContain("2/2")
+    expect(list.textContent).toContain("merged")
+    expect(screen.getAllByText(/^p\//).map((node) => node.textContent)).toEqual(["p/stuck", "p/new", "p/old", "p/m2", "p/m1"])
+    expect(screen.queryByRole("button", { name: /p\/m1/ })).toBeNull()
   })
 
   it("opens a wave to its unfinished tasks, a started one opens its session", () => {

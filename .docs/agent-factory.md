@@ -318,8 +318,11 @@ settings once at `waves.start`.
   of the plan's memory_store, read when its toggle opens (`GET /api/memory/read`). Waves of one column sharing a tag
   prefix are wrapped in one container per prefix segment; a group holding a single wave has no container of its own.
   A factory without `waves.list` (`unknown action`) shows no waves and no error.
-- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, the unfinished waves the tab's session
-  declared, each opening to its unfinished tasks with a button to open a task's session. Display only.
+- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the tab's
+  session declared. Its header counts the active waves, those that need the user (warning colour) and their cost, or
+  `<n> finished` without active ones, and collapses the element (open while a wave is active). Active waves, those
+  needing the user first, each open to their unfinished tasks with a button to open a task's session; merged and
+  cancelled waves sit behind one collapsed `<n> finished` row. Display only.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message), its
   questions, each gate with duration and failed output, the review with findings, the merge.
 - **Terminal**: `factory-tui` (read-only), or `factory waves.list`, `factory tasks.list`, `factory waves.get`.

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Bot, ChevronDown, ChevronRight, Circle, CircleAlert, LoaderCircle, type LucideIcon } from "lucide-react"
+import { Bot, Check, Circle, CircleAlert, LoaderCircle, X, type LucideIcon } from "lucide-react"
+import { Disclosure } from "@/components/ui/Disclosure"
 import { IconButton } from "@/components/ui/IconButton"
 import { callFactory } from "@/lib/backend/api"
 import { concernsFactory, isUnknownAction, waveNeedsUser, waveStageLabel, type FactoryWave, type FactoryWaveTask } from "@/lib/domain/factory"
@@ -13,13 +14,25 @@ const RESTING = new Set(["merged", "cancelled"])
 const FINISHED_TASK = new Set(["done", "cancelled"])
 const ATTENTION_TASK = new Set(["waiting_answer", "waiting_approve", "blocked"])
 
-/** The unfinished waves session `sessionId` declared (`origin`), oldest first. */
+const newestFirst = (a: FactoryWave, b: FactoryWave) => b.createdAt.localeCompare(a.createdAt)
+const totalCost = (waves: readonly FactoryWave[]) => waves.reduce((sum, wave) => sum + (wave.usage?.cost ?? 0), 0)
+
+/** The waves session `sessionId` declared (`origin`). */
 export function sessionWaves(waves: readonly FactoryWave[], sessionId: string): FactoryWave[] {
-  return waves.filter((wave) => wave.origin === sessionId && !RESTING.has(wave.stage))
+  return waves.filter((wave) => wave.origin === sessionId)
+}
+
+/** `waves` split into active ones (those needing the user first, then newest first) and finished ones (`merged`, `cancelled`, newest first). */
+export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave[]; finished: FactoryWave[] } {
+  const active = waves.filter((wave) => !RESTING.has(wave.stage)).sort(newestFirst)
+  return {
+    active: [...active.filter(waveNeedsUser), ...active.filter((wave) => !waveNeedsUser(wave))],
+    finished: waves.filter((wave) => RESTING.has(wave.stage)).sort(newestFirst),
+  }
 }
 
 /**
- * The unfinished waves session `sessionId` declared in `repo` (an absolute path), from the core's `waves.list`.
+ * The waves session `sessionId` declared in `repo` (an absolute path), from the core's `waves.list`.
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket, as the board does
  * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
@@ -52,6 +65,8 @@ export function useSessionWaves(repo: string, sessionId: string): FactoryWave[] 
 }
 
 function waveIcon(wave: FactoryWave): { icon: LucideIcon; className: string } {
+  if (wave.stage === "merged") return { icon: Check, className: "text-ink-subtle" }
+  if (wave.stage === "cancelled") return { icon: X, className: "text-ink-faint" }
   if (waveNeedsUser(wave)) return { icon: CircleAlert, className: "text-warning" }
   return { icon: LoaderCircle, className: wave.running ? "animate-spin text-ink-muted" : "text-ink-muted" }
 }
@@ -78,57 +93,96 @@ function TaskRow({ task, onOpenSession }: { task: FactoryWaveTask; onOpenSession
   )
 }
 
-function WaveRow({ wave, open, onToggle, onOpenSession }: { wave: FactoryWave; open: boolean; onToggle: () => void; onOpenSession: (sessionId: string) => void }) {
+/** A wave's line: status icon, tag, title, `done/total`, stage, cost. */
+function WaveSummary({ wave }: { wave: FactoryWave }) {
   const { icon: Icon, className } = waveIcon(wave)
-  const Chevron = open ? ChevronDown : ChevronRight
+  return (
+    <>
+      <Icon size={12} aria-hidden="true" className={cn("shrink-0", className)} />
+      <span className="shrink-0 text-ink">{wave.tag}</span>
+      <span className="min-w-0 flex-1 truncate text-ink-muted">{wave.title}</span>
+      <span className="shrink-0 tabular-nums text-ink-faint">
+        {wave.counts.done}/{wave.counts.total}
+        {" · "}
+        <span className={cn(waveNeedsUser(wave) && "text-warning")}>{waveStageLabel(wave)}</span>
+        {wave.usage && ` · ${formatCost(wave.usage.cost)}`}
+      </span>
+      <span className="w-5 shrink-0" />
+    </>
+  )
+}
+
+const ROW = "h-auto py-0.5"
+
+function ActiveWave({ wave, onOpenSession }: { wave: FactoryWave; onOpenSession: (sessionId: string) => void }) {
   const tasks = wave.tasks.filter((task) => !FINISHED_TASK.has(task.state))
   return (
     <li>
-      <button type="button" aria-expanded={open} onClick={onToggle} className="flex w-full min-w-0 items-center gap-2 rounded py-0.5 text-left hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-        <Chevron size={12} aria-hidden="true" className="-mr-1 shrink-0 text-ink-faint" />
-        <Icon size={12} aria-hidden="true" className={cn("shrink-0", className)} />
-        <span className="shrink-0 text-ink">{wave.tag}</span>
-        <span className="min-w-0 flex-1 truncate text-ink-muted">{wave.title}</span>
-        <span className="shrink-0 tabular-nums text-ink-faint">
-          {wave.counts.done}/{wave.counts.total}
-          {" · "}
-          <span className={cn(waveNeedsUser(wave) && "text-warning")}>{waveStageLabel(wave)}</span>
-          {wave.usage && ` · ${formatCost(wave.usage.cost)}`}
-        </span>
-        <span className="w-5 shrink-0" />
-      </button>
-      {open && tasks.length > 0 && (
-        <ul aria-label={`${wave.tag} tasks`} className="flex flex-col">
-          {tasks.map((task) => <TaskRow key={task.key} task={task} onOpenSession={onOpenSession} />)}
-        </ul>
-      )}
+      <Disclosure summary={<WaveSummary wave={wave} />} summaryClassName={ROW}>
+        {tasks.length > 0 && (
+          <ul aria-label={`${wave.tag} tasks`} className="flex flex-col">
+            {tasks.map((task) => <TaskRow key={task.key} task={task} onOpenSession={onOpenSession} />)}
+          </ul>
+        )}
+      </Disclosure>
     </li>
   )
 }
 
 /**
- * The unfinished waves a Pi session declared, pinned above the composer beside the subagent roster and in its shape.
+ * The factory waves a Pi session declared, pinned above the composer beside the subagent roster: one element that collapses to its header.
  *
- * - One collapsed row per wave: status icon, tag, title, `done/total`, stage, cost. A stage that needs the user shows in the warning colour
- * - A row opens to its tasks that are not done or cancelled, each with its state; a started one opens its session through `onOpenSession`
+ * - Header: `Factory`, the active waves (`<n> active`, `<m> needs you` in the warning colour when any), their summed cost; `<n> finished` without active waves.
+ *   Open while a wave is active, collapsed otherwise
+ * - Active waves (not `merged` or `cancelled`), those needing the user first, then newest first. A row opens to its tasks that are not done or cancelled,
+ *   a started one opens its session through `onOpenSession`
+ * - Finished waves behind one collapsed `<n> finished` row with their summed cost, newest first, rows that do not open
  * - Renders nothing without waves
  */
 export function SessionWaves({ waves, onOpenSession }: { waves: FactoryWave[]; onOpenSession: (sessionId: string) => void }) {
-  const [openId, setOpenId] = useState<string | null>(null)
+  const { active, finished } = useMemo(() => splitWaves(waves), [waves])
   if (waves.length === 0) return null
+  const needsUser = active.filter(waveNeedsUser).length
+  const header = (
+    <>
+      <span className="shrink-0">
+        Factory · {active.length > 0 ? `${active.length} active` : `${finished.length} finished`}
+        {needsUser > 0 && <> · <span className="text-warning">{needsUser} needs you</span></>}
+      </span>
+      <span className="flex-1" />
+      {active.length > 0 && <span className="shrink-0 tabular-nums text-ink-faint">{formatCost(totalCost(active))}</span>}
+      <span className="w-5 shrink-0" />
+    </>
+  )
   return (
     <section aria-label="Waves" className="mx-auto mb-2 flex w-full max-w-2xl flex-col rounded-xl bg-paper px-3 py-1.5 text-xs">
-      <ul className="flex flex-col">
-        {waves.map((wave) => (
-          <WaveRow
-            key={wave.id}
-            wave={wave}
-            open={openId === wave.id}
-            onToggle={() => setOpenId((current) => current === wave.id ? null : wave.id)}
-            onOpenSession={onOpenSession}
-          />
-        ))}
-      </ul>
+      <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0}>
+        <ul className="flex flex-col">
+          {active.map((wave) => <ActiveWave key={wave.id} wave={wave} onOpenSession={onOpenSession} />)}
+          {finished.length > 0 && (
+            <li>
+              <Disclosure
+                summary={(
+                  <>
+                    <span className="min-w-0 flex-1">{finished.length} finished</span>
+                    <span className="shrink-0 tabular-nums text-ink-faint">{formatCost(totalCost(finished))}</span>
+                    <span className="w-5 shrink-0" />
+                  </>
+                )}
+                summaryClassName={ROW}
+              >
+                <ul aria-label="Finished waves" className="flex flex-col">
+                  {finished.map((wave) => (
+                    <li key={wave.id} className="ml-5 flex min-w-0 items-center gap-2 py-0.5">
+                      <WaveSummary wave={wave} />
+                    </li>
+                  ))}
+                </ul>
+              </Disclosure>
+            </li>
+          )}
+        </ul>
+      </Disclosure>
     </section>
   )
 }
