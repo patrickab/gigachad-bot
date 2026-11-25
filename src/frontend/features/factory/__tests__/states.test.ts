@@ -25,7 +25,7 @@ describe("shownState", () => {
 describe("board order", () => {
   it("puts what waits on the user before what runs, and that before what is finished", () => {
     expect(STATE_ORDER).toEqual(["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"])
-    expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Needs you", "Working", "Merging", "Finished"])
+    expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Waiting", "Working", "Merging", "Finished"])
   })
 
   it("gives every shown state a label and exactly one column, in the same order", () => {
@@ -40,7 +40,7 @@ describe("task status", () => {
     expect(taskStatusLine(task("running", { round: 0 }))).toBe("Working")
     expect(taskStatusLine(task("waiting_approve", { round: 2 }))).toBe("Ready for review · round 2")
     expect(taskStatusLine(task("merging", { round: 3, interrupted: true }))).toBe("Interrupted · round 3")
-    expect(taskStatusLine(task("waiting_answer", { round: 1 }))).toBe("Question · round 1")
+    expect(taskStatusLine(task("waiting_answer", { round: 1 }))).toBe("Waiting for supervisor · round 1")
   })
 
   it("pulses the dot only while a runner holds the task", () => {

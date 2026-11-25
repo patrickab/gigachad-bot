@@ -54,7 +54,7 @@ describe("TaskTimeline", () => {
     expect(first.getByText("question")).toBeTruthy()
     expect(first.getByText("Keep the old flag?")).toBeTruthy()
     expect(first.getByText("Drop it.")).toBeTruthy()
-    expect(first.getByText("Question")).toBeTruthy()
+    expect(first.getByText("Waiting for supervisor")).toBeTruthy()
   })
 
   it("names a merge request's source and target branch, nothing for a coder's task", () => {

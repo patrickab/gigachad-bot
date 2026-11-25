@@ -22,7 +22,7 @@ export const STATE_LABELS: Record<FactoryShownState, string> = {
   starting: "Launching session",
   running: "Working",
   waiting_approve: "Ready for review",
-  waiting_answer: "Question",
+  waiting_answer: "Waiting for supervisor",
   blocked: "Blocked",
   interrupted: "Interrupted",
   merging: "Merging",
@@ -30,7 +30,7 @@ export const STATE_LABELS: Record<FactoryShownState, string> = {
   cancelled: "Cancelled",
 }
 
-/** Board order: what waits on the user first, then what runs, then what is finished. */
+/** Board order: what waits (on the supervisor or the user) first, then what runs, then what is finished. */
 export const STATE_ORDER: readonly FactoryShownState[] = ["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"]
 
 interface BoardColumn {
@@ -43,7 +43,7 @@ interface BoardColumn {
 
 /** Board columns in display order, every shown state belongs to exactly one. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = [
-  { id: "needs-you", title: "Needs you", states: ["waiting_answer", "waiting_approve", "blocked", "interrupted"], tone: "attention" },
+  { id: "waiting", title: "Waiting", states: ["waiting_answer", "waiting_approve", "blocked", "interrupted"], tone: "attention" },
   { id: "working", title: "Working", states: ["starting", "running"], tone: "ready" },
   { id: "merging", title: "Merging", states: ["merging"], tone: "ready" },
   { id: "finished", title: "Finished", states: ["done", "cancelled"], tone: "done" },

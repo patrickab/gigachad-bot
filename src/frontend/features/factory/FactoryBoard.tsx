@@ -151,7 +151,7 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
   )
 }
 
-/** A start on its way, "Launching session" in Working, or refused, with its reason, in Needs you. */
+/** A start on its way, "Launching session" in Working, or refused, with its reason, in Waiting. */
 function LaunchCard({ launch }: { launch: FactoryLaunch }) {
   const { repo, title } = launch.body
   const failed = launch.error !== null
@@ -257,7 +257,7 @@ export function FactoryBoard({ repo, tasks, error, refresh, onOpenTask }: {
             // Finished shows what waits for inspection, or the archive while that is opened.
             const columnTasks = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id) === (showArchived && archivedCount > 0)) : inColumn
             // Newest first, like the tasks: a refused start waits on the user, one on its way works.
-            const columnLaunches = launches.filter((launch) => column.id === (launch.error === null ? "working" : "needs-you")).reverse()
+            const columnLaunches = launches.filter((launch) => column.id === (launch.error === null ? "working" : "waiting")).reverse()
             const count = isFinished ? inColumn.length - archivedCount : columnTasks.length + columnLaunches.length
             const capped = isFinished && !showAllFinished && columnTasks.length > FINISHED_LIMIT
             const shown = capped ? columnTasks.slice(0, FINISHED_LIMIT) : columnTasks

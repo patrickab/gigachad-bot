@@ -90,7 +90,7 @@ describe("FactoryBoard", () => {
   it("names the repo by its folder and orders the columns from what waits on the user to what is finished", () => {
     const { view } = renderBoard([])
     expect(view.getByRole("heading", { level: 2 })).toHaveTextContent("Factory · gigachad-bot")
-    expect(view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Needs you", "Working", "Merging", "Finished"])
+    expect(view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Waiting", "Working", "Merging", "Finished"])
   })
 
   it("sorts every task into the column of its shown state, a column newest created first", () => {
@@ -107,20 +107,20 @@ describe("FactoryBoard", () => {
       task("Task waiting new", "waiting_approve"),
     ])
 
-    expect(titles("Needs you")).toEqual(["Task waiting new", "Task waiting old", "Task blocked", "Task lost merge", "Task lost child"])
+    expect(titles("Waiting")).toEqual(["Task waiting new", "Task waiting old", "Task blocked", "Task lost merge", "Task lost child"])
     expect(titles("Working")).toEqual(["Task starting", "Task running"])
     expect(titles("Merging")).toEqual(["Task merging"])
     expect(titles("Finished")).toEqual(["Task done", "Task cancelled"])
   })
 
-  it("puts a task asking a question in Needs you, its card showing the question", () => {
+  it("puts a task asking a question in Waiting, its card showing the question", () => {
     const { titles, card } = renderBoard([
       task("Task asking", "waiting_answer", { question: "Keep the old flag?" }),
       task("Task running", "running"),
     ])
 
-    expect(titles("Needs you")).toEqual(["Task asking"])
-    expect(card("Task asking")).toHaveTextContent("Question · round 1")
+    expect(titles("Waiting")).toEqual(["Task asking"])
+    expect(card("Task asking")).toHaveTextContent("Waiting for supervisor · round 1")
     expect(within(card("Task asking")).getByLabelText("Question")).toHaveTextContent("Keep the old flag?")
     expect(within(card("Task running")).queryByLabelText("Question")).toBeNull()
   })
@@ -383,7 +383,7 @@ describe("FactoryBoard", () => {
     expect(called("tasks.list")).toContainEqual({ repo: REPO })
   })
 
-  it("moves a refused start to Needs you with its reason, to retry or dismiss", async () => {
+  it("moves a refused start to Waiting with its reason, to retry or dismiss", async () => {
     let refusals = ["the checkout already has a task"]
     api.handlers["tasks.start"] = async () => {
       const refusal = refusals.shift()
@@ -397,7 +397,7 @@ describe("FactoryBoard", () => {
     fireEvent.change(view.getByLabelText("Request"), { target: { value: "Fix it" } })
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
-    const needsYou = view.getByRole("region", { name: "Needs you" })
+    const needsYou = view.getByRole("region", { name: "Waiting" })
     await waitFor(() => expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("Could not start"))
     expect(within(needsYou).getByRole("group", { name: "Refused" })).toHaveTextContent("the checkout already has a task")
 

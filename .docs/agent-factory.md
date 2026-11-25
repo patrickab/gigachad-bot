@@ -131,7 +131,7 @@ One per repository, shared by every task's session through ticket files in `<git
 ## Observability
 
 - **Board card**: state, round, blocked reason, the open question, a merge request's source branch, total tokens and
-  cost (coder plus reviews). `waiting_answer` sits in Needs you.
+  cost (coder plus reviews). `waiting_answer` sits in Waiting.
 - **Plan tree** (above the columns, `tagGroups.ts`, `TagTree.tsx`): tasks whose tag has two or more segments leave the
   columns. One closed row per segment (name, task count; a wave also its counts per state), an open wave lists its
   task cards. A group's description is the document `plan/<tag prefix>.md` of the plan's memory_store
