@@ -128,10 +128,39 @@ function messageKey(message: AgentMessage): string {
   return `${message.role}:${message.timestamp}:${message.role === "toolResult" ? (message as ToolResultMessage).toolCallId : ""}`
 }
 
+/**
+ * Whether `stored` (confirmed, or an earlier live message) is the live message `live`.
+ *
+ * A `custom_message` entry is stamped when Pi persists it, not with the message's own timestamp, so a custom message
+ * matches a stored one of the same type and content stamped at or after it
+ */
+function sameMessage(stored: AgentMessage, live: AgentMessage): boolean {
+  if (messageKey(stored) === messageKey(live)) return true
+  if (stored.role !== "custom" || live.role !== "custom") return false
+  return stored.customType === live.customType && stored.timestamp >= live.timestamp
+    && JSON.stringify(stored.content) === JSON.stringify(live.content) && JSON.stringify(stored.details) === JSON.stringify(live.details)
+}
+
 function hasMessage(messages: AgentMessage[], message: AgentMessage): boolean {
-  const key = messageKey(message)
-  for (let index = messages.length - 1; index >= 0; index--) if (messageKey(messages[index]) === key) return true
+  for (let index = messages.length - 1; index >= 0; index--) if (sameMessage(messages[index], message)) return true
   return false
+}
+
+/** Roles whose entries carry the message's own timestamp, so it orders them against live messages. */
+const STAMPED_ROLES = new Set<AgentMessage["role"]>(["user", "assistant", "toolResult"])
+
+/**
+ * The live messages `messages` does not hold yet.
+ *
+ * One whose entry arrived goes, and so does every one before it or older than a confirmed message: entries are
+ * persisted in order, so a message the session holds nothing of by then is never coming (another branch, a lost write)
+ */
+function stillUnconfirmed(unconfirmed: AgentMessage[], messages: AgentMessage[]): AgentMessage[] {
+  let latest = -Infinity
+  for (const message of messages) if (STAMPED_ROLES.has(message.role) && message.timestamp > latest) latest = message.timestamp
+  let lastConfirmed = -1
+  unconfirmed.forEach((message, index) => { if (hasMessage(messages, message)) lastConfirmed = index })
+  return unconfirmed.slice(lastConfirmed + 1).filter((message) => message.timestamp >= latest)
 }
 
 function promptsWithText(messages: AgentMessage[], text: string): number {
@@ -141,7 +170,7 @@ function promptsWithText(messages: AgentMessage[], text: string): number {
 /** Replace the confirmed state, dropping the live messages it now holds. The optimistic prompt goes once a new prompt with its text is confirmed. */
 function withConfirmed(transcript: Transcript, confirmed: Confirmed): Transcript {
   const { messages } = confirmed
-  const unconfirmed = transcript.unconfirmed.filter((message) => !hasMessage(messages, message))
+  const unconfirmed = stillUnconfirmed(transcript.unconfirmed, messages)
   const pending = transcript.optimistic
   const pendingText = pending && textOf(pending.content)
   const promptConfirmed = pendingText !== null && promptsWithText(messages, pendingText) > promptsWithText(transcript.messages, pendingText)

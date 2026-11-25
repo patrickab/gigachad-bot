@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { EMPTY_TRANSCRIPT, messagesOfEntries, reduceTranscript, shownMessages, toolRunsOf, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
-import type { AgentMessage, AssistantMessage, UserMessage } from "../types"
+import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "../types"
 
 const prompt: UserMessage = { role: "user", content: "Fix the bug", timestamp: 1_000 }
 const reply: AssistantMessage = { role: "assistant", content: [{ type: "text", text: "Done" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 2_000 }
@@ -139,6 +139,40 @@ describe("resync", () => {
     ])
     const reset = transcriptReducer(live, { kind: "stream_changed" })
     expect(reset).toEqual({ ...base, unconfirmed: [], optimistic: null, streaming: null, runs: {} })
+  })
+
+  it("places a live custom message by its entry, although Pi stamps the entry when it persists it", () => {
+    const notice: CustomMessage = { role: "custom", customType: "factory-notice", content: "Task merged", display: true, timestamp: 2_500 }
+    const live = events(base, [{ type: "message_end", message: notice }])
+    expect(live.unconfirmed).toEqual([notice])
+
+    const answer: AssistantMessage = { ...reply, content: [{ type: "text", text: "Nice" }], timestamp: 3_500 }
+    const entries: SessionEntry[] = [
+      messageEntry("a", null, prompt),
+      { type: "custom_message", id: "n", parentId: "a", timestamp: new Date(2_507).toISOString(), customType: "factory-notice", content: "Task merged", display: true },
+      messageEntry("c", "n", followUp),
+      messageEntry("d", "c", answer),
+    ]
+    const resynced = transcriptReducer(live, { kind: "resync", resync: { mode: "replace", entries, leafId: "d" } })
+    expect(resynced.unconfirmed).toEqual([])
+    expect(shownMessages(resynced).map((message) => message.role)).toEqual(["user", "custom", "user", "assistant"])
+    // A replayed message_end of the notice stays in place too
+    expect(events(resynced, [{ type: "message_end", message: notice }]).unconfirmed).toEqual([])
+  })
+
+  it("keeps a second identical custom message apart from the first one's entry", () => {
+    const notice: CustomMessage = { role: "custom", customType: "factory-notice", content: "Ping", display: true, timestamp: 1_500 }
+    const entry: SessionEntry = { type: "custom_message", id: "n", parentId: "a", timestamp: new Date(1_501).toISOString(), customType: "factory-notice", content: "Ping", display: true }
+    const confirmed = transcriptReducer(base, { kind: "resync", resync: { mode: "append", entries: [entry], leafId: "n" } })
+    const again = { ...notice, timestamp: 1_800 }
+    expect(events(confirmed, [{ type: "message_end", message: again }]).unconfirmed).toEqual([again])
+  })
+
+  it("drops live messages older than a message the resync brings", () => {
+    const lost: UserMessage = { role: "user", content: "Lost", timestamp: 1_500 }
+    const live = events(base, [{ type: "message_end", message: lost }])
+    const resynced = transcriptReducer(live, { kind: "resync", resync: { mode: "append", entries: [messageEntry("b", "a", reply)], leafId: "b" } })
+    expect(resynced.unconfirmed).toEqual([])
   })
 })
 
