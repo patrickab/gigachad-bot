@@ -33,7 +33,7 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   sessions and does not restart pi-host while one runs.
 - **Backend** (`routes/factory.py`, `lib/pi_host.py`): `POST /api/factory/call` and `GET /api/factory/actions`, a pass
   through (a refusal keeps the core's `detail`). A `tasks.start` without `tag` gets the requesting login as its tag
-  (the core would fall back to the host's system user, shared by every login). Its own parts: reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert reloads the dev server), previews (stopped after a successful `tasks.remove`)
+  (the core would fall back to the host's system user, shared by every login), each character the core refuses in a tag replaced by `-`. Its own parts: reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert reloads the dev server), previews (stopped after a successful `tasks.remove`)
   and the one-time move of the old Postgres rows (`lib/factory_migration.py`). It stores no factory state.
 - **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.
@@ -129,8 +129,9 @@ One per repository, shared by every task's session through ticket files in `<git
   cost (coder plus reviews). `waiting_answer` sits in Needs you.
 - **Plan tree** (above the columns, `tagGroups.ts`, `TagTree.tsx`): tasks whose tag has two or more segments leave the
   columns. One closed row per segment (name, task count; a wave also its counts per state), an open wave lists its
-  task cards. A group's description, on demand, is the document `plan/<tag prefix>.md` of the plan's memory_store
-  (`GET /api/memory/read`); missing, it shows nothing. Tasks tagged with a login stay in the columns.
+  task cards. A group's description is the document `plan/<tag prefix>.md` of the plan's memory_store
+  (`GET /api/memory/read`), read when the group opens; its `Description` row appears only for a non-empty document.
+  Tasks tagged with a login, or without a tag (an older plugin), stay in the columns.
 - **Timeline** (task view): a merge request's source and target, then per round the trigger, the coder's turn (model,
   tokens, cost, last message, earlier ones collapsed), its questions, each gate with duration and failed output, the
   review with findings, the merge. A merge request's view has no message box.

@@ -38,7 +38,8 @@ function finish(group: TagGroup): TagGroup {
   const states = STATE_ORDER
     .map((state) => ({ state, count: tasks.filter((task) => shownState(task) === state).length }))
     .filter(({ count }) => count > 0)
-  const plan = tasks.find((task) => task.plan !== null)?.plan ?? children.find((child) => child.plan !== null)?.plan ?? null
+  // `!= null`: a TaskView of an older plugin has no `plan` at all.
+  const plan = tasks.find((task) => task.plan != null)?.plan ?? children.find((child) => child.plan != null)?.plan ?? null
   return { ...group, children, tasks, states, plan, count: tasks.length + children.reduce((sum, child) => sum + child.count, 0) }
 }
 
@@ -52,7 +53,8 @@ export function groupByTag(tasks: readonly FactoryTask[]): TagGrouping {
   const roots: TagGroup[] = []
   const ungrouped: FactoryTask[] = []
   for (const task of tasks) {
-    const segments = task.tag.split("/")
+    // A TaskView of an older plugin has no `tag`: such a task stays in the columns.
+    const segments = (task.tag ?? "").split("/")
     if (segments.length < 2) {
       ungrouped.push(task)
       continue

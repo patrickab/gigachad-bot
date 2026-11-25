@@ -6,7 +6,7 @@ factory tables move into the core once.
 - The table move needs the test database (`POSTGRES_TEST_DATABASE_URL`), without one those tests skip
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
 import logging
@@ -135,6 +135,17 @@ def test_a_start_without_a_tag_is_tagged_with_the_requesting_login(client, host)
 
     assert response.status_code == 200, response.text
     assert host.calls == [("tasks.start", params | {"tag": "me@example.test"})]
+
+
+def test_a_login_that_is_no_valid_tag_is_tagged_with_its_refused_characters_replaced(host, stopped_previews):
+    identity = request_identity()
+    client = route_client(router, overrides={get_request_identity: replace(identity, login="o'neil!/x y@example.test")})
+    params = {"repo": "/repo", "title": "Rename", "request": "Call it Library"}
+
+    response = client.post("/api/factory/call", json={"action": "tasks.start", "params": params})
+
+    assert response.status_code == 200, response.text
+    assert host.calls == [("tasks.start", params | {"tag": "o-neil--x-y@example.test"})]
 
 
 def test_only_a_start_gets_a_tag(client, host):

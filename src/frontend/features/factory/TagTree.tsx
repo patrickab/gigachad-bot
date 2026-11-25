@@ -10,15 +10,20 @@ import { STATE_LABELS } from "./states"
 import { descriptionPath, type TagGroup } from "./tagGroups"
 
 /**
- * The group's description, the document `plan/<path>.md` of its plan's memory_store, rendered as markdown. A missing
- * document or memory_store (or any failed read) renders nothing: a plan need not describe every level.
+ * The group's description row, the document `plan/<path>.md` of its plan's memory_store rendered as markdown when
+ * opened. Read as soon as it mounts (when its group opens), the row appears only once a non-empty document came back:
+ * a missing document or memory_store (or any failed read) renders nothing, a plan need not describe every level.
  */
 export function TagGroupDescription({ plan, path }: { plan: string; path: string }) {
   const [text, setText] = useState<string | null>(null)
   const load = useCallback(() => readMemory(plan, descriptionPath(path)), [plan, path])
   useLoadWhile(true, load, (read) => setText(read.kind === "document" && read.text.trim() ? read.text : null))
   if (text === null) return null
-  return <div className="py-1 text-xs text-ink-muted"><LaTeXMarkdown content={text} compact /></div>
+  return (
+    <Disclosure summary="Description" summaryClassName="text-ink-subtle">
+      <div className="py-1 text-xs text-ink-muted"><LaTeXMarkdown content={text} compact /></div>
+    </Disclosure>
+  )
 }
 
 function GroupSummary({ group }: { group: TagGroup }) {
@@ -35,16 +40,12 @@ function GroupSummary({ group }: { group: TagGroup }) {
   )
 }
 
-/** One group: its row, and while open its description on demand, the groups below it and its own tasks as cards. */
+/** One group: its row, and while open its description (when its document exists), the groups below it and its own tasks as cards. */
 function TagGroupNode({ group, renderTask }: { group: TagGroup; renderTask: (task: FactoryTask) => ReactNode }) {
   return (
     <Disclosure summary={<GroupSummary group={group} />}>
       <div className="flex flex-col pl-5">
-        {group.plan !== null && (
-          <Disclosure summary="Description" summaryClassName="text-ink-subtle">
-            <TagGroupDescription plan={group.plan} path={group.path} />
-          </Disclosure>
-        )}
+        {group.plan != null && <TagGroupDescription plan={group.plan} path={group.path} />}
         {group.children.map((child) => <TagGroupNode key={child.path} group={child} renderTask={renderTask} />)}
         {group.tasks.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2.5 py-2">

@@ -73,6 +73,17 @@ describe("groupByTag", () => {
     expect(groups[0].children.map((child) => child.plan)).toEqual([null, "gigachad-bot/factory-protocol"])
   })
 
+  it("leaves a task of an older plugin, without tag or plan, in the columns and its siblings' plan intact", () => {
+    const older: Partial<FactoryTask> = factoryTask("old")
+    delete older.tag
+    delete older.plan
+    const planless = { ...task("a", "p/w1"), plan: undefined } as unknown as FactoryTask
+    const { groups, ungrouped } = groupByTag([older as FactoryTask, planless, task("b", "p/w1", { plan: "store" })])
+
+    expect(ungrouped.map((one) => one.id)).toEqual(["old"])
+    expect(groups[0].plan).toBe("store")
+  })
+
   it("finds a group's description under plan/ in the memory_store", () => {
     expect(descriptionPath("plugin/m1")).toBe("plan/plugin/m1.md")
   })

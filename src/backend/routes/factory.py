@@ -4,7 +4,7 @@
   repos, settings, `factory.yaml`, tasks and their runners. This backend keeps no factory state
 - Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
 - `tasks.start` without a `tag` gets the requesting login as its tag: the core would fall back to the host's system
-  user, which every login shares
+  user, which every login shares. Characters the core refuses in a tag segment become `-` (`login_tag`)
 - `tasks.remove` of a merged (`done`) task: a dry run (`git merge-tree`) first refuses a conflicting revert with 409
   `refused`, then, after the core removed the task, `git revert` of its merge commit in the repo's checkout
   (`lib.factory_revert`). Reverting last matters: it rewrites the checkout, which reloads a dev server mid-request
@@ -22,6 +22,7 @@ Host code execution: `host_access_only`.
 import asyncio
 from collections.abc import Awaitable
 from datetime import datetime
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -103,10 +104,19 @@ async def _revert_after_removal(repo: str, commit: str) -> None:
         raise _error(409, "failed", f"The task was deleted, its code stays: {exc}") from exc
 
 
+# What the core accepts in one tag segment: a login with anything else would make every start of it fail.
+_TAG_SEGMENT_REFUSED = re.compile(r"[^A-Za-z0-9._@+-]")
+
+
+def login_tag(login: str) -> str:
+    """*login* as a one-segment tag: each character the core refuses in a tag replaced by `-`."""
+    return _TAG_SEGMENT_REFUSED.sub("-", login)
+
+
 @router.post("/call")
 async def post_call(body: FactoryCall, identity: Annotated[RequestIdentity, Depends(get_request_identity)]) -> Any:  # noqa: ANN401 - the core's JSON, as each action shapes it
     """Run the core action *action* with *params*; the answer is its result."""
-    params = {"tag": identity.login} | body.params if body.action == "tasks.start" else body.params
+    params = {"tag": login_tag(identity.login)} | body.params if body.action == "tasks.start" else body.params
     revert = await _commit_to_revert(params) if body.action == "tasks.remove" else None
     result = await factory_result(pi_host.factory_call(body.action, params))
     if body.action == "tasks.remove":
