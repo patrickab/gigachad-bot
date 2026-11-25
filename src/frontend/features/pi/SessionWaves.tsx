@@ -73,6 +73,8 @@ function waveIcon(wave: FactoryWave): { icon: LucideIcon; className: string } {
 
 function taskIcon(state: string): { icon: LucideIcon; className: string } {
   if (ATTENTION_TASK.has(state)) return { icon: CircleAlert, className: "text-warning" }
+  if (state === "done") return { icon: Check, className: "text-ink-subtle" }
+  if (state === "cancelled") return { icon: X, className: "text-ink-faint" }
   if (state === "pending") return { icon: Circle, className: "text-ink-faint" }
   return { icon: LoaderCircle, className: "text-ink-muted" }
 }
@@ -114,8 +116,9 @@ function WaveSummary({ wave }: { wave: FactoryWave }) {
 
 const ROW = "h-auto py-0.5"
 
-function ActiveWave({ wave, onOpenSession }: { wave: FactoryWave; onOpenSession: (sessionId: string) => void }) {
-  const tasks = wave.tasks.filter((task) => !FINISHED_TASK.has(task.state))
+/** A wave's row, opening to its tasks: the unfinished ones first, then the finished, each started one with its session. */
+function WaveRow({ wave, onOpenSession }: { wave: FactoryWave; onOpenSession: (sessionId: string) => void }) {
+  const tasks = [...wave.tasks.filter((task) => !FINISHED_TASK.has(task.state)), ...wave.tasks.filter((task) => FINISHED_TASK.has(task.state))]
   return (
     <li>
       <Disclosure summary={<WaveSummary wave={wave} />} summaryClassName={ROW}>
@@ -134,9 +137,9 @@ function ActiveWave({ wave, onOpenSession }: { wave: FactoryWave; onOpenSession:
  *
  * - Header: `Factory`, the active waves (`<n> active`, `<m> needs you` in the warning colour when any), their summed cost; `<n> finished` without active waves.
  *   Open while a wave is active, collapsed otherwise
- * - Active waves (not `merged` or `cancelled`), those needing the user first, then newest first. A row opens to its tasks that are not done or cancelled,
- *   a started one opens its session through `onOpenSession`
- * - Finished waves behind one collapsed `<n> finished` row with their summed cost, newest first, rows that do not open
+ * - Active waves (not `merged` or `cancelled`), those needing the user first, then newest first
+ * - Finished waves behind one collapsed `<n> finished` row with their summed cost, newest first
+ * - Every wave's row opens to its tasks, unfinished ones first; a started one opens its session through `onOpenSession`
  * - Renders nothing without waves
  */
 export function SessionWaves({ waves, onOpenSession }: { waves: FactoryWave[]; onOpenSession: (sessionId: string) => void }) {
@@ -158,7 +161,7 @@ export function SessionWaves({ waves, onOpenSession }: { waves: FactoryWave[]; o
     <section aria-label="Waves" className="mx-auto mb-2 flex w-full max-w-2xl flex-col rounded-xl bg-paper px-3 py-1.5 text-xs">
       <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0}>
         <ul className="flex flex-col">
-          {active.map((wave) => <ActiveWave key={wave.id} wave={wave} onOpenSession={onOpenSession} />)}
+          {active.map((wave) => <WaveRow key={wave.id} wave={wave} onOpenSession={onOpenSession} />)}
           {finished.length > 0 && (
             <li>
               <Disclosure
@@ -171,12 +174,8 @@ export function SessionWaves({ waves, onOpenSession }: { waves: FactoryWave[]; o
                 )}
                 summaryClassName={ROW}
               >
-                <ul aria-label="Finished waves" className="flex flex-col">
-                  {finished.map((wave) => (
-                    <li key={wave.id} className="ml-5 flex min-w-0 items-center gap-2 py-0.5">
-                      <WaveSummary wave={wave} />
-                    </li>
-                  ))}
+                <ul aria-label="Finished waves" className="ml-5 flex flex-col">
+                  {finished.map((wave) => <WaveRow key={wave.id} wave={wave} onOpenSession={onOpenSession} />)}
                 </ul>
               </Disclosure>
             </li>

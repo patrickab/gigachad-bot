@@ -105,10 +105,10 @@ describe("SessionWaves", () => {
     expect(list.textContent).toContain("2/2")
     expect(list.textContent).toContain("merged")
     expect(screen.getAllByText(/^p\//).map((node) => node.textContent)).toEqual(["p/stuck", "p/new", "p/old", "p/m2", "p/m1"])
-    expect(screen.queryByRole("button", { name: /p\/m1/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /p\/m1/ })).toBeTruthy()
   })
 
-  it("opens a wave to its unfinished tasks, a started one opens its session", () => {
+  it("opens a wave to its tasks, unfinished first, a started one opens its session", () => {
     const onOpenSession = vi.fn()
     const tasks = [
       task("a", { title: "feat: running one", state: "running", taskId: "t-a", sessionId: "s-a" }),
@@ -124,10 +124,9 @@ describe("SessionWaves", () => {
     expect(list.textContent).toContain("running")
     expect(list.textContent).toContain("feat: pending one")
     expect(list.textContent).toContain("pending")
-    expect(list.textContent).not.toContain("done one")
-    expect(list.textContent).not.toContain("cancelled one")
+    expect(Array.from(list.querySelectorAll("li")).map((row) => row.textContent?.match(/feat: \w+ one/)?.[0])).toEqual(["feat: running one", "feat: pending one", "feat: done one", "feat: cancelled one"])
     const open = screen.getAllByRole("button", { name: "Open session" })
-    expect(open).toHaveLength(1)
+    expect(open).toHaveLength(3)
     fireEvent.click(open[0])
     expect(onOpenSession).toHaveBeenCalledWith("s-a")
   })
