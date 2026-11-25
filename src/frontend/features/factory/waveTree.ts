@@ -53,7 +53,11 @@ const byName = (left: string, right: string) => left.localeCompare(right, undefi
 
 function addUsage(sum: FactoryUsage | null, usage: FactoryUsage | null): FactoryUsage | null {
   if (!usage) return sum
-  return { input: (sum?.input ?? 0) + usage.input, output: (sum?.output ?? 0) + usage.output, cost: (sum?.cost ?? 0) + usage.cost }
+  const total: FactoryUsage = { input: (sum?.input ?? 0) + usage.input, output: (sum?.output ?? 0) + usage.output, cost: (sum?.cost ?? 0) + usage.cost }
+  // Cache counts are optional: summed only once a wave reports them, so a sum without any stays without
+  if (sum?.cacheRead !== undefined || usage.cacheRead !== undefined) total.cacheRead = (sum?.cacheRead ?? 0) + (usage.cacheRead ?? 0)
+  if (sum?.cacheWrite !== undefined || usage.cacheWrite !== undefined) total.cacheWrite = (sum?.cacheWrite ?? 0) + (usage.cacheWrite ?? 0)
+  return total
 }
 
 function finish(group: WaveGroup): WaveGroup {

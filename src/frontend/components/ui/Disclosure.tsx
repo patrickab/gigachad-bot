@@ -10,6 +10,8 @@ interface DisclosureProps {
   defaultOpen?: boolean
   /** Classes of the row button, e.g. its ink. */
   summaryClassName?: string
+  /** Rendered below the row whether open or not, above the content: a description toggle, a meta line. */
+  between?: ReactNode
   /** Rendered below the row while open. */
   children: ReactNode
   className?: string
@@ -19,7 +21,7 @@ interface DisclosureProps {
  * A row that opens and closes the content below it: a chevron that turns, `aria-expanded`, a keyboard focus ring.
  * The content mounts only while open, so what it loads waits until asked for.
  */
-export function Disclosure({ summary, defaultOpen = false, summaryClassName, children, className }: DisclosureProps) {
+export function Disclosure({ summary, defaultOpen = false, summaryClassName, between, children, className }: DisclosureProps) {
   const [open, setOpen] = useState(defaultOpen)
   const contentId = useId()
   return (
@@ -34,9 +36,10 @@ export function Disclosure({ summary, defaultOpen = false, summaryClassName, chi
           summaryClassName,
         )}
       >
-        <ChevronRight aria-hidden className={cn("h-3 w-3 shrink-0 text-ink-faint transition-transform", open && "rotate-90")} />
+        <ChevronRight aria-hidden className={cn("h-3 w-3 shrink-0 self-center text-ink-faint transition-transform", open && "rotate-90")} />
         {summary}
       </button>
+      {between}
       {open && <div id={contentId}>{children}</div>}
     </div>
   )

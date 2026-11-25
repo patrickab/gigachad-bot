@@ -2,7 +2,6 @@
 
 import { useCallback, useState, type ReactNode } from "react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { ChevronRight } from "lucide-react"
 import { Disclosure } from "@/components/ui/Disclosure"
 import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
@@ -24,22 +23,36 @@ function useDescription(plan: string | null, path: string): string | null {
   return plan === null ? null : text
 }
 
-/** A description rendered as markdown when its row is opened. */
+/** A description's text, rendered as markdown. */
+function DescriptionText({ text }: { text: string }) {
+  return <div className="py-1 text-xs text-ink-muted"><LaTeXMarkdown content={text} compact /></div>
+}
+
+/** A description already read, rendered as markdown when its row is opened. */
 function DescriptionRow({ text }: { text: string }) {
   return (
     <Disclosure summary="Description" summaryClassName="text-ink-subtle">
-      <div className="py-1 text-xs text-ink-muted"><LaTeXMarkdown content={text} compact /></div>
+      <DescriptionText text={text} />
     </Disclosure>
   )
 }
 
+/** The document `plan/<path>.md`, read when mounted: nothing while it is missing, empty or not back yet. */
+function LoadedDescription({ plan, path }: { plan: string; path: string }) {
+  const text = useDescription(plan, path)
+  return text === null ? null : <DescriptionText text={text} />
+}
+
 /**
- * The description row of the track, milestone or wave at tag `path`: the document `plan/<path>.md` of its plan's
- * memory_store, appearing only once a non-empty document came back.
+ * The description row of the wave at tag `path`: a toggle that reads the document `plan/<path>.md` of its plan's
+ * memory_store only once opened, so a closed row costs no read.
  */
 export function TagGroupDescription({ plan, path }: { plan: string; path: string }) {
-  const text = useDescription(plan, path)
-  return text === null ? null : <DescriptionRow text={text} />
+  return (
+    <Disclosure summary="Description" summaryClassName="text-ink-subtle">
+      <LoadedDescription plan={plan} path={path} />
+    </Disclosure>
+  )
 }
 
 /** A container's meta line: its stage and spend on a quiet line under the title and the description toggle. */
@@ -65,22 +78,26 @@ function Container({ label, count, description, meta, defaultOpen, children }: {
   defaultOpen: boolean
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(defaultOpen)
   return (
     <ElevatedContainer role="group" aria-label={label} className="min-w-0 rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((shown) => !shown)}
-        className="flex w-full min-w-0 items-baseline gap-2 rounded-xl px-3 pb-1 pt-2.5 text-left hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+      <Disclosure
+        defaultOpen={defaultOpen}
+        summaryClassName="h-auto items-baseline rounded-xl px-3 pb-1 pt-2.5"
+        summary={
+          <>
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{label}</span>
+            <span aria-label="Progress" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{count}</span>
+          </>
+        }
+        between={
+          <>
+            {description && <div className="px-3 pl-[1.625rem]">{description}</div>}
+            {meta}
+          </>
+        }
       >
-        <ChevronRight aria-hidden className={cn("h-3 w-3 shrink-0 self-center text-ink-faint transition-transform", open && "rotate-90")} />
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{label}</span>
-        <span aria-label="Progress" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{count}</span>
-      </button>
-      {description && <div className="px-3 pl-[1.625rem]">{description}</div>}
-      {meta}
-      {open && <div className="flex min-w-0 flex-col gap-2 px-2 pb-2">{children}</div>}
+        <div className="flex min-w-0 flex-col gap-2 px-2 pb-2">{children}</div>
+      </Disclosure>
     </ElevatedContainer>
   )
 }

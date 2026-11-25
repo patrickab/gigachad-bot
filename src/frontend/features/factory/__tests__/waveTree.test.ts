@@ -31,6 +31,15 @@ describe("treeOfWaves", () => {
     expect(root.children[1].usage).toEqual({ input: 30, output: 10, cost: 3 })
   })
 
+  it("carries cache reads and writes through the sum", () => {
+    const root = treeOfWaves([
+      factoryWave("a", { tag: "p/w1", usage: { input: 10, output: 5, cost: 1, cacheRead: 100, cacheWrite: 7 } }),
+      factoryWave("b", { tag: "p/w2", usage: { input: 20, output: 5, cost: 2, cacheRead: 50 } }),
+      factoryWave("c", { tag: "p/w3", usage: { input: 1, output: 1, cost: 0 } }),
+    ])
+    expect(root.children[0].usage).toEqual({ input: 31, output: 11, cost: 3, cacheRead: 150, cacheWrite: 7 })
+  })
+
   it("orders by name, numbers by value, whatever the listed order", () => {
     const waves = [factoryWave("ten", { tag: "p/w10" }), factoryWave("two", { tag: "p/w2" })]
     expect(treeOfWaves(waves).children[0].waves.map((wave) => wave.id)).toEqual(["two", "ten"])

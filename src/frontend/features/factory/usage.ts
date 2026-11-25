@@ -16,11 +16,6 @@ export function formatUsage(usage: { input: number; output: number }): string {
   return `${formatTokens(usage.input)} in / ${formatTokens(usage.output)} out`
 }
 
-/** Tokens in and out together, then dollars: a card's and a wave row's spend. */
-export function formatSpend(usage: { input: number; output: number; cost: number }): string {
-  return `${formatTokens(usage.input + usage.output)} tok · ${formatCost(usage.cost)}`
-}
-
 /** Flow and spend of a wave header: `↑55k ↓12k · $3.50`, in = input plus cache reads, out = output. */
 export function formatFlow(usage: { input: number; output: number; cost: number; cacheRead?: number }): string {
   return `↑${formatTokens(usage.input + (usage.cacheRead ?? 0))} ↓${formatTokens(usage.output)} · ${formatCost(usage.cost)}`

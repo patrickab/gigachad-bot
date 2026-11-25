@@ -27,4 +27,15 @@ describe("Disclosure", () => {
     expect(screen.getByRole("button", { name: "Details" })).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("Inside")).toBeTruthy()
   })
+
+  it("shows `between` below the row whether open or not, outside the content it controls", () => {
+    render(<Disclosure summary="Details" between={<p>Always</p>}><p>Inside</p></Disclosure>)
+    const toggle = screen.getByRole("button", { name: "Details" })
+    expect(screen.getByText("Always")).toBeTruthy()
+    fireEvent.click(toggle)
+    const content = document.getElementById(toggle.getAttribute("aria-controls") ?? "")
+    expect(content).toContainElement(screen.getByText("Inside"))
+    expect(content).not.toContainElement(screen.getByText("Always"))
+    expect(toggle.compareDocumentPosition(screen.getByText("Always")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })

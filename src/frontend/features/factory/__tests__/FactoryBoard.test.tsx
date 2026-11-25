@@ -190,6 +190,69 @@ describe("FactoryBoard", () => {
       stored.set("gigachad:factory-column-gap", "500")
       expect(renderBoard([]).view.getAllByRole("separator")[0]).toHaveAttribute("aria-valuenow", "64")
     })
+
+    /** jsdom has no pointer events nor capture: a mouse event carrying `pointerId`, and a spy for the test's duration. */
+    function stubCapture() {
+      vi.stubGlobal("PointerEvent", class extends MouseEvent {
+        readonly pointerId: number
+        constructor(type: string, init: PointerEventInit = {}) {
+          super(type, init)
+          this.pointerId = init.pointerId ?? 0
+        }
+      })
+      const original = Object.getOwnPropertyDescriptor(Element.prototype, "setPointerCapture")
+      const capture = vi.fn()
+      Object.defineProperty(Element.prototype, "setPointerCapture", { value: capture, configurable: true, writable: true })
+      return { capture, restore: () => original ? Object.defineProperty(Element.prototype, "setPointerCapture", original) : Reflect.deleteProperty(Element.prototype, "setPointerCapture") }
+    }
+
+    it("follows a pointer drag live, stores the gap once released and restores the body's cursor and selection", async () => {
+      const { capture, restore } = stubCapture()
+      try {
+        const { view } = renderBoard([])
+        const gaps = view.getAllByRole("separator", { name: "Resize column gap" })
+        fireEvent.pointerDown(gaps[0], { button: 0, pointerId: 1, clientX: 500 })
+        expect(capture).toHaveBeenCalledWith(1)
+        expect(document.body.style.cursor).toBe("col-resize")
+        expect(document.body.style.userSelect).toBe("none")
+
+        fireEvent.pointerMove(gaps[0], { pointerId: 1, clientX: 476 })
+        await waitFor(() => expect(gaps[1]).toHaveAttribute("aria-valuenow", "40"))
+        fireEvent.pointerMove(gaps[0], { pointerId: 1, clientX: 400 })
+        await waitFor(() => expect(gaps[0]).toHaveAttribute("aria-valuenow", "0"))
+        expect(stored.has("gigachad:factory-column-gap")).toBe(false)
+
+        fireEvent.pointerMove(gaps[0], { pointerId: 1, clientX: 492 })
+        fireEvent(gaps[0], new Event("lostpointercapture"))
+        await waitFor(() => expect(stored.get("gigachad:factory-column-gap")).toBe("56"))
+        expect(gaps[0]).toHaveAttribute("aria-valuenow", "56")
+        expect(document.body.style.cursor).toBe("")
+        expect(document.body.style.userSelect).toBe("")
+
+        // Released, the handle follows the pointer no more
+        fireEvent.pointerMove(gaps[0], { pointerId: 1, clientX: 400 })
+        expect(gaps[0]).toHaveAttribute("aria-valuenow", "56")
+      } finally {
+        restore()
+      }
+    })
+
+    it("restores the body's cursor and selection when unmounted mid-drag, storing nothing", () => {
+      const { restore } = stubCapture()
+      try {
+        const { view } = renderBoard([])
+        const gap = view.getAllByRole("separator", { name: "Resize column gap" })[0]
+        fireEvent.pointerDown(gap, { button: 0, pointerId: 1, clientX: 500 })
+        fireEvent.pointerMove(gap, { pointerId: 1, clientX: 480 })
+        expect(document.body.style.cursor).toBe("col-resize")
+        view.unmount()
+        expect(document.body.style.cursor).toBe("")
+        expect(document.body.style.userSelect).toBe("")
+        expect(stored.has("gigachad:factory-column-gap")).toBe(false)
+      } finally {
+        restore()
+      }
+    })
   })
 
   describe("waves", () => {

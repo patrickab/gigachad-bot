@@ -111,6 +111,20 @@ describe("WaveContainers", () => {
     expect(screen.queryByRole("button", { name: "Task done" })).toBeNull()
   })
 
+  it("reads no wave's description while its toggle is closed, a closed wave's neither", () => {
+    renderTree([factoryWave("a", { tag: "w1", title: "Wave one", stage: "merged", plan: PLAN })], [], vi.fn(), false)
+    expect(screen.getByRole("button", { name: "Description" })).toHaveAttribute("aria-expanded", "false")
+    expect(api.readMemory).not.toHaveBeenCalled()
+  })
+
+  it("is a disclosure: its header controls the content below the description and meta", () => {
+    renderTree([factoryWave("a", { tag: "w1", title: "Wave one", stage: "merged" })], [factoryTask("t1", { title: "Task done", state: "done", wave: "a" })])
+    const title = header("Wave one")
+    const content = document.getElementById(title.getAttribute("aria-controls") ?? "")
+    expect(content).toContainElement(screen.getByRole("button", { name: "Task done" }))
+    expect(content).not.toContainElement(screen.getByLabelText("Stage"))
+  })
+
   it("titles a track by the first line of its description, falling back to its name", async () => {
     api.readMemory.mockImplementation(async (_store, path) => {
       if (path === "plan/plugin.md") return { kind: "document", text: "# Plugin track\n\nBody" }
@@ -200,21 +214,33 @@ describe("WaveContainers", () => {
     })
     renderTree([factoryWave("a", { tag: "w1", plan: PLAN })])
     fireEvent.click(await screen.findByRole("button", { name: "Description" }))
-    expect(screen.getByTestId("rendered-markdown")).toHaveTextContent("# Wave one")
+    expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("# Wave one")
   })
 })
 
 describe("TagGroupDescription", () => {
-  it("renders nothing when the document or memory_store is missing", async () => {
-    const { container } = render(<TagGroupDescription plan={PLAN} path="plugin/m1" />)
-    await waitFor(() => expect(api.readMemory).toHaveBeenCalledWith(PLAN, "plan/plugin/m1.md"))
-    expect(container).toBeEmptyDOMElement()
+  it("reads its document only once opened", async () => {
+    api.readMemory.mockResolvedValue({ kind: "document", text: "# Wave one" })
+    render(<TagGroupDescription plan={PLAN} path="plugin/m1" />)
+    const toggle = screen.getByRole("button", { name: "Description" })
+    expect(api.readMemory).not.toHaveBeenCalled()
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("# Wave one")
+    expect(api.readMemory).toHaveBeenCalledExactlyOnceWith(PLAN, "plan/plugin/m1.md")
   })
 
-  it("renders nothing for an empty document", async () => {
+  it("opens to nothing when the document or memory_store is missing", async () => {
+    render(<TagGroupDescription plan={PLAN} path="plugin/m1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Description" }))
+    await waitFor(() => expect(api.readMemory).toHaveBeenCalledWith(PLAN, "plan/plugin/m1.md"))
+    expect(screen.queryByTestId("rendered-markdown")).toBeNull()
+  })
+
+  it("renders nothing inside for an empty document", async () => {
     api.readMemory.mockResolvedValue({ kind: "document", text: "  \n" })
-    const { container } = render(<TagGroupDescription plan={PLAN} path="plugin" />)
+    render(<TagGroupDescription plan={PLAN} path="plugin" />)
+    fireEvent.click(screen.getByRole("button", { name: "Description" }))
     await waitFor(() => expect(api.readMemory).toHaveBeenCalledOnce())
-    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByTestId("rendered-markdown")).toBeNull()
   })
 })
