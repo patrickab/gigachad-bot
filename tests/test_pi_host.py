@@ -260,13 +260,13 @@ async def test_a_prompt_to_a_stopped_session_is_refused_with_pi_hosts_status(mon
 
 
 async def test_a_missing_factory_plugin_is_reported_with_where_it_comes_from(monkeypatch):
-    message = f"The factory plugin is not installed. Install it from {pi_host.FACTORY_PLUGIN_SOURCE}"
+    message = f"The factory is not installed. Install it from {pi_host.FACTORY_PLUGIN_SOURCE}"
     _serve(monkeypatch, {"POST /factory/call": (503, {"error": "factory_plugin_missing", "message": message})})
 
     with pytest.raises(pi_host.FactoryPluginMissing) as missing:
         await pi_host.factory_call("repos.list", {})
 
-    assert "patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory" in str(missing.value)
+    assert "github.com/patrickab/agent-factory" in str(missing.value)
 
 
 async def test_a_factory_call_answers_the_result_and_a_refusal_its_code(monkeypatch):

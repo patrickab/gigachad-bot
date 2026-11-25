@@ -1,6 +1,6 @@
-/** Factory routes against a stand-in factory core in a scratch agent dir (never the deployed plugin). */
+/** Factory routes against a stand-in `factory` CLI and core in a scratch dir (never the installed package). */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleFactory } from "../src/factory.ts";
@@ -33,16 +33,31 @@ export async function callAction(name, params, options) {
 `;
 
 let scratch: string;
-const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+let core: string;
+let cli: string;
+const savedCli = process.env.AGENT_FACTORY_CLI;
+
+/** Make the stand-in CLI run `body` (a shell script) and count its runs in `<scratch>/cli-runs`. */
+async function writeCli(body: string): Promise<void> {
+  await writeFile(cli, `#!/bin/sh\necho run >> "${join(scratch, "cli-runs")}"\n${body}\n`);
+  await chmod(cli, 0o755);
+}
+
+async function cliRuns(): Promise<number> {
+  const runs = Bun.file(join(scratch, "cli-runs"));
+  return (await runs.exists()) ? (await runs.text()).split("\n").filter(Boolean).length : 0;
+}
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), "pi-host-factory-"));
-  process.env.PI_CODING_AGENT_DIR = join(scratch, "agent");
+  core = join(scratch, "agent-factory", "src", "core.ts");
+  cli = join(scratch, "factory");
+  process.env.AGENT_FACTORY_CLI = cli;
 });
 
 afterAll(async () => {
-  if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-  else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+  if (savedCli === undefined) delete process.env.AGENT_FACTORY_CLI;
+  else process.env.AGENT_FACTORY_CLI = savedCli;
   await rm(scratch, { recursive: true, force: true });
 });
 
@@ -59,18 +74,32 @@ function callAction(action: string, params?: unknown): Promise<{ status: number;
 }
 
 describe("factory routes", () => {
-  test("without the plugin both routes answer 503 naming its source", async () => {
+  /** Both routes answer 503 `factory_plugin_missing` naming the package's repository and `reason`. */
+  async function expectMissing(reason: string): Promise<void> {
     for (const answer of [await call("GET", "/factory/actions"), await callAction("repos.list")]) {
       expect(answer.status).toBe(503);
       expect(answer.json.error).toBe("factory_plugin_missing");
-      expect(answer.json.message).toContain("github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory");
+      expect(answer.json.message).toContain("https://github.com/patrickab/agent-factory");
+      expect(answer.json.message).toContain(reason);
     }
+  }
+
+  test("without the factory CLI both routes answer 503 naming the package's source", async () => {
+    await expectMissing(`posix_spawn '${cli}'`);
   });
 
-  test("call and actions go to the installed core, its errors map to their status", async () => {
-    const plugin = join(scratch, "agent", "extensions", "factory");
-    await mkdir(plugin, { recursive: true });
-    await writeFile(join(plugin, "core.ts"), STUB_CORE);
+  test("a failing CLI is a missing factory", async () => {
+    await writeCli('echo "broken install" >&2; exit 3');
+    await expectMissing("exited with 3: broken install");
+  });
+
+  test("a CLI naming a core that does not exist is a missing factory", async () => {
+    await writeCli(`echo "${core}"`);
+    await expectMissing(core);
+  });
+
+  test("call and actions go to the core the CLI names, its errors map to their status", async () => {
+    await Bun.write(core, STUB_CORE);
 
     const actions = await call("GET", "/factory/actions");
     expect(actions.status).toBe(200);
@@ -90,8 +119,15 @@ describe("factory routes", () => {
     });
   });
 
+  test("the core's path is asked once and kept across calls", async () => {
+    const runs = await cliRuns();
+    await writeCli("exit 1");
+    expect((await call("GET", "/factory/actions")).status).toBe(200);
+    expect((await callAction("repos.list")).status).toBe(200);
+    expect(await cliRuns()).toBe(runs);
+  });
+
   test("a changed core.ts is imported anew", async () => {
-    const core = join(scratch, "agent", "extensions", "factory", "core.ts");
     await writeFile(core, STUB_CORE.replace('"repos.list": {', '"repos.add": {'));
     const later = new Date(Date.now() + 10_000);
     await utimes(core, later, later);

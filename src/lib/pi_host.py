@@ -4,8 +4,8 @@
 - Consumes pi-host's HTTP API (`.docs/pi-migration-contracts.md`, "pi-host HTTP") and the token file pi-host creates on start
 - Provides the session, file and private-state calls of `/api/pi/*` and the workbench chats (`document` profile with the
   backend's system prompt, P3), a WebSocket opener for the `/ws` proxy and the gateway URL
-- Provides the factory core's actions (`factory_call`, `factory_actions`): pi-host runs them in the factory plugin's
-  `core.ts`, a refusal is `FactoryCallError` with the core's code, a missing plugin `FactoryPluginMissing`
+- Provides the factory core's actions (`factory_call`, `factory_actions`): pi-host runs them in the agent-factory
+  package's `core.ts`, a refusal is `FactoryCallError` with the core's code, a missing package `FactoryPluginMissing`
 - Provides `media`: the content-addressed tool-result images pi-host stores (`pi-host/src/media.ts`)
 - `SessionInfo.factory`: a session that is a factory task carries its state, so the session picker can hide it
 - Answers are validated against the contract models below, a changed shape fails loudly with the field name
@@ -74,9 +74,9 @@ class PiHostRejected(UpstreamRequestFailed):
         self.body = body
 
 
-# The factory plugin is a Pi user extension from the owner's dotfiles, not part of this repo.
-FACTORY_PLUGIN_SOURCE = "https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory"
-FACTORY_PLUGIN_HINT = f"Install the factory plugin to ~/.pi/agent/extensions/factory from {FACTORY_PLUGIN_SOURCE}"
+# The factory is a package of its own (CLI `factory`, Pi extension), not part of this repo.
+FACTORY_PLUGIN_SOURCE = "https://github.com/patrickab/agent-factory"
+FACTORY_PLUGIN_HINT = f"Install the factory (its `factory` CLI on pi-host's PATH) from {FACTORY_PLUGIN_SOURCE}"
 
 
 class FactoryPluginMissing(RuntimeError):

@@ -192,7 +192,7 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
   (code, its manifest, the lockfile), the installed `pi --version` differs from the
   one `/health` reports, or pi-host is down (M14). It never restarts while a Pi
   session runs a turn (`/health`; an older pi-host: a `pi` child in the unit's cgroup) or a
-  factory runner is alive (`pgrep -f /extensions/factory/runner.ts`), and prints the
+  factory runner is alive (`pgrep -f` on `agent-factory/src/runner.ts` and the old `extensions/factory/runner.ts`), and prints the
   restart command instead (M4). Without any `pi` on `PATH` the redeploy stops before a restart.
   The installer stops, disables and removes the retired `gigachad-bot-omp.service`, and the omp-web units once
   no omp session runs (see "Retire omp-web").
@@ -275,24 +275,22 @@ Units, environment, gate, backup and restore: `.docs/integration-learnharness.md
 
 ### Provision the agent factory
 
-Factory tasks belong to the factory plugin of the service user's Pi: each runs in a detached runner (`bun runner.ts`,
-under systemd in its own `systemd-run --user --scope`, so a pi-host restart leaves it running), its files under
-`~/.pi/agent/factory/`. pi-host only calls the plugin's core. The only factory unit is the preview gate.
+Factory tasks belong to the agent-factory package of the service user's Pi: each runs in a detached runner
+(`bun runner.ts`, under systemd in its own `systemd-run --user --scope`, so a pi-host restart leaves it running), its
+files under `~/.pi/agent/factory/`. pi-host only calls the package's core. The only factory unit is the preview gate.
 
-The factory needs two things this repo does not ship. Both come from the owner's dotfiles
-([patrickab/.os](https://github.com/patrickab/.os), applied with `./setup.sh` or `chezmoi apply`) and must be current
-for the service user on every host that runs factory tasks:
+The factory needs two things this repo does not ship. Both must be current for the service user on every host that
+runs factory tasks:
 
-| Dependency | Source in `.os` | Installed as | Without it |
+| Dependency | Source | Installed as | Without it |
 | --- | --- | --- | --- |
-| Factory plugin (Pi user extension) | [`chezmoi/dot_pi/agent/extensions/factory/`](https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory) | `~/.pi/agent/extensions/factory/` | No task starts, the board reports `factory_plugin_missing` with this link |
-| `agent-worktree` | [`chezmoi/dot_local/bin/executable_agent-worktree`](https://github.com/patrickab/.os/blob/master/chezmoi/dot_local/bin/executable_agent-worktree) | `~/.local/bin/agent-worktree` | No worktree task starts (tasks in the checkout still do) |
+| `agent-factory` (core, `factory` CLI, Pi extension) | [patrickab/agent-factory](https://github.com/patrickab/agent-factory) | a clone; its `factory` CLI on the service's `PATH` (or env `AGENT_FACTORY_CLI` in the pi-host unit), the clone registered with `pi install <clone>` | No task starts, the board reports `factory_plugin_missing` with this link |
+| `agent-worktree` | [`.os`: `chezmoi/dot_local/bin/executable_agent-worktree`](https://github.com/patrickab/.os/blob/master/chezmoi/dot_local/bin/executable_agent-worktree) | `~/.local/bin/agent-worktree` (`chezmoi apply`, or copy the script to a directory on the service's `PATH`) | No worktree task starts (tasks in the checkout still do) |
 
-Without chezmoi: copy the plugin directory to `~/.pi/agent/extensions/factory/` (the `*.test.ts`, `tsconfig.json` and
-`bun.lock` files are for development only) and the script to a directory on the service's `PATH`. The other Pi plugins
-of that repo are optional: `chezmoi/dot_pi/README.md` there lists them. A plugin update reaches a task when its runner
-next starts; pi-host imports `core.ts` again when its mtime changes, a change only in another plugin module reaches
-pi-host when it restarts.
+pi-host runs `factory --core-path` once and imports the file it prints. A package update reaches a task when its
+runner next starts; pi-host imports `core.ts` again when its mtime changes, a change only in another module of the
+package reaches pi-host when it restarts. Runners the old plugin location (`~/.pi/agent/extensions/factory/`) started
+keep running, and `redeploy.sh` counts both.
 
 | Concern | Contract |
 | --- | --- |

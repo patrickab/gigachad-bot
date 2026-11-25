@@ -5,18 +5,21 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
 
 ## Where the plugin lives
 
-- **Not in this repo.** The factory plugin is a Pi user extension in the owner's dotfiles:
-  [`~/.os/chezmoi/dot_pi/agent/extensions/factory/`](https://github.com/patrickab/.os/tree/master/chezmoi/dot_pi/agent/extensions/factory), deployed by chezmoi to
-  `~/.pi/agent/extensions/factory/`. Edit the source in `~/.os`, never the deployed copy.
+- **Not in this repo.** The factory is the package `agent-factory`, a repository of its own:
+  [`patrickab/agent-factory`](https://github.com/patrickab/agent-factory) (locally `~/git/agent-factory`). It ships the
+  core (`src/core.ts`), the `factory` CLI, the `factory-mcp` server and the Pi extension (`src/pi/`).
+- **Installed** from a clone: its `factory` CLI on the PATH of pi-host's user (env `AGENT_FACTORY_CLI` names another
+  executable), and the clone registered as a Pi package (`pi install <clone>`), so every Pi session loads the extension.
+  Tasks the old plugin location (`~/.pi/agent/extensions/factory/`) started keep running.
 - **Why**: it runs in any Pi session on any repo (the `factory` tool, `/factory` commands), with or without gigachad.
   It is the factory core: repos, settings, `factory.yaml`, tasks, their runners and files. gigachad is a thin client.
-- **Factory tasks of this repo cannot change it.** A plugin change is a commit in `~/.os` (tests: `bun test` and
-  `bun run types` in the plugin's directory), then `chezmoi apply`. A change to the contract below needs a commit in
-  both repos.
+- **Factory tasks of this repo cannot change it.** A factory change is a commit in `agent-factory` (tests: `bun test`
+  and `bun run types` there). A change to the contract below needs a commit in both repos.
 - **Contract with gigachad**: the core's actions (`core.ts`: `ACTIONS`, `callAction`, `TaskView`, `TimelineEntry`,
-  see the plugin's README), which pi-host imports from the installed plugin, and the `preview` setting the core stores
-  for gigachad without acting on it.
-- **Not installed**: pi-host answers `factory_plugin_missing`, the board and a failed start name the link above.
+  see the package's README), which pi-host imports from the path `factory --core-path` prints, and the `preview`
+  setting the core stores for gigachad without acting on it.
+- **Not installed** (no `factory` CLI, a failing one, or a core path that does not exist): pi-host answers
+  `factory_plugin_missing`, the board and a failed start name the link above.
 
 ## Parts
 
@@ -24,8 +27,9 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   `settings.get|set`, `config.get|write`, `tasks.list|get|timeline|diff|start|approve|retry|cancel|remove|message`,
   host-only `tasks.import`). A detached runner (`bun runner.ts`, `pi --mode rpc`) holds every task, whoever started it.
   State: `<agent dir>/factory/` (task records, per-repo settings files, task sessions).
-- **pi-host**: `POST /factory/call {action, params}` and `GET /factory/actions` run the core in-process (imported
-  again when `core.ts`'s mtime changes; a change in another plugin module needs a pi-host restart). A runner it starts
+- **pi-host**: `POST /factory/call {action, params}` and `GET /factory/actions` run the core in-process (its path asked
+  once from `factory --core-path` and kept while it imports; imported again when `core.ts`'s mtime changes; a change in
+  another module of the package needs a pi-host restart). A runner it starts
   inherits pi-host's environment, as a terminal-started task inherits the shell's. It never opens or prompts a factory
   session; a change of a task session, record or runner lock under `<agent dir>/factory/` sends `sessions_changed`.
 - **Runners and restarts**: under systemd the plugin starts a runner through `systemd-run --user --scope`, outside
@@ -35,7 +39,7 @@ behavior. Implementation contracts: `.docs/architecture.md` ("Agent factory" row
   through (a refusal keeps the core's `detail`). A `tasks.start` without `tag` gets the requesting login as its tag
   (the core would fall back to the host's system user, shared by every login), each character the core refuses in a tag replaced by `-`. Its own parts: reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert reloads the dev server), previews (stopped after a successful `tasks.remove`)
   and the one-time move of the old Postgres rows (`lib/factory_migration.py`). It stores no factory state.
-- **Plugin** (`~/.pi/agent/extensions/factory/`, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
+- **Plugin** (the package's Pi extension, see above): runs the pipeline inside the task's own Pi session. Every step is a `custom`
   entry in the session file, the task is rebuilt from them after a restart.
   - `index.ts` session hooks and commands, `pipeline.ts` round and merge control flow, `merge.ts` rebase and merge,
     `queue.ts` merge queue, `review.ts` reviewer child, `config.ts` `factory.yaml`, `state.ts` entries and feedback.

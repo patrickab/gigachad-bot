@@ -315,7 +315,7 @@ async def test_factory_call_errors_are_the_cores_codes(host):
     assert forceable.value.detail == {"force": True}
 
     host.refusals["tasks.get"] = ("factory_plugin_missing", f"Install it from {pi_host.FACTORY_PLUGIN_SOURCE}")
-    with pytest.raises(pi_host.FactoryPluginMissing, match=r"patrickab/\.os"):
+    with pytest.raises(pi_host.FactoryPluginMissing, match=r"patrickab/agent-factory"):
         await pi_host.factory_call("tasks.get", {"id": "6f1c"})
 
     assert await pi_host.factory_actions() == ACTIONS

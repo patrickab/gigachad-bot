@@ -87,11 +87,12 @@ pi_host_up() {
     systemctl --user is-active --quiet "$pi_host_unit" && [[ -n $(pi_host_version 2>/dev/null) ]]
 }
 
-# Live factory runners (`bun .../extensions/factory/runner.ts`), one per task at work. The factory
-# plugin starts them outside pi-host's control group, but one started without systemd-run would
+# Live factory runners, one per task at work: `bun .../agent-factory/src/runner.ts` and those the old
+# plugin location (`.../extensions/factory/runner.ts`) started, which keep running after the switch.
+# The factory starts them outside pi-host's control group, but one started without systemd-run would
 # end with a restart, so they count as running sessions.
 factory_runners() {
-    pgrep -cf '/extensions/factory/runner\.ts' || true
+    pgrep -cf '/(extensions/factory|agent-factory/src)/runner\.ts' || true
 }
 
 # Pi sessions running a turn per pi-host's /health plus the live factory runners; a restart ends
