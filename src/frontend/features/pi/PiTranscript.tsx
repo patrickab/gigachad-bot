@@ -25,7 +25,7 @@ import { ToolCallRow } from "./tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
-import "./ShellNotices"
+import { isSilentShellNotice } from "./ShellNotices"
 // Registers the `video-preview` card (`~/.pi/agent/extensions/video-paste.ts`, from `~/.os`)
 import "./VideoPreview"
 
@@ -98,7 +98,7 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
   for (let index = turn.start + 1; index < turn.end; index++) {
     const message = messages[index]
     const key = `m${index}`
-    const visible = message.role === "assistant" || message.role === "bashExecution" || (message.role === "custom" && (message as CustomMessage).display)
+    const visible = message.role === "assistant" || message.role === "bashExecution" || (message.role === "custom" && (message as CustomMessage).display && !isSilentShellNotice(message))
     const marks = visible ? marksAt(confirmed, index) : undefined
     const retried = retriedError(message, marks)
     if (marks) pieces.push({ kind: "mark", key: `${key}-mark`, marks, retried })
@@ -108,7 +108,7 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
       pieces.push(...assistantPieces(message as AssistantMessage, key, runs).map((piece) => (piece.kind === "text" && entryId ? { ...piece, entryId } : piece)))
     }
     if (message.role === "bashExecution") pieces.push({ kind: "bash", key, message: message as BashExecutionMessage })
-    if (message.role === "custom" && (message as CustomMessage).display) pieces.push({ kind: "custom", key, message: message as CustomMessage })
+    if (message.role === "custom" && (message as CustomMessage).display && !isSilentShellNotice(message)) pieces.push({ kind: "custom", key, message: message as CustomMessage })
   }
   if (streaming) pieces.push(...assistantPieces(streaming, "streaming", runs))
   return pieces
