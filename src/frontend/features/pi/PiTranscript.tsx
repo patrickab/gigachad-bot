@@ -25,6 +25,7 @@ import { ToolCallRow } from "./tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
+import "./ShellNotices"
 // Registers the `video-preview` card (`~/.pi/agent/extensions/video-paste.ts`, from `~/.os`)
 import "./VideoPreview"
 
