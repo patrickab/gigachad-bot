@@ -125,30 +125,74 @@ describe("FactoryBoard", () => {
     expect(within(card("Task running")).queryByLabelText("Question")).toBeNull()
   })
 
-  it("moves a wave's tasks out of the columns into the wave tree, tasks without a wave stay whatever their tag", () => {
-    const planned = task("Task planned", "running", { tag: "plugin/m1/w1", wave: "wave1" })
-    const tasks = [planned, task("Task tagged", "running", { tag: "plugin/m1/w2" }), task("Task mine", "running", { tag: "noob" })]
-    const waves = [factoryWave("wave1", { tag: "plugin/m1/w1", tasks: [waveTask("a", { taskId: planned.id, state: "running" })] })]
-    const { view, titles, onOpenTask } = renderBoard(tasks, { waves })
+  describe("waves", () => {
+    /** The containers of a column by their accessible names. */
+    const containers = (view: ReturnType<typeof renderBoard>["view"], column: string) =>
+      within(view.getByRole("region", { name: column })).queryAllByRole("group").map((group) => group.getAttribute("aria-label"))
 
-    expect(titles("Working")).toEqual(["Task mine", "Task tagged"])
-    const tree = within(view.getByRole("region", { name: "Waves" }))
-    expect(tree.queryByRole("button", { name: /^w2/ })).toBeNull()
-    fireEvent.click(tree.getByRole("button", { name: /^plugin/ }))
-    fireEvent.click(tree.getByRole("button", { name: /^m1/ }))
-    fireEvent.click(tree.getByRole("button", { name: /^w1/ }))
-    fireEvent.click(tree.getByRole("button", { name: /^Task planned/ }))
-    expect(onOpenTask).toHaveBeenCalledWith(planned.id)
-  })
+    it("collects a building wave's done tasks in its container in Merging, its running task a card in Working naming the wave", () => {
+      const doneOne = task("Task done one", "done", { tag: "w1", wave: "wave1" })
+      const running = task("Task running", "running", { tag: "w1", wave: "wave1" })
+      const waves = [factoryWave("wave1", { tag: "w1", title: "Board waves", counts: { total: 8, done: 5 }, tasks: [
+        waveTask("a", { taskId: doneOne.id, state: "done" }), waveTask("b", { taskId: running.id, state: "running" }), waveTask("c", { title: "Task pending" }),
+      ] })]
+      const { view, titles, card, onOpenTask } = renderBoard([doneOne, running, task("Task plain done", "done")], { waves })
 
-  it("keeps a task in the columns whose wave the list does not hold", () => {
-    const { titles } = renderBoard([task("Task orphan", "running", { wave: "gone" })])
-    expect(titles("Working")).toEqual(["Task orphan"])
-  })
+      expect(titles("Finished")).toEqual(["Task plain done"])
+      expect(titles("Working")).toEqual(["Task running"])
+      expect(within(card("Task running")).getByLabelText("Wave")).toHaveTextContent("w1")
+      const merging = within(view.getByRole("region", { name: "Merging" }))
+      const wave = within(merging.getByRole("group", { name: "Board waves" }))
+      const header = wave.getAllByRole("button")[0]
+      expect(within(header).getByLabelText("Progress")).toHaveTextContent("5/8")
+      expect(within(header).getByLabelText("Stage")).toHaveTextContent("building")
+      expect(header).toHaveTextContent("Board waves")
+      expect(view.queryByText("Task pending")).toBeNull()
+      fireEvent.click(wave.getByRole("button", { name: /^Task done one/ }))
+      expect(onOpenTask).toHaveBeenCalledWith(doneOne.id)
+    })
 
-  it("shows no wave tree without waves", () => {
-    const { view } = renderBoard([task("Task mine", "running")])
-    expect(view.queryByRole("region", { name: "Waves" })).toBeNull()
+    it("shows a building wave without a done task nowhere but on its tasks' cards", () => {
+      const running = task("Task running", "running", { wave: "wave1" })
+      const { view } = renderBoard([running], { waves: [factoryWave("wave1", { tag: "w1", title: "Board waves", counts: { total: 2, done: 0 } })] })
+      expect(view.queryByRole("group", { name: "Board waves" })).toBeNull()
+    })
+
+    it("puts a rejected wave's container in Waiting, a merged one's in Finished closed", () => {
+      const merged = task("Task merged", "done", { wave: "m" })
+      const { view } = renderBoard([merged, task("Task rejected", "done", { wave: "r" })], { waves: [
+        factoryWave("r", { tag: "r1", title: "Rejected wave", stage: "rejected", counts: { total: 1, done: 1 } }),
+        factoryWave("m", { tag: "m1", title: "Merged wave", stage: "merged", counts: { total: 1, done: 1 } }),
+      ] })
+      expect(containers(view, "Waiting")).toEqual(["Rejected wave"])
+      expect(containers(view, "Finished")).toEqual(["Merged wave"])
+      const wave = within(view.getByRole("group", { name: "Merged wave" }))
+      expect(wave.getAllByRole("button")[0]).toHaveAttribute("aria-expanded", "false")
+      expect(view.queryByText("Task merged")).toBeNull()
+    })
+
+    it("wraps two waves of one milestone in one container counting the merged waves, titled by its name without a document", () => {
+      const { view } = renderBoard([], { waves: [
+        factoryWave("a", { tag: "plugin/m1/w1", title: "First", stage: "reviewing" }),
+        factoryWave("b", { tag: "plugin/m1/w2", title: "Second", stage: "merging" }),
+      ] })
+      expect(containers(view, "Merging")).toEqual(["plugin", "m1", "First", "Second"])
+      const milestone = within(view.getByRole("group", { name: "m1" }))
+      expect(within(milestone.getAllByRole("button")[0]).getByLabelText("Progress")).toHaveTextContent("0/2")
+    })
+
+    it("keeps a task in the columns whose wave the list does not hold, without a wave line", () => {
+      const { titles, card } = renderBoard([task("Task orphan", "done", { wave: "gone" }), task("Task mine", "running", { tag: "plugin/m1/w2" })])
+      expect(titles("Finished")).toEqual(["Task orphan"])
+      expect(titles("Working")).toEqual(["Task mine"])
+      expect(within(card("Task orphan")).queryByLabelText("Wave")).toBeNull()
+    })
+
+    it("renders nothing above the columns", () => {
+      const { view } = renderBoard([], { waves: [factoryWave("a", { tag: "w1", stage: "merged" })] })
+      expect(view.queryByRole("region", { name: "Waves" })).toBeNull()
+      expect(view.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(["Waiting", "Working", "Merging", "Finished"])
+    })
   })
 
   it("formats a task's age in minutes, hours, days, then weeks", () => {

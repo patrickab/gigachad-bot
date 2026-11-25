@@ -133,19 +133,24 @@ One per repository, shared by every task's session through ticket files in `<git
 
 - **Board card**: state, round, blocked reason, the open question, total tokens and cost (coder plus reviews).
   `waiting_answer` sits in Waiting.
-- **Wave tree** (above the columns, `waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on
-  the same refresh events. Tracks and milestones are the prefixes of the waves' tags, each row with the sums of its
-  waves (`done/total`, tokens and cost). A wave's row: name, `done/total`, stage, tokens and cost. Opened: its title
-  (with a link to the declaring supervisor's Pi session, `origin`), description, its tasks (`task.wave`) as task cards
-  sorted by state, a declared task not started yet as a quiet row with its title, then the wave's outcome
-  (`WaveOutcome.tsx`): its reviews newest first in the task timeline's review row (`ReviewStep.tsx`; model, usage,
-  duration, verdict, findings, a link to the reviewer's session), failed gate runs only, the merged commit range
-  (`from..to`, short) and the remote request's link. A session link appears only when its id exists and opens the
-  session as a Pi workspace item (`piSessionItem`). A description is the document `plan/<tag or prefix>.md` of the
-  plan's memory_store (`GET /api/memory/read`), read when the row opens; its `Description` row appears only for a
-  non-empty document.
-  Tasks without a wave (or of a wave the list lacks) stay in the columns whatever their tag. A factory without
-  `waves.list` (`unknown action`) shows no tree and no error.
+- **Waves on the board** (`waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on the same
+  refresh events. Nothing sits above the columns: a wave is a card-shaped container inside a column (`waveColumn`):
+  `building` (once a task of it is done), `reviewing`, `merging` in Merging; `rejected`, `blocked`, `waiting_approve`
+  or interrupted in Waiting; `merged`, `cancelled` in Finished, closed by default. Its header (a `Disclosure`):
+  `done/total`, the wave's title, stage, tokens and cost. Inside: the wave's done tasks as task cards (they leave
+  Finished), then a link to the declaring supervisor's Pi session (`origin`), the outcome (`WaveOutcome.tsx`): reviews
+  newest first in the task timeline's review row (`ReviewStep.tsx`; model, usage, duration, verdict, findings, a link
+  to the reviewer's session), failed gate runs only, the merged commit range (`from..to`, short), the remote request's
+  link; and the description. Declared tasks not started yet count only in the total. A wave's other tasks are ordinary
+  cards in the columns of their states with a quiet line naming the wave (its tag's last segment).
+  Waves of one column sharing a tag prefix are wrapped in one container per prefix segment (track, milestone):
+  `merged waves/waves`, the title (first line of the prefix's description, heading marks stripped, else the segment),
+  summed tokens and cost. A one-segment tag has no outer container. A session link appears only when its id exists
+  and opens the session as a Pi workspace item (`piSessionItem`). A description is the document
+  `plan/<tag or prefix>.md` of the plan's memory_store (`GET /api/memory/read`); its `Description` row appears only for
+  a non-empty document.
+  Tasks without a wave (or of a wave the list lacks) behave as before whatever their tag. A factory without
+  `waves.list` (`unknown action`) shows no waves and no error.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message, earlier ones
   collapsed), its questions, each gate with duration and failed output, the review with findings, the merge.
 - Tokens count cache reads and writes as input; cost is the provider's figure.

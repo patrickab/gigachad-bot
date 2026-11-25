@@ -3,14 +3,14 @@
 import { useCallback, useState, type ReactNode } from "react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { Disclosure } from "@/components/ui/Disclosure"
+import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { readMemory } from "@/lib/backend/api"
 import type { FactoryTask, FactoryUsage, FactoryWave, FactoryWaveStage } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
-import { STATE_ORDER, shownState } from "./states"
 import { formatSpend } from "./usage"
 import { SessionButton, WaveOutcome } from "./WaveOutcome"
-import { descriptionPath, waveName, type WaveGroup } from "./waveTree"
+import { descriptionPath, descriptionTitle, type WaveGroup } from "./waveTree"
 
 const STAGE_LABELS: Record<FactoryWaveStage, string> = {
   building: "building",
@@ -23,22 +23,25 @@ const STAGE_LABELS: Record<FactoryWaveStage, string> = {
   cancelled: "cancelled",
 }
 
-/** A wave's stage as its row shows it: interrupted over the stage, a blocked wave's reason after it. */
+/** A wave's stage as its header shows it: interrupted over the stage, a blocked wave's reason after it. */
 export function waveStageLabel(wave: Pick<FactoryWave, "stage" | "reason" | "interrupted">): string {
   if (wave.interrupted) return "interrupted"
   return wave.stage === "blocked" && wave.reason ? `blocked · ${wave.reason}` : STAGE_LABELS[wave.stage]
 }
 
 /**
- * The description row of the track, milestone or wave at tag `path`: the document `plan/<path>.md` of its plan's
- * memory_store rendered as markdown when opened. Read as soon as it mounts (when its row opens), it appears only once a
- * non-empty document came back: a missing document or memory_store (or any failed read) renders nothing.
+ * The document `plan/<path>.md` of the memory_store `plan`, read once mounted: null until it came back, and for a
+ * missing or empty document, a missing memory_store or any failed read.
  */
-export function TagGroupDescription({ plan, path }: { plan: string; path: string }) {
+function useDescription(plan: string | null, path: string): string | null {
   const [text, setText] = useState<string | null>(null)
-  const load = useCallback(() => readMemory(plan, descriptionPath(path)), [plan, path])
-  useLoadWhile(true, load, (read) => setText(read.kind === "document" && read.text.trim() ? read.text : null))
-  if (text === null) return null
+  const load = useCallback(() => readMemory(plan ?? "", descriptionPath(path)), [plan, path])
+  useLoadWhile(plan !== null, load, (read) => setText(read.kind === "document" && read.text.trim() ? read.text : null))
+  return plan === null ? null : text
+}
+
+/** A description rendered as markdown when its row is opened. */
+function DescriptionRow({ text }: { text: string }) {
   return (
     <Disclosure summary="Description" summaryClassName="text-ink-subtle">
       <div className="py-1 text-xs text-ink-muted"><LaTeXMarkdown content={text} compact /></div>
@@ -46,97 +49,112 @@ export function TagGroupDescription({ plan, path }: { plan: string; path: string
   )
 }
 
-/** A row's name, its `done/total` and its spend. */
-function RowSummary({ name, counts, usage, stage }: {
-  name: string
-  counts: { total: number; done: number }
-  usage: FactoryUsage | null
+/**
+ * The description row of the track, milestone or wave at tag `path`: the document `plan/<path>.md` of its plan's
+ * memory_store, appearing only once a non-empty document came back.
+ */
+export function TagGroupDescription({ plan, path }: { plan: string; path: string }) {
+  const text = useDescription(plan, path)
+  return text === null ? null : <DescriptionRow text={text} />
+}
+
+/** A container's header: its progress and title, then its stage and spend on a quiet second line. */
+function ContainerHeader({ progress, title, stage, usage }: {
+  progress: string
+  title: string
   stage?: { label: string; failed: boolean }
+  usage: FactoryUsage | null
 }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0">{name}</span>
-      <span aria-label="Progress" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{counts.done}/{counts.total}</span>
-      {stage && <span aria-label="Stage" className={cn("shrink-0 text-[11px]", stage.failed ? "text-danger" : "text-ink-faint")}>{stage.label}</span>}
-      {usage && <span aria-label="Tokens and cost" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{formatSpend(usage)}</span>}
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span aria-label="Progress" className="shrink-0 text-[11px] tabular-nums text-ink-faint">{progress}</span>
+        <span className="min-w-0 truncate text-xs font-semibold text-ink">{title}</span>
+      </span>
+      {(stage || usage) && (
+        <span className="flex min-w-0 items-baseline gap-2 text-[11px]">
+          {stage && <span aria-label="Stage" className={cn("min-w-0 truncate", stage.failed ? "text-danger" : "text-ink-faint")}>{stage.label}</span>}
+          {usage && <span aria-label="Tokens and cost" className="ml-auto shrink-0 tabular-nums text-ink-faint">{formatSpend(usage)}</span>}
+        </span>
+      )}
     </span>
   )
 }
 
-/** Board order of a wave's tasks: by shown state, then newest first. */
-function stateOrder(left: FactoryTask, right: FactoryTask): number {
-  return STATE_ORDER.indexOf(shownState(left)) - STATE_ORDER.indexOf(shownState(right)) || right.createdAt.localeCompare(left.createdAt)
+/** A card-shaped container in a column: a header that opens and closes it, its content below. */
+function Container({ label, header, defaultOpen, children }: { label: string; header: ReactNode; defaultOpen: boolean; children: ReactNode }) {
+  return (
+    <ElevatedContainer role="group" aria-label={label} className="min-w-0 rounded-xl border border-divider/40 shadow-[var(--shadow-md)]">
+      <Disclosure summary={header} defaultOpen={defaultOpen} summaryClassName="h-auto items-start rounded-xl px-3 py-2.5 [&>svg]:mt-0.5">
+        <div className="flex min-w-0 flex-col gap-2 px-2 pb-2">{children}</div>
+      </Disclosure>
+    </ElevatedContainer>
+  )
 }
 
-/** The props every node of the tree passes down: the board's tasks, how to draw one, how to open a Pi session. */
-interface TreeProps {
-  tasks: readonly FactoryTask[]
+/** What every container passes down: the done tasks per wave, how to draw one, how to open a Pi session. */
+interface ContainerProps {
+  /** A wave's done tasks, by wave id, in the order they show. */
+  doneTasks: ReadonlyMap<string, readonly FactoryTask[]>
   renderTask: (task: FactoryTask) => ReactNode
   onOpenSession: (sessionId: string) => void
+  /** Whether the containers start open: a finished wave's start closed. */
+  defaultOpen: boolean
 }
 
 /**
- * One wave: its row, and while open its title (with the declaring supervisor's session), description, tasks as cards,
- * specs not started yet as quiet rows, then what happened to the wave as a whole (`WaveOutcome`).
+ * One wave in its column: `done/total`, title, stage and spend, then while open its done tasks as cards and what
+ * happened to it: the declaring supervisor's session, its description, reviews, failed gates, merge and remote.
  */
-function WaveNode({ wave, tasks, renderTask, onOpenSession }: TreeProps & { wave: FactoryWave }) {
-  const own = tasks.filter((task) => task.wave === wave.id).sort(stateOrder)
-  const started = new Set(own.map((task) => task.id))
-  const pending = wave.tasks.filter((spec) => spec.taskId === null || !started.has(spec.taskId))
+function WaveContainer({ wave, doneTasks, renderTask, onOpenSession, defaultOpen }: ContainerProps & { wave: FactoryWave }) {
+  const done = doneTasks.get(wave.id) ?? []
   const stage = { label: waveStageLabel(wave), failed: wave.interrupted || wave.stage === "blocked" }
   return (
-    <Disclosure summary={<RowSummary name={waveName(wave)} counts={wave.counts} usage={wave.usage} stage={stage} />}>
-      <div className="flex flex-col pl-5">
-        <div className="group flex items-baseline gap-2 py-1">
-          <span className="min-w-0 truncate text-xs text-ink-subtle">{wave.title}</span>
-          {wave.origin && <SessionButton label="Open supervisor session" sessionId={wave.origin} onOpenSession={onOpenSession} />}
-        </div>
-        {wave.plan != null && <TagGroupDescription plan={wave.plan} path={wave.tag} />}
-        {own.length > 0 && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2.5 py-2">
-            {own.map((task) => <div key={task.id}>{renderTask(task)}</div>)}
+    <Container
+      label={wave.title}
+      defaultOpen={defaultOpen}
+      header={<ContainerHeader progress={`${wave.counts.done}/${wave.counts.total}`} title={wave.title} stage={stage} usage={wave.usage} />}
+    >
+      {done.map((task) => <div key={task.id}>{renderTask(task)}</div>)}
+      <div className="flex flex-col px-1">
+        {wave.origin && (
+          <div className="group flex items-baseline gap-2 text-[11px] text-ink-subtle">
+            <span>supervisor</span>
+            <SessionButton label="Open supervisor session" sessionId={wave.origin} onOpenSession={onOpenSession} />
           </div>
         )}
-        {pending.length > 0 && (
-          <ul aria-label="Pending" className="flex flex-col gap-1 py-1">
-            {pending.map((spec) => <li key={spec.key} className="truncate text-xs text-ink-faint">{spec.title}</li>)}
-          </ul>
-        )}
         <WaveOutcome wave={wave} onOpenSession={onOpenSession} />
+        {wave.plan != null && <TagGroupDescription plan={wave.plan} path={wave.tag} />}
       </div>
-    </Disclosure>
+    </Container>
   )
 }
 
-function GroupNode({ group, ...props }: TreeProps & { group: WaveGroup }) {
+/** A track or milestone in a column: `merged/waves`, the first line of its description (or its name), summed spend. */
+function GroupContainer({ group, ...props }: ContainerProps & { group: WaveGroup }) {
+  const description = useDescription(group.plan, group.path)
+  const title = (description && descriptionTitle(description)) || group.name
   return (
-    <Disclosure summary={<RowSummary name={group.name} counts={group.counts} usage={group.usage} />}>
-      <div className="flex flex-col pl-5">
-        {group.plan != null && <TagGroupDescription plan={group.plan} path={group.path} />}
-        <GroupContent group={group} {...props} />
-      </div>
-    </Disclosure>
-  )
-}
-
-function GroupContent({ group, ...props }: TreeProps & { group: WaveGroup }) {
-  return (
-    <>
-      {group.children.map((child) => <GroupNode key={child.path} group={child} {...props} />)}
-      {group.waves.map((wave) => <WaveNode key={wave.id} wave={wave} {...props} />)}
-    </>
+    <Container
+      label={title}
+      defaultOpen={props.defaultOpen}
+      header={<ContainerHeader progress={`${group.counts.merged}/${group.counts.total}`} title={title} usage={group.usage} />}
+    >
+      <WaveContainers group={group} {...props} />
+      {description !== null && <div className="px-1"><DescriptionRow text={description} /></div>}
+    </Container>
   )
 }
 
 /**
- * The waves above the board's columns: a row per track and milestone (the prefixes of the waves' tags, with the sums
- * of their waves) and per wave (name, `done/total`, stage, spend), closed until opened. `renderTask` draws a wave's
- * task as the columns do, `onOpenSession` opens a supervisor's or reviewer's Pi session.
+ * The waves of one column in their containers: a container per prefix of their tags (track, milestone) wrapping one
+ * per wave. A wave with a one-segment tag has no outer container.
  */
-export function WaveTree({ root, ...props }: TreeProps & { root: WaveGroup }) {
+export function WaveContainers({ group, ...props }: ContainerProps & { group: WaveGroup }) {
   return (
-    <section aria-label="Waves" className="flex flex-col">
-      <GroupContent group={root} {...props} />
-    </section>
+    <>
+      {group.children.map((child) => <GroupContainer key={child.path} group={child} {...props} />)}
+      {group.waves.map((wave) => <WaveContainer key={wave.id} wave={wave} {...props} />)}
+    </>
   )
 }

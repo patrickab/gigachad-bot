@@ -8,20 +8,32 @@ vi.mock("@/components/content/LaTeXMarkdown", () => ({
   LaTeXMarkdown: ({ content }: { content: string }) => <output data-testid="rendered-markdown">{content}</output>,
 }))
 
-import { TagGroupDescription, WaveTree, waveStageLabel } from "@/features/factory/WaveTree"
+import { TagGroupDescription, WaveContainers, waveStageLabel } from "@/features/factory/WaveTree"
 import { treeOfWaves } from "@/features/factory/waveTree"
 import type { FactoryTask, FactoryWave, FactoryWaveReview } from "@/lib/domain/factory"
-import { factoryTask, factoryWave, waveTask } from "./factoryTask"
+import { factoryTask, factoryWave } from "./factoryTask"
 
 const PLAN = "gigachad-bot/factory-protocol"
 const MISSING = Object.assign(new Error("not found"), { status: 404, code: "not_found" })
 
-function renderTree(waves: FactoryWave[], tasks: FactoryTask[] = [], onOpenSession = vi.fn<(sessionId: string) => void>()) {
-  return render(<WaveTree root={treeOfWaves(waves)} tasks={tasks} renderTask={(task) => <button type="button">{task.title}</button>} onOpenSession={onOpenSession} />)
+/** The waves' containers, open unless `defaultOpen` is false, `done` their done tasks. */
+function renderTree(waves: FactoryWave[], done: FactoryTask[] = [], onOpenSession = vi.fn<(sessionId: string) => void>(), defaultOpen = true) {
+  const doneTasks = new Map<string, FactoryTask[]>()
+  for (const task of done) doneTasks.set(task.wave!, [...(doneTasks.get(task.wave!) ?? []), task])
+  return render(
+    <WaveContainers
+      group={treeOfWaves(waves)}
+      doneTasks={doneTasks}
+      renderTask={(task) => <button type="button">{task.title}</button>}
+      onOpenSession={onOpenSession}
+      defaultOpen={defaultOpen}
+    />,
+  )
 }
 
-function openWave(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }))
+/** The header of the container named `name`. */
+function header(name: string) {
+  return within(screen.getByRole("group", { name })).getAllByRole("button")[0]
 }
 
 const USAGE = { input: 1200, output: 300, cost: 0.05 }
@@ -35,22 +47,21 @@ beforeEach(() => {
   api.readMemory.mockRejectedValue(MISSING)
 })
 
-describe("WaveTree", () => {
-  it("shows a track's sums, and a wave row's progress, stage and usage", () => {
+describe("WaveContainers", () => {
+  it("heads a wave with done/total, its title, stage and usage, and a milestone with merged/waves and summed usage", () => {
     renderTree([
-      factoryWave("a", { tag: "plugin/m1/w1", title: "Board shows waves", stage: "reviewing", counts: { total: 8, done: 3 }, usage: { input: 1500, output: 500, cost: 0.42 } }),
-      factoryWave("b", { tag: "plugin/m1/w2", counts: { total: 2, done: 2 }, usage: { input: 0, output: 1000, cost: 0.08 } }),
+      factoryWave("a", { tag: "plugin/m1/w1", title: "Board shows waves", stage: "reviewing", counts: { total: 8, done: 5 }, usage: { input: 1500, output: 500, cost: 0.42 } }),
+      factoryWave("b", { tag: "plugin/m1/w2", title: "Second", stage: "merged", counts: { total: 2, done: 2 }, usage: { input: 0, output: 1000, cost: 0.08 } }),
     ])
-    const track = screen.getByRole("button", { name: /^plugin/ })
-    expect(within(track).getByLabelText("Progress")).toHaveTextContent("5/10")
+    const track = header("plugin")
+    expect(within(track).getByLabelText("Progress")).toHaveTextContent("1/2")
     expect(within(track).getByLabelText("Tokens and cost")).toHaveTextContent("3.0k tok · $0.50")
     expect(within(track).queryByLabelText("Stage")).toBeNull()
+    expect(within(header("m1")).getByLabelText("Progress")).toHaveTextContent("1/2")
 
-    fireEvent.click(track)
-    fireEvent.click(screen.getByRole("button", { name: /^m1/ }))
-    const wave = screen.getByRole("button", { name: /^w1/ })
-    expect(wave).not.toHaveTextContent("Board shows waves")
-    expect(within(wave).getByLabelText("Progress")).toHaveTextContent("3/8")
+    const wave = header("Board shows waves")
+    expect(wave).toHaveTextContent("Board shows waves")
+    expect(within(wave).getByLabelText("Progress")).toHaveTextContent("5/8")
     expect(within(wave).getByLabelText("Stage")).toHaveTextContent("reviewing")
     expect(within(wave).getByLabelText("Tokens and cost")).toHaveTextContent("2.0k tok · $0.42")
   })
@@ -61,18 +72,31 @@ describe("WaveTree", () => {
     expect(waveStageLabel({ stage: "waiting_approve", reason: null, interrupted: false })).toBe("ready for review")
   })
 
-  it("opens a wave to its tasks as cards and its specs not started yet as quiet rows", () => {
-    const started = factoryTask("t1", { title: "Task started", wave: "a" })
-    renderTree(
-      [factoryWave("a", { tag: "w1", tasks: [waveTask("one", { taskId: "t1", state: "running" }), waveTask("two", { title: "Later work" })] })],
-      [started, factoryTask("t2", { title: "Task elsewhere" })],
-    )
-    fireEvent.click(screen.getByRole("button", { name: /^w1/ }))
+  it("holds a wave's done tasks as cards, no pending specs, and closes from its header", () => {
+    renderTree([factoryWave("a", { tag: "w1", title: "Wave one", counts: { total: 3, done: 1 } })], [factoryTask("t1", { title: "Task done", state: "done", wave: "a" })])
+    const wave = within(screen.getByRole("group", { name: "Wave one" }))
+    expect(wave.getByRole("button", { name: "Task done" })).toBeTruthy()
+    expect(screen.queryByRole("list", { name: "Pending" })).toBeNull()
 
-    expect(screen.getByRole("button", { name: "Task started" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Task elsewhere" })).toBeNull()
-    const pending = within(screen.getByRole("list", { name: "Pending" }))
-    expect(pending.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Later work"])
+    fireEvent.click(header("Wave one"))
+    expect(wave.queryByRole("button", { name: "Task done" })).toBeNull()
+  })
+
+  it("starts closed when asked", () => {
+    renderTree([factoryWave("a", { tag: "w1", title: "Wave one", stage: "merged" })], [factoryTask("t1", { title: "Task done", state: "done", wave: "a" })], vi.fn(), false)
+    expect(header("Wave one")).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("button", { name: "Task done" })).toBeNull()
+  })
+
+  it("titles a track by the first line of its description, falling back to its name", async () => {
+    api.readMemory.mockImplementation(async (_store, path) => {
+      if (path === "plan/plugin.md") return { kind: "document", text: "# Plugin track\n\nBody" }
+      throw MISSING
+    })
+    renderTree([factoryWave("a", { tag: "plugin/m1/w1", title: "Wave", plan: PLAN })])
+    expect(await screen.findByRole("group", { name: "Plugin track" })).toBeTruthy()
+    expect(screen.getByRole("group", { name: "m1" })).toBeTruthy()
+    expect(api.readMemory).toHaveBeenCalledWith(PLAN, "plan/plugin/m1.md")
   })
 
   it("shows a wave's reviews newest first: a rejected one with its findings open, an approved one", () => {
@@ -83,7 +107,6 @@ describe("WaveTree", () => {
       ] }),
       review({ round: 2, at: "2026-01-01T02:00:00Z" }),
     ] })])
-    openWave("w1")
 
     const rows = within(screen.getByRole("list", { name: "Outcome" })).getAllByRole("listitem").filter((item) => item.textContent?.startsWith("review"))
     expect(rows).toHaveLength(2)
@@ -101,13 +124,11 @@ describe("WaveTree", () => {
 
   it("names a failed review by its status", () => {
     renderTree([factoryWave("a", { tag: "w1", reviews: [review({ verdict: "failed", status: "timeout", usage: null })] })])
-    openWave("w1")
     expect(screen.getByRole("list", { name: "Outcome" })).toHaveTextContent("timed out")
   })
 
   it("shows the merged commit range short", () => {
     renderTree([factoryWave("a", { tag: "w1", stage: "merged", merge: { at: "2026-01-01T03:00:00Z", from: "0123456789abcdef", to: "fedcba9876543210", queueMs: 0 } })])
-    openWave("w1")
     expect(screen.getByLabelText("Merged range")).toHaveTextContent("01234567..fedcba98")
   })
 
@@ -116,7 +137,6 @@ describe("WaveTree", () => {
       { at: "2026-01-01T01:00:00Z", phase: "review", passed: true, wallMs: 1000, log: "all green" },
       { at: "2026-01-01T02:00:00Z", phase: "merge", passed: false, wallMs: 2000, log: "1 test failed" },
     ] })])
-    openWave("w1")
     const outcome = screen.getByRole("list", { name: "Outcome" })
     expect(outcome).toHaveTextContent("merge gate")
     expect(outcome).toHaveTextContent("1 test failed")
@@ -126,14 +146,12 @@ describe("WaveTree", () => {
 
   it("shows nothing of the outcome while only passed gates ran", () => {
     renderTree([factoryWave("a", { tag: "w1", gates: [{ at: "2026-01-01T01:00:00Z", phase: "review", passed: true, wallMs: 1000, log: null }] })])
-    openWave("w1")
     expect(screen.queryByRole("list", { name: "Outcome" })).toBeNull()
   })
 
   it("opens the supervisor's and the reviewer's Pi sessions by their ids", () => {
     const onOpenSession = vi.fn<(sessionId: string) => void>()
     renderTree([factoryWave("a", { tag: "w1", title: "Board shows waves", origin: "supervisor-1", reviews: [review({ sessionId: "reviewer-1" })] })], [], onOpenSession)
-    openWave("w1")
 
     expect(screen.getByText("Board shows waves")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Open supervisor session" }))
@@ -143,29 +161,22 @@ describe("WaveTree", () => {
 
   it("has no session links without the sessions' ids", () => {
     renderTree([factoryWave("a", { tag: "w1", origin: null, reviews: [review({ sessionId: null })] })])
-    openWave("w1")
     expect(screen.queryByRole("button", { name: "Open supervisor session" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Open reviewer session" })).toBeNull()
   })
 
   it("links the remote request", () => {
     renderTree([factoryWave("a", { tag: "w1", remote: { number: 42, url: "https://example.com/pr/42", pushed: null, error: null } })])
-    openWave("w1")
     expect(screen.getByRole("link", { name: "#42" })).toHaveAttribute("href", "https://example.com/pr/42")
   })
 
-  it("reads a wave's description by its tag when it opens", async () => {
+  it("reads a wave's description by its tag", async () => {
     api.readMemory.mockImplementation(async (_store, path) => {
-      if (path === "plan/p/w1.md") return { kind: "document", text: "# Wave one" }
+      if (path === "plan/w1.md") return { kind: "document", text: "# Wave one" }
       throw MISSING
     })
-    renderTree([factoryWave("a", { tag: "p/w1", plan: PLAN })])
-    expect(api.readMemory).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: /^p/ }))
-    fireEvent.click(screen.getByRole("button", { name: /^w1/ }))
-
+    renderTree([factoryWave("a", { tag: "w1", plan: PLAN })])
     fireEvent.click(await screen.findByRole("button", { name: "Description" }))
-    expect(api.readMemory).toHaveBeenCalledWith(PLAN, "plan/p.md")
     expect(screen.getByTestId("rendered-markdown")).toHaveTextContent("# Wave one")
   })
 })

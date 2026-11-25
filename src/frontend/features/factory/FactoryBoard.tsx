@@ -21,8 +21,8 @@ import { ConfigDraft } from "./ConfigDraft"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
 import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, STATE_LABELS, shownState, taskStatusLine, taskTone } from "./states"
-import { treeOfWaves } from "./waveTree"
-import { WaveTree } from "./WaveTree"
+import { treeOfWaves, waveColumn, waveName, type WaveColumn } from "./waveTree"
+import { WaveContainers } from "./WaveTree"
 import { dismissLaunch, retryLaunch, useFactoryLaunches, type FactoryLaunch } from "./useFactoryTasks"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
 import { formatSpend } from "./usage"
@@ -59,10 +59,12 @@ function forceWouldAllow(cause: unknown): boolean {
  * One task on the board. Delete shows while the core accepts `tasks.remove` and asks first; a refusal that `force`
  * would allow (unmerged work) then shows with a second question that deletes it anyway, any other shows its message.
  */
-function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }: {
+function TaskCard({ task, archived, waveLabel, onArchive, onOpen, onDelete, onDeleteError }: {
   task: FactoryTask
   /** Whether the task is archived, null when it cannot be (not finished). */
   archived: boolean | null
+  /** The name of the listed wave the task belongs to, null when none. */
+  waveLabel?: string | null
   onArchive: () => void
   onOpen: () => void
   /** Delete the task, dropping its unmerged work with `force`. Throws the core's refusal. */
@@ -114,6 +116,7 @@ function TaskCard({ task, archived, onArchive, onOpen, onDelete, onDeleteError }
         {state === "blocked" && task.reason && <span className="truncate text-[11px] text-ink-subtle">{task.reason}</span>}
         {state === "waiting_answer" && task.question && <span aria-label="Question" className="line-clamp-3 whitespace-pre-wrap text-[11px] text-ink-muted">{task.question}</span>}
         {refusal !== null && <span className="line-clamp-3 text-[11px] text-ink-subtle">{refusal}</span>}
+        {waveLabel && <span aria-label="Wave" className="truncate text-[11px] text-ink-faint">{waveLabel}</span>}
         {/* The delete question covers this row, so asking never resizes the card. */}
         <span className={cn("flex h-6 min-w-0 items-center gap-1 text-[11px] text-ink-faint", confirming && "invisible")}>
           {task.usage && (
@@ -174,8 +177,8 @@ function LaunchCard({ launch }: { launch: FactoryLaunch }) {
 
 /**
  * Kanban board of the tasks of the repo at path `repo`: what waits on the user first, then what runs, then what is
- * finished. The waves show as a tree above them (`WaveTree`), their tasks inside it; tasks outside a wave (or of a wave
- * the list does not hold) stay in the columns.
+ * finished. A wave is a container in the column of its stage holding its done tasks (`WaveContainers`); its other tasks
+ * are cards in the columns of their states, naming the wave.
  */
 export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, onOpenSession }: {
   repo: string
@@ -207,12 +210,42 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, o
     await callFactory<FactoryTaskRemoval>("tasks.remove", force ? { id, force } : { id })
     await refresh()
   }
-  const tree = useMemo(() => treeOfWaves(waves), [waves])
-  const ungrouped = useMemo(() => {
-    const listed = new Set(waves.map((wave) => wave.id))
-    // `== null`: a TaskView of an older plugin has no `wave` at all.
-    return tasks.filter((task) => task.wave == null || !listed.has(task.wave))
-  }, [tasks, waves])
+  const listed = useMemo(() => new Map(waves.map((wave) => [wave.id, wave])), [waves])
+  /** The listed wave of `task`, undefined for a task without one. `== null`: a TaskView of an older plugin has no `wave`. */
+  const waveOf = useCallback((task: FactoryTask) => (task.wave == null ? undefined : listed.get(task.wave)), [listed])
+  const labelOf = (task: FactoryTask) => {
+    const wave = waveOf(task)
+    return wave ? waveName(wave) : null
+  }
+  // A listed wave's done tasks collect in its container, every other task is a card in the column of its state.
+  const { doneTasks, columnsTasks } = useMemo(() => {
+    const done = new Map<string, FactoryTask[]>()
+    const rest: FactoryTask[] = []
+    for (const task of [...tasks].sort(boardOrder)) {
+      const wave = waveOf(task)
+      if (wave && shownState(task) === "done") done.set(wave.id, [...(done.get(wave.id) ?? []), task])
+      else rest.push(task)
+    }
+    return { doneTasks: done, columnsTasks: rest }
+  }, [tasks, waveOf])
+  const waveTrees = useMemo(() => {
+    const byColumn = new Map<WaveColumn, FactoryWave[]>()
+    for (const wave of waves) {
+      const column = waveColumn(wave, wave.counts.done > 0 || doneTasks.has(wave.id))
+      if (column) byColumn.set(column, [...(byColumn.get(column) ?? []), wave])
+    }
+    return new Map([...byColumn].map(([column, inColumn]) => [column, { tree: treeOfWaves(inColumn), count: inColumn.length }]))
+  }, [waves, doneTasks])
+  const renderWaveTask = (task: FactoryTask) => (
+    <TaskCard
+      task={task}
+      archived={null}
+      onArchive={() => {}}
+      onOpen={() => onOpenTask(task.id)}
+      onDelete={(force) => deleteTask(task.id, force)}
+      onDeleteError={setDeleteError}
+    />
+  )
 
   return (
     // Lanes start at --surface, the level of the sidebar beside them
@@ -237,36 +270,19 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, o
         {missingConfig && config.draft !== null && (
           <ConfigDraft repo={repo} draft={config.draft} onSaved={(text) => setConfig({ exists: true, text, draft: null, source: [] })} />
         )}
-        {!missingConfig && waves.length > 0 && (
-          // Bounded and scrolling on its own, so open groups never squeeze the columns away
-          <div className="max-h-[40vh] shrink-0 overflow-y-auto px-16 pt-6 scrollbar-thin">
-            <WaveTree
-              root={tree}
-              tasks={tasks}
-              onOpenSession={onOpenSession}
-              renderTask={(task) => (
-                <TaskCard
-                  task={task}
-                  archived={null}
-                  onArchive={() => {}}
-                  onOpen={() => onOpenTask(task.id)}
-                  onDelete={(force) => deleteTask(task.id, force)}
-                  onDeleteError={setDeleteError}
-                />
-              )}
-            />
-          </div>
-        )}
         <div className={cn("min-h-0 flex-1 gap-16 overflow-x-auto px-16 pb-10 pt-6 scrollbar-thin", missingConfig ? "hidden" : "flex")}>
           {BOARD_COLUMNS.map((column) => {
-            const inColumn = ungrouped.filter((task) => column.states.includes(shownState(task))).sort(boardOrder)
+            const inColumn = columnsTasks.filter((task) => column.states.includes(shownState(task)))
             const isFinished = column.id === "finished"
             const archivedCount = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id)).length : 0
+            const showWaves = !(isFinished && showArchived && archivedCount > 0)
+            const columnWaves = showWaves ? waveTrees.get(column.id as WaveColumn) : undefined
             // Finished shows what waits for inspection, or the archive while that is opened.
-            const columnTasks = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id) === (showArchived && archivedCount > 0)) : inColumn
+            const columnTasks = isFinished ? inColumn.filter((task) => archivedIds.includes(task.id) === !showWaves) : inColumn
             // Newest first, like the tasks: a refused start waits on the user, one on its way works.
             const columnLaunches = launches.filter((launch) => column.id === (launch.error === null ? "working" : "waiting")).reverse()
-            const count = isFinished ? inColumn.length - archivedCount : columnTasks.length + columnLaunches.length
+            const waveCount = waveTrees.get(column.id as WaveColumn)?.count ?? 0
+            const count = waveCount + (isFinished ? inColumn.length - archivedCount : columnTasks.length + columnLaunches.length)
             const capped = isFinished && !showAllFinished && columnTasks.length > FINISHED_LIMIT
             const shown = capped ? columnTasks.slice(0, FINISHED_LIMIT) : columnTasks
             return (
@@ -321,6 +337,17 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, o
                     <LaunchCard launch={launch} />
                   </motion.div>
                 ))}
+                {columnWaves && (
+                  <motion.div key="waves" layout className="flex min-w-0 flex-col gap-2.5">
+                    <WaveContainers
+                      group={columnWaves.tree}
+                      doneTasks={doneTasks}
+                      renderTask={renderWaveTask}
+                      onOpenSession={onOpenSession}
+                      defaultOpen={!isFinished}
+                    />
+                  </motion.div>
+                )}
                 {shown.map((task) => (
                   <motion.div
                     key={task.id}
@@ -334,6 +361,7 @@ export function FactoryBoard({ repo, tasks, waves, error, refresh, onOpenTask, o
                     <TaskCard
                       task={task}
                       archived={isFinished ? archivedIds.includes(task.id) : null}
+                      waveLabel={labelOf(task)}
                       onArchive={() => toggleArchived(task.id)}
                       onOpen={() => onOpenTask(task.id)}
                       onDelete={(force) => deleteTask(task.id, force)}

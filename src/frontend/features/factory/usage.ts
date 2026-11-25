@@ -1,4 +1,4 @@
-// Token and dollar figures of a factory task or wave, shared by the timeline, the board's cards and its wave tree.
+// Token and dollar figures of a factory task or wave, shared by the timeline, the board's cards and its wave containers.
 
 /** Dollars, to the tenth of a cent below ten cents: a review on a small model costs less than one cent. */
 export function formatCost(cost: number): string {
