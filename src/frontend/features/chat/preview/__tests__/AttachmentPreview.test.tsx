@@ -45,3 +45,18 @@ describe("AttachmentPreview views", () => {
     expect(screen.queryByRole("button", { name: "Neovim" })).toBeNull()
   })
 })
+
+describe("AttachmentPreview images", () => {
+  afterEach(cleanup)
+
+  it("opens an image in a floating window, not the file panel, and closes it from there", () => {
+    const onClose = vi.fn()
+    const image: Attachment = { name: "plot.png", mime: "image/png", url: "blob:plot", active: true }
+    render(<FilePanelProvider><AttachmentPreview attachment={image} onClose={onClose} /><FilePanelSlot /></FilePanelProvider>)
+
+    expect(screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toBe("blob:plot")
+    expect(screen.queryByRole("button", { name: "Close panel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Close image" }))
+    expect(onClose).toHaveBeenCalled()
+  })
+})

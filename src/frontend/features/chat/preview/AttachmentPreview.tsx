@@ -1,8 +1,10 @@
 "use client"
 
 import { useCallback, useState } from "react"
+import { X } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
+import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { useNeovimSetting, type NeovimSetting } from "@/contexts/SettingsContext"
 import { FilePanel } from "@/features/editor/FilePanel"
 import { NeovimEditor, useNeovimTerminal } from "@/features/editor/NeovimEditor"
@@ -77,8 +79,22 @@ function AttachmentPanel({ attachment, onClose, onContentChange }: {
   )
 }
 
+/** An image over the chat in a floating window sized to it: backdrop click, Escape or the close button close it. */
+function ImageWindow({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
+  const label = useAttachmentLabel(attachment)
+  return (
+    <FloatingWindow label={label} onClose={onClose} panelClassName="relative h-auto max-h-[90vh] w-auto max-w-[90vw]">
+      <button type="button" aria-label="Close image" onClick={onClose} className="absolute right-2 top-2 rounded-md bg-paper/80 p-1 text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+        <X className="h-3.5 w-3.5" />
+      </button>
+      {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export */}
+      <img src={attachment.url} alt={attachment.name} className="block max-h-[90vh] max-w-[90vw] object-contain" />
+    </FloatingWindow>
+  )
+}
+
 /**
- * Show `attachment` in the tab's file panel, nothing while it is null.
+ * Show `attachment`, nothing while it is null: an image in a floating window, anything else in the tab's file panel.
  *
  * - PDFs switch between the PDF and its rendered extraction, when MinerU produced one
  * - Text attachments switch between Neovim (setting on, the default then) and rendered markdown
@@ -90,5 +106,6 @@ export function AttachmentPreview({ attachment, onClose, onContentChange }: {
   onContentChange?: ContentChange
 }) {
   if (!attachment) return null
+  if (attachment.mime.startsWith("image/")) return <ImageWindow key={attachment.name} attachment={attachment} onClose={onClose} />
   return <AttachmentPanel key={attachment.name} attachment={attachment} onClose={onClose} onContentChange={onContentChange} />
 }

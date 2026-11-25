@@ -134,7 +134,7 @@ function ThinkingBlock({ text }: { text: string }) {
 
 const PreviewContext = createContext<(attachment: Attachment) => void>(() => {})
 
-/** A tool's images as the chat's image attachments, a click opens the lightbox (the file panel). */
+/** A tool's images as the chat's image attachments, a click opens the image in a floating window. */
 function ToolImages({ attachments }: { attachments: Attachment[] }) {
   const open = useContext(PreviewContext)
   return <MessageAttachments attachments={attachments} onClick={open} />
