@@ -53,6 +53,7 @@ Styling: overlay CSS applies under `html.cf-embed` only (standalone LH keeps its
 ## Shell contracts
 
 - **One frame**: one persistent iframe for all learn tabs, switched by `open-session`/`new-session`/`open-home`; never reloaded, moved in the DOM, or duplicated per tab. Learn entry and "new session" open `/chat/new`.
+- **Header and filter**: New Teaching / New Practice learn header actions → `new-session {kind}`; "Open knowledge graph" → `open-home`; the Teaching/Practice/All filter row (fuzzy search, ↑/↓, Enter) keeps upstream's ranking.
 - **Keyboard**: upstream's shortcuts work in the frame. In drive mode the frame swallows the hidden chrome's shortcuts (⌘B, ⌘⇧F, F2) and posts `chrome-key`; the freeze turns ⌘K into `model-open` (never on a session's read-only pill). ⇧Tab cycles the draft's strong-tier thinking, swallowed on a session. A chord with nothing to do keeps its browser default.
 - **Models**: the draft selector offers catalog models LH serves (`set-model`/`set-thinking` → upstream's write, moves the strong tier globally; running sessions keep their stamp). A session's model is a read-only pill; an unavailable stamped model turns it back into the selector (the freeze lets that pick through). Cheap/vision tiers and every other setting: learn header Settings → `open-settings` → upstream's dialog.
 - **Modal**: while the frame reports `modal.open`, the shell dims its chrome with a scrim whose hole tracks the frame; scrim click or Escape sends `close-modal`.
