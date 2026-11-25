@@ -14,17 +14,22 @@ import type { FactoryTask, FactoryTaskAction, FactoryTaskCommand } from "@/lib/d
 import { cn } from "@/lib/utils"
 import { AgentPanel } from "./AgentPanel"
 import { PreviewPane } from "./PreviewPane"
+import { TaskHandoff, handoffOf } from "./TaskHandoff"
+import { TaskSession } from "./TaskSession"
 import { shownState, statusTone, taskStatusLine } from "./states"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import { TaskDiff } from "./TaskDiff"
 import { useTaskReview } from "./taskReview"
 import { useFactoryTask, useFactoryTasks } from "./useFactoryTasks"
 import { useTaskDiff } from "./useTaskDiff"
+import { useTaskSession } from "./useTaskSession"
 import { useTaskTimeline } from "./useTaskTimeline"
 
-type TaskPane = "changes" | "preview"
+type TaskPane = "session" | "handoff" | "changes" | "preview"
 
 const PANES: readonly { value: TaskPane; label: string }[] = [
+  { value: "session", label: "Session" },
+  { value: "handoff", label: "Handoff" },
   { value: "changes", label: "Changes" },
   { value: "preview", label: "Preview" },
 ]
@@ -63,7 +68,11 @@ export function TaskView({ repo, taskId, onBack, onOpenTask }: {
   useTabWorkingDirectory(task?.worktree)
   const timeline = useTaskTimeline(taskId, taskRevision(task), task?.running ?? false)
   const diff = useTaskDiff(taskId, timeline.entries.length, task !== undefined && task.state !== null)
-  const [pane, setPane] = useState<TaskPane>("changes")
+  const session = useTaskSession(task?.sessionId ?? "", taskRevision(task), task?.running ?? false)
+  const handoff = task?.running ? undefined : handoffOf(timeline.entries)
+  const [chosen, setPane] = useState<TaskPane>("session")
+  const pane = chosen === "handoff" && handoff === undefined ? "session" : chosen
+  const panes = PANES.filter((one) => one.value !== "handoff" || handoff !== undefined)
   const [panelOpen, setPanelOpen] = useState(true)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const { run, pending, error: commandError } = useAsyncAction(async (command: FactoryTaskCommand) => {
@@ -109,19 +118,23 @@ export function TaskView({ repo, taskId, onBack, onOpenTask }: {
             </>)}
           <PillTabs
             className="shrink-0"
-            options={PANES}
+            options={panes}
             value={pane}
             onChange={setPane}
             tabs={{ label: "Task view", idPrefix: "task-tab", panelId: "task-pane" }}
           />
           {!panelOpen && <PanelToggleButton open={false} onClick={() => setPanelOpen(true)} openLabel="Open agent" closeLabel="Close agent" />}
         </div>
-        <ErrorText className="px-3 py-1">{commandError || review.sendError || tasksError || diff.error}</ErrorText>
+        <ErrorText className="px-3 py-1">{commandError || review.sendError || tasksError || diff.error || session.error}</ErrorText>
         <div id="task-pane" role="tabpanel" aria-labelledby={`task-tab-${pane}`} className="min-h-0 flex-1">
           {!task ? (
             <div className="flex h-full items-center justify-center text-xs text-ink-faint">Loading task</div>
           ) : pane === "preview" ? (
             <PreviewPane taskId={task.id} />
+          ) : pane === "session" ? (
+            <TaskSession transcript={session.transcript} />
+          ) : pane === "handoff" && handoff !== undefined ? (
+            <TaskHandoff task={task} text={handoff} files={diff.files ?? []} onShowChanges={() => setPane("changes")} />
           ) : (
             <TaskDiff files={diff.files} root={task.worktree} review={review} />
           )}

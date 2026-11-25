@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { SidePanelScroll } from "@/components/ui/SidePanel"
 import { StatusDot } from "@/components/ui/StatusDot"
@@ -25,13 +26,18 @@ const TRIGGER_LABELS: Record<FactoryRoundTrigger, string> = {
 
 const PHASE_LABELS: Record<FactoryTimelineData["gate"]["phase"], string> = { hooks: "hook", gates: "gate", merge_gates: "merge gate", after_merge: "after merge" }
 
-const SAID_CLASS = "whitespace-pre-wrap break-words text-ink-muted"
+const SAID_CLASS = "min-w-0 break-words text-ink-muted"
+
+/** A message's text as compact markdown. */
+function Said({ text, className }: { text: string; className?: string }) {
+  return <div className={cn(SAID_CLASS, className)}><LaTeXMarkdown content={text} compact /></div>
+}
 
 /** Consecutive coder messages of a round are one turn, a user message and a coder's question stand alone. */
-type Said = { kind: "user" | "question"; text: string } | { kind: "coder"; texts: string[] }
+type SaidTurn = { kind: "user" | "question"; text: string } | { kind: "coder"; texts: string[] }
 
-function conversation(messages: readonly TimelineMessage[]): Said[] {
-  const said: Said[] = []
+function conversation(messages: readonly TimelineMessage[]): SaidTurn[] {
+  const said: SaidTurn[] = []
   for (const message of messages) {
     const text = message.data.text.trim()
     if (!text) continue
@@ -46,9 +52,9 @@ function conversation(messages: readonly TimelineMessage[]): Said[] {
 /** A message of the user to the task's coder. */
 function UserStep({ text }: { text: string }) {
   return (
-    <li className={ROW_CLASS}>
-      <span className={KIND_CLASS}>you</span>
-      <p className={cn(SAID_CLASS, "min-w-0 flex-1")}>{text}</p>
+    <li>
+      <span className="text-ink-subtle">you</span>
+      <Said text={text} className="mt-0.5" />
     </li>
   )
 }
@@ -56,14 +62,14 @@ function UserStep({ text }: { text: string }) {
 /** The coder's question to the user, which the next message answers. */
 function QuestionStep({ text }: { text: string }) {
   return (
-    <li className={ROW_CLASS}>
-      <span className={KIND_CLASS}>question</span>
-      <p className={cn(SAID_CLASS, "min-w-0 flex-1 text-ink")}>{text}</p>
+    <li>
+      <span className="text-ink-subtle">question</span>
+      <Said text={text} className="mt-0.5 text-ink" />
     </li>
   )
 }
 
-function SaidStep({ said }: { said: Said }) {
+function SaidStep({ said }: { said: SaidTurn }) {
   if (said.kind === "coder") return <CoderStep texts={said.texts} />
   return said.kind === "user" ? <UserStep text={said.text} /> : <QuestionStep text={said.text} />
 }
@@ -76,15 +82,13 @@ function CoderStep({ texts }: { texts: readonly string[] }) {
   const earlier = texts.length - 1
   return (
     <li>
-      <div className={ROW_CLASS}>
-        <span className={KIND_CLASS}>coder</span>
-      </div>
-      <p className={cn(SAID_CLASS, "mt-1 max-h-60 overflow-auto scrollbar-thin")}>{texts[earlier]}</p>
+      <span className="text-ink-subtle">coder</span>
+      <Said text={texts[earlier]} className="mt-0.5 max-h-60 overflow-auto scrollbar-thin" />
       {earlier > 0 && (
         <details className="mt-1">
           <summary className={SUMMARY_CLASS}>{earlier} earlier {earlier === 1 ? "message" : "messages"}</summary>
           <div className="mt-1 flex flex-col gap-2">
-            {texts.slice(0, earlier).map((text, index) => <p key={index} className={SAID_CLASS}>{text}</p>)}
+            {texts.slice(0, earlier).map((text, index) => <Said key={index} text={text} />)}
           </div>
         </details>
       )}
@@ -202,10 +206,17 @@ export function TaskTimeline({ entries, usage, error, onOpenTask }: {
   onOpenTask: (taskId: string) => void
 }) {
   const { rounds, review } = useMemo(() => groupTimeline(entries), [entries])
+  const brief = useMemo(() => entries.find((entry) => entry.kind === "task")?.data.request ?? "", [entries])
   return (
     <SidePanelScroll className="px-4 pb-4 pt-1">
       <div className="flex flex-col gap-4">
         <ErrorText className="text-[11px]">{error}</ErrorText>
+        {brief && (
+          <details aria-label="Task brief">
+            <summary className={SUMMARY_CLASS + " text-[11px]"}>Task brief</summary>
+            <div className="mt-1 max-h-72 overflow-auto text-[11px] text-ink-muted scrollbar-thin"><LaTeXMarkdown content={brief} compact /></div>
+          </details>
+        )}
         {rounds.length > 0 && (
           <p aria-label="Totals" className="text-[11px] tabular-nums text-ink-subtle">
             {rounds.length} {rounds.length === 1 ? "round" : "rounds"}

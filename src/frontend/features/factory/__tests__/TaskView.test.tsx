@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
     throw new Error(`unexpected ${action}`)
   }),
   getFactoryPreview: vi.fn<(id: string) => Promise<FactoryPreview | null>>(),
+  fetchPiSessionEntries: vi.fn(async () => ({ entries: [], leafId: null })),
   startFactoryPreview: vi.fn(),
   stopFactoryPreview: vi.fn(),
 }))
@@ -40,6 +41,7 @@ vi.mock("@/features/factory/useFactoryTasks", () => ({
   },
   useFactoryTask: () => store.task,
 }))
+vi.mock("@/features/factory/TaskSession", () => ({ TaskSession: () => <div data-testid="task-session" /> }))
 vi.mock("@/features/factory/AgentPanel", () => ({
   AgentPanel: ({ entries, canMessage }: { entries: readonly FactoryTimelineEntry[]; canMessage: boolean }) =>
     <div data-testid="agent-panel" data-can-message={String(canMessage)}>{entries.length} entries</div>,
@@ -75,6 +77,14 @@ const GATE: FactoryTimelineEntry = { at: "", kind: "gate", data: { round: 1, pha
 
 function view() {
   return <TaskView repo="/home/u/git/demo" taskId="t1" onBack={vi.fn()} onOpenTask={vi.fn()} />
+}
+
+/** Renders the task view on its Changes pane (it opens on the session). */
+function renderView() {
+  const result = render(view())
+  const tab = screen.queryByRole("tab", { name: "Changes" })
+  if (tab) fireEvent.click(tab)
+  return result
 }
 
 const buttons = () => screen.queryAllByRole("button").map((button) => button.textContent).filter((label) => ["Approve", "Retry", "Cancel"].includes(label ?? ""))
@@ -117,7 +127,7 @@ describe("taskCommands", () => {
 
 describe("TaskView", () => {
   it("keeps the repo's task list read and shows a loading state until it has the task", async () => {
-    render(view())
+    renderView()
 
     expect(store.listedRepos).toContain("/home/u/git/demo")
     expect(screen.getByText("Loading task")).toBeTruthy()
@@ -128,7 +138,7 @@ describe("TaskView", () => {
 
   it("shows title, state, round and branch", async () => {
     store.task = task("running")
-    render(view())
+    renderView()
     expect(screen.getByRole("heading", { name: "Fix the header" })).toBeTruthy()
     expect(screen.getByLabelText("Task state").textContent).toBe("Working · round 2 · factory/fix-header")
     await waitFor(() => expect(screen.getByText("No changes")).toBeTruthy())
@@ -136,7 +146,7 @@ describe("TaskView", () => {
 
   it("approves a task that waits for approval", async () => {
     store.task = task("waiting_approve")
-    render(view())
+    renderView()
     expect(buttons()).toEqual(["Approve", "Cancel"])
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }))
@@ -146,25 +156,25 @@ describe("TaskView", () => {
 
   it("retries a blocked or cancelled task", async () => {
     store.task = task("blocked")
-    const first = render(view())
+    const first = renderView()
     expect(buttons()).toEqual(["Retry", "Cancel"])
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     await waitFor(() => expect(core.command).toHaveBeenCalledWith("tasks.retry", "t1"))
     first.unmount()
 
     store.task = task("cancelled")
-    render(view())
+    renderView()
     expect(buttons()).toEqual(["Retry"])
   })
 
   it("cancels a running or merging task after a confirmation", async () => {
     store.task = task("merging")
-    const first = render(view())
+    const first = renderView()
     expect(buttons()).toEqual(["Cancel"])
     first.unmount()
 
     store.task = task("running")
-    render(view())
+    renderView()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(core.command).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Yes" }))
@@ -175,20 +185,20 @@ describe("TaskView", () => {
 
   it("offers nothing for a finished task, and shows why a command failed", async () => {
     store.task = task("done")
-    const first = render(view())
+    const first = renderView()
     expect(buttons()).toEqual([])
     first.unmount()
 
     core.command.mockRejectedValue(new Error("the runner of task t1 is still ending, try again in a few seconds"))
     store.task = task("blocked")
-    render(view())
+    renderView()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("the runner of task t1 is still ending, try again in a few seconds"))
   })
 
   it("shows a task without a factory state as starting, with the core's commands, without a diff read or a message box", async () => {
     store.task = task(null)
-    render(view())
+    renderView()
 
     expect(shownState(store.task)).toBe("starting")
     expect(screen.getByLabelText("Task state").textContent).toBe("Launching session · factory/fix-header")
@@ -200,7 +210,7 @@ describe("TaskView", () => {
 
   it("shows a task the core reports interrupted as such and offers retry and cancel", () => {
     store.task = task("running", { running: false, interrupted: true, actions: ["tasks.retry", "tasks.cancel", "tasks.message"] })
-    render(view())
+    renderView()
 
     expect(screen.getByLabelText("Task state").textContent).toBe("Interrupted · round 2 · factory/fix-header")
     expect(buttons()).toEqual(["Retry", "Cancel"])
@@ -208,19 +218,19 @@ describe("TaskView", () => {
 
   it("offers what the core lists whatever the state, and no message the core does not accept", () => {
     store.task = task("running", { actions: ["tasks.approve"] })
-    render(view())
+    renderView()
     expect(buttons()).toEqual(["Approve"])
     expect(screen.getByTestId("agent-panel").dataset.canMessage).toBe("false")
   })
 
   it("lets the user message the coder unless the task merges", () => {
     store.task = task("running")
-    const first = render(view())
+    const first = renderView()
     expect(screen.getByTestId("agent-panel").dataset.canMessage).toBe("true")
     first.unmount()
 
     store.task = task("merging")
-    render(view())
+    renderView()
     expect(screen.getByTestId("agent-panel").dataset.canMessage).toBe("false")
   })
 
@@ -228,7 +238,7 @@ describe("TaskView", () => {
     store.task = task("blocked")
     core.timeline.mockResolvedValueOnce({ entries: [ROUND], next: 100 })
     core.diff.mockResolvedValue(DIFF("a.ts"))
-    const rendered = render(view())
+    const rendered = renderView()
     await waitFor(() => expect(screen.getByTestId("agent-panel").textContent).toBe("1 entries"))
     await waitFor(() => expect(screen.getByLabelText("Diff for a.ts")).toBeTruthy())
     expect(core.timeline).toHaveBeenCalledTimes(1)
@@ -258,7 +268,7 @@ describe("TaskView", () => {
 
   it("shows the preview on demand instead of the diff", async () => {
     store.task = task("waiting_approve")
-    render(view())
+    renderView()
     expect(api.getFactoryPreview).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("tab", { name: "Preview" }))
@@ -292,7 +302,7 @@ describe("TaskView review", () => {
 
   it("shows a comment under its line and sends all pending comments as one message, then clears them", async () => {
     store.task = task("waiting_approve")
-    render(view())
+    renderView()
     expect(sendReview()).toBeNull()
     await comment("new", "Use a constant")
     expect(within(screen.getByLabelText("Diff")).getByText("Use a constant")).toBeTruthy()
@@ -307,7 +317,7 @@ describe("TaskView review", () => {
   it("keeps the comments and shows the error when the send fails", async () => {
     core.message.mockRejectedValue(new Error("task t1 is merging, send the message when the merge has ended"))
     store.task = task("blocked")
-    render(view())
+    renderView()
     await comment("new", "Rename it")
     fireEvent.click(sendReview()!)
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("task t1 is merging, send the message when the merge has ended"))
@@ -317,7 +327,7 @@ describe("TaskView review", () => {
 
   it("does not send while the task merges", async () => {
     store.task = task("merging")
-    render(view())
+    renderView()
     await comment("new", "Later")
     expect(sendReview()).toBeDisabled()
     fireEvent.click(sendReview()!)
@@ -326,12 +336,12 @@ describe("TaskView review", () => {
 
   it("keeps a task's comments across leaving and reopening it, and sends one whose line left the diff with its quoted line", async () => {
     store.task = task("waiting_approve")
-    const first = render(view())
+    const first = renderView()
     await comment("new", "Keep this")
     first.unmount()
 
     core.diff.mockResolvedValue(DIFF("b.txt"))
-    render(view())
+    renderView()
     expect(await screen.findByText("a.txt · no longer in diff")).toBeTruthy()
     expect(screen.getByText("Keep this")).toBeTruthy()
     fireEvent.click(sendReview()!)
@@ -340,10 +350,22 @@ describe("TaskView review", () => {
 
   it("discards the comments when the shown task finishes", async () => {
     store.task = task("waiting_approve")
-    const shown = render(view())
+    const shown = renderView()
     await comment("new", "Too late")
     store.task = task("done")
     shown.rerender(view())
     await waitFor(() => expect(sendReview()).toBeNull())
+  })
+})
+
+describe("TaskView panes", () => {
+  it("opens on the session and offers the handoff once the coder rests after saying something", async () => {
+    store.task = task("waiting_approve")
+    core.timeline.mockResolvedValue({ entries: [{ at: "t", kind: "coder", data: { text: "## Done\nAll **fixed**" } } as FactoryTimelineEntry], next: 1 })
+    render(view())
+    expect(screen.getByTestId("task-session")).toBeTruthy()
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Handoff" }))
+    expect(screen.getByLabelText("Coder handoff").textContent).toContain("All fixed")
   })
 })

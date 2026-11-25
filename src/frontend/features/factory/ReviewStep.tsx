@@ -8,7 +8,7 @@ import { formatCost, formatUsage } from "./usage"
 // The rows of a factory timeline shared by a task's timeline and a wave's outcome: their classes, the verdict and the review.
 
 export const ROW_CLASS = "flex items-baseline gap-2"
-export const KIND_CLASS = "w-16 shrink-0 text-ink-subtle"
+export const KIND_CLASS = "w-14 shrink-0 text-ink-subtle"
 export const METER_CLASS = "shrink-0 tabular-nums text-ink-faint"
 export const SUMMARY_CLASS = "cursor-pointer text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 export const OUTPUT_CLASS = "mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-elevated p-2 font-mono text-[10px] text-ink-muted scrollbar-thin"
