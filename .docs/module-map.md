@@ -1,4 +1,4 @@
-Generated from f12a654 on 2026-11-09
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists.
 
 # Module map
 
@@ -26,10 +26,14 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- 0004_canvas_mutation_log.sql
 |       |-- 0005_canvas_shares.sql
 |       |-- 0007_model_reasoning_levels.sql
-|       |-- 0010_memory_topics.sql    Memory topics migration
+|       |-- 0010_memory_topics.sql    Old memory topics (memory now lives in memory-store files)
 |       |-- 0014_change_moved_to.sql  `changes.moved_to` for renames
 |       |-- 0015_change_operation.sql `changes.operation` (`write`, `move`, `delete`)
-|       `-- 0016_drop_model_reasoning_levels.sql Effort ladders come from the gateway, the cache table goes
+|       |-- 0016_drop_model_reasoning_levels.sql Effort ladders come from the gateway, the cache table goes
+|       |-- 0017_factory_tasks.sql, 0020_factory_rows_migrated.sql Old factory rows and their one-time move into the core
+|       |-- 0018_repositories.sql    Pi start folders
+|       |-- 0019_user_animated_background.sql Per-user display preference
+|       `-- 0020_share_links.sql, 0021_share_links_derived_access.sql Share links (secret hash, one per resource)
 |-- src/
 |   |-- config.py                     Env-derived backend settings (imports nothing from lib)
 |   |-- backend/
@@ -59,7 +63,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- canvases.py           Collaborative mutation and canvas stream APIs
 |   |       |-- assets.py             Stored binary serving
 |   |       |-- projects.py           Project catalog, kanban and saved tabs
-|   |       |-- memory.py             Memory extraction, review and CRUD
+|   |       |-- memory.py             Memory window: list, read, apply ops on the login's memory-store root
+|   |       |-- share_links.py        `/api/shares` (owner) and `/api/shared/{secret}` (guest: content, shared canvas)
 |   |       |-- models.py             Models, providers, usage, defaults and prompts
 |   |       |-- config.py             Browser configuration and capability flags
 |   |       |-- ocr.py                Image OCR generation
@@ -72,7 +77,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, tool-image media (`/media/<sha256>`, `/thumb`), the session WebSocket relay to pi-host (host access)
-|   |       |-- factory.py            `/api/factory/call`, `/api/factory/actions`: factory core pass-through, preview stop after `tasks.remove` (host access)
+|   |       |-- factory.py            `/api/factory/call`, `/actions`, `/images`: core pass-through, login tag, revert on remove, preview stop (host access)
 |   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
 |   |       `-- upstream.py           Host-access dependency and adapter error mapping
@@ -93,9 +98,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- chat_cleanup.py           `ChatCleanup`: release uploads, derived data and sandbox state after chat deletion
 |   |   |-- references.py             Reference model, post-delete cleanup of unused derived data, `--dry-run` orphan report, `annotation_canvas` (PDF annotation key, recorded host files)
 |   |   |-- project_rename.py         Project rename transaction and reference rewriting
-|   |   |-- memory_store.py           `MemoryScope`, `MemoryOperation`, topic/fact persistence, pending buffer, watermarks, atomic commit
-|   |   |-- memory_extract.py         `MemoryExtractor`: LLM extraction proposals and regroup
-|   |   |-- memory_context.py         Memory injection into chat system prompts
+|   |   |-- memory_context.py         Login's memory-store root, project memory_store name, chat system-prompt memory block
+|   |   |-- share_links.py            `ShareLinks`, `ShareTarget`, `find_grant`: secret-hash links to one document or asset
+|   |   |-- user_preferences.py       Per-user display preferences (`users` columns)
+|   |   |-- pi_pastes.py              Videos pasted into a Pi composer, stored in `<cwd>/.pi/pastes/`
 |   |   |-- model_provider_store.py   Provider catalog and model defaults
 |   |   |-- reasoning_levels.py       Reasoning-effort levels from the gateway's `thinking_levels`, send-time kwargs
 |   |   |-- prompt_store.py           User prompt storage (read lazily) and seed/block loading
@@ -135,6 +141,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- pi_media.py               480px WebP thumbnails of Pi tool-result images (Pillow, in-memory cache)
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
 |   |   |-- factory_migration.py      One-time move of the old `factory_repo_settings`/`factory_tasks` rows into the factory core, per row (`migrated_at`)
+|   |   |-- factory_revert.py         Dry-run and `git revert` of a merged task's commit before its removal
+|   |   |-- factory_images.py         Images attached to task requests/messages, stored outside every repo
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
@@ -177,19 +185,20 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- app/
 |       |   |-- layout.tsx            Root providers, font and styles
 |       |   |-- present/page.tsx      Presenter/audience popup route of a built LaTeX deck (`features/latex/present/`)
+|       |   |-- share/page.tsx        Share link page `/share#<secret>`: shared canvas or sandboxed content, full page
 |       |   |-- page.tsx              Client shell entry
 |       |   |-- globals.css           Shell theme and application styles
 |       |   `-- _components/
+|       |       |-- App.tsx, AppEntry.tsx, AppEntry.dev.tsx App root with a fullscreen error boundary; hydrated build entry, browser-only `next dev` entry
 |       |       |-- AppShell.tsx      Cross-feature composition and workspace navigation
-|       |       |-- TabContent.tsx    Tab layout: sidebar, surface, overlays and modals
+|       |       |-- TabContent.tsx    Tab layout: sidebar, surface, overlays and modals, per-tab error boundary
 |       |       |-- TabSidebar.tsx    The tab's Sidebar apart from its chat: memoized, so stream tokens never re-render navigation
 |       |       |-- WorkspaceSurface.tsx Per-mode table of top-bar controls and surface body
 |       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every mode
 |       |       |-- deepLink.ts       Preview/open-target parsing
-|       |       |-- DesktopBackendProvider.tsx Tauri-only API base discovery
-|       |       `-- MemoryCommandLayer.tsx
+|       |       `-- DesktopBackendProvider.tsx
 |       |-- features/                 Domain-owned interactive surfaces
-|       |   |-- chat/                 Turns, attachments, persistence and streaming
+|       |   |-- chat/                 Turns, attachments, persistence and streaming (`useChatStream` over `lib/backend/tokenPacer.ts`)
 |       |   |   |-- ChatContainer.tsx Message column; pair expansion and scroll pinning in usePairExpansion/useStickToBottom
 |       |   |   |-- attachments.ts
 |       |   |   |-- composer/         Input, completions, drawings and attachment chips (useDraftAttachments, dictation via hooks/useSpeechInput)
@@ -229,11 +238,14 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- pi/                   Pi sessions rendered natively, the only frontend code that knows Pi's protocol
-|       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar, shell commands (`/memorize`)
+|       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar
 |       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
 |       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- subagents.ts, SubagentRoster.tsx Subagent roster above the composer (pi-subagents widget and tool details, M26)
+|       |   |   |-- SubagentMessages.tsx `intercom_message` and `subagent-notify` cards, one line that folds open
+|       |   |   |-- FactoryNotices.tsx, ShellNotices.tsx Factory notices as one line; background shell sessions that ended well left out
+|       |   |   |-- renderers.ts      Registry of native tool and custom-message renderers
 |       |   |   |-- SessionWaves.tsx  The session's unfinished factory waves above the composer (`waves.list`, `origin`)
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
 |       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search with a row per hit
@@ -268,20 +280,20 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- AddSlide.tsx, useLatexTemplates.ts Primitive picker of a presentation root, template set per root
 |       |   |   `-- present/          PresentButton, presenter and audience windows over one `BroadcastChannel`, slide notes from PDF annotations
 |       |   |-- learn/                Learn mode frame, sidebar and sessions (LearnProvider, LearnSurface)
-|       |   |-- factory/              Boards, task view, settings and previews
-|       |   |   |-- FactoryBoard.tsx  Task columns per repo, delete
+|       |   |-- factory/              Boards, task view, settings and previews (core shapes in `lib/domain/factory.ts`)
+|       |   |   |-- FactoryBoard.tsx  Columns per repo (Working, Merging, Finished, Waiting block), delete with revert
+|       |   |   |-- waveTree.ts, WaveTree.tsx, WaveOutcome.tsx Waves as column containers grouped by tag prefix; reviews, gates, merge
 |       |   |   |-- states.ts         Shown state, labels, board columns, allowed actions
-|       |   |   |-- useFactoryTasks.ts Task list per repo, refetched on pi-host session changes
+|       |   |   |-- useFactoryTasks.ts Task and wave lists per repo, refetched on pi-host session changes
+|       |   |   |-- FactorySettingsDialog.tsx, NewTaskDialog.tsx, ConfigDraft.tsx Small/big models and defaults; new task with images; `factory.yaml` draft
 |       |   |   |-- TaskView.tsx      Diff or preview, commands, `AgentPanel` (timeline, Pi session)
 |       |   |   |-- taskReview.ts     Review comments on the task diff, sent as one message that opens a round
-|       |   |   `-- TaskTimeline.tsx, useTaskTimeline.ts Rounds, gates, review and merge from the session's `factory-` entries
-|       |   |-- memory/               Memory window, review panel and memory commands
-|       |   |   |-- MemoryViewer.tsx  Memory window shell and view switching
-|       |   |   |-- useMemoryLibrary.ts Scope loading, queued per-scope writes, delete with undo
-|       |   |   |-- scopeEdits.ts     Pure scope changes (rename, merge, move, delete, restore)
-|       |   |   |-- Overview.tsx / TopicPage.tsx / RegroupPage.tsx Memory window pages
-|       |   |   |-- MemoryPanel.tsx   Single-screen review of proposed operations
-|       |   |   `-- useMemorizeFlow.ts Extraction, review and commit orchestration
+|       |   |   `-- TaskTimeline.tsx, useTaskTimeline.ts Rounds, gates, review and merge from `tasks.timeline`
+|       |   |-- sharing/              `ShareButton` (create, copy, rotate, revoke a link), `useSharedResource`
+|       |   |-- memory/               Memory window over the memory-store root
+|       |   |   |-- MemoryViewer.tsx  Window shell: root, memory_stores, folders, memories, documents; Esc goes up
+|       |   |   |-- useMemoryLibrary.ts Listing of a level, open memory or document, applied ops
+|       |   |   `-- Overview.tsx, MemoryPage.tsx, EditableText.tsx Level listing, facts and description edited in place
 |       |   |-- projects/             Project dashboard/kanban
 |       |   |   `-- ProjectDashboard.tsx
 |       |   `-- settings/             Model, reasoning, prompts, preferences and theme
@@ -299,6 +311,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- FloatingWindow.tsx Modal floating window, `FloatingPanel` its panel look shared with the picker preview
 |       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), with a preview a sidebar-card finder beside a centered preview window
 |       |   |   |-- AmbientCopy.tsx The app background's picture as a window's background (picker preview)
+|       |   |   |-- ErrorBoundary.tsx Render-error fallback with a reset (app-wide and per tab)
+|       |   |   |-- Disclosure.tsx, Switch.tsx Collapsible section; on/off switch
 |       |   |   |-- MenuPopover.tsx   Trigger plus popover menu, closed by outside press or Escape
 |       |   |   |-- PillTabs.tsx, BoardColumn.tsx, Field.tsx
 |       |   |   |-- IconButton.tsx, StatusDot.tsx Icon button, status tone dot (`StatusTone`)
@@ -370,7 +384,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   `-- test_file_roots.py
 |-- scripts/
 |   |-- setup-postgres.sh              PostgreSQL setup helper
+|   |-- migrate_memory.py              One-time move of old Postgres memories into memory-store roots
+|   |-- check.sh                       Forwards to `factory/gates.sh` for tasks started before the move
 |   `-- build-tauri-linux.sh           Desktop sidecar/AppImage build (expects absent `src/frontend/src-tauri/`)
+|-- factory/gates.sh                  The one test pipeline (lint, types, python, frontend, pi-host; `--changed`, `--reuse`)
 |-- redeploy.sh                       Production rebase/restart of pi-host, backend, learn mode and the preview gate
 |-- run.sh                            Development launcher composition
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
@@ -378,7 +395,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
 |-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md`
 |-- pi-extensions/                    Pi extensions loaded into every `coding` session
-|                                     (the factory plugin is not here: `~/.os/chezmoi/dot_pi/agent/extensions/factory/`)
+|                                     (the factory is the agent-factory package, `~/git/agent-factory`)
 |-- run-learnharness.sh               LearnHarness sidecar launcher
 |-- learnharness-overlay/             Private LearnHarness overlay, see `.docs/integration-learnharness.md`
 |-- run-preview-gate.sh               Factory preview gate launcher
@@ -402,7 +419,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 
 - Compose features in `src/frontend/app/_components/`; do not make a feature import the app shell.
 - Put feature behavior under its owner in `features/`. Import another feature only through permitted public files at the feature root or one sub-feature level; concept-folder internals are not a general cross-feature API.
-- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation`, `notebook -> navigation/workbench`, `factory -> editor`, `navigation -> factory/learn/memory/pi`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/notebook/pi`, and `pi -> chat/editor`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature except `notebook` (`NotebookWorkbench`). Add shared domain logic below the features rather than bypassing the boundary.
+- Follow the actual allow-list in `eslint.config.mjs`: `chat -> editor/learn/navigation`, `editor -> navigation/sharing`, `notebook -> navigation/workbench`, `factory -> editor/navigation/pi`, `navigation -> factory/learn/memory/pi`, `learn -> chat/settings`, `latex -> workbench`, `workbench -> editor/navigation/notebook/pi`, and `pi -> chat/editor/settings`. Other cross-feature edges are disallowed by default, and `workbench` must not import a kind feature except `notebook` (`NotebookWorkbench`). Add shared domain logic below the features rather than bypassing the boundary.
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
 - Keep all Pi protocol knowledge in `features/pi/`, and the learn frame's iframe URL and message protocol (`packages/chat-ui/src/learn-protocol.ts`) in `features/learn/`.
@@ -430,7 +447,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | `factory.yaml`, `.factory/agents/`, `~/.pi/agent/extensions/factory/` (source in `~/.os`), `src/lib/factory_migration.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
+| Factory integration | agent-factory package (`~/git/agent-factory`, `factory --core-path`), `pi-host/src/factory.ts`, `factory.yaml`, `.factory/agents/`, `factory/gates.sh`, `src/backend/routes/factory.py`, `src/lib/factory_revert.py`, `factory_images.py`, `factory_migration.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 
@@ -455,11 +472,12 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | File chat sidebar (Pi sessions per file or LaTeX project folder) | `src/frontend/features/workbench/DocumentChat.tsx`, `useDocumentChat.ts`, `fileLead.ts`, `FileChat.tsx` | `routes/workbench.py` (`POST /api/workbench/chat`), `lib/workbench/links.py`, `features/editor/FilePanel.tsx`; workbench `__tests__/DocumentChat.test.tsx`, `tests/test_workbench_chat.py` |
 | Learn mode | `src/lib/learnharness.py`, `src/lib/learnharness_config.py`, `routes/learn.py`, `features/learn/`, `learnharness-overlay/` | `.docs/integration-learnharness.md`, `run-learnharness.sh`, `lib/models.ts` (`gatewayModelId`) |
 | Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
-| Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
+| Memory store, memory tool or memory window | `src/lib/memory_context.py`, `src/lib/tools.py` (memory tools), `src/backend/routes/memory.py`, `src/frontend/features/memory/` | `memory-store` package (`pyproject.toml`), `routes/chat.py` (`_memory_block`), `project_rename.py`, `scripts/migrate_memory.py`; `tests/test_memory_context.py`, `tests/test_memory_route.py`, `tests/test_memory_tools.py`, `tests/test_migrate_memory.py` |
+| Share links | `src/lib/share_links.py`, `src/backend/routes/share_links.py`, `src/frontend/features/sharing/`, `app/share/page.tsx` | `db/schema/0020_share_links.sql`, `routes/canvases.py` (shared canvas engine), `features/editor/canvas/SharedCanvas.tsx`, `lib/backend/api/shareLinks.ts` |
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
 | Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/` (`src/media.ts`: tool-image store), `src/lib/pi_media.py`, `features/pi/toolImages.ts`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
-| Factory pipeline, tasks or preview UI | `~/.pi/agent/extensions/factory/` (source in `~/.os`, `core.ts` is the API), `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `src/lib/factory_migration.py`, `factory.yaml`; the plugin's own tests in `~/.os`, `tests/test_factory*.py`, factory `__tests__/` |
+| Factory board, tasks, waves or preview UI | agent-factory package (core, runners, extension; its own tests), `pi-host/src/factory.ts`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `factory_revert.py`, `factory_images.py`, `factory_migration.py`, `factory.yaml`, `.docs/agent-factory.md`; `tests/test_factory*.py`, `pi-host/test/factory.test.ts`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |
@@ -475,5 +493,5 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 
 ## Refresh evidence and scope
 
-- The 2026-11-09 refresh checked every referenced path against the tracked tree and source for the moved `templates/` sources, the LaTeX template/SyncTeX/present modules, the PDF Text view and deferred-delete unload commit. Other sections come from the commits since `2bfaf7e` that updated these docs themselves and were not re-verified line by line. External engine/fork internals and deployed service behavior are outside this refresh.
+- The 2026-11-25 refresh re-verified against source the memory-store replacement, share links, the factory's gigachad-side contracts (pi-host core loading, login tag, revert, images, waves on the board), Pi transcript cards, Pi start folders, provider usage and chat transport, and checked every tree leaf against the tracked tree. Other sections were maintained commit by commit and not re-verified line by line. The agent-factory and memory-store packages' internals, and deployed service behavior, are outside this refresh.
 - The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.

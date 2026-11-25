@@ -28,6 +28,7 @@ import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSu
 import "./FactoryNotices"
 import { isSilentShellNotice } from "./ShellNotices"
 // Registers the `video-preview` card (`~/.pi/agent/extensions/video-paste.ts`, from `~/.os`)
+import "./SubagentMessages"
 import "./VideoPreview"
 
 const MAX_LABEL_LENGTH = 80

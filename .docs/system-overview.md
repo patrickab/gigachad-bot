@@ -1,4 +1,4 @@
-Generated from f12a654 on 2026-11-09
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the Pi transcript's subagent/intercom message cards (`features/pi/SubagentMessages.tsx`), which these docs describe.
 
 # System overview
 
@@ -15,10 +15,11 @@ GigaChad Bot is a self-hosted, local-first LLM workspace for conversations, rese
 | Canvas | An infinite drawing workspace with ink, notes, page/image frames, and document windows |
 | Architecture workspace | A project's merged LikeC4 model, editable as diagrams and `.c4` source |
 | Pi session | A coding-agent conversation run by Pi through pi-host, distinct from local model chat |
-| Factory task | A Pi coding session that a pipeline drives through gates, review and merge, in its own git worktree or the current checkout, with an optional preview |
+| Factory task / wave | A task is a Pi coding session that the agent-factory package drives through gates, review and merge in its own git worktree, with an optional preview. A wave is a set of tasks built on one branch, reviewed once and merged as a whole |
 | Workbench | One `.md` file or one LaTeX project as Neovim beside its rendered view (Markdown preview or built PDF) with a Pi chat drawer. The files live on disk and the agent edits them there |
 | Learn session | A LearnHarness teaching session (probe, plan, teach, recall) shown in learn mode, host-only |
-| Memory | Reviewed, document-backed facts supplied to later chats, globally or within a project; not vector search |
+| Memory | Durable facts as plain files in a memory-store root, offered to chats as tools and an index in the prompt; not vector search |
+| Share link | A revocable secret URL that grants one stored resource (today a canvas, edited together) to whoever holds it |
 
 Use [architecture](architecture.md) for implementation, persistence, access boundaries, integration contracts, and failure semantics. Use the [module map](module-map.md) to locate source owners. Find operational instructions through the [repository documentation index](../AGENTS.md#documentation).
 
@@ -40,6 +41,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Distinguish Pi models in local chat from Pi coding-session tabs. Every local-chat model, Ollama included, answers through pi-host's completion gateway, the tabs run Pi sessions through pi-host.
 - Stream replies, revisit saved histories, branch from a message, and merge branches back into a conversation.
 - Collapsed answers render their rich text when nearby or focused, reducing work in long chats. Hidden tabs wait until shown, and expanding a turn reveals its full answer.
+- Replies stream as they arrive, paced evenly. A chat request on a dead connection is sent again (at worst a reply is generated twice), and a transport failure shows in the reply instead of an empty bubble.
 - Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent tasks and are separate.
 - Space outside text fields opens the tab picker: search over open tabs with a live preview of the highlighted one. Delete (at the end of the search) or Alt+W closes the highlighted tab, Alt+T opens a new background tab, both keep the picker open.
 - Rename a project to move all its chats, documents, canvases, architecture, memory and attachments to the new slug, with internal links updated. A name whose slug is taken is refused. Archive projects (and, per device, Code directories) to hide them from the sidebar, restore from the section's archive list.
@@ -121,6 +123,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Add page frames to export an A4 PDF. Exports and model-facing raster artwork include ink, text, and image frames, not the contents of live document/PDF/architecture/nested-canvas windows.
 - Use independent undo/redo for the canvas being edited. Nested canvas history is separate; file-window navigation is not an artwork undo step.
 - Canvas nesting is limited to prevent recursive file cycles. A failed named-canvas load leaves stored content untouched; interrupted synchronization exposes retry and retries changes automatically. See [architecture](architecture.md) for collaboration and persistence guarantees.
+- Share a stored canvas from its top bar: the link (`/share#<secret>`) opens it full page for anyone holding it, edited live together with the owner. Creating a new link replaces the old one, revoking ends it at once (an open guest stream stops before the next change). The link follows renames and dies with the canvas.
 
 ## Architecture workspaces
 
@@ -153,28 +156,29 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Pi tabs
 
-- Open Pi coding sessions as workspace tabs, rendered natively in the shell. The sidebar lists sessions per repository and mount, worktrees grouped under their main repository, each with its running, waiting-on-a-dialog and unread state.
+- Open Pi coding sessions as workspace tabs, rendered natively in the shell. The sidebar lists sessions per repository and mount, worktrees grouped under their main repository, each with its running, waiting-on-a-dialog and unread state. A session can start in any folder: Git checkouts and `~/git`, `~/dev` folders are listed, and a mounted folder is offered too.
 - Branch from any turn: it forks into a new session that opens in the tab. Open returned file links under the shell's file-access policy; an extension command can open a file the same way, e.g. `/files` opens a file the session changed in the file panel.
 - Use the shell composer for prompts, images, abort, model/thinking selection, and `/` or `@` completion. While the agent runs, Enter steers and Alt+Enter queues a follow-up; Esc or Stop aborts and takes queued messages back into the draft.
+- The transcript folds what is meant for the agent: a loaded skill (`/skill:<name>`) is one collapsible line, a compaction shows its full summary, a background shell session that ended well leaves no line, and factory notices, subagent results and intercom messages are one line that opens to their text. Above the composer sit the session's subagents and the factory waves it declared.
 - Start a Pi session from an empty chat with the project selector in its composer (`None` by default) (host access only). No folder is a plain chat, a folder turns the first message into a new Pi session in it, the tab becomes a Pi tab.
 - The session picker in the top bar (Alt+A) lists running, recent and older Pi sessions with full-text search. Picking opens it in the current tab (host access only).
 - Pi features require host access and a running pi-host. Runs continue while no tab shows them and across backend reloads. Old omp sessions are not shown, they stay reachable through the `omp` CLI. Integration ownership and deployment compatibility belong in [architecture](architecture.md); operational steps are indexed in [AGENTS.md](../AGENTS.md#documentation).
 
 ## Agent factory
 
-A factory task is a normal Pi coding session. A pipeline inside it runs the coder, then the repository's gates and a read-only reviewer, feeds problems back as the next round, and merges when a round passes. GigaChad sets tasks up and shows boards, timelines, diffs and previews.
+The factory is the agent-factory package, outside this repository: it runs each task's coder, the repository's gates and a reviewer, feeds problems back as the next round, and merges when a round passes. Waves group tasks a supervising Pi session (or the CLI) declares. GigaChad is a thin client: it shows boards, timelines, diffs and previews, keeps per-project settings, and reverts a merged task's code on delete. How tasks and waves run: [agent factory](agent-factory.md).
 
-1. Open a repository's factory board and register its primary checkout if needed. Set its defaults: the source branch tasks start from (`main`, else `master`, when unset) and the target branch they merge into (the source when unset), both overridable per task, merge `auto` or `review`, max rounds, review on or off, worktree or current checkout, a model per role.
-2. Create a task with a title and a request, optionally overriding worktree, branch and merge.
-3. Follow it on the board (Needs you, Working, Merging, Finished) and in the task view: the diff, the round timeline with gate output and review findings, and the agent's Pi session, which can be steered while it runs. Comment on lines of the diff and send the comments as one review message, which starts a new round.
-4. Approve a task waiting for approval, retry a blocked or cancelled one, cancel a running one, or write to it: a message to a finished task starts new rounds on the same branch.
-5. Start a preview from the task view when the repository's `factory.yaml` defines one. Preview data starts empty.
-6. Delete a finished, blocked or interrupted task: its session, worktree and branch go.
+1. Open a repository's factory board (sidebar, Pi section). A repository without a `factory.yaml` shows an editable draft to save into its checkout, uncommitted; New task stays disabled until it exists.
+2. Set the project's defaults: branch, merge `auto` or `review`, max rounds, review on or off, preview, and a small and a big model (easy wave tasks run on small, everything else and the reviewer on big).
+3. Create a task with a title, a request and optional images (pasted or attached), optionally overriding branch, merge and models. A task started here is tagged with your login.
+4. Follow it on the board: Working, Merging and Finished, with whatever waits on you (a question, approval, a blocked or interrupted task or wave) in a Waiting block above Working. Waves sit in the columns as containers with their tasks, reviews, merge and a link to the declaring session. The task view shows the diff, the round timeline with gate output and review findings, and the agent's Pi session. Comment on lines of the diff and send the comments as one review message, which starts a new round.
+5. Approve a task waiting for approval, answer a question, retry a blocked or interrupted one, cancel a running one, or write to it: a message to a resting task starts new rounds on the same branch.
+6. Start a preview from the task view when the repository's `factory.yaml` defines one. Preview data starts empty.
+7. Delete a task: its session, worktree and branch go. A merged task's commit is reverted in the repository's checkout first; a revert that would conflict refuses the delete.
 
-- A worktree task starts from the tip of its branch and merges into it; a branch checked out in another worktree is refused. Before every run and at merge the task is squashed to one commit and rebased onto the branch: a conflict becomes a coder round, which counts against max rounds. The reviewer sees the request and every follow-up message; a round without changes ends the task done. A current-checkout task commits to the checked-out branch and only its own changes: edits the user made before it started stay uncommitted, and commits or pulls the user makes meanwhile become its new base. One unfinished current-checkout task per checkout.
-- `factory.yaml`, `.factory/agents/coder.md` and `reviewer.md` come from the task's base commit; the coder cannot change them. Precedence and contracts: [architecture](architecture.md).
+- `factory.yaml` and `.factory/agents/coder.md` and `reviewer.md` come from the target's commit; the coder cannot change them.
 - Previews run on host loopback ports 8100–8199 with the development identity, reachable only through the preview gate.
-- Factory features require host access and a running pi-host.
+- Factory features require host access, a running pi-host and the installed `factory` CLI. Without the package the board names where to get it.
 
 ## Learn mode
 
@@ -183,15 +187,15 @@ A factory task is a normal Pi coding session. A pipeline inside it runs the code
 
 ## Memory system
 
-- Keep personal facts/preferences in global memory and project facts in project memory. Atomic memories are single user-confirmed facts, grouped into topics (complete memories with a name and summary). Global memory starts with Profile and Preferences, other topics emerge from extraction.
-- Manage all memory in one window from the sidebar brain button: "You" topics and one group per project. Open a topic to edit its title, summary and facts, move facts to another topic, merge it into another topic, or delete it (with undo). Regroup a scope to let the memory model propose subject topics, applied only after review.
-- Extract on demand with `/memorize` (or Alt+M) and the configured memory model, in a chat or a Pi tab. One extraction covers global memory and, inside a project, project memory. A Pi session counts as its user and assistant text, thinking and tool calls are left out. It proposes additions, corrections and removals of stored facts, and new topics where no existing one fits.
-- Review every proposed change in one screen: accept, edit, move or deny it, then commit. Committing advances that chat/scope's extraction position, cancelling leaves the conversation eligible.
-- Later local chats receive every global fact plus their containing project's facts in the system prompt, most relevant first, with no size budget. Relevance is the stored order: extraction places new and updated facts with a position, review shows it as `#N`, and the relevance page of a scope in the memory window reorders facts by hand. Memory is explicit document-backed context, not automatic retrieval from every past conversation. Detailed storage and watermark contracts belong in [architecture](architecture.md).
+- Memory is the memory-store package: JSON fact lists ("memories", each with a description) and Markdown documents in named memory_stores under one root. The host login shares the machine's root (`~/.pi/memory_store`) with Pi; every other login gets its own folder in the checkout.
+- `user` holds facts about you across chats, each project has its own memory_store (named after its linked folder, else its slug). Renaming an unlinked project moves its memory_store.
+- In a chat the Memory tool toggle (on by default) gives the model tools to list, read and change memories, and puts your `profile` and `preferences` in full plus an index of `user` and the project's memory_store into the system prompt. The model reads a memory before answering from it and saves only durable facts. There is no extraction step, review screen or slash command.
+- Browse and edit everything in the memory window (sidebar brain button): memory_stores, folders, memories and documents. Facts are edited, added and retired in place, descriptions are editable, documents are read-only.
+- Memories stored before memory-store stay hidden until `scripts/migrate_memory.py` has run.
 
 ## User-visible access and failure limits
 
-- Require host access for Pi sessions, factory, Neovim, the workbench, learn mode, production redeploy, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents.
+- Require host access for Pi sessions, factory, Neovim, the workbench, learn mode, production redeploy, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents. A share link is the one way past identity: whoever holds it reaches its one resource.
 - Mounted trees omit ignored/internal directories. Text editing refuses non-UTF-8 data rather than risking a lossy binary overwrite.
 - A reference is not a backup of the original file; missing references retain only their last available snapshot. PDF extraction may lag a changed file, and visual attachments do not update a previously sent snapshot automatically.
 - Model/provider, OCR, research, sandbox, architecture, Pi, and factory services have independent prerequisites. Service unavailability, invalid upstream responses, rejected edits, and failed saves must remain visible rather than being represented as successful empty results.
