@@ -42,6 +42,7 @@ from backend.routes.share_links import guest_router as share_guest_router
 from backend.routes.share_links import owner_router as share_owner_router
 from backend.routes.sync import router as sync_router
 from backend.routes.terminal import router as terminal_router
+from backend.routes.theme import router as theme_router
 from backend.routes.workbench import router as workbench_router
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
@@ -174,6 +175,7 @@ for _exception, _status in (
 app.include_router(chat_router)
 app.include_router(architecture_router)
 app.include_router(config_router)
+app.include_router(theme_router)
 app.include_router(documents_router)
 app.include_router(files_router)
 app.include_router(file_watch_router)

@@ -306,3 +306,35 @@
   border-top: 1px solid var(--divider);
   margin: 0.5em 0;
 }
+
+/* Scheme colors (`--md-*`, same roles as Neovim's `@markup.*`): live from ~/.os via `/api/theme.css`, else the fallback in
+   `scheme.css`; a host with neither (the LearnHarness overlay) keeps the neutral look. Accents are mixed 80% with the text
+   color so they stay calm. Only code, paths and links are colored: headings, bullets, bold and italics keep the neutral look (Pi colors those from the same palette). */
+.gc-markdown, .gc-markdown-compact { --md-mix: 80%; }
+
+.gc-markdown strong,
+.gc-markdown-compact strong {
+  color: color-mix(in oklab, var(--md-strong, var(--ink)) var(--md-mix), var(--ink));
+}
+
+.gc-markdown :not(pre) > code,
+.gc-markdown-compact :not(pre) > code {
+  color: color-mix(in oklab, var(--md-raw, var(--ink)) var(--md-mix), var(--ink));
+}
+
+.gc-markdown a,
+.gc-markdown-compact a {
+  color: color-mix(in oklab, var(--md-link, var(--ink-muted)) var(--md-mix), var(--ink));
+  text-decoration-color: color-mix(in oklab, var(--md-link-url, var(--divider-strong)) 60%, transparent);
+}
+
+.gc-markdown a:hover,
+.gc-markdown-compact a:hover {
+  color: var(--md-link, var(--ink));
+}
+
+.gc-markdown blockquote,
+.gc-markdown-compact blockquote {
+  color: var(--md-quote, var(--ink-muted));
+  font-style: italic;
+}

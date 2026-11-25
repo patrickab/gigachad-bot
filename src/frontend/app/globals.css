@@ -2,6 +2,7 @@
 @import "katex/dist/katex.min.css";
 @import "streamdown/styles.css";
 @import "../packages/chat-ui/src/palette.css";
+@import "../packages/chat-ui/src/scheme.css";
 
 /* Streamdown emits arbitrary-value utilities (e.g. dark:text-[var(--shiki-dark,...)])
    from its compiled output, so Tailwind must scan its dist to generate them. */

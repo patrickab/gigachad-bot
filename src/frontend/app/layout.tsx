@@ -74,6 +74,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${jetbrainsMono.variable} ${architectsDaughter.variable} ${symbolsNerdFont.variable}`}>
       <head>
+        {/* The ~/.os color scheme from the backend (the browser calls it directly, like every API), 404 (ignored) without it; overrides the fallback in chat-ui scheme.css */}
+        {/* eslint-disable-next-line @next/next/no-css-tags -- runtime file from the backend, not a bundled stylesheet */}
+        <link rel="stylesheet" href={`${process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001/api"}/theme.css`} />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_TOUCH_CONTEXTMENU_SCRIPT }} />
       </head>
