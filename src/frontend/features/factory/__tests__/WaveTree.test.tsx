@@ -8,7 +8,8 @@ vi.mock("@/components/content/LaTeXMarkdown", () => ({
   LaTeXMarkdown: ({ content }: { content: string }) => <output data-testid="rendered-markdown">{content}</output>,
 }))
 
-import { TagGroupDescription, WaveContainers, waveStageLabel } from "@/features/factory/WaveTree"
+import { TagGroupDescription, WaveContainers } from "@/features/factory/WaveTree"
+import { waveStageLabel } from "@/lib/domain/factory"
 import { treeOfWaves } from "@/features/factory/waveTree"
 import type { FactoryTask, FactoryWave, FactoryWaveReview } from "@/lib/domain/factory"
 import { factoryTask, factoryWave } from "./factoryTask"

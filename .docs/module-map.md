@@ -234,6 +234,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- subagents.ts, SubagentRoster.tsx Subagent roster above the composer (pi-subagents widget and tool details, M26)
+|       |   |   |-- SessionWaves.tsx  The session's unfinished factory waves above the composer (`waves.list`, `origin`)
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
 |       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search with a row per hit
 |       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview

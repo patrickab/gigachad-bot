@@ -15,6 +15,7 @@ import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiCompos
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { usePiSearchFocus } from "./searchFocus"
+import { SessionWavesPanel } from "./SessionWaves"
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import type { SubagentRow } from "./subagents"
@@ -116,8 +117,9 @@ export function withLead(text: string, lead: string | undefined): string {
  * - A closed session's reason shows with the composer's notices
  * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
+ * - `waves` sits above the subagent roster (a Pi tab's factory waves)
  */
-export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, insertion, onInserted, lead, onLeadSent, docked = false }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, insertion, onInserted, lead, onLeadSent, docked = false, waves }: {
   sessionId: string
   cwd: string
   files: PiFileScope
@@ -131,6 +133,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   lead?: string
   onLeadSent?: () => void
   docked?: boolean
+  waves?: ReactNode
 }) {
   const openFile = useOpenFile()
   const session = usePiSession(sessionId, openFile)
@@ -229,7 +232,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
           queue={transcript.queue}
           notices={notices}
           statusLines={session.statusLines}
-          roster={<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} />}
+          roster={<>{waves}<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} /></>}
           editorText={session.editorText}
           insertion={insertion}
           onInserted={onInserted}
@@ -255,14 +258,16 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
  * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
  * - The repo and live dot sit in the composer's action row, where an empty chat picks its project
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
+ * - With `onOpenSession`, the unfinished factory waves the session declared sit above the composer, a wave task's session opens through it
  */
-export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched }: {
+export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch = null, onLaunched, onOpenSession }: {
   view: PiView
   onViewChange: (view: PiView) => void
   modelProps: PiCatalogProps
   slots?: PiTopBarSlots
   launch?: PiLaunch | null
   onLaunched?: () => void
+  onOpenSession?: (sessionId: string) => void
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
   const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
@@ -345,6 +350,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         onBranch={branch}
         insertion={insertion}
         onInserted={clearInsertion}
+        waves={onOpenSession && <SessionWavesPanel repo={repo} sessionId={shown.sessionId} onOpenSession={onOpenSession} />}
       />
     )
   }

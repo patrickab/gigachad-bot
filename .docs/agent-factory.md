@@ -151,6 +151,13 @@ One per repository, shared by every task's session through ticket files in `<git
   a non-empty document.
   Tasks without a wave (or of a wave the list lacks) behave as before whatever their tag. A factory without
   `waves.list` (`unknown action`) shows no waves and no error.
+- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, beside the subagent roster and in its
+  shape, the waves the tab's session declared (`origin`) that are not `merged` or `cancelled`, from `waves.list` of the
+  tab's repo on the board's refresh events. A collapsed row per wave (status icon, tag, title, `done/total`, stage,
+  cost; a stage that needs the user in the warning colour) opens to its tasks that are not done or cancelled, a started
+  one with an "Open session" button that opens it like the board. No waves (or `unknown action`): nothing renders.
+  The helpers both features share (`waveStageLabel`, `waveNeedsUser`, `isUnknownAction`, `concernsFactory`) live in
+  `lib/domain/factory.ts`: `features/pi` never imports `features/factory`.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message, earlier ones
   collapsed), its questions, each gate with duration and failed output, the review with findings, the merge.
 - Tokens count cache reads and writes as input; cost is the provider's figure.

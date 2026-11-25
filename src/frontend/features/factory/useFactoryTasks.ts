@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { observePiSocket, type HostEvent } from "@/features/pi/piSocket"
 import { callFactory } from "@/lib/backend/api"
-import type { FactoryTask, FactoryTaskStart, FactoryWave } from "@/lib/domain/factory"
+import { concernsFactory, isUnknownAction, type FactoryTask, type FactoryTaskStart, type FactoryWave } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
 interface TaskList {
@@ -37,11 +37,6 @@ function subscribe(listener: () => void): () => void {
 function setList(repo: string, list: TaskList) {
   lists.set(repo, list)
   for (const listener of listeners) listener()
-}
-
-/** Whether `cause` is the core refusing an action it does not have: a factory older than waves. */
-function isUnknownAction(cause: unknown): boolean {
-  return cause instanceof Error && cause.message.includes("unknown action")
 }
 
 /** The waves of `repo`, none from a factory without `waves.list`. */
@@ -80,17 +75,6 @@ function readTasks(repo: string): Promise<void> {
 
 function readWatched() {
   for (const repo of watchers.keys()) void readTasks(repo)
-}
-
-/**
- * Whether a `sessions_changed` notice may concern a task: one of its paths lies under a `/factory/` directory (task
- * records, runner locks, task sessions), or it names none (pi-host could not tell what changed).
- */
-export function concernsFactory(event: HostEvent): boolean {
-  if (event.type !== "sessions_changed") return false
-  const paths = event.sessionPaths
-  if (!Array.isArray(paths) || paths.length === 0) return true
-  return paths.some((path) => typeof path === "string" && path.includes("/factory/"))
 }
 
 /** pi-host announces a change of a task (its record, lock or session file) as `sessions_changed`, a reopened socket may have missed one. */

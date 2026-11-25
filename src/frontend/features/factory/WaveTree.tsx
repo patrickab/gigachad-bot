@@ -6,28 +6,11 @@ import { Disclosure } from "@/components/ui/Disclosure"
 import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { readMemory } from "@/lib/backend/api"
-import type { FactoryTask, FactoryUsage, FactoryWave, FactoryWaveStage } from "@/lib/domain/factory"
+import { waveStageLabel, type FactoryTask, type FactoryUsage, type FactoryWave } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
 import { formatSpend } from "./usage"
 import { SessionButton, WaveOutcome } from "./WaveOutcome"
 import { descriptionPath, descriptionTitle, type WaveGroup } from "./waveTree"
-
-const STAGE_LABELS: Record<FactoryWaveStage, string> = {
-  building: "building",
-  reviewing: "reviewing",
-  rejected: "rejected",
-  merging: "merging",
-  waiting_approve: "ready for review",
-  merged: "merged",
-  blocked: "blocked",
-  cancelled: "cancelled",
-}
-
-/** A wave's stage as its header shows it: interrupted over the stage, a blocked wave's reason after it. */
-export function waveStageLabel(wave: Pick<FactoryWave, "stage" | "reason" | "interrupted">): string {
-  if (wave.interrupted) return "interrupted"
-  return wave.stage === "blocked" && wave.reason ? `blocked · ${wave.reason}` : STAGE_LABELS[wave.stage]
-}
 
 /**
  * The document `plan/<path>.md` of the memory_store `plan`, read once mounted: null until it came back, and for a

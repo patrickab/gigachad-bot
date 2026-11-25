@@ -316,3 +316,41 @@ export interface FactoryWave {
   /** The `waves.*` actions valid now. */
   actions: string[]
 }
+
+const WAVE_STAGE_LABELS: Record<FactoryWaveStage, string> = {
+  building: "building",
+  reviewing: "reviewing",
+  rejected: "rejected",
+  merging: "merging",
+  waiting_approve: "ready for review",
+  merged: "merged",
+  blocked: "blocked",
+  cancelled: "cancelled",
+}
+
+/** A wave's stage as the board and a Pi tab show it: interrupted over the stage, a blocked wave's reason after it. */
+export function waveStageLabel(wave: Pick<FactoryWave, "stage" | "reason" | "interrupted">): string {
+  if (wave.interrupted) return "interrupted"
+  return wave.stage === "blocked" && wave.reason ? `blocked · ${wave.reason}` : WAVE_STAGE_LABELS[wave.stage]
+}
+
+/** Whether a wave cannot move without the user: `rejected`, `blocked`, `waiting_approve` or interrupted. */
+export function waveNeedsUser(wave: Pick<FactoryWave, "stage" | "interrupted">): boolean {
+  return wave.interrupted || wave.stage === "rejected" || wave.stage === "blocked" || wave.stage === "waiting_approve"
+}
+
+/** Whether `cause` is the core refusing an action it does not have: a factory older than waves. */
+export function isUnknownAction(cause: unknown): boolean {
+  return cause instanceof Error && cause.message.includes("unknown action")
+}
+
+/**
+ * Whether a pi-host `sessions_changed` notice may concern the factory: one of its paths lies under a `/factory/`
+ * directory (task and wave records, runner locks, task sessions), or it names none (pi-host could not tell what changed).
+ */
+export function concernsFactory(event: { type: string; sessionPaths?: unknown }): boolean {
+  if (event.type !== "sessions_changed") return false
+  const paths = event.sessionPaths
+  if (!Array.isArray(paths) || paths.length === 0) return true
+  return paths.some((path) => typeof path === "string" && path.includes("/factory/"))
+}
