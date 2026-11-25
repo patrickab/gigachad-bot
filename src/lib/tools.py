@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from memory_store import store as memory_store
+from memory_store.cli import render_results
 
 from lib import completions, learnharness
 from lib.data_store import StorageConflictError
@@ -19,8 +22,10 @@ from lib.upstream import UpstreamContractError, UpstreamRequestFailed, UpstreamU
 from lib.web_search import brave_sources, evidence_prompt, plan_query, source_label
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
+
+T = TypeVar("T")
 
 TOOL_GUIDANCE = (
     "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
@@ -30,6 +35,8 @@ TOOL_GUIDANCE = (
 
 # Tools that act on the machine owner's host, offered only to logins with the host capability.
 HOST_TOOLS = frozenset({"start_learn_session"})
+# Toggle names the browser sends that stand for several tools.
+TOOL_TOGGLES: dict[str, tuple[str, ...]] = {"memory": ("list_memories", "read_memories", "apply_memory_ops")}
 
 
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
@@ -209,6 +216,76 @@ async def _start_learn_session(args: dict[str, Any], context: ToolContext, stage
     )
 
 
+_MEMORY_STORE_PARAMETER: dict[str, Any] = {
+    "type": "string",
+    "description": "The memory_store, a root-relative path such as `user` or the project's name.",
+}
+
+
+def _memory_failure(exc: memory_store.MemoryStoreError) -> ToolOutcome:
+    return ToolOutcome(content=f"error: {exc.code}: {exc.message}", summary=exc.code, error=exc.message)
+
+
+def _memory_argument_error(message: str) -> ToolOutcome:
+    return ToolOutcome(content=f"Tool call rejected: {message}", summary="Rejected", error=message)
+
+
+async def _in_memory_root(context: ToolContext, function: Callable[..., T], *args: object) -> T:
+    """Run a blocking store call in the login's root, off the event loop; never in the default root."""
+    if context.memory_root is None:
+        raise memory_store.MemoryStoreError("unavailable", "Memory is not available for this request.")
+    return await asyncio.to_thread(function, *args, root=context.memory_root)
+
+
+async def _list_memories(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Listing memories")
+    try:
+        listing = await _in_memory_root(context, memory_store.list_memories, args.get("memory_store", ""), args.get("path", ""))
+    except memory_store.MemoryStoreError as exc:
+        return _memory_failure(exc)
+    return ToolOutcome(content=memory_store.render_list(listing), summary=f"{len(listing['memories'])} memories")
+
+
+async def _read_memories(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    paths, ids = args["paths"], args.get("ids", True)
+    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) for path in paths):
+        return _memory_argument_error("`paths` must be a non-empty list of strings.")
+    if not isinstance(ids, bool):
+        return _memory_argument_error("`ids` must be true or false.")
+    stage("Reading memories")
+    try:
+        text = await _in_memory_root(context, memory_store.read_memories, args["memory_store"], paths, ids)
+    except memory_store.MemoryStoreError as exc:
+        return _memory_failure(exc)
+    return ToolOutcome(content=text, summary=f"{len(paths)} read")
+
+
+async def _apply_memory_ops(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    ops = args["ops"]
+    if not isinstance(ops, list) or not ops or not all(isinstance(op, dict) for op in ops):
+        return _memory_argument_error("`ops` must be a non-empty list of op objects.")
+    stage("Saving memories")
+    try:
+        results = await _in_memory_root(context, memory_store.apply_memory_ops, args["memory_store"], ops)
+    except memory_store.MemoryStoreError as exc:
+        return _memory_failure(exc)
+    applied = sum(1 for result in results if result.get("ok"))
+    return ToolOutcome(content=render_results(results), summary=f"{applied}/{len(results)} applied")
+
+
+_MEMORY_OP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["op", "path"],
+    "properties": {
+        "op": {"type": "string", "enum": list(memory_store.OPS)},
+        "path": {"type": "string", "description": "Memory path (no extension) or document path ending in `.md`."},
+        "text": {"type": "string", "description": "The fact (add, update) or the whole document (write_doc)."},
+        "id": {"type": "string", "description": "The fact id to update or retire."},
+        "description": {"type": "string", "description": "The memory's one-line description, required when add creates it."},
+    },
+}
+
+
 BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
     (
         ToolDefinition(
@@ -280,13 +357,64 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             ),
             _start_learn_session,
         ),
+        ToolDefinition(
+            "list_memories",
+            "List the user's long-term memory: without memory_store the memory_stores, with it its directories, memories "
+            "(path, description, fact count, last update) and documents; with path one declared directory.",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "memory_store": _MEMORY_STORE_PARAMETER,
+                    "path": {"type": "string", "description": "A declared directory inside the memory_store."},
+                },
+            },
+            _list_memories,
+        ),
+        ToolDefinition(
+            "read_memories",
+            "Read memories (their active facts with ids) and documents of one memory_store from the user's long-term memory.",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["memory_store", "paths"],
+                "properties": {
+                    "memory_store": _MEMORY_STORE_PARAMETER,
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "Memory paths (no extension) or document paths ending in `.md`.",
+                    },
+                    "ids": {"type": "boolean", "description": "Show fact ids (default true); they are needed to update or retire."},
+                },
+            },
+            _read_memories,
+        ),
+        ToolDefinition(
+            "apply_memory_ops",
+            "Change the user's long-term memory in one memory_store: add a fact (creates the memory, then needs a "
+            "description), update or retire a fact by id, or write a whole `.md` document. Read the memory first for the "
+            "fact ids; a fact on the subject of an existing one is an update of it, not a new add. Returns one result per op.",
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["memory_store", "ops"],
+                "properties": {
+                    "memory_store": _MEMORY_STORE_PARAMETER,
+                    "ops": {"type": "array", "items": _MEMORY_OP_SCHEMA, "minItems": 1},
+                },
+            },
+            _apply_memory_ops,
+        ),
     )
 )
 
 
 def offered_tools(enabled: list[str], *, host_access: bool) -> list[str]:
-    """The tools of *enabled* this login may be offered: `HOST_TOOLS` only with the host capability."""
-    return enabled if host_access else [name for name in enabled if name not in HOST_TOOLS]
+    """The tools of *enabled* this login may be offered, `TOOL_TOGGLES` expanded: `HOST_TOOLS` only with the host capability."""
+    names = [tool for name in enabled for tool in TOOL_TOGGLES.get(name, (name,))]
+    return names if host_access else [name for name in names if name not in HOST_TOOLS]
 
 
 async def stream_chat_with_tools(
@@ -295,7 +423,7 @@ async def stream_chat_with_tools(
     system_prompt: str,
     enabled: list[str],
     host_access: bool = False,
-    **kwargs: Any,
+    **kwargs: Any,  # noqa: ANN401 - completion options pass through to the provider
 ) -> AsyncIterator[tuple[str, Any]]:
     """Stream one optional tool call and the answer, each call bound to *context* with its id.
 

@@ -19,6 +19,7 @@ ATTACHMENT = "attachment"
 DRAWING = "drawing"
 GRAPH = "graph"
 PROMPT = "prompt"
+# Documents of the old memory system, kept until `scripts/migrate_memory.py --delete-old` removes them.
 MEMORY = "memory"
 MODEL = "model"
 PDFS = "PDFs"
@@ -68,29 +69,6 @@ def project_dir(slug: str) -> str:
     if PurePosixPath(slug).name != slug or not slug:
         raise ValueError("Invalid project slug")
     return f"{CHAT}/{slug}"
-
-
-def _memory_project_dir(slug: str) -> str:
-    # Reject separators and dot segments so a slug cannot escape the project directory.
-    if not slug:
-        raise ValueError("Project slug is required")
-    if "/" in slug or "\\" in slug or slug in {".", ".."}:
-        raise ValueError("Invalid project slug")
-    return f"{MEMORY}/project/{slug}/memory"
-
-
-def memory_topics_key(project_slug: str | None) -> str:
-    """Topic list of the global memory (None) or of one project's memory."""
-    if project_slug is None:
-        return f"{MEMORY}/global-topics.json"
-    return f"{_memory_project_dir(project_slug)}/topics.json"
-
-
-def memory_memories_key(project_slug: str | None) -> str:
-    """Stored facts of the global memory (None) or of one project's memory."""
-    if project_slug is None:
-        return f"{MEMORY}/global-profile.json"
-    return f"{_memory_project_dir(project_slug)}/memory.json"
 
 
 def library_pdf(name: str) -> str:

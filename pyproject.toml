@@ -32,6 +32,7 @@ dependencies = [
     "jupyter-server>=2.14",
     "ipykernel>=6.29",
     "websockets>=15",
+    "memory-store",
 ]
 
 [project.scripts]
@@ -71,6 +72,7 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-sandbox = { git = "https://github.com/patrickab/Agents-in-a-box", branch = "main" }
+memory-store = { git = "https://github.com/patrickab/memory-store", branch = "master" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

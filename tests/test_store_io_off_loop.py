@@ -11,12 +11,9 @@ import pytest
 from lib import architecture_service, c4_service
 from lib.architecture_service import Change
 from lib.architecture_workspace import Snapshot
-from lib.memory_extract import MemoryExtractor
-from lib.memory_store import MemoryScope, MemoryStore
 from lib.sandbox_store import SandboxStore
 from lib.storage_namespace import sandbox_asset
 from tests.fakes import MemoryAssetStore, MemoryDataStore, memory_sandbox_service
-from tests.test_memory_store import GLOBAL, ScriptedLLM, seed
 
 
 def on_loop_calls(monkeypatch: pytest.MonkeyPatch, cls: type, *names: str) -> list[tuple[str, bool]]:
@@ -74,38 +71,6 @@ def test_architecture_apply_reads_checks_and_commits_off_the_loop(monkeypatch):
 
     assert applied is result
     assert store.calls == [("read", False), ("check_project", False), ("commit", False)] * 2
-
-
-def test_memory_extract_and_regroup_touch_the_store_off_the_loop(data_store, monkeypatch):
-    store = MemoryStore(data_store)
-    seed(store)
-    calls = on_loop_calls(
-        monkeypatch, MemoryStore, "ensure_pending_dir", "watermark", "get_topics", "read_memories", "write_pending"
-    )
-    add = {"operations": [{"op": "add", "topic": "profile", "text": "Runs iwd"}], "topics": []}
-    regroup = {"topics": [{"name": "profile", "summary": "Who the user is"}], "assignments": [{"id": "m1", "topic": "profile"}]}
-    extractor = MemoryExtractor(store, "test", complete=ScriptedLLM(add, regroup))
-
-    result = asyncio.run(extractor.extract([{"role": "user", "content": "hi"}], chat_id="c1"))
-    regrouped = asyncio.run(extractor.propose_regroup(GLOBAL))
-
-    assert [o.text for o in result.global_proposal.operations] == ["Runs iwd"]
-    assert {m["topic"] for m in regrouped["memories"]} == {"profile", "preferences"}
-    assert [name for name, _ in calls] == [
-        "ensure_pending_dir", "watermark", "get_topics", "read_memories", "write_pending",
-        "read_memories", "get_topics",
-    ]
-    assert not any(on_loop for _, on_loop in calls)
-
-
-def test_memory_regroup_of_an_empty_scope_reads_off_the_loop(data_store, monkeypatch):
-    store = MemoryStore(data_store)
-    calls = on_loop_calls(monkeypatch, MemoryStore, "get_topics", "read_memories")
-
-    regrouped = asyncio.run(MemoryExtractor(store, "test", complete=ScriptedLLM()).propose_regroup(MemoryScope("project", "shop")))
-
-    assert regrouped == {"topics": store.get_topics(MemoryScope("project", "shop")), "memories": []}
-    assert calls[:2] == [("read_memories", False), ("get_topics", False)]
 
 
 @pytest.mark.asyncio

@@ -1,134 +1,77 @@
+"""The memory window's REST surface: list, read and change the login's memory-store root through `memory_store.store`."""
+
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Annotated, Literal
+from contextlib import contextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from memory_store import store
+from memory_store.paths import inside_root, is_document, split_path, store_dir, target_file
 from pydantic import BaseModel
 
-from backend.http_plumbing import http_errors
-from backend.routes.deps import get_memory_store, get_model_defaults
-from lib.memory_extract import MemoryExtractor, ScopeProposal
-from lib.memory_store import MemoryOperation, MemoryScope, MemoryStore, ScopeKind
+from backend.identity import RequestIdentity, get_request_identity
+from lib.memory_context import memory_root
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
-MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
-ModelDefaultsDep = Annotated[dict[str, str], Depends(get_model_defaults)]
-# The memory store reports every failure as a plain exception, the UI shows it as an unavailable backend.
-_STORE_FAILURE = (Exception, 502, None)
+_NOT_FOUND_CODES = frozenset({"not_found", "memory_store_missing"})
+_FACT_FIELDS = ("id", "text", "created", "updated")
 
 
-class MemoryExtractRequest(BaseModel):
-    messages: list[dict[str, str]]
-    project_slug: str | None = None
-    chat_id: str | None = None
+def get_memory_root(identity: Annotated[RequestIdentity, Depends(get_request_identity)]) -> Path:
+    return memory_root(identity.user_id, identity.has_host_access)
 
 
-class MemoryCancelRequest(BaseModel):
-    review_id: str
+MemoryRootDep = Annotated[Path, Depends(get_memory_root)]
 
 
-class OperationModel(BaseModel):
-    id: str
-    op: Literal["add", "update", "delete"]
-    topic: str
-    text: str = ""
-    target_id: str | None = None
-    index: int | None = None
+class MemoryApplyRequest(BaseModel):
+    memory_store: str
+    ops: list[dict[str, Any]]
 
 
-class TopicModel(BaseModel):
-    name: str
-    summary: str
+@contextmanager
+def _store_errors() -> Iterator[None]:
+    """`MemoryStoreError` as 404 (missing memory_store or entry) or 400, the detail `{code, message}`."""
+    try:
+        yield
+    except store.MemoryStoreError as exc:
+        status = 404 if exc.code in _NOT_FOUND_CODES else 400
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message}) from exc
 
 
-class ScopedRequest(BaseModel):
-    scope: ScopeKind
-    project_slug: str | None = None
-
-    def memory_scope(self) -> MemoryScope:
-        return MemoryScope.of(self.scope, self.project_slug)
-
-
-class MemoryCommitRequest(ScopedRequest):
-    operations: list[OperationModel]
-    topics: list[TopicModel] = []
-    review_id: str | None = None
+def _read_document(root: Path, memory_store: str, path: str) -> str:
+    """A document's text, held to the root like the library's reads: a symlink out of it is `invalid_path`."""
+    file = inside_root(root, target_file(store_dir(root, memory_store), split_path(path)))
+    try:
+        return file.read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+        raise store.MemoryStoreError("not_found", f"no document {path}") from None
 
 
-class TopicSetRequest(ScopedRequest):
-    topics: list[TopicModel]
+# Plain `def` routes: FastAPI runs them in its thread pool, so the blocking file I/O stays off the event loop.
+@router.get("/list")
+def list_memories(root: MemoryRootDep, memory_store: str = "", path: str = "") -> dict:
+    with _store_errors():
+        return store.list_memories(memory_store, path, root=root)
 
 
-class MemoriesSetRequest(ScopedRequest):
-    memories: list[dict]
+@router.get("/read")
+def read_memory(root: MemoryRootDep, memory_store: str, path: str) -> dict:
+    with _store_errors():
+        if is_document(path):
+            return {"kind": "document", "text": _read_document(root, memory_store, path)}
+        memory = store.read_memory(memory_store, path, root=root)
+    facts = [{key: fact.get(key) for key in _FACT_FIELDS} for fact in memory["facts"]]
+    return {"kind": "memory", "description": memory["description"], "facts": facts}
 
 
-def _proposal_json(proposal: ScopeProposal | None) -> dict | None:
-    if not proposal:
-        return None
-    return {"operations": [asdict(o) for o in proposal.operations], "topics": [asdict(t) for t in proposal.topics]}
-
-
-@router.post("/extract")
-async def extract_memories(req: MemoryExtractRequest, store: MemoryStoreDep, defaults: ModelDefaultsDep) -> dict:
-    """Propose memory operations from a conversation for user review, a scope is None when not extracted."""
-    with http_errors(_STORE_FAILURE):
-        extractor = MemoryExtractor(store, defaults["memory_model"])
-        result = await extractor.extract(req.messages, project_slug=req.project_slug, chat_id=req.chat_id)
-    return {
-        "review_id": result.review_id,
-        "global": _proposal_json(result.global_proposal),
-        "project": _proposal_json(result.project_proposal),
-    }
-
-
-@router.post("/commit")
-def commit_memories(req: MemoryCommitRequest, store: MemoryStoreDep) -> dict:
-    """Apply accepted operations and topics, then advance the reviewed chat's watermark."""
-    operations = [MemoryOperation(o.id, o.op, req.scope, o.topic, o.text, o.target_id, index=o.index) for o in req.operations]
-    with http_errors(_STORE_FAILURE):
-        store.commit(req.memory_scope(), operations, [t.model_dump() for t in req.topics], req.review_id)
-    return {"status": "committed"}
-
-
-@router.post("/cancel")
-def cancel_memories(req: MemoryCancelRequest, store: MemoryStoreDep) -> dict:
-    """Discard a pending review without advancing its watermark."""
-    store.cancel(req.review_id)
-    return {"status": "cancelled"}
-
-
-@router.get("/memories")
-def list_memories(store: MemoryStoreDep, scope: ScopeKind, project_slug: str | None = None) -> dict:
-    with http_errors(_STORE_FAILURE):
-        return {"memories": store.list_memories(MemoryScope.of(scope, project_slug))}
-
-
-@router.put("/memories")
-def set_memories(req: MemoriesSetRequest, store: MemoryStoreDep) -> dict:
-    """Replace a scope's stored memories, used by the memory window's direct edits."""
-    with http_errors(_STORE_FAILURE):
-        store.write_memories(req.memory_scope(), req.memories)
-    return {"status": "saved"}
-
-
-@router.get("/topics")
-def get_topics(store: MemoryStoreDep, scope: ScopeKind, project_slug: str | None = None) -> dict:
-    with http_errors(_STORE_FAILURE):
-        return {"topics": store.get_topics(MemoryScope.of(scope, project_slug))}
-
-
-@router.put("/topics")
-def set_topics(req: TopicSetRequest, store: MemoryStoreDep) -> dict:
-    with http_errors(_STORE_FAILURE):
-        store.set_topics(req.memory_scope(), [t.model_dump() for t in req.topics])
-    return {"status": "saved"}
-
-
-@router.post("/regroup")
-async def regroup_memories(req: ScopedRequest, store: MemoryStoreDep, defaults: ModelDefaultsDep) -> dict:
-    """Propose subject topics for a scope's facts as `{topics, memories}`, nothing is written."""
-    with http_errors(_STORE_FAILURE):
-        return await MemoryExtractor(store, defaults["memory_model"]).propose_regroup(req.memory_scope())
+@router.post("/apply")
+def apply_memory_ops(req: MemoryApplyRequest, root: MemoryRootDep) -> dict:
+    with _store_errors():
+        return {"results": store.apply_memory_ops(req.memory_store, req.ops, root=root)}

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agent_sandbox import PromptImage
 
     from lib.project_store import ProjectStore
@@ -46,3 +48,5 @@ class ToolContext:
     # The chat's project (None outside projects) and the store its learn sessions are grouped in.
     project_slug: str | None = None
     project_store: ProjectStore | None = None
+    # The login's memory-store root, None when the request carries no identity.
+    memory_root: Path | None = None

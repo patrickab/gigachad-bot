@@ -100,7 +100,6 @@ class ModelDefaults(BaseModel):
     default_model: str
     small_model: str
     vision_model: str
-    memory_model: str
     sandbox_model: str
 
 

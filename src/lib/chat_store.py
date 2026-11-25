@@ -473,7 +473,7 @@ def _is_chat_key(key: str) -> bool:
 
 
 def _in_hidden_dir(dirs: Sequence[str]) -> bool:
-    """Whether a folder on the path is private (`_` prefix) or the memory store's, both left out of chat listings."""
+    """Whether a folder on the path is private (`_` prefix) or the old memory system's, both left out of chat listings."""
     return any(d.startswith("_") or d == MEMORY for d in dirs)
 
 

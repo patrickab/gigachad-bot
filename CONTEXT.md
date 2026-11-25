@@ -7,7 +7,8 @@ A self-hosted LLM workspace for chats, documents, canvases, coding agents and le
 ### What the assistant knows
 
 **Memory**:
-User-confirmed facts about the user or a project, such as preferences, profile and project decisions.
+Facts about the user or a project, such as preferences, profile and project decisions, kept in the login's memory-store root.
+The assistant reads and writes them while the Memory tool is on; the memory window shows and edits them.
 _Avoid_: knowledge base, notes
 
 **Knowledge**:

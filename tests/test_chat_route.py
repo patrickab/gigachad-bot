@@ -13,12 +13,10 @@ from tests.fakes import text_chunk, tool_chunk
 
 
 def _chat_client(monkeypatch: pytest.MonkeyPatch, *, has_host_access: bool = True) -> TestClient:
-    monkeypatch.setattr(chat_route, "augment_system_prompt", lambda store, prompt, slug: prompt)  # noqa: ARG005 - signature parity
     monkeypatch.setattr(chat_route, "_resolve_images", lambda *_, **__: None)
     return route_client(
         chat_route.router,
         overrides={
-            chat_route.get_memory_store: None,
             chat_route.get_asset_store: None,
             chat_route.get_sandbox_service: None,
             chat_route.get_project_store: None,
@@ -120,3 +118,70 @@ def test_learn_sessions_are_offered_to_host_logins_only(monkeypatch: pytest.Monk
 
     assert response.status_code == 200, response.text
     assert offers == [offered]
+
+
+@pytest.mark.parametrize("has_host_access", [True, False])
+def test_the_memory_toggle_offers_the_memory_tools_and_injects_the_memory_block(
+    monkeypatch: pytest.MonkeyPatch, has_host_access: bool
+) -> None:
+    """Every login gets the three memory tools for the "memory" toggle, and the system prompt its memory block."""
+    offers: list[list[str]] = []
+    system_prompts: list[str] = []
+
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+        offers.append([spec["function"]["name"] for spec in kwargs.get("tools") or []])
+        system_prompts.append(next(m["content"] for m in messages if m["role"] == "system"))
+        return iter([text_chunk("Hi")])
+
+    monkeypatch.setattr(completions, "stream", fake_stream)
+
+    response = _chat_client(monkeypatch, has_host_access=has_host_access).post(
+        "/api/chat",
+        json={"model": TEST_MODEL, "chat_id": "c1", "user_msg": "hi", "system_prompt": "Base", "tools": ["memory"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert offers == [["list_memories", "read_memories", "apply_memory_ops"]]
+    assert system_prompts[0].startswith("Base\n\n# Memory")
+    assert "`user`" in system_prompts[0]
+
+
+def test_without_the_memory_toggle_the_system_prompt_stays_as_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    system_prompts: list[str] = []
+
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_: Any) -> Any:
+        system_prompts.append(next(m["content"] for m in messages if m["role"] == "system"))
+        return iter([text_chunk("Hi")])
+
+    monkeypatch.setattr(completions, "stream", fake_stream)
+
+    response = _chat_client(monkeypatch).post(
+        "/api/chat",
+        json={"model": TEST_MODEL, "chat_id": "c1", "user_msg": "hi", "system_prompt": "Base", "tools": ["web_search"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert system_prompts and "# Memory" not in system_prompts[0]
+
+
+@pytest.mark.parametrize("failure", [OSError("not a directory"), RuntimeError("corrupt")])
+def test_a_failing_memory_block_never_fails_the_chat(monkeypatch: pytest.MonkeyPatch, failure: Exception) -> None:
+    system_prompts: list[str] = []
+
+    def broken_memory(*_: Any) -> str:
+        raise failure
+
+    def fake_stream(_model: str, messages: list[dict[str, Any]], **_: Any) -> Any:
+        system_prompts.append(next(m["content"] for m in messages if m["role"] == "system"))
+        return iter([text_chunk("Hi")])
+
+    monkeypatch.setattr(chat_route, "memory_prompt", broken_memory)
+    monkeypatch.setattr(completions, "stream", fake_stream)
+
+    response = _chat_client(monkeypatch).post(
+        "/api/chat",
+        json={"model": TEST_MODEL, "chat_id": "c1", "user_msg": "hi", "system_prompt": "Base", "tools": ["memory"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert system_prompts[0].startswith("Base") and "# Memory" not in system_prompts[0]

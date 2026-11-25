@@ -36,6 +36,8 @@ LEGACY_LABEL = "OMP"
 # Before Pi the sandbox model default was stored as `omp_model`. Loading rewrites it once as `sandbox_model`.
 LEGACY_SANDBOX_MODEL_KEY = "omp_model"
 SANDBOX_MODEL_KEY = "sandbox_model"
+# The old memory system's extraction model. Loading drops it once, keeping the other defaults.
+LEGACY_MEMORY_MODEL_KEY = "memory_model"
 # Before Pi a provider's selector prefix was stored as `litellm_id`. Loading rewrites it once as `provider_id`.
 LEGACY_PROVIDER_ID_KEY = "litellm_id"
 PROVIDER_ID_KEY = "provider_id"
@@ -86,10 +88,17 @@ def _checked_defaults(defaults: object) -> dict[str, str]:
 
 
 def _migrated_defaults(defaults: object) -> dict[str, Any] | None:
-    """*defaults* with the legacy sandbox key renamed in place, None when there is nothing to migrate."""
-    if not isinstance(defaults, dict) or LEGACY_SANDBOX_MODEL_KEY not in defaults or SANDBOX_MODEL_KEY in defaults:
+    """*defaults* with the legacy sandbox key renamed in place and the memory key dropped, None when there is nothing to migrate."""
+    if not isinstance(defaults, dict):
         return None
-    return {SANDBOX_MODEL_KEY if key == LEGACY_SANDBOX_MODEL_KEY else key: value for key, value in defaults.items()}
+    rename = LEGACY_SANDBOX_MODEL_KEY in defaults and SANDBOX_MODEL_KEY not in defaults
+    if not rename and LEGACY_MEMORY_MODEL_KEY not in defaults:
+        return None
+    return {
+        SANDBOX_MODEL_KEY if rename and key == LEGACY_SANDBOX_MODEL_KEY else key: value
+        for key, value in defaults.items()
+        if key != LEGACY_MEMORY_MODEL_KEY
+    }
 
 
 def _renamed_provider_ids(data: object) -> dict[str, Any] | None:

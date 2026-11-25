@@ -23,7 +23,7 @@ from lib.document_service import Relocate
 from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.file_roots import FileRoots
 from lib.file_roots_repository import PostgresFileRootRepository
-from lib.memory_store import MemoryStore
+from lib.memory_context import memory_root
 from lib.model_provider_store import ModelProviderStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.postgres_pool import get_postgres_pool
@@ -124,10 +124,12 @@ def get_chat_cleanup(
 
 
 def get_project_store(
+    identity: RequestIdentity = Depends(get_request_identity),
     scope: UserScope = Depends(get_user_scope),
     chats: ChatStore = Depends(get_chat_store),
 ) -> ProjectStore:
-    return ProjectStore(chats, rename=PostgresProjectRenamer(scope).rename)
+    renamer = PostgresProjectRenamer(scope, memory_root=memory_root(identity.user_id, identity.has_host_access))
+    return ProjectStore(chats, rename=renamer.rename)
 
 
 def get_relocate(scope: UserScope = Depends(get_user_scope)) -> Relocate:
@@ -143,10 +145,6 @@ def get_extraction_publisher(scope: UserScope = Depends(get_user_scope)) -> Extr
     docs = PostgresDataStore(background)
     store = ProjectStore(ChatStore(data_store=docs), rename=PostgresProjectRenamer(background).rename)
     return partial(document_service.add_extraction, store, docs)
-
-
-def get_memory_store(docs: DataStore = Depends(get_document_store)) -> MemoryStore:
-    return MemoryStore(docs)
 
 
 def get_file_roots(

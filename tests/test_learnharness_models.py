@@ -56,7 +56,6 @@ DEFAULTS = {
     "default_model": "litellm_proxy/anthropic/claude-sonnet-5-5",
     "small_model": "gemini/gemini-3.5-flash",
     "vision_model": "openrouter/not-in-the-catalog",
-    "memory_model": "gemini/gemini-3.5-flash",
     "sandbox_model": "gemini/gemini-3.5-flash",
 }
 BASE_URL = "http://127.0.0.1:8300/v1"

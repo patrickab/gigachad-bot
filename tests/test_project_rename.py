@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+from memory_store import store as memory_store
 from psycopg.types.json import Jsonb
 import pytest
 
@@ -11,7 +12,6 @@ from lib.asset_store import AssetStore
 from lib.changes import UserScope, latest_changes
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
-from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import KeyReference, PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
@@ -85,7 +85,7 @@ def test_references_move_owned_links_only():
     assert refs.value({"path": "project/old/document/a.md", "project_slug": "old", "history_file": "old/a.json"}) == {
         "path": "project/new/document/a.md", "project_slug": "new", "history_file": "new/a.json"}
     text = "old oldish project/older/a /home/project/old/a [doc](project/old/document/a.md) memory/project/old/x"
-    assert refs.text(text) == "old oldish project/older/a /home/project/old/a [doc](project/new/document/a.md) memory/project/new/x"
+    assert refs.text(text) == "old oldish project/older/a /home/project/old/a [doc](project/new/document/a.md) memory/project/old/x"
     assert refs.value({"path": "/home/project/old/a"}) == {"path": "/home/project/old/a"}
     assert refs.content("model/settings.json", b'{"slug":"old"}') == b'{"slug":"old"}'
     assert refs.content("project/old/document/a.pdf", b"\x00binary old") == b"\x00binary old"
@@ -119,15 +119,84 @@ def test_renamed_project_json_keeps_learn_session_ids():
     assert json.loads(content)["learn_sessions"] == ["chat_old_1"]
 
 
+def renamed_without_database(monkeypatch, memory_root, slug="old", new_slug="new", *, linked=False):
+    """Rename *slug* with the database step stubbed out, so only the folder and memory_store moves run."""
+    monkeypatch.setattr(PostgresProjectRenamer, "_rename_rows", lambda self, refs, name: linked)
+    PostgresProjectRenamer(SimpleNamespace(user_id=uuid4()), memory_root=memory_root).rename(slug, new_slug, "New")
+
+
+def test_rename_moves_the_projects_memory_store_after_the_database_step(tmp_path, monkeypatch):
+    root = tmp_path / "memory"
+    memory_store.create_memory_store("old", root=root)
+    memory_store.apply_memory_ops("old", [{"op": "add", "path": "notes", "description": "Notes", "text": "old fact"}], root=root)
+
+    renamed_without_database(monkeypatch, root)
+
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["new"]
+    assert [fact["text"] for fact in memory_store.read_memory("new", "notes", root=root)["facts"]] == ["old fact"]
+
+
+def test_rename_skips_a_missing_memory_store_and_a_taken_target(tmp_path, monkeypatch):
+    root = tmp_path / "memory"
+    renamed_without_database(monkeypatch, root)
+    renamed_without_database(monkeypatch, None)
+    assert not root.exists()
+
+    memory_store.create_memory_store("old", root=root)
+    memory_store.create_memory_store("new", ["kept"], root=root)
+    renamed_without_database(monkeypatch, root)
+
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["new", "old"]
+    assert memory_store.list_memories("new", root=root)["directories"] == ["kept"]
+
+
+def test_rename_leaves_a_linked_projects_memory_store(tmp_path, monkeypatch):
+    root = tmp_path / "memory"
+    memory_store.create_memory_store("old", root=root)
+
+    renamed_without_database(monkeypatch, root, linked=True)
+
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["old"]
+
+
+def test_rename_never_moves_the_logins_user_store(tmp_path, monkeypatch):
+    root = tmp_path / "memory"
+    memory_store.create_memory_store("user", root=root)
+    memory_store.create_memory_store("project-user", root=root)
+
+    renamed_without_database(monkeypatch, root, slug="user", new_slug="my-notes")
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["my-notes", "user"]
+
+    renamed_without_database(monkeypatch, root, slug="my-notes", new_slug="user")
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["project-user", "user"]
+
+
+def test_failed_database_step_leaves_the_memory_store(tmp_path):
+    root = tmp_path / "memory"
+    memory_store.create_memory_store("old", root=root)
+
+    def connection():
+        raise RuntimeError("database down")
+
+    with pytest.raises(RuntimeError, match="database down"):
+        PostgresProjectRenamer(SimpleNamespace(user_id=uuid4(), connection=connection), memory_root=root).rename("old", "new", "New")
+    assert memory_store.list_memories(root=root)["memory_stores"] == ["old"]
+
+
 @pytest.fixture
-def stores(postgres_pool, clean_database):
+def memory_root(tmp_path):
+    return tmp_path / "memory"
+
+
+@pytest.fixture
+def stores(postgres_pool, clean_database, memory_root):
     user = create_user(postgres_pool)
     docs = PostgresDataStore(UserScope(postgres_pool, user))
-    return docs, project_store(docs, UserScope(postgres_pool, user)), AssetStore(UserScope(postgres_pool, user)), user
+    return docs, project_store(docs, UserScope(postgres_pool, user), memory_root), AssetStore(UserScope(postgres_pool, user)), user
 
 
-def project_store(docs, scope):
-    return ProjectStore(ChatStore(data_store=docs), rename=PostgresProjectRenamer(scope).rename)
+def project_store(docs, scope, memory_root=None):
+    return ProjectStore(ChatStore(data_store=docs), rename=PostgresProjectRenamer(scope, memory_root=memory_root).rename)
 
 
 def put(docs, key, value):
@@ -138,7 +207,17 @@ def get(docs, key):
     return json.loads(docs.read_bytes(key)[0])
 
 
-def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool, tmp_path):
+def test_rename_moves_an_unlinked_projects_memory_store_with_its_slug(stores, memory_root):
+    _, projects, _, _ = stores
+    projects.create_project("Old")
+    memory_store.create_memory_store("old", root=memory_root)
+
+    projects.update_project("old", "New Name")
+
+    assert memory_store.list_memories(root=memory_root)["memory_stores"] == ["new-name"]
+
+
+def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool, tmp_path, memory_root):
     docs, projects, assets, user = stores
     projects.create_project("Old")
     projects.create_project("Other")
@@ -160,7 +239,9 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool,
     put(docs, "project/other/document/cross.canvas", {"attachments": [attachment]})
     docs.write_bytes("project/old/document/report.md", b"old [self](project/old/document/report.md)")
     docs.write_bytes("graph/old/system.c4", b"model {}")
-    put(docs, "memory/project/old/memory/memory.json", [{"id": "f", "text": "old fact", "topic": "note"}])
+    memory_store.create_memory_store("old", root=memory_root)
+    fact = {"op": "add", "path": "notes", "description": "Notes", "text": "old fact"}
+    memory_store.apply_memory_ops("old", [fact], root=memory_root)
     put(docs, "chat/other/external.json", {
         "messages": [{"content": "[report](project/old/document/report.md)", "attachments": [{"vaultPath": attachment["path"]}]}],
     })
@@ -193,7 +274,9 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool,
     assert get(docs, "project/other/document/cross.canvas")["attachments"][0]["path"] == "project/new-name/document/report.md"
     assert "project/new-name/document/report.md" in get(docs, "chat/other/external.json")["messages"][0]["content"]
     assert docs.read_bytes("graph/new-name/system.c4")[0] == b"model {}"
-    assert [m["text"] for m in MemoryStore(docs).list_memories(MemoryScope("project", "new-name"))] == ["old fact"]
+    # Linked to the folder `old`, the project keeps the memory_store named after it.
+    assert [f["text"] for f in memory_store.read_memory("old", "notes", root=memory_root)["facts"]] == ["old fact"]
+    assert memory_store.list_memories(root=memory_root)["memory_stores"] == ["old"]
     assert isinstance(ArchitectureStore.for_project(docs, "new-name", [str(mount)])._files, DirectoryFiles)
     assert source.read_text() == "model { system = system 'Original' }"
     moved = assets.read_by_id(asset.id)

@@ -42,3 +42,6 @@ src/frontend/public/ambient
 
 # Pi project settings and session state
 .pi/
+
+# memory-store roots of non-host logins
+.memory_store/

@@ -76,8 +76,29 @@ def test_legacy_sandbox_model_key_migrates_once_and_keeps_its_value(data_store):
 
     defaults = catalog.load_defaults()
 
-    assert list(defaults) == ["default_model", "small_model", "vision_model", "memory_model", "sandbox_model"]
+    assert list(defaults) == ["default_model", "small_model", "vision_model", "sandbox_model"]
     assert defaults["sandbox_model"] == "gemini/gemini-3.5-flash"
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}")
+    assert yaml.safe_load(content) == defaults
+    assert catalog.load_defaults() == defaults
+
+
+def test_stored_memory_model_default_is_dropped_once_and_the_other_defaults_survive(data_store):
+    """The old memory system's `memory_model` goes; the user's other defaults are kept, not reset."""
+    stored = {
+        "default_model": "a/chat",
+        "small_model": "a/small",
+        "memory_model": "a/memory",
+        "vision_model": "a/vision",
+        "sandbox_model": "a/sandbox",
+    }
+    data_store.write_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}", yaml.safe_dump(stored, sort_keys=False).encode())
+    catalog = ModelProviderStore(data_store)
+
+    defaults = catalog.load_defaults()
+
+    assert defaults == {"default_model": "a/chat", "small_model": "a/small", "vision_model": "a/vision", "sandbox_model": "a/sandbox"}
+    assert list(defaults) == ["default_model", "small_model", "vision_model", "sandbox_model"]
     content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}")
     assert yaml.safe_load(content) == defaults
     assert catalog.load_defaults() == defaults
