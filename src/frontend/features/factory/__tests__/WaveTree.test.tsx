@@ -49,6 +49,19 @@ beforeEach(() => {
 })
 
 describe("WaveContainers", () => {
+  it("orders a wave's header: title and count on one row, description toggle, then stage and usage", async () => {
+    api.readMemory.mockResolvedValue({ kind: "document", text: "# Wave one" })
+    renderTree([factoryWave("a", { tag: "w1", title: "Wave one", plan: PLAN, counts: { total: 5, done: 1 }, usage: { input: 50_000, output: 12_000, cost: 3.5, cacheRead: 5000 } })])
+    const toggle = await screen.findByRole("button", { name: "Description" })
+    const title = header("Wave one")
+    expect(title.textContent).toMatch(/^Wave one1\/5$/)
+    const stage = screen.getByLabelText("Tokens and cost")
+    expect(stage).toHaveTextContent("↑55k ↓12k · $3.50")
+    expect(title.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(toggle.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+  })
+
   it("heads a wave with done/total, its title, stage and usage, and a milestone with merged/waves and summed usage", () => {
     renderTree([
       factoryWave("a", { tag: "plugin/m1/w1", title: "Board shows waves", stage: "reviewing", counts: { total: 8, done: 5 }, usage: { input: 1500, output: 500, cost: 0.42 } }),
@@ -56,15 +69,15 @@ describe("WaveContainers", () => {
     ])
     const track = header("plugin")
     expect(within(track).getByLabelText("Progress")).toHaveTextContent("1/2")
-    expect(within(track).getByLabelText("Tokens and cost")).toHaveTextContent("3.0k tok · $0.50")
-    expect(within(track).queryByLabelText("Stage")).toBeNull()
+    expect(within(screen.getByRole("group", { name: "plugin" })).getAllByLabelText("Tokens and cost")[0]).toHaveTextContent("↑1.5k ↓1.5k · $0.50")
     expect(within(header("m1")).getByLabelText("Progress")).toHaveTextContent("1/2")
 
     const wave = header("Board shows waves")
     expect(wave).toHaveTextContent("Board shows waves")
     expect(within(wave).getByLabelText("Progress")).toHaveTextContent("5/8")
-    expect(within(wave).getByLabelText("Stage")).toHaveTextContent("reviewing")
-    expect(within(wave).getByLabelText("Tokens and cost")).toHaveTextContent("2.0k tok · $0.42")
+    const frame = within(screen.getByRole("group", { name: "Board shows waves" }))
+    expect(frame.getByLabelText("Stage")).toHaveTextContent("reviewing")
+    expect(frame.getByLabelText("Tokens and cost")).toHaveTextContent("↑1.5k ↓500 · $0.42")
   })
 
   it("draws a wave alone in its track without the track's frame, two waves with it", () => {

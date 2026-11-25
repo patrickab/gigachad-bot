@@ -110,6 +110,8 @@ export interface FactoryUsage {
   input: number
   output: number
   cost: number
+  cacheRead?: number
+  cacheWrite?: number
 }
 
 /** A task as every client sees it (the core's `TaskView`). */

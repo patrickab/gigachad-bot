@@ -145,7 +145,7 @@ describe("FactoryBoard", () => {
       const wave = within(merging.getByRole("group", { name: "Board waves" }))
       const header = wave.getAllByRole("button")[0]
       expect(within(header).getByLabelText("Progress")).toHaveTextContent("5/8")
-      expect(within(header).getByLabelText("Stage")).toHaveTextContent("building")
+      expect(wave.getByLabelText("Stage")).toHaveTextContent("building")
       expect(header).toHaveTextContent("Board waves")
       expect(view.queryByText("Task pending")).toBeNull()
       fireEvent.click(wave.getByRole("button", { name: /^Task done one/ }))
