@@ -24,6 +24,9 @@ gates:
   - [bash, factory/gates.sh, --changed, --reuse, lint, types]
 merge_gates:
   - [bash, factory/gates.sh, --changed, --reuse]
+# When a wave's task merges into the wave's branch: the same checks. merge_gates then run once for the whole wave.
+task_gates:
+  - [bash, factory/gates.sh, --changed, --reuse]
 # The browser reaches a preview only through the preview gate (`src/backend/preview_gate.py`), which picks it by the port in
 # the path: the frontend is served under `/preview/<port>`, its API base is the gate path of the backend (a path, resolved
 # against the gate's origin in the browser). Both processes listen on loopback only, they run agent-written code.
