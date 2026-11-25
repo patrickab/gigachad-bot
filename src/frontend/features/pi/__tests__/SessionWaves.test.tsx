@@ -34,7 +34,7 @@ function wave(id: string, fields: Partial<FactoryWave> = {}): FactoryWave {
 }
 
 function renderPanel(onOpenTask = vi.fn()) {
-  render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={onOpenTask} />)
+  render(<SessionWavesPanel sessionId="me" onOpenTask={onOpenTask} />)
   return onOpenTask
 }
 
@@ -50,7 +50,7 @@ describe("SessionWaves", () => {
     })
     renderPanel()
     const row = await screen.findByRole("button", { name: /p\/w1/ })
-    expect(api.callFactory).toHaveBeenCalledWith("waves.list", { repo: "/git/repo" })
+    expect(api.callFactory).toHaveBeenCalledWith("waves.list", {})
     expect(row.textContent).toContain("title w1")
     expect(row.textContent).toContain("2/8")
     expect(row.textContent).toContain("building")
@@ -129,19 +129,19 @@ describe("SessionWaves", () => {
     const open = screen.getAllByRole("button", { name: "Open task" })
     expect(open).toHaveLength(3)
     fireEvent.click(open[0])
-    expect(onOpenTask).toHaveBeenCalledWith("t-a")
+    expect(onOpenTask).toHaveBeenCalledWith("/git/repo", "t-a")
   })
 
   it("renders nothing without waves", async () => {
     api.callFactory.mockResolvedValue({ waves: [] })
-    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
+    const { container } = render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(api.callFactory).toHaveBeenCalled())
     expect(container.innerHTML).toBe("")
   })
 
   it("renders nothing when the factory has no waves.list", async () => {
     api.callFactory.mockRejectedValue(new Error("unknown action: waves.list"))
-    const { container } = render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
+    const { container } = render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(api.callFactory).toHaveBeenCalled())
     await act(async () => {})
     expect(container.innerHTML).toBe("")
@@ -151,7 +151,7 @@ describe("SessionWaves", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const cause = new Error("invalid: repo must be an absolute path")
     api.callFactory.mockRejectedValue(cause)
-    render(<SessionWavesPanel repo="/git/repo" sessionId="me" onOpenTask={vi.fn()} />)
+    render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
     await waitFor(() => expect(error).toHaveBeenCalledWith("waves.list failed", cause))
     error.mockRestore()
   })

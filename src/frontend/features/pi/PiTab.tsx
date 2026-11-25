@@ -351,7 +351,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         onBranch={branch}
         insertion={insertion}
         onInserted={clearInsertion}
-        waves={onOpenTask && <SessionWavesPanel repo={shown.cwd} sessionId={shown.sessionId} onOpenTask={(taskId) => onOpenTask(shown.cwd, taskId)} />}
+        waves={onOpenTask && <SessionWavesPanel sessionId={shown.sessionId} onOpenTask={onOpenTask} />}
       />
     )
   }

@@ -45,13 +45,13 @@ export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave
 }
 
 /**
- * The waves session `sessionId` declared in `repo` (an absolute path), from the core's `waves.list`.
+ * The waves session `sessionId` declared, in whatever repository, from the core's `waves.list` without a repo.
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket, as the board does
  * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
- * - `models`: the coder model of each task by task id, from `tasks.list`, read only when the session has waves
+ * - `models`: the coder model of each task by task id, from `tasks.list` of each repository the session has waves in
  */
-export function useSessionWaves(repo: string, sessionId: string): { waves: FactoryWave[]; models: TaskModels } {
+export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; models: TaskModels } {
   const [waves, setWaves] = useState<FactoryWave[]>([])
   const [models, setModels] = useState<TaskModels>({})
   useEffect(() => {
@@ -60,13 +60,13 @@ export function useSessionWaves(repo: string, sessionId: string): { waves: Facto
     const read = () => {
       const call = ++latest
       const current = () => !cancelled && call === latest
-      callFactory<{ waves: FactoryWave[] }>("waves.list", { repo }).then(
+      callFactory<{ waves: FactoryWave[] }>("waves.list", {}).then(
         (answer) => {
           if (!current()) return
           setWaves(answer.waves)
-          if (sessionWaves(answer.waves, sessionId).length === 0) return
-          callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }).then(
-            (listed) => { if (current()) setModels(taskModels(listed.tasks ?? [])) },
+          const repos = [...new Set(sessionWaves(answer.waves, sessionId).map((wave) => wave.repo))]
+          Promise.all(repos.map((repo) => callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }))).then(
+            (listed) => { if (current()) setModels(taskModels(listed.flatMap((answer) => answer.tasks ?? []))) },
             (cause: unknown) => console.error("tasks.list failed", cause),
           )
         },
@@ -83,7 +83,7 @@ export function useSessionWaves(repo: string, sessionId: string): { waves: Facto
       cancelled = true
       stop()
     }
-  }, [repo, sessionId])
+  }, [sessionId])
   return useMemo(() => ({ waves: sessionWaves(waves, sessionId), models }), [waves, sessionId, models])
 }
 
@@ -146,14 +146,14 @@ const ROW = "h-auto py-0.5"
 const NO_MODELS: TaskModels = {}
 
 /** A wave's row, opening to its tasks: the unfinished ones first, then the finished, each started one with its task view. */
-function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: TaskModels; onOpenTask: (taskId: string) => void }) {
+function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: TaskModels; onOpenTask: (repo: string, taskId: string) => void }) {
   const tasks = [...wave.tasks.filter((task) => !FINISHED_TASK.has(task.state)), ...wave.tasks.filter((task) => FINISHED_TASK.has(task.state))]
   return (
     <li>
       <Disclosure summary={<WaveSummary wave={wave} />} summaryClassName={ROW}>
         {tasks.length > 0 && (
           <ul aria-label={`${wave.tag} tasks`} className="flex flex-col">
-            {tasks.map((task) => <TaskRow key={task.key} task={task} model={task.taskId ? models[task.taskId] : undefined} onOpenTask={onOpenTask} />)}
+            {tasks.map((task) => <TaskRow key={task.key} task={task} model={task.taskId ? models[task.taskId] : undefined} onOpenTask={(taskId) => onOpenTask(wave.repo, taskId)} />)}
           </ul>
         )}
       </Disclosure>
@@ -172,7 +172,7 @@ function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: Task
  *   (the coder's session, brief and handoff) through `onOpenTask`
  * - Renders nothing without waves
  */
-export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves: FactoryWave[]; models?: TaskModels; onOpenTask: (taskId: string) => void }) {
+export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves: FactoryWave[]; models?: TaskModels; onOpenTask: (repo: string, taskId: string) => void }) {
   const { active, finished } = useMemo(() => splitWaves(waves), [waves])
   if (waves.length === 0) return null
   const needsUser = active.filter(waveNeedsUser).length
@@ -216,8 +216,8 @@ export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves:
   )
 }
 
-/** The waves of session `sessionId` in `repo`, read and shown. */
-export function SessionWavesPanel({ repo, sessionId, onOpenTask }: { repo: string; sessionId: string; onOpenTask: (taskId: string) => void }) {
-  const { waves, models } = useSessionWaves(repo, sessionId)
+/** The waves of session `sessionId`, read and shown. */
+export function SessionWavesPanel({ sessionId, onOpenTask }: { sessionId: string; onOpenTask: (repo: string, taskId: string) => void }) {
+  const { waves, models } = useSessionWaves(sessionId)
   return <SessionWaves waves={waves} models={models} onOpenTask={onOpenTask} />
 }

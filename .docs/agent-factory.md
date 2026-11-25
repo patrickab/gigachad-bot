@@ -319,7 +319,7 @@ settings once at `waves.start`.
   prefix are wrapped in one container per prefix segment; a group holding a single wave has no container of its own.
   A factory without `waves.list` (`unknown action`) shows no waves and no error.
 - **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the tab's
-  session declared. Its header counts the active waves, those that need the user (warning colour) and their cost, or
+  session declared, in whatever repository (`waves.list` without a repo). Its header counts the active waves, those that need the user (warning colour) and their cost, or
   `<n> finished` without active ones, and collapses the element (open while a wave is active). Active waves come first, those
   needing the user at the top; merged and cancelled waves sit behind one collapsed `<n> finished` row. Every wave
   opens to its tasks, unfinished ones first: the coder's model (from `tasks.list`), tokens in and out, state. A started
