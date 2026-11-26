@@ -4,7 +4,7 @@
 // or the agent's text instead. Readable is the default; Alt+V switches the whole tab (remembered per tab in
 // sessionStorage), a card's own switch flips just that card.
 
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext, useState, useSyncExternalStore } from "react"
 import { CornerUpLeft, Factory, FileText, LayoutList } from "lucide-react"
 import { Disclosure } from "@/components/ui/Disclosure"
 import { IconButton } from "@/components/ui/IconButton"
@@ -19,11 +19,38 @@ export const FACTORY_VIEW_STORAGE_KEY = "gc.pi.factoryView"
 export interface FactoryView {
   /** The tab shows the agent's text instead of the cards. */
   agentText: boolean
-  /** Opens a finding's file. */
+  /** Opens a finding's file, at its line. */
   openFile?: (path: string, line?: number) => void
   /** Scrolls to the notice card keyed `key`, what a decision answers. */
   revealNotice?: (key: string) => void
+  /** The keys of the transcript's notices: a decision links only to one of them. */
+  notices?: NoticeKeys
 }
+
+/** The keys of a transcript's notices, kept in one object so its events re-render only when theirs comes or goes. */
+export interface NoticeKeys {
+  has: (key: string) => boolean
+  subscribe: (onChange: () => void) => () => void
+  set: (keys: ReadonlySet<string>) => void
+}
+
+export function createNoticeKeys(): NoticeKeys {
+  let keys: ReadonlySet<string> = new Set()
+  const listeners = new Set<() => void>()
+  return {
+    has: (key) => keys.has(key),
+    subscribe: (onChange) => {
+      listeners.add(onChange)
+      return () => { listeners.delete(onChange) }
+    },
+    set: (next) => {
+      keys = next
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
+const NO_NOTICES: NoticeKeys["subscribe"] = () => () => {}
 
 const FactoryViewContext = createContext<FactoryView>({ agentText: false })
 
@@ -75,13 +102,15 @@ interface FactoryEventProps {
 
 /** One factory event: its card, or the agent's text; a switch on its row flips it, a decision links to what it answers. */
 export function FactoryEvent({ card, text, noticeKey }: FactoryEventProps) {
-  const { agentText: tabAgentText, openFile, revealNotice } = useContext(FactoryViewContext)
+  const { agentText: tabAgentText, openFile, revealNotice, notices } = useContext(FactoryViewContext)
   const [flipped, setFlipped] = useState(false)
   const agentText = tabAgentText !== flipped
   const answers = card.answers
+  // Offered only while the answered notice is in this transcript
+  const answered = useSyncExternalStore(notices?.subscribe ?? NO_NOTICES, () => !!answers && !!notices?.has(answers), () => false)
   const actions = (
     <>
-      {answers && revealNotice && <IconButton icon={CornerUpLeft} label="Show what this answers" onClick={() => revealNotice(answers)} />}
+      {answers && answered && revealNotice && <IconButton icon={CornerUpLeft} label="Show what this answers" onClick={() => revealNotice(answers)} />}
       <IconButton icon={agentText ? LayoutList : FileText} label={agentText ? "Show the card" : "Show the agent's text"} onClick={() => setFlipped((value) => !value)} />
     </>
   )

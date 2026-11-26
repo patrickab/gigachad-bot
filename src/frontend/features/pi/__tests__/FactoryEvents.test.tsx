@@ -9,7 +9,9 @@ import { TabContext, type Tab } from "@/contexts/TabContext"
 import "../FactoryNotices"
 import "../FactoryTool"
 import { FACTORY_VIEW_STORAGE_KEY } from "../factoryView"
+import { factoryRulings } from "../factoryCard"
 import { PiTranscript } from "../PiTranscript"
+import { SessionWaves } from "../SessionWaves"
 import { renderCustomMessage, renderToolCall } from "../renderers"
 import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
 import type { AgentMessage, CustomMessage, ToolCall, ToolRun } from "../types"
@@ -75,12 +77,12 @@ describe("a factory tool result", () => {
 })
 
 const TAB = { id: "tab-1" } as Tab
-const fileLinks = { base: "/repo", open: () => {} }
+const fileLinks = { base: "/repo", open: vi.fn() }
 
-function inTab(transcript: Transcript) {
+function inTab(transcript: Transcript, revealNoticeRef?: { current: ((key: string) => void) | null }) {
   return (
     <TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-      <PiTranscript transcript={transcript} fileLinks={fileLinks} />
+      <PiTranscript transcript={transcript} fileLinks={fileLinks} revealNoticeRef={revealNoticeRef} />
     </TabContext.Provider>
   )
 }
@@ -101,6 +103,44 @@ describe("factory events in a Pi tab", () => {
     Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
     const { container } = render(inTab(transcript))
     act(() => fireEvent.click(screen.getByRole("button", { name: "Show what this answers" })))
+    const target = container.querySelector("[data-factory-notice='task:c8eb1223:question:1']")
+    expect(target).not.toBeNull()
+    expect(scrolled).toContain(target)
+  })
+
+  it("offers no jump for a decision whose notice is not in this transcript", () => {
+    const without = messages.filter((message) => message.role !== "custom")
+    render(inTab({ ...EMPTY_TRANSCRIPT, messages: without, entryIds: without.map((_, index) => `e${index}`), running: true }))
+    expect(screen.getByText(CARD_FIXTURES.decision.title)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Show what this answers" })).toBeNull()
+  })
+
+  it("a finding's file:line opens the file at its line", () => {
+    fileLinks.open.mockClear()
+    const withWave: AgentMessage[] = [{ role: "user", content: "Go", timestamp: 1 }, notice({ key: "wave:w1:rejected:1", card: CARD_FIXTURES.wave })]
+    render(inTab({ ...EMPTY_TRANSCRIPT, messages: withWave, entryIds: ["e0", "e1"], running: true }))
+    fireEvent.click(screen.getByRole("button", { name: "1 blocker" }))
+    fireEvent.click(screen.getByRole("button", { name: "src/frontend/features/pi/PiTab.tsx:42" }))
+    expect(fileLinks.open).toHaveBeenCalledWith("/repo/src/frontend/features/pi/PiTab.tsx", 42)
+  })
+
+  it("the strip's Decisions entry jumps to the notice's card in this transcript, its turn settled", () => {
+    const scrolled: Element[] = []
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    const later: AgentMessage[] = [...messages, { role: "user", content: "Next", timestamp: 6 }, { role: "assistant", content: [{ type: "text", text: "done" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 7 }]
+    const settled: Transcript = { ...EMPTY_TRANSCRIPT, messages: later, entryIds: later.map((_, index) => `e${index}`) }
+    const ref: { current: ((key: string) => void) | null } = { current: null }
+    const rulings = factoryRulings(later)
+    const decisions = [{ at: "t", answers: "task:c8eb1223:question:1", card: CARD_FIXTURES.decision }]
+    const { container } = render(<>
+      {inTab(settled, ref)}
+      <SessionWaves waves={[]} decisions={decisions} cards={{ ...rulings, revealNotice: (key) => ref.current?.(key) }} onOpenTask={vi.fn()} />
+    </>)
+    // The question was answered in this transcript: nothing waits
+    expect(rulings.waiting).toEqual([])
+    fireEvent.click(screen.getByRole("button", { name: /^Factory/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Decisions · 1/ }))
+    act(() => fireEvent.click(within(screen.getByRole("list", { name: "Decisions" })).getByRole("button", { name: CARD_FIXTURES.decision.title })))
     const target = container.querySelector("[data-factory-notice='task:c8eb1223:question:1']")
     expect(target).not.toBeNull()
     expect(scrolled).toContain(target)

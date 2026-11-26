@@ -2,7 +2,7 @@
 
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
-import { createContext, Fragment, memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, Fragment, memo, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import { Brain, ChevronRight, FoldVertical, Sparkles, TerminalSquare } from "lucide-react"
 import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
@@ -17,7 +17,8 @@ import { scrollToRange } from "@/features/conversation/useTextHighlights"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { isRecord } from "@/lib/utils"
-import { FactoryViewProvider, useTabAgentText, type FactoryView } from "./factoryView"
+import { factoryRulings } from "./factoryCard"
+import { createNoticeKeys, FactoryViewProvider, useTabAgentText, type FactoryView } from "./factoryView"
 import { PiSearchBar } from "./PiSearchBar"
 import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
 import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighlights"
@@ -153,13 +154,18 @@ function MarksLine({ marks, retried }: { marks: MessageMarks; retried?: string }
   return <p className="my-1 text-xs text-ink-faint">{parts.join(" · ")}</p>
 }
 
-const fileOpeners = new WeakMap<FileLinks, (path: string) => void>()
+type NoticeJump = (key: string) => void
 
-/** One opener per `fileLinks`: a tool row is memoized on it, a new function per render would re-render every row of a live turn on each streamed frame. */
-function fileOpener(fileLinks: FileLinks): (path: string) => void {
+const fileOpeners = new WeakMap<FileLinks, (path: string, line?: number) => void>()
+
+/**
+ * One opener per `fileLinks`: a tool row is memoized on it, a new function per render would re-render every row of a live turn on each streamed frame.
+ * A `line` (a finding's `file:line`) goes to `fileLinks.open`, which opens the file there where it can.
+ */
+function fileOpener(fileLinks: FileLinks): (path: string, line?: number) => void {
   let open = fileOpeners.get(fileLinks)
   if (!open) {
-    open = (path) => fileLinks.open(resolveLocalFileHref(path, fileLinks.base) ?? path)
+    open = (path, line) => fileLinks.open(resolveLocalFileHref(path, fileLinks.base) ?? path, line)
     fileOpeners.set(fileLinks, open)
   }
   return open
@@ -438,7 +444,7 @@ interface PiColumnTurn extends ConversationTurn {
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  * - `readOnly` (a session preview): keys never reach its column
  */
-export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, onDeleteTurn, onEditTurn, paddingBottom, onColumnChange, readOnly }: {
+export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, onDeleteTurn, onEditTurn, paddingBottom, onColumnChange, readOnly, revealNoticeRef }: {
   transcript: Transcript
   /** Sent but unconfirmed messages, shown below the turns. */
   held?: readonly HeldMessage[]
@@ -453,6 +459,8 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   paddingBottom?: number
   onColumnChange?: (column: HTMLDivElement | null) => void
   readOnly?: boolean
+  /** Receives the jump to a factory notice's card (by its key), for the tab's waves strip: it reveals the notice's turn, mounted or not. */
+  revealNoticeRef?: Ref<NoticeJump | null>
 }) {
   const { messages: confirmedMessages, unconfirmed, optimistic, entryIds, marks, streaming, running, runs: liveRuns } = transcript
   // Derived from the fields that change per message, not per streamed delta, so settled turns keep their props
@@ -538,7 +546,12 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
       },
     })
   }, [])
-  const factoryView = useMemo<FactoryView>(() => ({ agentText, openFile: fileOpener(fileLinks), revealNotice: readOnly ? undefined : revealNotice }), [agentText, fileLinks, revealNotice, readOnly])
+  useImperativeHandle<NoticeJump | null, NoticeJump | null>(revealNoticeRef, () => (readOnly ? null : revealNotice), [readOnly, revealNotice])
+  // The notice keys live in one object: a new notice re-renders only the decisions that answer it
+  const [notices] = useState(createNoticeKeys)
+  const noticeKeys = useMemo(() => factoryRulings(messages).notices, [messages])
+  useLayoutEffect(() => notices.set(noticeKeys), [notices, noticeKeys])
+  const factoryView = useMemo<FactoryView>(() => ({ agentText, openFile: fileOpener(fileLinks), revealNotice: readOnly ? undefined : revealNotice, notices }), [agentText, fileLinks, revealNotice, readOnly, notices])
   // The newer of the two: a jump holds until the next search hit
   const shownReveal = jump && jump.search === search ? jump.reveal : reveal
   // Enter and Shift+Enter step, Escape clears: from the page or the transcript, never from a text field or a button

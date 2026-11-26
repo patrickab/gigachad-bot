@@ -183,15 +183,20 @@ function WaveSummary({ wave }: { wave: FactoryWave }) {
 const ROW = "h-auto py-0.5"
 const NO_MODELS: TaskModels = {}
 
-/** Scrolls the timeline to the card of notice `key`. */
-function jumpToCard(key: string) {
-  for (const el of document.querySelectorAll<HTMLElement>("[data-notice-key]")) {
-    if (el.dataset.noticeKey === key) { el.scrollIntoView({ block: "center" }); return }
-  }
+/**
+ * What the tab's transcript knows of its factory cards (`factoryRulings`), and its jump to a notice's card.
+ * `revealNotice` reveals the notice's turn in this tab's transcript, collapsed or not yet mounted.
+ */
+export interface SessionCards {
+  notices: ReadonlySet<string>
+  waiting: readonly string[]
+  revealNotice: (key: string) => void
 }
 
-/** The session's decisions, each jumping to the card it answers. */
-function DecisionsEntry({ decisions }: { decisions: readonly FactoryDecision[] }) {
+const NO_CARDS: SessionCards = { notices: new Set(), waiting: [], revealNotice: () => {} }
+
+/** The session's decisions, each jumping to the card it answers when that card is in this transcript. */
+function DecisionsEntry({ decisions, cards }: { decisions: readonly FactoryDecision[]; cards: SessionCards }) {
   return (
     <li>
       <Disclosure summary={<span className="min-w-0 flex-1">Decisions · {decisions.length}</span>} summaryClassName={ROW}>
@@ -200,8 +205,8 @@ function DecisionsEntry({ decisions }: { decisions: readonly FactoryDecision[] }
             const target = decision.answers ?? decision.key
             return (
               <li key={`${decision.at}-${index}`} className="flex items-center py-0.5">
-                {target ? (
-                  <button type="button" onClick={() => jumpToCard(target)} className="min-w-0 flex-1 truncate text-left text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink-faint">{decision.card.title}</button>
+                {target && cards.notices.has(target) ? (
+                  <button type="button" onClick={() => cards.revealNotice(target)} className="min-w-0 flex-1 truncate text-left text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink-faint">{decision.card.title}</button>
                 ) : (
                   <span className="min-w-0 flex-1 truncate text-ink-muted">{decision.card.title}</span>
                 )}
@@ -239,16 +244,29 @@ function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: Task
  * - Finished waves behind one collapsed `<n> finished` row with their summed cost, newest first
  * - Every wave's row opens to its tasks, unfinished ones first: the coder's model, tokens in and out, state. A started one opens its task view
  *   (the coder's session, brief and handoff) through `onOpenTask`
- * - Renders nothing without waves
+ * - `<m> needs you` counts the session's cards waiting for a ruling: the transcript's attention notices no decision answers
+ *   (one in the transcript or from `decisions.list`)
+ * - A `Decisions` entry lists `decisions`, each jumping to the card it answers through `cards.revealNotice`
+ * - Renders nothing without waves, decisions or waiting cards
  */
-export function SessionWaves({ waves, models = NO_MODELS, decisions = null, onOpenTask }: { waves: FactoryWave[]; models?: TaskModels; decisions?: readonly FactoryDecision[] | null; onOpenTask: (repo: string, taskId: string) => void }) {
+export function SessionWaves({ waves, models = NO_MODELS, decisions = null, cards = NO_CARDS, onOpenTask }: {
+  waves: FactoryWave[]
+  models?: TaskModels
+  decisions?: readonly FactoryDecision[] | null
+  cards?: SessionCards
+  onOpenTask: (repo: string, taskId: string) => void
+}) {
   const { active, finished } = useMemo(() => splitWaves(waves), [waves])
-  if (waves.length === 0) return null
-  const needsUser = active.filter(waveNeedsUser).length + active.filter((wave) => !waveNeedsUser(wave)).reduce((n, wave) => n + wave.tasks.filter((task) => ATTENTION_TASK.has(task.state)).length, 0)
+  const needsUser = useMemo(() => {
+    const answered = new Set(decisions?.map((decision) => decision.answers ?? decision.card.answers))
+    return cards.waiting.filter((key) => !answered.has(key)).length
+  }, [decisions, cards.waiting])
+  const hasDecisions = !!decisions && decisions.length > 0
+  if (waves.length === 0 && !hasDecisions && needsUser === 0) return null
   const header = (
     <>
       <span className="shrink-0">
-        Factory · {active.length > 0 ? `${active.length} active` : `${finished.length} finished`}
+        Factory{active.length > 0 ? ` · ${active.length} active` : finished.length > 0 ? ` · ${finished.length} finished` : ""}
         {needsUser > 0 && <> · <span className="text-warning">{needsUser} needs you</span></>}
       </span>
       <span className="flex-1" />
@@ -258,9 +276,9 @@ export function SessionWaves({ waves, models = NO_MODELS, decisions = null, onOp
   )
   return (
     <section aria-label="Waves" className="mx-auto mb-2 flex max-h-[40vh] w-full max-w-2xl flex-col overflow-y-auto rounded-xl bg-paper px-3 py-1.5 text-xs">
-      <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0}>
+      <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0 || (waves.length === 0 && needsUser > 0)}>
         <ul className="flex flex-col">
-          {decisions && decisions.length > 0 && <DecisionsEntry decisions={decisions} />}
+          {hasDecisions && <DecisionsEntry decisions={decisions} cards={cards} />}
           {active.map((wave) => <WaveRow key={wave.id} wave={wave} models={models} onOpenTask={onOpenTask} />)}
           {finished.length > 0 && (
             <li>
@@ -287,7 +305,7 @@ export function SessionWaves({ waves, models = NO_MODELS, decisions = null, onOp
 }
 
 /** The waves of session `sessionId`, read and shown. */
-export function SessionWavesPanel({ sessionId, onOpenTask }: { sessionId: string; onOpenTask: (repo: string, taskId: string) => void }) {
+export function SessionWavesPanel({ sessionId, cards, onOpenTask }: { sessionId: string; cards?: SessionCards; onOpenTask: (repo: string, taskId: string) => void }) {
   const { waves, models, decisions } = useSessionWaves(sessionId)
-  return <SessionWaves waves={waves} models={models} decisions={decisions} onOpenTask={onOpenTask} />
+  return <SessionWaves waves={waves} models={models} decisions={decisions} cards={cards} onOpenTask={onOpenTask} />
 }

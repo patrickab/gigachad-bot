@@ -75,9 +75,9 @@ describe("SessionWaves", () => {
     expect(row.textContent).toContain("$4.10")
     const header = screen.getByRole("button", { name: /^Factory/ })
     expect(header.getAttribute("aria-expanded")).toBe("true")
-    expect(header.textContent).toContain("Factory · 2 active · 1 needs you")
-    expect(header.textContent).toContain("$4.10")
-    expect(screen.getByText("1 needs you").className).toContain("text-warning")
+    // Wave states do not count: only the transcript's cards waiting for a ruling do
+    expect(header.textContent).toContain("Factory · 2 active")
+    expect(header.textContent).not.toContain("needs you")
     expect(screen.getByText("rejected").className).toContain("text-warning")
     expect(screen.getByText("building").className).not.toContain("text-warning")
     expect(screen.queryByText(/finished/)).toBeNull()
@@ -113,7 +113,7 @@ describe("SessionWaves", () => {
       ]}
       onOpenTask={vi.fn()}
     />)
-    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 3 active · 1 needs you")
+    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 3 active")
     const tags = screen.getAllByText(/^p\//).map((node) => node.textContent)
     expect(tags).toEqual(["p/stuck", "p/new", "p/old"])
     const finished = screen.getByRole("button", { name: /^2 finished/ })
@@ -197,28 +197,39 @@ describe("SessionWaves above the composer", () => {
     expect(cls).toContain("overflow-y-auto")
   })
 
-  it("counts waves and tasks waiting for a ruling", () => {
-    render(<SessionWaves waves={[wave("w1", { stage: "rejected", running: false }), wave("w2", { tasks: [task("a", { state: "waiting_answer" })] })]} onOpenTask={vi.fn()} />)
-    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("2 needs you")
+  const decision = (answers: string, title = "answered the coder") => ({ at: "t", answers, card: { v: 1 as const, kind: "decision" as const, tone: "quiet" as const, title, answers } })
+
+  it("counts the transcript's attention cards no decision answers, not wave or task states", () => {
+    const cards = { notices: new Set(["k1", "k2", "k3"]), waiting: ["k1", "k2"], revealNotice: vi.fn() }
+    render(<SessionWaves waves={[wave("w1", { stage: "rejected", running: false }), wave("w2", { tasks: [task("a", { state: "waiting_answer" })] })]} decisions={[decision("k2")]} cards={cards} onOpenTask={vi.fn()} />)
+    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 2 active · 1 needs you")
   })
 
-  it("lists the decisions from decisions.list and jumps to the card", async () => {
-    const target = document.createElement("div")
-    target.dataset.noticeKey = "k1"
-    target.scrollIntoView = vi.fn()
-    document.body.append(target)
+  it("shows with decisions but no waves, its Decisions entry jumping through the transcript", () => {
+    const cards = { notices: new Set(["k1"]), waiting: [], revealNotice: vi.fn() }
+    render(<SessionWaves waves={[]} decisions={[decision("k1"), decision("gone", "answered another")]} cards={cards} onOpenTask={vi.fn()} />)
+    const header = screen.getByRole("button", { name: /^Factory/ })
+    expect(header.textContent).not.toContain("needs you")
+    fireEvent.click(header)
+    fireEvent.click(screen.getByRole("button", { name: /Decisions · 2/ }))
+    fireEvent.click(screen.getByRole("button", { name: "answered the coder" }))
+    expect(cards.revealNotice).toHaveBeenCalledWith("k1")
+    // Its card is not in this transcript: no jump offered
+    expect(screen.queryByRole("button", { name: "answered another" })).toBeNull()
+    expect(screen.getByText("answered another")).toBeTruthy()
+  })
+
+  it("lists the decisions from decisions.list", async () => {
     api.callFactory.mockImplementation(async (action: string, params: unknown) => {
       if (action === "decisions.list") {
         expect(params).toEqual({ origin: "me" })
-        return { decisions: [{ at: "t", answers: "k1", card: { v: 1, kind: "decision", tone: "quiet", title: "answered the coder" } }] }
+        return { decisions: [decision("k1")] }
       }
       return action === "waves.list" ? { waves: [wave("w1")] } : { tasks: [] }
     })
     renderPanel()
     fireEvent.click(await screen.findByRole("button", { name: /Decisions/ }))
-    fireEvent.click(screen.getByRole("button", { name: "answered the coder" }))
-    expect(target.scrollIntoView).toHaveBeenCalled()
-    target.remove()
+    expect(screen.getByText("answered the coder")).toBeTruthy()
   })
 
   it("has no Decisions entry and no error when the action is unknown", async () => {

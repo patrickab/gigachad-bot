@@ -15,7 +15,8 @@ import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiCompos
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
 import { usePiSearchFocus } from "./searchFocus"
-import { SessionWavesPanel } from "./SessionWaves"
+import { factoryRulings } from "./factoryCard"
+import { SessionWavesPanel, type SessionCards } from "./SessionWaves"
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import { PiSessionDot } from "./usePiSidebar"
@@ -140,9 +141,9 @@ export function withLead(text: string, lead: string | undefined): string {
  * - A closed session's reason shows with the composer's notices
  * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
- * - `waves` sits above the subagent roster (a Pi tab's factory waves)
+ * - With `onOpenTask` the session's factory waves and decisions sit above the subagent roster, given the transcript's factory cards and its jump to a notice
  */
-export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, insertion, onInserted, lead, onLeadSent, docked = false, waves }: {
+export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLeading, firstSubmit, onFirstSubmitted, onBranch, insertion, onInserted, lead, onLeadSent, docked = false, onOpenTask }: {
   sessionId: string
   cwd: string
   files: PiFileScope
@@ -156,7 +157,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   lead?: string
   onLeadSent?: () => void
   docked?: boolean
-  waves?: ReactNode
+  onOpenTask?: (repo: string, taskId: string) => void
 }) {
   const openFile = useOpenFile()
   const session = usePiSession(sessionId, openFile)
@@ -165,6 +166,11 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
   const [column, setColumn] = useState<HTMLDivElement | null>(null)
+  // The strip's view of the transcript's factory cards: a jump goes through this tab's transcript, never another
+  const revealNoticeRef = useRef<((key: string) => void) | null>(null)
+  const revealNotice = useCallback((key: string) => revealNoticeRef.current?.(key), [])
+  const rulings = useMemo(() => factoryRulings(transcript.messages), [transcript.messages])
+  const cards = useMemo<SessionCards>(() => ({ ...rulings, revealNotice }), [rulings, revealNotice])
   const roster = useSubagentRoster(transcript.runs, session.widgets, transcript.running)
   const { inspectSubagent } = session
   const inspectRow = useCallback((row: SubagentRow) => inspectSubagent(row.inspect!), [inspectSubagent])
@@ -262,7 +268,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   return (
     <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} onDeleteTurn={deleteTurn} onEditTurn={editTurn} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
+      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} onDeleteTurn={deleteTurn} onEditTurn={editTurn} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} revealNoticeRef={revealNoticeRef} />
       <ComposerDock dock={dock}>
         <BtwPanel threads={session.btw.threads} actions={session.btw} fileLinks={fileLinks} />
         <PiComposer
@@ -275,7 +281,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
           queue={transcript.queue}
           notices={notices}
           statusLines={session.statusLines}
-          roster={<>{waves}<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} /></>}
+          roster={<>{onOpenTask && <SessionWavesPanel sessionId={sessionId} cards={cards} onOpenTask={onOpenTask} />}<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} /></>}
           editorText={session.editorText}
           insertion={editInsertion ?? insertion}
           onInserted={editInsertion ? editInserted : onInserted}
@@ -397,7 +403,7 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
         onBranch={branch}
-        waves={onOpenTask && <SessionWavesPanel sessionId={shown.sessionId} onOpenTask={onOpenTask} />}
+        onOpenTask={onOpenTask}
       />
     )
   }

@@ -76,3 +76,31 @@ export function factoryCard(details: unknown): FactoryCard | null {
     ...(isString(card.answers) && { answers: card.answers }),
   }
 }
+
+/** What a transcript's factory events say about rulings: the keys of its notices with a card, and those of attention tone no decision in it answers. */
+export interface FactoryRulings {
+  notices: ReadonlySet<string>
+  waiting: readonly string[]
+}
+
+interface EventLike { role: string; customType?: string; toolName?: string; details?: unknown; isError?: boolean }
+
+/** The rulings of `messages` (a Pi transcript's): a decision is a `factory` tool result's card of kind `decision`. */
+export function factoryRulings(messages: readonly EventLike[]): FactoryRulings {
+  const notices = new Set<string>()
+  const attention: string[] = []
+  const answered = new Set<string>()
+  for (const message of messages) {
+    if (message.role === "custom" && message.customType === "factory-notice") {
+      const card = factoryCard(message.details)
+      const key = isRecord(message.details) && isString(message.details.key) ? message.details.key : null
+      if (!card || key === null) continue
+      notices.add(key)
+      if (card.tone === "attention") attention.push(key)
+    } else if (message.role === "toolResult" && message.toolName === "factory" && !message.isError) {
+      const card = factoryCard(message.details)
+      if (card?.kind === "decision" && card.answers) answered.add(card.answers)
+    }
+  }
+  return { notices, waiting: attention.filter((key) => !answered.has(key)) }
+}

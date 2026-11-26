@@ -28,7 +28,7 @@ interface FilePanelContextValue {
   ownerWidth: number | null
   claim: (id: string, close: () => void, width: number | null) => void
   release: (id: string) => void
-  openFile: (path: string) => void
+  openFile: (path: string, line?: number) => void
   collapsed: boolean
   toggleCollapsed: () => void
 }
@@ -39,8 +39,8 @@ function useFilePanelContext(): FilePanelContextValue {
   return useRequiredContext(FilePanelContext, "File panel used outside FilePanelProvider")
 }
 
-/** Open an absolute file path in this tab's file panel. */
-export function useOpenFile(): (path: string) => void {
+/** Open an absolute file path in this tab's file panel, at 1-based `line` when given (in Neovim). */
+export function useOpenFile(): (path: string, line?: number) => void {
   return useFilePanelContext().openFile
 }
 
@@ -56,6 +56,8 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
   const [ownerId, setOwnerId] = useState<string | null>(null)
   const [ownerWidth, setOwnerWidth] = useState<number | null>(null)
   const [filePath, setFilePath] = useState<string | null>(null)
+  // A new object per open: opening the shown file at a line moves its cursor again
+  const [fileLine, setFileLine] = useState<{ line: number } | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const ownerRef = useRef<{ id: string; close: () => void } | null>(null)
 
@@ -75,8 +77,9 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
   const closeFile = useCallback(() => setFilePath(null), [])
   const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [])
   // Reopening the shown file claims nothing, so expand here too
-  const openFile = useCallback((path: string) => {
+  const openFile = useCallback((path: string, line?: number) => {
     setFilePath(path)
+    setFileLine(line !== undefined && Number.isInteger(line) && line > 0 ? { line } : null)
     setCollapsed(false)
   }, [])
 
@@ -87,7 +90,7 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
   return (
     <FilePanelContext.Provider value={value}>
       {children}
-      {filePath && <RootFileView key={filePath} path={filePath} onClose={closeFile} />}
+      {filePath && <RootFileView key={filePath} path={filePath} at={fileLine} onClose={closeFile} />}
     </FilePanelContext.Provider>
   )
 }
@@ -194,14 +197,14 @@ function asMarkdown(path: string, content: string): string {
 }
 
 /** Show `path` (absolute, inside a file root): image and PDF as such, text in Neovim (setting on) or read-only. */
-function RootFileView({ path, onClose }: { path: string; onClose: () => void }) {
+function RootFileView({ path, at, onClose }: { path: string; at: { line: number } | null; onClose: () => void }) {
   const kind = kindOf(path)
   if (kind === "image" || kind === "pdf") return <FilePanel label={path} onClose={onClose}><RawFileView path={path} kind={kind} /></FilePanel>
-  return <TextFileView path={path} onClose={onClose} />
+  return <TextFileView path={path} at={at} onClose={onClose} />
 }
 
-/** Text file: in Neovim `:w` saves it in place and `:q` closes the panel. */
-function TextFileView({ path, onClose }: { path: string; onClose: () => void }) {
+/** Text file: in Neovim `:w` saves it in place and `:q` closes the panel, `at` puts the cursor on its line. */
+function TextFileView({ path, at, onClose }: { path: string; at: { line: number } | null; onClose: () => void }) {
   const neovim = useNeovimSetting()
   const write = useCallback((text: string) => writeRootFile(path, text), [path])
   // While Neovim runs it holds the text, so a change on disk is merged into its buffer
@@ -210,6 +213,11 @@ function TextFileView({ path, onClose }: { path: string; onClose: () => void }) 
   })
   useEffect(() => { reload() }, [reload])
   const neovimSession = useNeovimTerminal(neovim.enabled && content !== null ? { key: path, path, filename: baseName(path), content } : null, saveFromNeovim, onClose)
+  // Once the session takes commands (its terminal is set), queued until its socket opens
+  const { terminal, send } = neovimSession
+  useEffect(() => {
+    if (terminal && at) send({ type: "open_file", path, line: at.line })
+  }, [terminal, at, path, send])
 
   return (
     <FilePanel label={path} onClose={onClose}>

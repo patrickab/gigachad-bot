@@ -69,7 +69,8 @@ const FILE_LINK_PLUGINS = [remarkInlineCodeFileLinks]
 /** Local file links of an agent answer: relative ones resolve against `base`, `open` shows the absolute path. */
 export interface FileLinks {
   base: string
-  open: (path: string) => void
+  /** Opens `path`, at 1-based `line` where the opener can (a finding's `file:line`). */
+  open: (path: string, line?: number) => void
 }
 
 function LaTeXMarkdownInner({
