@@ -16,11 +16,11 @@ import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelCo
 import { PiTranscript } from "./PiTranscript"
 import { usePiSearchFocus } from "./searchFocus"
 import { factoryRulings } from "./factoryCard"
-import { SessionWavesPanel, type SessionCards } from "./SessionWaves"
+import { SessionWavesPanel, useSessionWaves, type SessionCards } from "./SessionWaves"
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import { PiSessionDot } from "./usePiSidebar"
-import type { SubagentRow } from "./subagents"
+import { isActive, type SubagentRow } from "./subagents"
 import type { ImageContent, PiCommand, PiModel } from "./types"
 import { usePiSession, type Notice } from "./usePiSession"
 
@@ -127,6 +127,26 @@ export function withLead(text: string, lead: string | undefined): string {
 }
 
 /**
+ * What the session's subagents and the factory waves it declared cost, and how many of them work now.
+ *
+ * A subagent's cost is kept at its highest seen, so dismissing a finished child or the next run's clearing of the roster does not lower the total.
+ */
+function useSubSessions(sessionId: string, rows: readonly SubagentRow[]): { subCost: number; subActive: number } {
+  const [seen, setSeen] = useState<Record<string, number>>({})
+  const { waves } = useSessionWaves(sessionId)
+  let highest = seen
+  for (const row of rows) {
+    if ((row.cost ?? 0) > (highest[row.id] ?? 0)) highest = { ...highest, [row.id]: row.cost ?? 0 }
+  }
+  // Adjusted while rendering: a child's cost rose
+  if (highest !== seen) setSeen(highest)
+  let total = waves.reduce((sum, wave) => sum + (wave.usage?.cost ?? 0), 0)
+  for (const cost of Object.values(highest)) total += cost
+  const activeTasks = waves.flatMap((wave) => wave.tasks).filter((task) => task.state === "running" || task.state === "merging").length
+  return { subCost: total, subActive: rows.filter((row) => isActive(row.status)).length + activeTasks }
+}
+
+/**
  * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs, the `/pi` page and workbench chats.
  *
  * - Laid out like a chat: the composer floats over the transcript's column, a session without turns lifts it under the greeting
@@ -173,6 +193,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const cards = useMemo<SessionCards>(() => ({ ...rulings, revealNotice }), [rulings, revealNotice])
   const roster = useSubagentRoster(transcript.runs, session.widgets, transcript.running)
   const { inspectSubagent } = session
+  const { subCost, subActive } = useSubSessions(sessionId, roster.rows)
   const inspectRow = useCallback((row: SubagentRow) => inspectSubagent(row.inspect!), [inspectSubagent])
 
   const { messages } = transcript
@@ -258,7 +279,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
       models: session.models,
       thinkingLevel: state?.thinkingLevel ?? null,
       thinkingLevels: session.thinkingLevels,
-      stats: session.stats,
+      stats: session.stats && { ...session.stats, subCost, subActive },
       onModel: (model) => void setModel(model),
       onThinking: (level) => void setThinking(level),
     },

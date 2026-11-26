@@ -17,6 +17,12 @@ export interface Notice { id: string; text: string; tone: "info" | "warning" | "
 /** `get_session_stats` data the top bar reads: the session's cost and the current context window use (F3). */
 export interface PiSessionStats {
   cost: number
+  /** Cost of the session's subagents and factory tasks, added by the view: Pi's own stats cover the main agent only. */
+  subCost?: number
+  /** Subagents and factory tasks of the session working now, added by the view. */
+  subActive?: number
+  /** Tokens over the whole session; `input` is uncached input. */
+  tokens?: { input: number; output: number; cacheRead: number; cacheWrite: number }
   /** Absent without a model, `tokens`/`percent` null right after a compaction until the next reply. */
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null }
 }
@@ -136,6 +142,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
 
     const handleExtensionRequest = (record: PiRecord) => {
       if (isDialogRequest(record)) {
+        // SAFETY: isDialogRequest passed, so the record is a dialog request in the shape of ExtensionDialog
         const dialog = record as unknown as ExtensionDialog
         setDialogs((current) => current.some((open) => open.id === dialog.id) ? current : [...current, dialog])
         return
@@ -179,6 +186,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
       if (record.type === "response") {
         const resolve = record.id ? pending.get(record.id) : undefined
         if (resolve) {
+          // SAFETY: the record is a `response` frame, whose fields are those of Response
           resolve(record as unknown as Response)
           pending.delete(record.id!)
         }
@@ -202,6 +210,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     }
 
     const applyUi = (ui: AttachedUi) => {
+        // SAFETY: isDialogRequest keeps only records whose method is a dialog method, which is the shape of ExtensionDialog
       setDialogs(ui.dialogs.filter(isDialogRequest) as unknown as ExtensionDialog[])
       setStatusLines(ui.statuses)
       setWidgets(ui.widgets ?? NO_WIDGETS)

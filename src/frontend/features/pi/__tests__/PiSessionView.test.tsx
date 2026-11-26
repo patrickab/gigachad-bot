@@ -100,7 +100,7 @@ describe("PiSessionView in a document panel", () => {
     expect(screen.getByText("Notes chat")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Model: anthropic/claude-haiku-4-5" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Reasoning: medium" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Context 20k tokens, 10% of 200k")).toHaveTextContent("20k | 10%")
+    expect(screen.getByLabelText("Cost 0.12$ (0.00$), context 20k tokens, 10% of 200k")).toHaveTextContent("0.12$ (0.00$)·20k (10%)")
     expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument()
   })
 })

@@ -66,9 +66,15 @@ export function takeHeld(sessionId: string): readonly HeldMessage[] {
   return entries
 }
 
+/** Pi expands `/skill:name args` into a `<skill>` block before it queues or records it: map that back to what the user typed. */
+function typed(text: string): string {
+  const match = /^<skill name="([^"]*)"[^>]*>\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]*))?$/.exec(text)
+  return match ? `/skill:${match[1]}${match[2] ? ` ${match[2]}` : ""}` : text
+}
+
 /** The ids of `entries` that `queue` (Pi's queue snapshot) or `userTexts` (user messages sent at or after `since`, one text per message) confirm. Each queue item or message confirms one entry. */
 export function confirmedIds(entries: readonly HeldMessage[], queue: { steering: string[]; followUp: string[] }, userTexts: (since: number) => string[]): string[] {
-  const queued = [...queue.steering, ...queue.followUp]
+  const queued = [...queue.steering, ...queue.followUp].map(typed)
   const seen: string[][] = []
   const ids: string[] = []
   for (const entry of entries) {
@@ -78,7 +84,7 @@ export function confirmedIds(entries: readonly HeldMessage[], queue: { steering:
       ids.push(entry.id)
       continue
     }
-    const texts = userTexts(entry.createdAt)
+    const texts = userTexts(entry.createdAt).map(typed)
     const used = seen.flat().filter((text) => text === entry.text).length
     if (texts.filter((text) => text === entry.text).length > used) {
       seen.push([entry.text])

@@ -1,9 +1,10 @@
 "use client"
 
+import { LoaderCircle } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
-import { ContextUsage } from "@/features/chat/ContextUsage"
+import { compactTokens } from "@/features/chat/ContextUsage"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { catalogOffering, gatewayModelId, selectorIdOf } from "@/lib/models"
@@ -84,11 +85,54 @@ export function PiModelDropdown({ controls, modelProps, chatColumn }: { controls
   )
 }
 
-/** The context readout: context tokens and context use (F3), the same as a chat's. Nothing before Pi reports them. */
+/** `0.16$ (0.40$)`: the main agent's cost, then its subagents' and factory tasks' in brackets. */
+export function formatSessionCost(cost: number, subCost: number): string {
+  return `${cost.toFixed(2)}$ (${subCost.toFixed(2)}$)`
+}
+
+/** Context use colour: muted to 20%, then highlighted, yellow from 40%, red from 60%. */
+export function contextTone(percent: number | null): string {
+  if (percent === null || percent < 20) return "text-ink-faint"
+  if (percent < 40) return "text-ink"
+  return percent < 60 ? "text-warning" : "text-danger"
+}
+
+/** Share of the session's prompt tokens read from cache, null before any. */
+export function cacheHitRate(tokens: PiSessionStats["tokens"]): number | null {
+  if (!tokens) return null
+  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite
+  return prompt > 0 ? tokens.cacheRead / prompt : null
+}
+
+const Dot = () => <span aria-hidden="true" className="px-1.5 text-ink-subtle">·</span>
+
+/**
+ * The telemetry readout as one line, `⟳2 · 0.48$ (0.00$) · 62.8k (6%) · 82% cached`: working subsessions (only while some work), session
+ * cost, context tokens and use (F3) coloured by `contextTone`, cache hit rate. Nothing before Pi reports them.
+ */
 export function PiUsage({ stats }: { stats: PiSessionStats | null }) {
-  const usage = stats?.contextUsage
-  if (!usage) return null
-  return <ContextUsage tokens={usage.tokens} percent={usage.percent} contextWindow={usage.contextWindow} />
+  if (!stats) return null
+  const usage = stats.contextUsage
+  const active = stats.subActive ?? 0
+  const cost = formatSessionCost(stats.cost, stats.subCost ?? 0)
+  const tokens = usage ? (usage.tokens === null ? "?" : compactTokens(usage.tokens)) : null
+  const percent = usage ? (usage.percent === null ? "?" : `${Math.round(usage.percent)}%`) : null
+  const rate = cacheHitRate(stats.tokens)
+  const cached = rate === null ? null : `${Math.round(rate * 100)}% cached`
+  const label = [
+    active > 0 && `${active} subsessions working`,
+    `Cost ${cost}`,
+    usage && `context ${tokens} tokens, ${percent} of ${compactTokens(usage.contextWindow)}`,
+    cached,
+  ].filter(Boolean).join(", ")
+  return (
+    <span aria-label={label} className="flex shrink-0 items-center whitespace-nowrap px-3 font-mono text-xs tabular-nums text-ink-faint">
+      {active > 0 && <><span className="flex items-center gap-1"><LoaderCircle size={11} aria-hidden="true" className="animate-spin" />{active}</span><Dot /></>}
+      {cost}
+      {usage && <><Dot /><span className={contextTone(usage.percent)}>{tokens} ({percent})</span></>}
+      {cached && <><Dot />{cached}</>}
+    </span>
+  )
 }
 
 /** The tab top bar's places a Pi tab fills, where a chat's bar has its reasoning selector, model dropdown and context readout. */

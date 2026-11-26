@@ -327,12 +327,15 @@ def test_open_session_sends_the_coding_profile_and_resume(monkeypatch, repositor
 
 
 async def test_calls_that_wait_on_a_pi_child_outlast_pi_hosts_own_limit_reads_keep_the_short_one(monkeypatch):
-    host = _serve(monkeypatch, {
-        "POST /sessions": (200, {"session": SESSION}),
-        f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"}),
-        f"POST /sessions/{SESSION_ID}/close": (204, None),
-        "GET /health": (200, {"ok": True}),
-    })
+    host = _serve(
+        monkeypatch,
+        {
+            "POST /sessions": (200, {"session": SESSION}),
+            f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"}),
+            f"POST /sessions/{SESSION_ID}/close": (204, None),
+            "GET /health": (200, {"ok": True}),
+        },
+    )
 
     await pi_host.open_session("/tmp", None)
     await pi_host.prompt_session(SESSION_ID, "/factory start {}")
@@ -375,13 +378,20 @@ async def test_document_sessions_carry_their_prompt_and_resume_by_id(monkeypatch
     host = _serve(monkeypatch, {"POST /sessions": (200, {"session": {**SESSION, "profile": "document"}})})
 
     session = await pi_host.open_session(
-        "/w/markdown", pi_host.ResumeById(session_id=SESSION_ID), profile="document", system_prompt="Edit it.", tools=["read"],
+        "/w/markdown",
+        pi_host.ResumeById(session_id=SESSION_ID),
+        profile="document",
+        system_prompt="Edit it.",
+        tools=["read"],
     )
 
     assert session.profile == "document"
     assert json.loads(host.requests[0].content) == {
-        "cwd": "/w/markdown", "profile": "document", "resume": {"sessionId": SESSION_ID},
-        "systemPrompt": "Edit it.", "tools": ["read"],
+        "cwd": "/w/markdown",
+        "profile": "document",
+        "resume": {"sessionId": SESSION_ID},
+        "systemPrompt": "Edit it.",
+        "tools": ["read"],
     }
 
 

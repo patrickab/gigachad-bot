@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { PiPanelBar, PiTopBar, PiUsage, piGatewayId, piModelFor, type PiCatalogProps, type PiSessionControls, type PiSessionHeader, type PiTopBarSlots } from "../PiTopBar"
+import { PiPanelBar, PiTopBar, PiUsage, contextTone, piGatewayId, piModelFor, type PiCatalogProps, type PiSessionControls, type PiSessionHeader, type PiTopBarSlots } from "../PiTopBar"
 import type { PiModel } from "../types"
 
 vi.mock("@/lib/backend/api", () => ({ fetchPiCatalog: vi.fn(() => new Promise(() => {})) }))
@@ -60,8 +60,7 @@ describe("PiTopBar", () => {
     expect(within(slots.thinking!).getByRole("button", { name: "Reasoning: medium" })).toBeInTheDocument()
     expect(within(slots.model!).getByRole("button", { name: "Model: anthropic/claude-opus-4-5" })).toBeInTheDocument()
     expect(slots.model).toHaveTextContent("Fix")
-    expect(within(slots.usage!).getByLabelText("Context 12.3k tokens, 1% of 1000k")).toHaveTextContent("12.3k | 1%")
-    expect(slots.bar.textContent).not.toContain("$")
+    expect(within(slots.usage!).getByLabelText("Cost 0.16$ (0.00$), context 12.3k tokens, 1% of 1000k")).toHaveTextContent("0.16$ (0.00$)·12.3k (1%)")
   })
 
   it("shows the session's model by its catalog entry and offers only the catalog models Pi offers and the gateway serves", () => {
@@ -117,7 +116,7 @@ describe("PiUsage", () => {
 
   it("marks both unknown right after a compaction", () => {
     render(<PiUsage stats={{ cost: 0, contextUsage: { tokens: null, contextWindow: 200_000, percent: null } }} />)
-    expect(screen.getByText("? | ?")).toBeTruthy()
+    expect(screen.getByText("? (?)", { exact: false })).toBeTruthy()
   })
 })
 
@@ -127,10 +126,10 @@ describe("PiPanelBar", () => {
   it("orders a side panel's header like a chat's top bar: thinking, the chats' model dropdown, then the context readout and actions", () => {
     const stats = { cost: 0.01, contextUsage: { tokens: 60_000, contextWindow: 200_000, percent: 30 } }
     const { container } = render(<PiPanelBar header={header({ sessionName: "Notes", controls: controls({ stats }) })} modelProps={MODEL_PROPS} actions={<button type="button">New session</button>} />)
-    const labels = [...container.querySelectorAll("button, [aria-label^='Context']")].map((element) => element.getAttribute("aria-label") ?? element.textContent)
-    expect(labels).toEqual(["Reasoning: medium", "Model: anthropic/claude-opus-4-5", "Context 60k tokens, 30% of 200k", "New session"])
+    const labels = [...container.querySelectorAll("button, [aria-label^='Cost']")].map((element) => element.getAttribute("aria-label") ?? element.textContent)
+    expect(labels).toEqual(["Reasoning: medium", "Model: anthropic/claude-opus-4-5", "Cost 0.01$ (0.00$), context 60k tokens, 30% of 200k", "New session"])
     expect(container).toHaveTextContent("Notes")
-    expect(container.textContent).not.toContain("$")
+    expect(container).toHaveTextContent("0.01$ (0.00$)")
   })
 
   it("offers the catalog models Pi offers, like a Pi tab", () => {
@@ -158,5 +157,23 @@ describe("piModelFor", () => {
   it("names a gateway model by its upstream id", () => {
     expect(piGatewayId({ provider: "gateway", id: "openrouter/acme/model-x" })).toBe("openrouter/acme/model-x")
     expect(piGatewayId({ provider: "anthropic", id: "claude-opus-5" })).toBe("anthropic/claude-opus-5")
+  })
+})
+
+describe("PiUsage telemetry", () => {
+  afterEach(cleanup)
+
+  it("shows working subsessions, cost, context and cache hit rate, the context coloured by its use", () => {
+    const stats = { cost: 0.48, subCost: 1.2, subActive: 2, tokens: { input: 10, output: 5, cacheRead: 80, cacheWrite: 10 }, contextUsage: { tokens: 90_000, contextWindow: 200_000, percent: 45 } }
+    render(<PiUsage stats={stats} />)
+    const readout = screen.getByLabelText("2 subsessions working, Cost 0.48$ (1.20$), context 90k tokens, 45% of 200k, 80% cached")
+    expect(readout).toHaveTextContent("2·0.48$ (1.20$)·90k (45%)·80% cached")
+    expect(screen.getByText("90k (45%)")).toHaveClass("text-warning")
+  })
+
+  it("hides the working count when nothing works and grades context use", () => {
+    render(<PiUsage stats={{ cost: 0, subActive: 0 }} />)
+    expect(screen.getByLabelText("Cost 0.00$ (0.00$)")).toHaveTextContent(/^0.00\$ \(0.00\$\)$/)
+    expect([10, 25, 45, 70, null].map(contextTone)).toEqual(["text-ink-faint", "text-ink", "text-warning", "text-danger", "text-ink-faint"])
   })
 })
