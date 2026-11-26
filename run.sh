@@ -33,7 +33,11 @@ cleanup() {
     # TERM reaches only the launchers, bash does not pass it on: `npm -> next dev -> next-server` would keep 2999.
     # Snapshot the whole tree first, let the launchers stop gracefully, then stop whatever of it is left.
     local tree launchers=()
-    mapfile -t tree < <(descendants $$)
+    # Only what lives in this run's own cgroup: a factory runner is a child of the Pi that started it but runs in a
+    # systemd scope of its own, and must survive a restart of this stack.
+    local own
+    own=$(cat /proc/$$/cgroup 2>/dev/null)
+    mapfile -t tree < <(for pid in $(descendants $$); do [[ "$(cat "/proc/$pid/cgroup" 2>/dev/null)" == "$own" ]] && printf '%s\n' "$pid"; done)
     for pid in "$backend_pid" "$frontend_pid" "${service_pids[@]}"; do
         [[ -n "$pid" ]] && launchers+=("$pid")
     done
