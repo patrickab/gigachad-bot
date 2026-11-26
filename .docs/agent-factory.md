@@ -287,8 +287,18 @@ turn there. No session has to poll.
 - Delivered exactly once per event, also across restarts (`<agent dir>/factory/notified.jsonl`).
 - Work declared outside a Pi session (the CLI, the board) has no origin: watch the board, or block on
   `factory tasks.wait '{"wave": "<id>"}'`.
-- In a Pi tab a notice is one line that opens to its text (`features/pi/FactoryNotices.tsx`, custom message type
-  `factory-notice`).
+- In a Pi tab a notice with a card (`details.card`, version 1; `details.key` names it) shows the card, one without its
+  first line that opens to its text (`features/pi/FactoryNotices.tsx`, custom message type `factory-notice`). A
+  settled `factory` tool result with a card shows it the same way (`FactoryTool.tsx`), otherwise its row.
+- **Cards** (`factoryCard.ts` parses, `FactoryCard.tsx` draws, nothing derived): the factory icon, the title (warning
+  ink when `tone` is `attention`, muted when `quiet`), tag, state, progress and cost at the right; opened, its rows,
+  findings grouped by severity behind counts (a finding's file opens in the file panel), its text as Markdown. An
+  attention card starts open. Kinds: wave, task, scout, proof, contract, decision, action.
+- **The switch** (`factoryView.tsx`): readable is the default. Alt+V flips the whole tab to the agent's text (what the
+  agent has in context), remembered per tab in `sessionStorage` (`gc.pi.factoryView:<tab id>`); a button on each card's
+  row flips that card alone.
+- **Decisions**: a `decision` card names the notice it answers (`answers`); while that notice is in the transcript its
+  row offers "Show what this answers", which reveals and scrolls to the notice's card, mounting or opening its turn.
 
 ## Failures
 
@@ -326,8 +336,8 @@ settings once at `waves.start`.
   Finished. What waits on the supervisor or the user sits in a Waiting block atop Working, absent while nothing waits
   and outside Working's count. The gap between columns is one shared, draggable value
   (`localStorage` `gigachad:factory-column-gap`).
-- **Cards**: state, round, blocked reason, the open question, tokens in and out, cost (coder plus reviews). Tokens in
-  count cache reads; cost is the provider's figure.
+- **Cards on the board**: state, round, blocked reason, the open question, tokens in and out, cost (coder plus reviews).
+  Tokens in count cache reads; cost is the provider's figure. Cards in a Pi tab's transcript: [notices](#notices).
 - **Waves on the board** (`waveTree.ts`, `WaveTree.tsx`): built from `waves.list`, read with `tasks.list` on the same
   refresh events. A wave is a container inside a column (`waveColumn`): `building` (once a task of it is done),
   `reviewing`, `merging` in Merging; `rejected`, `blocked`, `waiting_approve` or interrupted in the Waiting block;
@@ -337,12 +347,16 @@ settings once at `waves.start`.
   of the plan's memory_store, read when its toggle opens (`GET /api/memory/read`). Waves of one column sharing a tag
   prefix are wrapped in one container per prefix segment; a group holding a single wave has no container of its own.
   A factory without `waves.list` (`unknown action`) shows no waves and no error.
-- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the tab's
-  session declared, in whatever repository (`waves.list` without a repo). Its header counts the active waves, those that need the user (warning colour) and their cost, or
-  `<n> finished` without active ones, and collapses the element (open while a wave is active). Active waves come first, those
-  needing the user at the top; merged and cancelled waves sit behind one collapsed `<n> finished` row. Every wave
-  opens to its tasks, unfinished ones first: the coder's model (from `tasks.list`), tokens in and out, state. A started
-  one has a button that opens its task view (the coder's session, brief and handoff). Display only.
+- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the
+  tab's session declared, in whatever repository (`waves.list` without a repo), at most 40% of the view high, scrolling
+  beyond. Its header counts the active waves, the cards that need the user (warning colour) and the active waves' cost,
+  or `<n> finished` without active ones, and collapses the element (open while a wave is active). `<n> needs you`
+  counts the transcript's attention cards that no decision answers, in the transcript or from `decisions.list`
+  (`origin`: the session). A `Decisions · <n>` entry lists the session's decisions, each jumping to the card it answers
+  while that card is in the transcript. Active waves come first, those needing the user at the top; merged and
+  cancelled waves sit behind one collapsed `<n> finished` row. Every wave opens to its tasks, unfinished ones first:
+  the coder's model (from `tasks.list`), tokens in and out, state. A started one has a button that opens its task view
+  (the coder's session, brief and handoff). Without waves, decisions or waiting cards it is absent.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message), its
   questions, each gate with duration and failed output, the review with findings, the merge.
 - **Terminal**: `factory-tui` (read-only), or `factory waves.list`, `factory tasks.list`, `factory waves.get`.

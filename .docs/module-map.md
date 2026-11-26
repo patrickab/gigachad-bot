@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists.
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run).
 
 # Module map
 
@@ -52,7 +52,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- deps.py               Identity-scoped store/service injection
 |   |       |-- schemas.py            Shared file-route request/response models
 |   |       |-- chat.py               Chat generation and tools
-|   |       |-- histories.py          Chat persistence, branching and merge endpoints
+|   |       |-- histories.py          Chat persistence, branching and merge endpoints; every chat (`/all`) and full-text search (`/search`)
 |   |       |-- documents.py          Logical/project documents and library attachment APIs (over `lib/document_service.py`)
 |   |       |-- files.py              Chat uploads and extraction APIs (over `lib/attachments.py`)
 |   |       |-- fileviewer.py         Generic text/raw preview APIs
@@ -76,7 +76,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- latex.py              LaTeX build (`POST /api/latex/build`), tex project resolution, root choice, new project files, SyncTeX search and slide gaps, template sets and primitive previews
 |   |       |-- learn.py              LearnHarness session API boundary
 |   |       |-- sync.py               Durable change-log SSE
-|   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, tool-image media (`/media/<sha256>`, `/thumb`), the session WebSocket relay to pi-host (host access)
+|   |       |-- pi.py                 `/api/pi/*`: repositories, sessions, turn delete, tool-image media (`/media/<sha256>`, `/thumb`), the session WebSocket relay to pi-host (host access)
 |   |       |-- factory.py            `/api/factory/call`, `/actions`, `/images`: core pass-through, login tag, revert on remove, preview stop (host access)
 |   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
@@ -92,7 +92,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- asset_store.py            PostgreSQL binary assets
 |   |   |-- storage_namespace.py      Canonical database namespaces and key builders
 |   |   |-- db_schema.py              Checksum-protected migration application
-|   |   |-- chat_store.py             Chat model, I/O, indexing and atomic tree operations
+|   |   |-- chat_store.py             Chat model, I/O, indexing, atomic tree operations, the listing and search of every chat
 |   |   |-- project_store.py          Catalog, slugs, kanban and tab persistence, project file references with display names
 |   |   |-- document_service.py       `DocumentScope` (notes or a project), document write/move with reference repointing, file rename (stored key move, disk rename)
 |   |   |-- chat_cleanup.py           `ChatCleanup`: release uploads, derived data and sandbox state after chat deletion
@@ -199,12 +199,20 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       `-- DesktopBackendProvider.tsx
 |       |-- features/                 Domain-owned interactive surfaces
 |       |   |-- chat/                 Turns, attachments, persistence and streaming (`useChatStream` over `lib/backend/tokenPacer.ts`)
-|       |   |   |-- ChatContainer.tsx Chat on the shared ConversationColumn (scrolling, paging, open state, keyboard focus)
+|       |   |   |-- ChatContainer.tsx Chat on the shared ConversationColumn; settles a reveal and paints a search hit
+|       |   |   |-- ChatPair.tsx      A pair's label, collapsed preview and open body (`renderPreview`/`renderBody`)
+|       |   |   |-- useChatTurns.ts   Send, pair delete and edit (cut, save, resend), attachment removal
+|       |   |   |-- ChatPicker.tsx, useChatPicker.ts Chat picker (Alt+C): every chat by project, full-text search with a row per hit
+|       |   |   |-- toolRun.tsx, toolRenderers.tsx Chat tool calls as conversation tool rows: record -> `{call, run}` adapter, chat renderers and display
 |       |   |   |-- attachments.ts
 |       |   |   |-- composer/         Input, completions, drawings and attachment chips (useDraftAttachments, dictation via hooks/useSpeechInput)
-|       |   |   |-- messages/         Tools, research and rich output rendering
+|       |   |   |-- messages/         Question/answer messages, research and rich output rendering
 |       |   |   `-- preview/          Attachment previews
-|       |   |-- conversation/         ConversationColumn: the turn column of the chat and Pi (scroll, follow the end, paging, open state, keyboard focus, lazy previews, width and wide mode)
+|       |   |-- conversation/         What the chat and Pi share
+|       |   |   |-- ConversationColumn.tsx The turn column (scroll, follow the end, paging, open state, keyboard focus, lazy previews, reveal, width)
+|       |   |   |-- TurnQuestion.tsx  The turn card's question (copy, edit in place, delete, confirmations) and answer (copy, branch)
+|       |   |   |-- WideModeToggle.tsx, useTextHighlights.ts Wide mode button; search-hit painter (CSS Custom Highlights)
+|       |   |   `-- tools/            Tool-call rows, process details, diff view and the tool renderer registry (rows ported from omp-web, MIT)
 |       |   |-- editor/               Documents, viewers and terminal editors
 |       |   |   |-- DocumentEditor.tsx Routes a document path to its viewer or editor (image, architecture source, canvas, text), `WorkspaceSurface` shows notebooks in `NotebookWorkbench` instead
 |       |   |   |-- TextDocumentEditor.tsx Markdown/text save and preview owner (EditorShell, EditorViewSwitch, useEditorView)
@@ -239,20 +247,23 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- pi/                   Pi sessions rendered natively, the only frontend code that knows Pi's protocol
-|       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar
+|       |   |   |-- PiTab.tsx         A Pi tab: transcript, composer, top bar; turn delete and edit (`deletePiTurn`)
+|       |   |   |-- PiTranscript.tsx  Turns on the shared ConversationColumn: pieces, answers, search jump, held messages, factory view
 |       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
 |       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
 |       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
 |       |   |   |-- subagents.ts, SubagentRoster.tsx Subagent roster above the composer (pi-subagents widget and tool details, M26)
 |       |   |   |-- SubagentMessages.tsx `intercom_message` and `subagent-notify` cards, one line that folds open
-|       |   |   |-- FactoryNotices.tsx, ShellNotices.tsx Factory notices as one line; background shell sessions that ended well left out
-|       |   |   |-- renderers.ts      Registry of native tool and custom-message renderers
-|       |   |   |-- SessionWaves.tsx  The session's unfinished factory waves above the composer (`waves.list`, `origin`)
+|       |   |   |-- FactoryNotices.tsx, FactoryTool.tsx Factory notices and `factory` tool calls: their card, else one line
+|       |   |   |-- factoryCard.ts, FactoryCard.tsx, factoryView.tsx Card parsing and view, the card/agent-text switch (Alt+V), decision links
+|       |   |   |-- ShellNotices.tsx  Background shell sessions that ended well left out
+|       |   |   |-- renderers.ts      Custom-message renderer registry, re-exports the conversation tool registry
+|       |   |   |-- SessionWaves.tsx  The session's factory waves, decisions and cards waiting for a ruling above the composer (`waves.list`, `decisions.list`, `origin`)
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
 |       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search with a row per hit
 |       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview
 |       |   |   |-- PiWorkspacePicker.tsx Composer project selector of an empty chat, a pick makes the first message start a Pi session
-|       |   |   `-- tools/            Tool-call rows (ported from omp-web, MIT)
+|       |   |   `-- tools/            Re-exports of `features/conversation/tools/`
 |       |   |-- workbench/            Editor | rendered file | Pi chat drawer primitive
 |       |   |   |-- Workbench.tsx     Neovim, quoting, status slot and editor notes on `WorkbenchFrame`, kinds supply `renderPane`
 |       |   |   |-- WorkbenchFrame.tsx `WorkbenchFrame`: the one layout of `Workbench` and `NotebookWorkbench`, `EditorNote`
@@ -394,7 +405,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
 |-- run-frontend.sh                   Frontend launch/setup
 |-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
-|-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md`
+|-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md` (turn delete: `src/host/local/turns.ts`, `delete-turn.ts`)
 |-- pi-extensions/                    Pi extensions loaded into every `coding` session
 |                                     (the factory is the agent-factory package, `~/git/agent-factory`)
 |-- run-learnharness.sh               LearnHarness sidecar launcher
@@ -459,6 +470,9 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Shell layout, deep links, surface selection | `src/frontend/app/_components/AppShell.tsx`, `TabContent.tsx`, `deepLink.ts` | `features/navigation/TabManager.tsx`, `contexts/TabContext.tsx`, `app/_components/__tests__/deepLink.test.ts` |
 | Chat generation, streaming or tool behavior | `src/backend/routes/chat.py`, `src/lib/toolcalling.py`, `src/lib/tools.py` | `src/frontend/features/chat/useChatStream.ts`, `useChat.ts`; `tests/test_toolcalling.py`, `tests/test_builtin_tools.py`, `tests/test_sandbox_plot.py`, `tests/test_chat_route.py`, chat `__tests__/useChatStream.test.tsx` |
 | Chat save, branches or merge | `src/lib/chat_store.py`, `src/backend/routes/histories.py` | `features/chat/useChatPersistence.ts`, `features/navigation/BranchContext.tsx`; `tests/test_histories.py`, `tests/test_chat_store_message_preservation.py` |
+| Conversation column, turn card, turn edit or delete | `src/frontend/features/conversation/`, `features/chat/ChatContainer.tsx`, `ChatPair.tsx`, `useChatTurns.ts`, `features/pi/PiTranscript.tsx`, `PiTab.tsx` | `packages/chat-ui/src/Turn.tsx`, `turn.css`, `pi-host/src/host/local/turns.ts`, `delete-turn.ts`, `src/backend/routes/pi.py`; conversation `__tests__/`, `app/_components/__tests__/chatEditDelete.test.tsx`, `chatStreamingRenders.test.tsx`, `features/pi/__tests__/PiStreamingRenders.test.tsx`, `pi-host/test/turns.test.ts`, `delete-turn.test.ts` |
+| Chat list, search or picker | `src/lib/chat_store.py`, `src/backend/routes/histories.py`, `src/frontend/features/chat/ChatPicker.tsx`, `useChatPicker.ts` | `lib/backend/api/chat.ts`, `features/conversation/useTextHighlights.ts`, `app/_components/TabContent.tsx`; `tests/test_chat_search.py`, chat `__tests__/ChatPicker.test.tsx`, `ChatContainer.test.tsx` |
+| Chat tool rows | `src/frontend/features/conversation/tools/`, `features/chat/toolRun.tsx`, `toolRenderers.tsx` | `app/_components/toolRenderers.ts`, `features/pi/MemoryTool.tsx`; chat `__tests__/toolRun.test.tsx`, `toolRenderers.test.tsx`, `app/_components/__tests__/chatToolRows.test.tsx` |
 | Attachment live references, uploads or PDF extraction | `src/frontend/features/chat/attachments.ts`, `src/lib/attachments.py`, `attachment_materialize.py`, `extract_queue.py`, `mineru.py` | `src/backend/routes/files.py`, `documents.py`, `file_attach.py`; `tests/test_attachment_materialize.py`, `tests/test_extract_queue.py`, `tests/test_upload_assets.py`, chat `__tests__/attachments.test.ts` |
 | Text/PDF/plot viewing or editing | `src/frontend/features/editor/DocumentEditor.tsx`, `FileViewer.tsx`, `features/editor/pdf/`, `src/frontend/components/content/` | `src/backend/routes/documents.py`, `src/lib/document_service.py`, `fileviewer.py` (PDF annotation canvas key); `tests/test_document_state.py`, `tests/test_postgres_mode_end_to_end.py`, editor/content `__tests__/` |
 | Collaborative canvas or canvas entity shape | `src/frontend/features/editor/canvas/`, `src/frontend/lib/domain/canvasDocument.ts` | `src/lib/canvas_store.py`, `routes/canvases.py`, `lib/backend/canvasStream.ts`; `tests/test_canvas_mutations.py`, canvas `__tests__/` |
@@ -496,3 +510,4 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 
 - The 2026-11-25 refresh re-verified against source the memory-store replacement, share links, the factory's gigachad-side contracts (pi-host core loading, login tag, revert, images, waves on the board), Pi transcript cards, Pi start folders, provider usage and chat transport, and checked every tree leaf against the tracked tree. Other sections were maintained commit by commit and not re-verified line by line. The agent-factory and memory-store packages' internals, and deployed service behavior, are outside this refresh.
 - The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.
+- The 2026-11-26 hand edit re-verified against source the conversation column, turn card, turn delete, chat list and search, chat picker, chat tool rows and the factory cards in a Pi tab; the rest was not re-checked.

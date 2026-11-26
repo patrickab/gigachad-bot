@@ -1,5 +1,5 @@
 Generated from bd63559a on 2026-11-25.
-Reduced by hand on 2026-11-25.
+Reduced by hand on 2026-11-25. Conversations section, the Pi tool rows and the backlog edited by hand from 78140998 on 2026-11-26 (no `/repomix` run).
 
 # Architecture
 
@@ -170,7 +170,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | Optional services | Report unavailability; never silently substitute a local service. |
 | Memory tool | Toggle `memory` (default on) adds `list_memories`, `read_memories`, `apply_memory_ops` (`lib/tools.py`, threaded, on `ToolContext.memory_root`). `memory_context.memory_prompt` creates `user` and the project's memory_store if missing and appends `# Memory` (`user` profile/preferences, indexes, rules). Project store name: `linked_root` folder name, else slug, `project-user` for `user`. Any failure drops the block, never the chat (`routes/chat.py` `_memory_block`). |
 
-- `features/conversation/ConversationColumn.tsx` (chat and Pi) defers collapsed previews until near the viewport or focused, mounts the newest page of turns, and holds the column at its end until reader input.
+- The chat's turns render in the conversation column shared with Pi: [conversations](#conversations-chat-and-pi).
 
 ### Sandbox checkpoints
 
@@ -194,6 +194,33 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 - `GET /api/fileviewer/raw` sends `ETag` + `private, no-cache` (304 from metadata: asset `sha256`, document version/`updated_at`, host stat) and serves single byte ranges sliced in Postgres. CORS exposes `Accept-Ranges`/`Content-Range`. Annotation key hashing never loads the PDF.
 - `features/editor/pdf/AnnotatedPdfViewer.tsx` anchors strokes to pages, reusing canvas ink, history and collaboration; save failures show as unsaved.
 - `PdfAssistant.tsx`: with host access a Pi session per PDF in `WORKBENCH/pdf` (`FileChat`); otherwise a local chat whose system prompt embeds the MinerU Markdown (mounted, `PDFs/…`, or `project/…` via `PDFs/<name>`), polled every 5 s during extraction. History is not saved. Once Markdown is ready a PDF/Text switch shows it with `images/` links rewritten to `/api/assets/Mineru/images/<stem>/`.
+
+## Conversations (chat and Pi)
+
+One column and one turn card for chats and Pi sessions; what only one side has stays on its side (chat: web search results, sources, research trace, project documents; Pi: session search, queue, held messages, roster, compaction, live tool output, attachment sending). Rendering parts shared with LearnHarness stay in `packages/chat-ui` (`Turn.tsx`, `turn.css`, `previewHead.ts`): `[data-chat-column]`, `.gc-turn-preview-scroll` and the package's exports keep their names.
+
+| Part | Contract |
+| --- | --- |
+| Column | `features/conversation/ConversationColumn.tsx` takes `turns` (`{key, label, icon?, live}`), `renderPreview`, `previewText`, `renderBody`, `renderAfter`, `header`, `footer`, `reveal` (`{key, seq, scroll?}`), `followSeq`, `paddingBottom`, `scrollRef`, `wide`/`onWideChange`, `readOnly`. Opens at the end and follows it; until the reader scrolls, clicks or types, late layout keeps it there. Mounts the newest `TURN_PAGE_SIZE` (20) turns, earlier pages on scrolling up; away from the end the window's top stays put. Collapsed previews render near the viewport only (an empty preview reserves no space). Ctrl/Cmd+Up/Down focus turns, Enter toggles, Esc drops the focus; a key reaches the innermost column of its surface, never a `readOnly` one (the session picker's preview). Each turn sits in `div[data-turn-key]`; `ColumnTurn` is memoized on its content. Width and wide mode (`WideModeToggle.tsx`) are shared app-wide. |
+| Turn keys | Chat: `keyPairs` (`lib/domain/pairs.ts`), a pair keeps its key across an earlier pair's delete, a streamed answer, a toggled attachment. Pi: the prompt's `entryId` (`pending-<start>` until the host confirms it). Open state and edit drafts live by key. |
+| Stable props | Nothing handed to a settled turn changes identity because the message list changed; a streamed frame re-renders the live turn only. `useChatTurns` reads messages and `isStreaming` through refs, `laterTurns` is a getter. Render-count tests: `app/_components/__tests__/chatStreamingRenders.test.tsx`, `features/pi/__tests__/PiStreamingRenders.test.tsx`. |
+| Turn card | `features/conversation/TurnQuestion.tsx`: `TurnQuestion` (copy, edit, delete) and `TurnAnswer` (copy, branch) on chat-ui's `TurnRegion`. No actions on a live turn; inside `TurnEditsPaused` (a reply streams: `ChatContainer`, `PiTranscript`) no edit or delete, without props changing. Edit turns the question into a textarea: Enter confirms, Esc cancels, Shift+Enter is a newline; unchanged or empty cancels. Delete always asks, an edit asks when later turns go (naming how many); the confirmation is the shared `Dialog` in a portal. |
+| Delete and edit | Delete removes one turn entirely, edit removes the turn and every later one, then sends the edited text with the turn's attachments; neither creates a session or history file (only branch does). Chat (`useChatTurns`): `removePairs(user, "pair" \| "end")`, saved first through the history file; a failed save keeps the pair and shows `turnError`; a failed send puts the text into the composer. No undo for pairs. Pi (`PiTab`): `deletePiTurn(sessionId, entryId, "turn" \| "end")` -> `POST /api/pi/sessions/{id}/turns/{entryId}/delete` -> pi-host rewrites the session file and restarts the child ([Pi migration](pi-migration.md) D18, F13); the transcript follows the host's `resync` (`mode: replace`). Refusals (409 `running`, `compacted`, `locked`, `changed`; 400 `not_prompt`, `off_branch`, `factory`, ...) show as notices; files the cleanup could not remove (`notRemoved`) show once as a warning. |
+| Chat list and search | `GET /api/chat-histories/all` -> `{chats: ChatListing[]}` (`historyFile`, `projectSlug`, `title`, `updatedAt`, newest first); `GET /api/chat-histories/search?q=&limit=` (`q` at most 200 characters, else 422; blank 400; `limit` 1-100, default 20) -> `{hits}`, each a listing plus `matches` (`qaIndex`, `role`, `ordinal`, `snippet`). `ChatStore.search` scans question and answer text case-insensitively, newest first, in batches of 50, nothing indexed: at most 20 matches per chat, 60 characters of snippet each side. Client: `listAllChats`, `searchChats` in `lib/backend/api/chat.ts`. |
+| Chat picker | `features/chat/ChatPicker.tsx` (Alt+C in the active tab, mounted by `TabContent`), `useChatPicker.ts` (200 ms debounce, one abortable request per query). Without a query the chats grouped by project, newest group first; with one the title matches, then a row per content hit. A pick opens the chat in the active tab (`onOpenChat(historyFile, qaIndex?, hit?)` -> `ChatReveal`); `ChatContainer` settles the reveal once its own file loaded and paints the hit with `features/conversation/useTextHighlights.ts` (highlights `chat-search`, `chat-search-current`; text tagged `data-chat-text="<index>:<role>"`). Pi's search jump uses the same painter (`features/pi/useSearchHighlights.ts`). |
+| Tool rows | `features/conversation/tools/`: `ToolCallRow` (optional `display` label/icon and `stages`), `ProcessDetails`, `DiffView`, `patch`, `format`, `tools.css` and the registry `renderers.ts` (`registerToolRenderer`, `registerToolDisplay`/`toolDisplayOf` per source, `toolPlacement`, `renderToolCall`). `features/pi/tools/*` re-export them. The chat adapts a `ToolCallRecord` to `{call, run}` (`features/chat/toolRun.tsx`, one stable run per record) and registers its renderers (`features/chat/toolRenderers.tsx`, source `chat`; web search, deep research, plots, diagrams, mind maps, workspace agent, learn session stand alone). `app/_components/toolRenderers.ts` loads Pi's memory row for the chat without a chat -> Pi import. |
+| Factory cards | A `factory-notice` or `factory` tool result with a card renders it (`features/pi/factoryCard.ts`, `FactoryCard.tsx`, `factoryView.tsx`); behaviour: [agent factory](agent-factory.md#notices). |
+
+### Backlog: cleanliness refactors
+
+Not done, carried over from the conversation unification plan:
+
+- **Split `PiTranscript.tsx`**: piece derivation (`answerPieces`, `assistantPieces`, `headPieces`) beside `transcript.ts`, pure and cacheable per message; rendering, search jump and held messages as small files.
+- **Explicit renderer registration**: one index listing every tool and message renderer instead of the side-effect imports in `PiTranscript.tsx`, heavy renderers (video preview, diff view) loaded lazily.
+- **`PiTab.tsx` as a state machine** (no session, starting, attached, closed) instead of the refs guarding effects (`firstSent`); roster, dock and header as components reading the state.
+- **Structured subagent data**: pi-host forwards the roster as a typed event instead of parsing the `PI_SUBAGENT_ASYNC_JSON:` widget text (`features/pi/subagents.ts`); touches the contract with the pi-subagents extension.
+- **Drop the session-list poll**: `sessionStore.ts` refreshes every 30 s (`POLL_MS`) besides `sessions_changed`, socket reopen, focus and visibility; drop it once pi-host tests prove every list change emits the event.
+- **Ambient pause** (`deepfocus-ambient`, own repository): a `paused` flag in `NightOceanFrame` so the shell can pause an unfocused window without the pop `still` causes.
 
 ## Architecture workspaces
 
@@ -263,9 +290,9 @@ Bun service (`pi-host/`, `run-pi-host.sh`, `gigachad-bot-pi-host.service`): one 
 
 ### Frontend
 
-- Only `features/pi/` knows Pi's protocol (`sessionStore`/`usePiSession`, `PiTab`, `PiComposer`, `PiSessionPicker`, tool rows in `tools/`); `features/workbench/` reuses it. `features/pi` never imports `features/factory`; shared shapes live in `lib/domain/factory.ts`.
+- Only `features/pi/` knows Pi's protocol (`sessionStore`/`usePiSession`, `PiTab`, `PiComposer`, `PiSessionPicker`, `PiTranscript`); `features/workbench/` reuses it. The transcript renders on the shared column, turn card and tool rows ([conversations](#conversations-chat-and-pi)). `features/pi` never imports `features/factory`; shared shapes live in `lib/domain/factory.ts`.
 - Search: `GET /api/pi/search` returns `(entryId, ordinal)` hits, `GET /api/pi/sessions/{id}/matches` a session's ranked hits, `GET /api/pi/sessions/{id}/entries` a preview without attaching. `searchMatch.ts` is the browser copy of pi-host's span matching, kept equal by a test; the ordinal counts spans per rendered text node, so markup the host counts as text can shift it.
-- `renderers.ts` registers native UI per tool or `custom` message type (e.g. `factory-notice` in `FactoryNotices.tsx`, `video-preview`).
+- `renderers.ts` registers native UI per `custom` message type (e.g. `factory-notice` in `FactoryNotices.tsx`, `video-preview`) and re-exports the tool registry of `features/conversation/tools/renderers.ts` (e.g. `factory` in `FactoryTool.tsx`).
 - `pi-extensions/files.ts` sends the RPC notice `Open file: <abs path>`; `usePiSession` routes it to the file panel through `OPEN_FILE_NOTICE_PREFIX` instead of a toast.
 - `/btw` is the user's Pi extension (`~/.pi/agent/extensions/btw/`): `usePiSession` parses `setWidget` record `btw_state` (version 1, whole state, unknown versions ignored), sends `/btw-list` after attach when `get_commands` lists it; `/btw*` prompts bypass the held/steer/follow-up queue and go out without the lead.
 - Model selector: offers catalog models Pi offers the session (`get_available_models`, by gateway id: `gateway` model `openrouter/x` is catalog `openrouter/x`); a pick sends `set_model` for the session's own provider, else `gateway` (`piModelFor`). An empty tab offers `/api/models/pi`.
@@ -461,7 +488,7 @@ templates/latex/
 - Deferred deletions use `UndoDeleteContext`: scheduling the next commits the previous, refusal restores it; `pagehide` or hiding commits the pending one, and `DELETE` uses `keepalive`.
 - `DELETE /api/documents` answers `removed` (keys and absolute paths gone; unlinked mounts excluded) and records a `delete` change per absolute path. The frontend announces each (`announceFileRemoval`); other devices get the `delete` event. Shared lists drop entries at or inside the path; `TabManager` closes tabs whose item or `texFolder` lies inside (`tabsAfterRemoval`). Tabs are not stored.
 - A tab's crumb is `tab.projectSlug`; disk files resolve their project via `owningProject` (`workspaceTree.ts`): listing project, else linked-folder project, else none.
-- Removed chat pairs/attachments leave model context immediately; undo restores by message identity (a pair before its follower, an attachment only into its message).
+- Removed chat attachments leave model context immediately; undo restores by message identity (an attachment only into its message). A removed pair is final (no undo, [conversations](#conversations-chat-and-pi)).
 
 ### Delete cleanup
 
