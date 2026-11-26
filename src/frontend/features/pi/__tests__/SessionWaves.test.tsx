@@ -157,7 +157,7 @@ describe("SessionWaves", () => {
   })
 
   it("reads again on a factory change", async () => {
-    api.callFactory.mockResolvedValueOnce({ waves: [] }).mockResolvedValueOnce({ waves: [wave("w1")] })
+    api.callFactory.mockResolvedValueOnce({ waves: [] }).mockResolvedValueOnce({ waves: [wave("w1")] }).mockResolvedValue({ tasks: [] })
     renderPanel()
     await waitFor(() => expect(api.callFactory).toHaveBeenCalledTimes(1))
     act(() => {
