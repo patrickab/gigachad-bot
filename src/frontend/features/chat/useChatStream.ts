@@ -25,8 +25,8 @@ export interface UseChatStreamReturn {
   /** `skipAddMessages` streams into the existing trailing assistant message instead of appending a user/assistant pair. */
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
   cancel: () => void
-  /** Take the pair starting at `user` out of the chat; the returned restore puts it back before the message that followed it, or at its old index (clamped) once that is gone. Null when `user` heads no pair. */
-  removePair: (user: Message) => (() => void) | null
+  /** Take the pair starting at `user` out of the chat, with every later pair when `through` is "end". Returns the new list, null when `user` is not in the chat. */
+  removePairs: (user: Message, through: "pair" | "end") => Message[] | null
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   /** Update the latest messages so a `send` right after builds its history from them, without waiting for a render. Returns the result. */
   replaceMessages: (update: (current: Message[]) => Message[]) => Message[]
@@ -183,23 +183,14 @@ export function useChatStream(): UseChatStreamReturn {
     return next
   }, [])
 
-  const removePair = useCallback((user: Message) => {
+  const removePairs = useCallback((user: Message, through: "pair" | "end") => {
     const current = messagesRef.current
     const index = current.indexOf(user)
-    if (index < 0 || !current[index + 1]) return null
-    const pair = current.slice(index, index + 2)
-    const follower = current[index + 2]
-    replaceMessages((latest) => latest.filter((m) => !pair.includes(m)))
-    return () => {
-      replaceMessages((latest) => {
-        if (latest.includes(user)) return latest
-        const at = follower ? latest.indexOf(follower) : -1
-        const insertAt = at < 0 ? Math.min(index, latest.length) : at
-        return [...latest.slice(0, insertAt), ...pair, ...latest.slice(insertAt)]
-      })
-    }
+    if (index < 0) return null
+    // A pair whose answer is missing is the user message alone
+    const end = through === "end" ? current.length : index + (current[index + 1]?.role === "assistant" ? 2 : 1)
+    return replaceMessages(() => [...current.slice(0, index), ...current.slice(end)])
   }, [replaceMessages])
 
-
-  return { messages, isStreaming, send, cancel, removePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
+  return { messages, isStreaming, send, cancel, removePairs, setMessages, replaceMessages, totalUsage, setTotalUsage }
 }

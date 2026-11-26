@@ -15,7 +15,7 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
 }))
 vi.mock("@/features/chat/messages/ChatMessage", () => ({
   AssistantMessageContent: ({ content }: { content: string }) => <div>{content}</div>,
-  ChatMessage: ({ content }: { content: string }) => <div>{content}</div>,
+  ChatMessage: ({ content, laterTurns }: { content: string; laterTurns?: number }) => <div data-later-turns={laterTurns}>{content}</div>,
 }))
 // The top bar's slot is not mounted here: the toggle renders in place
 vi.mock("@/features/conversation/WideModeToggle", () => ({
@@ -87,6 +87,13 @@ describe("ChatContainer column", () => {
     rerender(chat({ messages: pairsOf(3, " and a streamed tail"), isStreaming: true }))
     expect(screen.getByText("Answer 2 and a streamed tail")).toBeTruthy()
     expect(scroller().scrollTop).toBe(scroller().scrollHeight)
+  })
+
+  it("tells each question how many pairs follow it, for the edit's confirmation", () => {
+    render(chat({ messages: pairsOf(3) }))
+    fireEvent.click(screen.getByRole("button", { name: "Question 0" }))
+    expect(screen.getByText("Question 0").getAttribute("data-later-turns")).toBe("2")
+    expect(screen.getByText("Question 2").getAttribute("data-later-turns")).toBe("0")
   })
 
   it("mounts the newest page of a long history, earlier pairs on request", () => {

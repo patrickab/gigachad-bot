@@ -131,9 +131,17 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
     })
   }, [tab.historyFile, createBranch, onOpenChat])
 
+  // A failed send keeps the edited text: it goes into the composer, ahead of any draft there
+  const { handleEditPair } = turns
+  const onEditPair = useCallback((index: number, text: string) => {
+    void handleEditPair(index, text).catch(() => false).then((sent) => {
+      if (!sent) chatInputRef.current?.updateText((draft) => (draft ? `${text}\n\n${draft}` : text))
+    })
+  }, [handleEditPair])
+
   return {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems,
+    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onEditPair,
     onBranch: tab.historyFile ? handleBranch : undefined,
   }
 }

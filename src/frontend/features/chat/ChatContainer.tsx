@@ -43,7 +43,10 @@ interface ChatContainerProps {
   isStreaming: boolean
   onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
+  /** Delete the pair whose question is at message `index`, confirmed by the user. */
   onDeletePair: (index: number) => void
+  /** Replace the pair whose question is at message `index`, and every later one, by the edited `text`. Unset -> no edit. */
+  onEditPair?: (index: number, text: string) => void
   onBranch?: (qaIndex: number) => void
   reveal?: ChatReveal
   branchMessageIdx?: number | null
@@ -97,6 +100,7 @@ export function ChatContainer({
   onSend,
   onCancel,
   onDeletePair,
+  onEditPair,
   onBranch,
   reveal,
   branchMessageIdx,
@@ -156,6 +160,17 @@ export function ChatContainer({
     onSend(text, attachments)
   }, [onSend, messages.length, chatId])
 
+  // An open preview of a removed message, or of one whose index moves, closes with it
+  const handleDelete = useCallback((index: number) => {
+    setPreviewTarget((target) => (target && target.messageIndex >= index ? null : target))
+    onDeletePair(index)
+  }, [onDeletePair])
+  const handleEdit = useMemo(() => onEditPair && ((index: number, text: string) => {
+    setPreviewTarget((target) => (target && target.messageIndex >= index ? null : target))
+    setFollowSeq((seq) => seq + 1)
+    onEditPair(index, text)
+  }), [onEditPair])
+
   const context = useMemo<ChatContext | undefined>(
     () => attachmentActions && {
       attachments: messages.flatMap((m, messageIndex) => (m.attachments ?? []).map((attachment) => ({ messageIndex, attachment }))),
@@ -169,7 +184,7 @@ export function ChatContainer({
   // Settled pairs get equal props each streamed frame, so the column skips them
   const renderPreview = (turn: ChatTurn) => chatPairPreview(turn.pair.assistant)
   const previewText = (turn: ChatTurn) => turn.pair.assistant.content
-  const renderBody = (turn: ChatTurn, _index: number, collapse: (() => void) | undefined) => (
+  const renderBody = (turn: ChatTurn, index: number, collapse: (() => void) | undefined) => (
     <ChatPairBody
       user={turn.pair.user}
       assistant={turn.pair.assistant}
@@ -178,7 +193,9 @@ export function ChatContainer({
       isStreaming={turn.live}
       onCollapse={collapse}
       onAttachmentClick={openPreview}
-      onDelete={onDeletePair}
+      onDelete={handleDelete}
+      onEdit={handleEdit}
+      laterTurns={turns.length - 1 - index}
       onBranch={onBranch}
     />
   )

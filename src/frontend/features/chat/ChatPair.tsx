@@ -55,11 +55,15 @@ interface ChatPairBodyProps {
   onAttachmentClick?: (messageIndex: number, attachment: Attachment) => void
   /** Unset -> read-only pair without a delete action. */
   onDelete?: (index: number) => void
+  /** The question's edit with the new text. Unset -> no edit action. */
+  onEdit?: (index: number, text: string) => void
+  /** Pairs after this one, removed by an edit. */
+  laterTurns?: number
   onBranch?: (qaIndex: number) => void
 }
 
 /** An open pair's card content: the question, its tool calls and the answer. Props stay equal for a settled pair, so a streamed frame skips it. */
-export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onBranch }: ChatPairBodyProps) {
+export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onEdit, laterTurns, onBranch }: ChatPairBodyProps) {
   return (
     <>
       <ChatMessage
@@ -70,6 +74,8 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         isStreaming={isStreaming}
         onAttachmentClick={onAttachmentClick && ((attachment) => onAttachmentClick(globalIndex, attachment))}
         onDelete={onDelete}
+        onEdit={onEdit}
+        laterTurns={laterTurns}
         onCollapse={onCollapse}
       />
       {assistant.tool_calls?.map((call) => (

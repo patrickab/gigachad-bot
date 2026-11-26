@@ -108,7 +108,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const canvas = useCanvasView()
   const {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onBranch,
+    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onEditPair, onBranch,
   } = useTabChat({ reveal, onOpenChat, onOpenItem })
   const { models } = chat
   const { standaloneFile } = filePicker
@@ -151,6 +151,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       historyLoading={historyLoading}
       isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
+      onEditPair={onEditPair}
       extracting={extracting}
       onSend={handleSend}
       onCancel={chat.cancel}

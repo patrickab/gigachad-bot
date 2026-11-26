@@ -14,11 +14,11 @@ import { useTabChat } from "../useTabChat"
  * app-wide providers (tab, branches, undo, tools, settings) are stubbed, with values as stable as the real ones.
  *
  * Props covered, every one `TabContent` hands `ChatContainer` (add a new one here and to `TabChat` below):
- * chatId, historyFile, draftKey, onChatColumnChange, messages, historyLoading, isStreaming, onDeletePair, extracting,
+ * chatId, historyFile, draftKey, onChatColumnChange, messages, historyLoading, isStreaming, onDeletePair, onEditPair, extracting,
  * onSend, onCancel, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
  * (onToggleActive, onRemove, onContentChange, onPreviewOpen), attachMenuItems, composerLeading, composerNotice.
  * What `ChatContainer` hands a pair from them: the pair's messages and indexes, isStreaming, onCollapse,
- * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onBranch, the branch separator.
+ * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onEdit, laterTurns, onBranch, the branch separator.
  */
 
 const { renders, attachmentClicks, stream, history, branches, undoDelete, enabledTools } = vi.hoisted(() => ({
@@ -124,7 +124,7 @@ const onOpenItem = () => {}
 function TabChat({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabChat>) => void }) {
   const tabChat = useTabChat({ reveal, onOpenChat, onOpenItem })
   onTabChat(tabChat)
-  const { chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, docs, turns, attachmentActions, attachMenuItems, onBranch } = tabChat
+  const { chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch } = tabChat
   return (
     <ChatContainer
       chatId={chatId}
@@ -135,6 +135,7 @@ function TabChat({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabC
       historyLoading={historyLoading}
       isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
+      onEditPair={onEditPair}
       extracting={extracting}
       onSend={(text, attachments) => turns.handleSend(text, attachments)}
       onCancel={chat.cancel}

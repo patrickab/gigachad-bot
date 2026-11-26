@@ -47,7 +47,7 @@ function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record
   }
 }
 
-/** Send and edit chat turns: attachment intake, tool artifacts, autosave, and undoable pair/attachment removal. */
+/** Send and edit chat turns: attachment intake, tool artifacts, autosave, pair delete and edit, and undoable attachment removal. */
 export function useChatTurns({
   chat,
   chatId,
@@ -57,7 +57,7 @@ export function useChatTurns({
   prompts,
   autosave,
 }: {
-  chat: Pick<UseChatStreamReturn, "messages" | "send" | "removePair" | "setMessages" | "replaceMessages">
+  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "totalUsage" | "send" | "removePairs" | "setMessages" | "replaceMessages">
   chatId: string
   projectSlug: string | null
   config: TabConfig
@@ -65,7 +65,7 @@ export function useChatTurns({
   prompts: Record<string, string>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
 }) {
-  const { messages, send, removePair, setMessages, replaceMessages } = chat
+  const { messages, isStreaming, totalUsage, send, removePairs, setMessages, replaceMessages } = chat
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
   const baseParams = useMemo(
@@ -79,9 +79,13 @@ export function useChatTurns({
   // Every handler reads the messages here: created once per chat, they stay the same while a reply streams, so settled
   // pairs skip its frames
   const messagesRef = useRef(messages)
+  const isStreamingRef = useRef(isStreaming)
+  const totalUsageRef = useRef(totalUsage)
   useLayoutEffect(() => {
     messagesRef.current = messages
-  }, [messages])
+    isStreamingRef.current = isStreaming
+    totalUsageRef.current = totalUsage
+  }, [messages, isStreaming, totalUsage])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -114,18 +118,20 @@ export function useChatTurns({
     setMessages((current) => applyReferenceReads(current, reads))
   }, [setMessages])
 
-  const handleSend = useCallback(async (text: string, attachments: Attachment[]) => {
+  /** Send `text` with `attachments` as a new pair. Resolves to whether the answer completed. */
+  const handleSend = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
     const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
     if (draft.length === 0) {
-      await finishTurn(await send({
+      const completion = await send({
         ...baseParams,
         chat_id: chatId,
         user_msg: text,
         img_paths: collectActiveImagePaths(history),
         project_slug: projectSlug,
-      }))
-      return
+      })
+      await finishTurn(completion)
+      return completion !== null
     }
 
     replaceMessages((current) => [
@@ -144,11 +150,13 @@ export function useChatTurns({
     }, parseFiles).catch(() => null)
     if (!built) {
       updateMessageAt(setMessages, -1, (m) => m.role === "assistant" ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : null)
-      return
+      return false
     }
 
     updateMessageAt(setMessages, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
-    await finishTurn(await send(built.request, true))
+    const completion = await send(built.request, true)
+    await finishTurn(completion)
+    return completion !== null
   }, [refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
@@ -183,16 +191,30 @@ export function useChatTurns({
     )
   }, [replaceMessages, chatId, projectSlug, scheduleDelete])
 
-  // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
+  /** Save the chat after a pair left it. While a reply streams the live pair stays out: its own save follows when it completes. */
+  const saveRemoval = useCallback((next: Message[]) => {
+    return autosave(isStreamingRef.current ? next.slice(0, -2) : next, totalUsageRef.current)
+  }, [autosave])
+
+  /** Delete the pair whose question is at `index`, for good: it leaves the chat and the saved history. */
   const handleDeletePair = useCallback((index: number) => {
-    const message = messagesRef.current[index]
-    const restore = message && removePair(message)
-    if (!restore) return
-    const scheduledChat = chatId
-    scheduleDelete(`pair:${chatId}:${index}`, "message pair", async () => {}, () => {
-      if (chatIdRef.current === scheduledChat) restore()
-    })
-  }, [removePair, chatId, scheduleDelete])
+    const user = messagesRef.current[index]
+    const next = user?.role === "user" ? removePairs(user, "pair") : null
+    if (next) void saveRemoval(next)
+  }, [removePairs, saveRemoval])
+
+  /**
+   * Replace the pair whose question is at `index`, and every later pair, by `text` sent with the question's attachments.
+   * Resolves to whether the new answer completed; false without a change while a reply streams.
+   */
+  const handleEditPair = useCallback(async (index: number, text: string): Promise<boolean> => {
+    const user = messagesRef.current[index]
+    if (isStreamingRef.current || user?.role !== "user") return false
+    const next = removePairs(user, "end")
+    if (!next) return false
+    await saveRemoval(next)
+    return handleSend(text, user.attachments ?? [])
+  }, [removePairs, saveRemoval, handleSend])
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
@@ -207,6 +229,7 @@ export function useChatTurns({
     handleToggleAttachmentActive,
     handleRemoveAttachment,
     handleDeletePair,
+    handleEditPair,
     handleAttachmentContentChange,
     syncReferences,
   }
