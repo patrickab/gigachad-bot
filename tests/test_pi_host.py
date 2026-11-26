@@ -643,9 +643,19 @@ def test_a_turn_delete_passes_through_and_drops_the_thumbnails_of_removed_images
     response = _client().post(TURN_URL, json={"through": "end"}, headers=TRUSTED)
 
     assert response.status_code == 200
-    assert response.json() == {"removedEntries": 4, "removedMedia": [image]}
+    assert response.json() == {"removedEntries": 4, "removedMedia": [image], "notRemoved": []}
     assert json.loads(host.requests[0].content) == {"through": "end"}
     assert pi_media.thumbnail_for(image) is None
+
+
+def test_a_turn_delete_names_what_its_cleanup_left_on_disk(monkeypatch):
+    paste = ".pi/pastes/ab.txt"
+    _serve(monkeypatch, {TURN_DELETE: (200, {"ok": True, "removedEntries": 2, "removedMedia": [], "notRemoved": [paste]})})
+
+    response = _client().post(TURN_URL, json={"through": "turn"}, headers=TRUSTED)
+
+    assert response.status_code == 200
+    assert response.json() == {"removedEntries": 2, "removedMedia": [], "notRemoved": [paste]}
 
 
 @pytest.mark.parametrize("reason", ["running", "compacted", "locked", "changed"])

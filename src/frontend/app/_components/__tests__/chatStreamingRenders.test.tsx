@@ -18,7 +18,8 @@ import { useTabChat } from "../useTabChat"
  * onSend, onCancel, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
  * (onToggleActive, onRemove, onContentChange, onPreviewOpen), attachMenuItems, composerLeading, composerNotice.
  * What `ChatContainer` hands a pair from them: the pair's messages and indexes, isStreaming, onCollapse,
- * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onEdit, laterTurns, onBranch, the branch separator.
+ * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onEdit, laterTurnsOf, onBranch, the branch separator.
+ * Edit and delete pause through `TurnEditsPaused` while a reply streams: no prop of a settled pair changes when a send starts or ends.
  */
 
 const { renders, attachmentClicks, stream, history, branches, undoDelete, enabledTools } = vi.hoisted(() => ({
@@ -102,6 +103,8 @@ const settled: Message[] = [
   { role: "assistant", content: "Answer 0" },
   { role: "user", content: "Question 1" },
   { role: "assistant", content: "Answer 1" },
+  { role: "user", content: "Question 2" },
+  { role: "assistant", content: "Answer 2" },
 ]
 history.current = {
   messages: settled, filename: "c1.json", chat_id: "c1", title: null, usage: null, parent_id: null, branch_message_idx: 0, children: [],
@@ -153,7 +156,10 @@ function TabChat({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabC
 }
 
 describe("a tab's chat while a reply streams", () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    stream.current = null
+  })
 
   it("re-renders neither an open nor a collapsed settled pair", async () => {
     let tabChat!: ReturnType<typeof useTabChat>
@@ -161,7 +167,7 @@ describe("a tab's chat while a reply streams", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Question 0" }))
     expect(screen.getByRole("separator")).toBeTruthy()
 
-    act(() => { void tabChat.turns.handleSend("Question 2", []) })
+    act(() => { void tabChat.turns.handleSend("Question 3", []) })
     await waitFor(() => expect(stream.current).not.toBeNull())
     act(() => stream.current!.push({ event: "token", data: "A" }))
     await waitFor(() => expect(renders.get("assistant:A")).toBeGreaterThan(0))
@@ -183,5 +189,25 @@ describe("a tab's chat while a reply streams", () => {
 
     act(() => stream.current!.push({ event: "done", data: "" }))
     await waitFor(() => expect(tabChat.chat.isStreaming).toBe(false))
+  })
+
+  it("re-renders no settled pair for a send from start to end, nor for the delete of a later pair", async () => {
+    let tabChat!: ReturnType<typeof useTabChat>
+    render(<TabContext.Provider value={tab}><TabChat onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
+    fireEvent.click(await screen.findByRole("button", { name: "Question 0" }))
+    const watched = ["user:Question 0", "assistant:Answer 0", "preview:Answer 1"]
+    const before = watched.map((key) => renders.get(key) ?? 0)
+    expect(before.every((count) => count > 0)).toBe(true)
+
+    act(() => { void tabChat.turns.handleSend("Question 3", []) })
+    await waitFor(() => expect(stream.current).not.toBeNull())
+    act(() => stream.current!.push({ event: "token", data: "Reply" }))
+    act(() => stream.current!.push({ event: "done", data: "" }))
+    await waitFor(() => expect(tabChat.chat.isStreaming).toBe(false))
+    expect(watched.map((key) => renders.get(key) ?? 0)).toEqual(before)
+
+    act(() => tabChat.turns.handleDeletePair(4))
+    await waitFor(() => expect(tabChat.chat.messages.map((m) => m.content)).not.toContain("Question 2"))
+    expect(watched.map((key) => renders.get(key) ?? 0)).toEqual(before)
   })
 })

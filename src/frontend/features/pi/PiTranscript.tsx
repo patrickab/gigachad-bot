@@ -2,7 +2,7 @@
 
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
-import { createContext, Fragment, memo, useContext, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, Fragment, memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, FoldVertical, Sparkles, TerminalSquare } from "lucide-react"
 import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
@@ -12,7 +12,7 @@ import { useTabActive } from "@/contexts/TabContext"
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
-import { TurnAnswer, TurnQuestion } from "@/features/conversation/TurnQuestion"
+import { TurnAnswer, TurnEditsPaused, TurnQuestion } from "@/features/conversation/TurnQuestion"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { PiSearchBar } from "./PiSearchBar"
@@ -290,27 +290,81 @@ function SkillFold({ skill, fileLinks }: { skill: SkillBlock; fileLinks: FileLin
   )
 }
 
-interface PiTurnProps {
+/**
+ * What one turn renders from: its own messages (`turn` spans them all), their entry ids and marks, and the runs of its tool
+ * calls. Kept while equal (`useTurnViews`), so a send, a delete or a tool run elsewhere hands a settled turn the same view.
+ */
+interface TurnView {
   messages: AgentMessage[]
   turn: Turn
   confirmed: Confirmed
   runs: Record<string, ToolRun>
+}
+
+function turnView(messages: AgentMessage[], turn: Turn, confirmed: Confirmed, runs: Record<string, ToolRun>, live: boolean): TurnView {
+  const own = messages.slice(turn.start, turn.end)
+  const entryIds = confirmed.entryIds.slice(turn.start, Math.min(turn.end, confirmed.count))
+  const marks: Record<string, MessageMarks> = {}
+  for (const id of entryIds) if (confirmed.marks[id]) marks[id] = confirmed.marks[id]
+  // A live turn's streaming reply has calls no message holds yet: it reads every run
+  const ownRuns: Record<string, ToolRun> = live ? runs : {}
+  if (!live) {
+    for (const message of own) {
+      if (message.role !== "assistant") continue
+      for (const block of (message as AssistantMessage).content) if (block.type === "toolCall" && runs[block.id]) ownRuns[block.id] = runs[block.id]
+    }
+  }
+  return { messages: own, turn: { start: 0, end: own.length }, confirmed: { count: entryIds.length, entryIds, marks }, runs: ownRuns }
+}
+
+function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((item, index) => Object.is(item, b[index]))
+}
+
+function sameRecord<T>(a: Record<string, T>, b: Record<string, T>): boolean {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]))
+}
+
+function sameView(a: TurnView, b: TurnView): boolean {
+  return sameItems(a.messages, b.messages) && sameItems(a.confirmed.entryIds, b.confirmed.entryIds)
+    && sameRecord(a.confirmed.marks, b.confirmed.marks) && sameRecord(a.runs, b.runs)
+}
+
+/** Each turn's view by key, the previous object while its content is equal. */
+function useTurnViews(turns: readonly PiColumnTurn[], messages: AgentMessage[], confirmed: Confirmed, runs: Record<string, ToolRun>): Map<string, TurnView> {
+  const [state, setState] = useState<{ turns: readonly PiColumnTurn[]; runs: Record<string, ToolRun>; views: Map<string, TurnView> }>({ turns: [], runs: {}, views: new Map() })
+  if (state.turns === turns && state.runs === runs) return state.views
+  const views = new Map<string, TurnView>()
+  for (const item of turns) {
+    const fresh = turnView(messages, item.turn, confirmed, runs, item.live)
+    const kept = state.views.get(item.key)
+    views.set(item.key, kept && sameView(kept, fresh) ? kept : fresh)
+  }
+  setState({ turns, runs, views })
+  return views
+}
+
+interface PiTurnProps {
+  view: TurnView
   fileLinks: FileLinks
 }
 
 /** A collapsed turn's preview: the answer with activity folded as when opened (omp-web's preview); memoized like the open turn. */
-const PiTurnPreview = memo(function PiTurnPreview({ messages, turn, confirmed, runs, fileLinks }: PiTurnProps) {
+const PiTurnPreview = memo(function PiTurnPreview({ view, fileLinks }: PiTurnProps) {
+  const { messages, turn, confirmed, runs } = view
   const pieces = answerPieces(messages, turn, null, confirmed, runs)
   return <TurnPreview tools={[]}>{pieces.length > 0 ? <CollapsedAnswer pieces={pieces} runs={runs} fileLinks={fileLinks} /> : null}</TurnPreview>
 })
 
 /** One open turn's question and answer; memoized so a streamed delta re-renders the newest turn only. */
-const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirmed, runs, live, laterTurns, onCollapse, onBranch, onDeleteTurn, onEditTurn, fileLinks }: PiTurnProps & {
+const PiTurnBody = memo(function PiTurnBody({ view, turnKey, streaming, live, laterTurnsOf, onCollapse, onBranch, onDeleteTurn, onEditTurn, fileLinks }: PiTurnProps & {
+  turnKey: string
   /** The streaming reply, for the newest turn only. */
   streaming: AssistantMessage | null
   live: boolean
-  /** Turns after this one, what an edit removes with it. */
-  laterTurns: number
+  /** Counts the turns after the one keyed `key`, what an edit removes with it. */
+  laterTurnsOf: (key: string) => number
   onCollapse?: () => void
   /** Branch keeping `entryId`. */
   onBranch?: (entryId: string) => void
@@ -319,6 +373,7 @@ const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirm
   /** Delete the turn whose prompt is `entryId` and every later one, then send `text` with `images`. */
   onEditTurn?: (entryId: string, text: string, images: ImageContent[]) => void
 }) {
+  const { messages, turn, confirmed, runs } = view
   const prompt = messages[turn.start]
   const { text, compaction, skill } = promptOf(prompt)
   const promptImages = useMemo(() => userImageAttachments((prompt as { content?: unknown }).content), [prompt])
@@ -337,7 +392,7 @@ const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirm
   const remove = editFrom && onDeleteTurn ? () => onDeleteTurn(editFrom) : undefined
   return (
     <>
-      <TurnQuestion text={text} live={live} icon={icon} onCollapse={onCollapse} onEdit={edit} onDelete={remove} laterTurns={laterTurns}>
+      <TurnQuestion text={text} live={live} icon={icon} onCollapse={onCollapse} onEdit={edit} onDelete={remove} laterTurns={() => laterTurnsOf(turnKey)}>
         {promptMarks && <MarksLine marks={promptMarks} />}
         {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
         {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
@@ -375,7 +430,8 @@ interface PiColumnTurn extends ConversationTurn {
  *   (outside text fields) step through the session's hits, Escape clears
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message
  * - `onDeleteTurn` and `onEditTurn` add delete and edit to the question of each turn with a persisted prompt, compactions
- *   aside, and to none while a run is live. Both get the prompt's entry id; the transcript follows the host's resync
+ *   aside, and to none while a run is live (`TurnEditsPaused`). Both get the prompt's entry id; the transcript follows the host's resync
+ * - A settled turn's props hold through streamed deltas, sends, deletes and tool runs of other turns (`useTurnViews`)
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  * - `readOnly` (a session preview): keys never reach its column
  */
@@ -402,9 +458,8 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   const runs = useMemo(() => toolRunsOf({ messages: confirmedMessages, unconfirmed, optimistic, runs: liveRuns }), [confirmedMessages, unconfirmed, optimistic, liveRuns])
   const confirmed = useMemo<Confirmed>(() => ({ count: confirmedMessages.length, entryIds, marks }), [confirmedMessages.length, entryIds, marks])
   const liveTail = running || streaming !== null || optimistic !== null
-  // While a run is live no turn is edited or deleted: the host refuses a running session
-  const deleteTurn = liveTail || readOnly ? undefined : onDeleteTurn
-  const editTurn = liveTail || readOnly ? undefined : onEditTurn
+  const deleteTurn = readOnly ? undefined : onDeleteTurn
+  const editTurn = readOnly ? undefined : onEditTurn
   const columnTurns = useMemo(() => turns.map((turn, index): PiColumnTurn => {
     const { text, compaction, skill } = promptOf(messages[turn.start])
     return {
@@ -415,6 +470,14 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
       turn,
     }
   }), [turns, messages, confirmed, liveTail])
+  const views = useTurnViews(columnTurns, messages, confirmed, runs)
+  // Read when an edit is submitted: a count handed to each turn would change for every settled turn on each send and delete
+  const keysRef = useRef<string[]>([])
+  useLayoutEffect(() => { keysRef.current = columnTurns.map((item) => item.key) }, [columnTurns])
+  const laterTurnsOf = useCallback((key: string) => {
+    const index = keysRef.current.indexOf(key)
+    return index < 0 ? 0 : keysRef.current.length - 1 - index
+  }, [])
   const [preview, setPreview] = useState<Attachment | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -454,16 +517,14 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
     event.preventDefault()
   }, { active: tabActive && search !== null })
 
-  const renderPreview = (item: PiColumnTurn) => <PiTurnPreview messages={messages} turn={item.turn} confirmed={confirmed} runs={runs} fileLinks={fileLinks} />
+  const renderPreview = (item: PiColumnTurn) => <PiTurnPreview view={views.get(item.key)!} fileLinks={fileLinks} />
   const renderBody = (item: PiColumnTurn, index: number, collapse: (() => void) | undefined) => (
     <PiTurnBody
-      messages={messages}
-      turn={item.turn}
+      view={views.get(item.key)!}
+      turnKey={item.key}
       streaming={index === turns.length - 1 ? streaming : null}
-      confirmed={confirmed}
-      runs={runs}
       live={item.live}
-      laterTurns={turns.length - 1 - index}
+      laterTurnsOf={laterTurnsOf}
       onCollapse={collapse}
       onBranch={onBranch}
       onDeleteTurn={deleteTurn}
@@ -474,21 +535,24 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
 
   return (
     <PreviewContext.Provider value={setPreview}>
-      <ConversationColumn
-        turns={columnTurns}
-        renderPreview={renderPreview}
-        renderBody={renderBody}
-        header={search && <PiSearchBar search={search} />}
-        footer={<>
-          <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
-          <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
-        </>}
-        reveal={reveal}
-        paddingBottom={paddingBottom}
-        onColumnChange={onColumnChange}
-        scrollRef={scrollRef}
-        readOnly={readOnly}
-      />
+      {/* While a run is live no turn is edited or deleted: the host refuses a running session */}
+      <TurnEditsPaused.Provider value={liveTail}>
+        <ConversationColumn
+          turns={columnTurns}
+          renderPreview={renderPreview}
+          renderBody={renderBody}
+          header={search && <PiSearchBar search={search} />}
+          footer={<>
+            <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
+            <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
+          </>}
+          reveal={reveal}
+          paddingBottom={paddingBottom}
+          onColumnChange={onColumnChange}
+          scrollRef={scrollRef}
+          readOnly={readOnly}
+        />
+      </TurnEditsPaused.Provider>
     </PreviewContext.Provider>
   )
 }

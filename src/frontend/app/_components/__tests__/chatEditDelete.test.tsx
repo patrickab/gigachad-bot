@@ -113,8 +113,8 @@ describe("deleting a pair", () => {
 
     act(() => result.current.turns.handleDeletePair(2))
 
-    expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"])
-    await waitFor(() => expect(saveChat).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
+    expect(saveChat).toHaveBeenCalledTimes(1)
     expect(saveChat.mock.calls[0][0]).toBe("c1.json")
     expect(contents(lastSaved())).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"])
     // Created once per chat: a changed list hands settled pairs the same handler
@@ -126,9 +126,23 @@ describe("deleting a pair", () => {
 
     act(() => result.current.turns.handleDeletePair(0))
 
-    expect(contents(result.current.chat.messages)).toEqual(["Question 1", "Answer 1", "Question 2", "Answer 2"])
-    await act(async () => {})
+    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 1", "Answer 1", "Question 2", "Answer 2"]))
     expect(saveChat).not.toHaveBeenCalled()
+  })
+
+  it("keeps the pair and says why when the history file cannot be written", async () => {
+    const { result } = await renderChat("c1.json")
+    saveChat.mockRejectedValueOnce(new Error("disk full"))
+
+    act(() => result.current.turns.handleDeletePair(2))
+
+    await waitFor(() => expect(result.current.turns.turnError).toBe("The chat could not be saved, so the turn was not deleted."))
+    expect(contents(result.current.chat.messages)).toEqual(contents(messages))
+
+    // The next delete that saves clears it
+    act(() => result.current.turns.handleDeletePair(2))
+    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
+    expect(result.current.turns.turnError).toBeNull()
   })
 })
 
@@ -140,7 +154,7 @@ describe("editing a pair", () => {
     act(() => result.current.onEditPair(4, "Question 2, edited"))
 
     await waitFor(() => expect(contents(lastSaved() ?? [])).toContain("edited answer"))
-    expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1", "Question 2, edited", "edited answer"])
+    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1", "Question 2, edited", "edited answer"]))
     // Saved without the pair first, then with the new answer
     expect(contents(saveChat.mock.calls[0][2] as Message[])).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1"])
     expect(streams.requests).toHaveLength(1)
@@ -154,7 +168,7 @@ describe("editing a pair", () => {
     act(() => result.current.onEditPair(2, "Question 1, edited"))
 
     await waitFor(() => expect(contents(lastSaved() ?? [])).toContain("edited answer"))
-    expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1, edited", "edited answer"])
+    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1, edited", "edited answer"]))
     expect(result.current.chat.messages[2].attachments?.map((a) => a.name)).toEqual(["notes.md"])
     expect(contents(saveChat.mock.calls[0][2] as Message[])).toEqual(["Question 0", "Answer 0"])
     expect(streams.requests).toHaveLength(1)
@@ -173,6 +187,18 @@ describe("editing a pair", () => {
 
     await waitFor(() => expect(draft()).toBe("Question 2, edited"))
     expect(contents(saveChat.mock.calls[0][2] as Message[])).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1"])
+  })
+
+  it("keeps every pair, sends nothing and says why when the cut cannot be saved", async () => {
+    const { result, draft } = await renderChat("c1.json")
+    saveChat.mockRejectedValueOnce(new Error("disk full"))
+
+    act(() => result.current.onEditPair(2, "Question 1, edited"))
+
+    await waitFor(() => expect(result.current.turns.turnError).toBe("The chat could not be saved, so the turn was not edited."))
+    expect(contents(result.current.chat.messages)).toEqual(contents(messages))
+    expect(streams.requests).toHaveLength(0)
+    expect(draft()).toBe("")
   })
 
   it("changes only the state of a chat without a history file", async () => {

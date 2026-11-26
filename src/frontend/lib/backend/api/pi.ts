@@ -133,15 +133,16 @@ export type PiTurnRefusal = "running" | "compacted" | "locked" | "changed"
 
 /**
  * Delete the turn that `entryId` (a user prompt) starts for good: `through: "turn"` that turn, `"end"` it and every later one.
+ * `notRemoved`: the pastes and media files a cleanup after the rewrite could not remove, still on disk.
  * A 409 rejects with an ApiError whose `code` and `message` are the reason (`PiTurnRefusal`).
  */
-export async function deletePiTurn(sessionId: string, entryId: string, through: "turn" | "end"): Promise<{ removedEntries: number }> {
+export async function deletePiTurn(sessionId: string, entryId: string, through: "turn" | "end"): Promise<{ removedEntries: number; notRemoved: string[] }> {
   try {
-    const answer = await post<{ removedEntries: number }>(
+    const answer = await post<{ removedEntries: number; notRemoved?: string[] }>(
       `/pi/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(entryId)}/delete`,
       { through },
     )
-    return { removedEntries: answer.removedEntries }
+    return { removedEntries: answer.removedEntries, notRemoved: answer.notRemoved ?? [] }
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) throw new ApiError(error.message, 409, error.message)
     throw error

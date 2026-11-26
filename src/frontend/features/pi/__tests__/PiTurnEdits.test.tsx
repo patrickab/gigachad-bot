@@ -18,7 +18,7 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   fetchPiFiles: vi.fn(async () => []),
   fetchPiSessionMatches: vi.fn(async () => []),
-  deletePiTurn: vi.fn(async () => ({ removedEntries: 2 })),
+  deletePiTurn: vi.fn(async () => ({ removedEntries: 2, notRemoved: [] as string[] })),
 }))
 
 const session = vi.hoisted(() => ({
@@ -106,6 +106,16 @@ describe("a Pi turn's delete and edit", () => {
     await waitFor(() => expect(deletePiTurn).toHaveBeenCalledWith("s-1", "e2", "turn"))
     expect(screen.getByText("Prompt 1")).toBeInTheDocument()
     expect(session.send).not.toHaveBeenCalled()
+    expect(session.notify).not.toHaveBeenCalled()
+  })
+
+  it("shows one notice when a delete left files on disk", async () => {
+    vi.mocked(deletePiTurn).mockResolvedValueOnce({ removedEntries: 2, notRemoved: [".pi/pastes/a.txt", "f00d"] })
+    renderSession()
+    fireEvent.click(questionAction("Prompt 1", "Delete turn"))
+    confirm("Delete")
+    await waitFor(() => expect(session.notify).toHaveBeenCalledOnce())
+    expect(session.notify).toHaveBeenCalledWith("The turn is deleted, but 2 files of it could not be removed from disk: .pi/pastes/a.txt, f00d", "warning")
   })
 
   it("edits by deleting through the end, then prompting once with the turn's images", async () => {

@@ -22,10 +22,10 @@ interface ChatMessageProps {
   index: number
   /** The question's delete, confirmed first. */
   onDelete?: (index: number) => void
-  /** The question's edit, confirmed first when `laterTurns` go with it. */
+  /** The question's edit, confirmed first when later pairs go with it. */
   onEdit?: (index: number, text: string) => void
-  /** Pairs after this one, for the edit's confirmation. */
-  laterTurns?: number
+  /** Counts the pairs after the one at `index`, for the edit's confirmation. */
+  laterTurnsOf?: (index: number) => number
   /** The answer's branch. */
   onBranch?: (index: number) => void
   search_result?: Message["search_result"]
@@ -115,7 +115,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurns, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const hasResearch = !isUser && !!research_steps?.length
   // Research steps stream into `content` as progress text until the final answer replaces them
@@ -159,7 +159,7 @@ function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurns, 
         live={isStreaming}
         onDelete={onDelete && (() => onDelete(index))}
         onEdit={onEdit && ((text) => onEdit(index, text))}
-        laterTurns={laterTurns}
+        laterTurns={laterTurnsOf && (() => laterTurnsOf(index))}
         onCollapse={onCollapse}
       >
         {body}

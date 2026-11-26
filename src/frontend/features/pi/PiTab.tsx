@@ -63,6 +63,12 @@ export function piTurnError(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }
 
+/** The notice of a turn delete whose cleanup could not remove `paths` (pastes, media hashes). */
+export function piLeftOnDisk(paths: string[]): string {
+  const files = paths.length === 1 ? "1 file" : `${paths.length} files`
+  return `The turn is deleted, but ${files} of it could not be removed from disk: ${paths.join(", ")}`
+}
+
 /** Session `sessionId` of `repo` to resume: a listed one, or an archived one restored first. */
 async function resumableSession(repo: string, sessionId: string): Promise<PiSessionInfo> {
   const listed = await fetchPiSessions(repo)
@@ -173,17 +179,22 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   // An edit's text whose send failed goes into the composer, before the owner's insertion
   const [editInsertion, setEditInsertion] = useState<PiInsertion | null>(null)
   const editInserted = useCallback(() => setEditInsertion(null), [])
-  const deleteTurn = useCallback((entryId: string) => {
-    deletePiTurn(sessionId, entryId, "turn").catch((reason: unknown) => notify(piTurnError(reason), "error"))
+  // A delete whose cleanup left files on disk says so once: delete means deleted entirely
+  const deleteRange = useCallback(async (entryId: string, through: "turn" | "end") => {
+    const { notRemoved } = await deletePiTurn(sessionId, entryId, through)
+    if (notRemoved.length > 0) notify(piLeftOnDisk(notRemoved), "warning")
   }, [sessionId, notify])
+  const deleteTurn = useCallback((entryId: string) => {
+    deleteRange(entryId, "turn").catch((reason: unknown) => notify(piTurnError(reason), "error"))
+  }, [deleteRange, notify])
   const editTurn = useCallback(async (entryId: string, text: string, images: ImageContent[]) => {
     try {
-      await deletePiTurn(sessionId, entryId, "end")
+      await deleteRange(entryId, "end")
     } catch (reason) {
       return notify(piTurnError(reason), "error")
     }
     if (!(await send(text, images))) setEditInsertion({ id: Date.now(), text })
-  }, [sessionId, notify, send])
+  }, [deleteRange, notify, send])
 
   // The lead already sent: one the owner has not cleared yet never leads a second prompt
   const sentLead = useRef<string | null>(null)

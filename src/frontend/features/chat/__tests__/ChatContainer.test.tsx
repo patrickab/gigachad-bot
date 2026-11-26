@@ -15,7 +15,7 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
 }))
 vi.mock("@/features/chat/messages/ChatMessage", () => ({
   AssistantMessageContent: ({ content }: { content: string }) => <div>{content}</div>,
-  ChatMessage: ({ content, laterTurns }: { content: string; laterTurns?: number }) => <div data-later-turns={laterTurns}>{content}</div>,
+  ChatMessage: ({ content, index, laterTurnsOf }: { content: string; index: number; laterTurnsOf?: (index: number) => number }) => <div data-later-turns={laterTurnsOf?.(index)}>{content}</div>,
 }))
 // The top bar's slot is not mounted here: the toggle renders in place
 vi.mock("@/features/conversation/WideModeToggle", () => ({

@@ -49,6 +49,15 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
     })
 }
 
+/** `messages` without the pair whose question is `user` (`"pair"`), or without it and every later one (`"end"`); null when `user` is not there. */
+export function withoutPairs(messages: Message[], user: Message, through: "pair" | "end"): Message[] | null {
+  const index = messages.indexOf(user)
+  if (index < 0) return null
+  // A pair whose answer is missing is the user message alone
+  const end = through === "end" ? messages.length : index + (messages[index + 1]?.role === "assistant" ? 2 : 1)
+  return [...messages.slice(0, index), ...messages.slice(end)]
+}
+
 /** Own the message list and stream one assistant reply at a time. `send` resolves to null when cancelled, failed, or not completed. */
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
@@ -184,12 +193,8 @@ export function useChatStream(): UseChatStreamReturn {
   }, [])
 
   const removePairs = useCallback((user: Message, through: "pair" | "end") => {
-    const current = messagesRef.current
-    const index = current.indexOf(user)
-    if (index < 0) return null
-    // A pair whose answer is missing is the user message alone
-    const end = through === "end" ? current.length : index + (current[index + 1]?.role === "assistant" ? 2 : 1)
-    return replaceMessages(() => [...current.slice(0, index), ...current.slice(end)])
+    const next = withoutPairs(messagesRef.current, user, through)
+    return next && replaceMessages(() => next)
   }, [replaceMessages])
 
   return { messages, isStreaming, send, cancel, removePairs, setMessages, replaceMessages, totalUsage, setTotalUsage }

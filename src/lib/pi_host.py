@@ -259,10 +259,12 @@ class SearchResult(ContractModel):
 
 
 class TurnDeleted(ContractModel):
-    """What a turn delete removed: session entries, and the sha256 of the tool images whose files went."""
+    """What a turn delete removed: session entries, and the sha256 of the tool images whose files went. `not_removed`: the
+    pastes and media hashes a cleanup after the rewrite could not remove, still on disk."""
 
     removed_entries: int
     removed_media: list[str]
+    not_removed: list[str] = []
 
 
 class PromptAnswer(ContractModel):

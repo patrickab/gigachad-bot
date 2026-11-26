@@ -224,11 +224,17 @@ describe("api.ts — deletePiTurn", () => {
       return new Response(JSON.stringify({ removedEntries: 3, removedMedia: [] }), { status: 200, headers: { "Content-Type": "application/json" } })
     }))
 
-    await expect(api.deletePiTurn("s-1", "ab12", "end")).resolves.toEqual({ removedEntries: 3 })
+    await expect(api.deletePiTurn("s-1", "ab12", "end")).resolves.toEqual({ removedEntries: 3, notRemoved: [] })
 
     expect(new URL(lastCall(calls).url).pathname).toMatch(/\/pi\/sessions\/s-1\/turns\/ab12\/delete$/)
     expect(lastCall(calls).init.method).toBe("POST")
     expect(JSON.parse(String(lastCall(calls).init.body))).toEqual({ through: "end" })
+  })
+
+  it("names the files its cleanup left on disk", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ removedEntries: 2, removedMedia: [], notRemoved: [".pi/pastes/a.txt"] }), { status: 200, headers: { "Content-Type": "application/json" } })))
+
+    await expect(api.deletePiTurn("s-1", "ab12", "turn")).resolves.toEqual({ removedEntries: 2, notRemoved: [".pi/pastes/a.txt"] })
   })
 
   it("exposes the 409 reason to the caller", async () => {

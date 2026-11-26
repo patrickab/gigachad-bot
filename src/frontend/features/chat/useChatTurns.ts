@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import type { ChatStreamCompletion, UseChatStreamReturn } from "@/features/chat/useChatStream"
+import { withoutPairs, type ChatStreamCompletion, type UseChatStreamReturn } from "@/features/chat/useChatStream"
 import { deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
 import { attachReference } from "@/lib/backend/references"
 import {
@@ -47,7 +47,16 @@ function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record
   }
 }
 
-/** Send and edit chat turns: attachment intake, tool artifacts, autosave, pair delete and edit, and undoable attachment removal. */
+/** What the reader is told when a pair's delete or an edit's cut could not be saved: the pair stays. */
+export const DELETE_UNSAVED = "The chat could not be saved, so the turn was not deleted."
+export const EDIT_UNSAVED = "The chat could not be saved, so the turn was not edited."
+
+/**
+ * Send and edit chat turns: attachment intake, tool artifacts, autosave, pair delete and edit, and undoable attachment removal.
+ *
+ * - `save` writes the history file (a no-op without one) and rejects when it fails; `autosave` swallows that
+ * - `turnError`: why the last delete or edit left its pair in place, null once a later one (or a send) goes through
+ */
 export function useChatTurns({
   chat,
   chatId,
@@ -55,6 +64,7 @@ export function useChatTurns({
   config,
   reasoningEffort,
   prompts,
+  save,
   autosave,
 }: {
   chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "totalUsage" | "send" | "removePairs" | "setMessages" | "replaceMessages">
@@ -63,9 +73,11 @@ export function useChatTurns({
   config: TabConfig
   reasoningEffort: string
   prompts: Record<string, string>
+  save: (messages: Message[], usage: Usage) => Promise<void>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
 }) {
-  const { messages, isStreaming, totalUsage, send, removePairs, setMessages, replaceMessages } = chat
+  const { messages, totalUsage, send, removePairs, setMessages, replaceMessages } = chat
+  const [turnError, setTurnError] = useState<string | null>(null)
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
   const baseParams = useMemo(
@@ -79,13 +91,11 @@ export function useChatTurns({
   // Every handler reads the messages here: created once per chat, they stay the same while a reply streams, so settled
   // pairs skip its frames
   const messagesRef = useRef(messages)
-  const isStreamingRef = useRef(isStreaming)
   const totalUsageRef = useRef(totalUsage)
   useLayoutEffect(() => {
     messagesRef.current = messages
-    isStreamingRef.current = isStreaming
     totalUsageRef.current = totalUsage
-  }, [messages, isStreaming, totalUsage])
+  }, [messages, totalUsage])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -120,6 +130,7 @@ export function useChatTurns({
 
   /** Send `text` with `attachments` as a new pair. Resolves to whether the answer completed. */
   const handleSend = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
+    setTurnError(null)
     const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
     if (draft.length === 0) {
@@ -191,30 +202,40 @@ export function useChatTurns({
     )
   }, [replaceMessages, chatId, projectSlug, scheduleDelete])
 
-  /** Save the chat after a pair left it. While a reply streams the live pair stays out: its own save follows when it completes. */
-  const saveRemoval = useCallback((next: Message[]) => {
-    return autosave(isStreamingRef.current ? next.slice(0, -2) : next, totalUsageRef.current)
-  }, [autosave])
-
-  /** Delete the pair whose question is at `index`, for good: it leaves the chat and the saved history. */
-  const handleDeletePair = useCallback((index: number) => {
+  /**
+   * Remove the pair of the question at `index` (`"pair"`), or it and every later one (`"end"`): the history file is written
+   * without them first, then they leave the chat. Resolves to the question, or null when nothing changed (no such question,
+   * or the save failed: then `turnError` says `unsaved`).
+   */
+  const removeSaved = useCallback(async (index: number, through: "pair" | "end", unsaved: string): Promise<Message | null> => {
     const user = messagesRef.current[index]
-    const next = user?.role === "user" ? removePairs(user, "pair") : null
-    if (next) void saveRemoval(next)
-  }, [removePairs, saveRemoval])
+    const next = user?.role === "user" ? withoutPairs(messagesRef.current, user, through) : null
+    if (!next) return null
+    try {
+      await save(next, totalUsageRef.current)
+    } catch {
+      setTurnError(unsaved)
+      return null
+    }
+    setTurnError(null)
+    return removePairs(user, through) && user
+  }, [save, removePairs])
+
+  /** Delete the pair whose question is at `index`, for good: it leaves the saved history, then the chat. */
+  const handleDeletePair = useCallback((index: number) => {
+    void removeSaved(index, "pair", DELETE_UNSAVED)
+  }, [removeSaved])
 
   /**
    * Replace the pair whose question is at `index`, and every later pair, by `text` sent with the question's attachments.
-   * Resolves to whether the new answer completed; false without a change while a reply streams.
+   * Resolves to `"sent"` when the new answer completed, `"unsent"` when the pairs went but the send failed, `"kept"` when
+   * nothing changed (see `turnError`).
    */
-  const handleEditPair = useCallback(async (index: number, text: string): Promise<boolean> => {
-    const user = messagesRef.current[index]
-    if (isStreamingRef.current || user?.role !== "user") return false
-    const next = removePairs(user, "end")
-    if (!next) return false
-    await saveRemoval(next)
-    return handleSend(text, user.attachments ?? [])
-  }, [removePairs, saveRemoval, handleSend])
+  const handleEditPair = useCallback(async (index: number, text: string): Promise<"sent" | "unsent" | "kept"> => {
+    const user = await removeSaved(index, "end", EDIT_UNSAVED)
+    if (!user) return "kept"
+    return (await handleSend(text, user.attachments ?? []).catch(() => false)) ? "sent" : "unsent"
+  }, [removeSaved, handleSend])
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
@@ -232,5 +253,6 @@ export function useChatTurns({
     handleEditPair,
     handleAttachmentContentChange,
     syncReferences,
+    turnError,
   }
 }

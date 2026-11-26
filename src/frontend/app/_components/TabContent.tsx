@@ -163,7 +163,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       attachmentActions={attachmentActions}
       attachMenuItems={attachMenuItems}
       composerLeading={isEmptyChat ? <PiWorkspacePicker folder={folder} onChange={pickFolder} onOpenSession={(session, repo) => onOpenItem(piSessionItem(session, repo ?? newPiItem(session.cwd, projectSlug).pi!.repo, projectSlug))} /> : undefined}
-      composerNotice={(isEmptyChat && folderError) || docs.architectureError || undefined}
+      composerNotice={turns.turnError || (isEmptyChat && folderError) || docs.architectureError || undefined}
     />
   )
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type ElementType, type ReactNode, type Ref } from "react"
+import { createContext, useContext, useRef, useState, type ElementType, type ReactNode, type Ref } from "react"
 import { createPortal } from "react-dom"
 import { Pencil, Trash2 } from "lucide-react"
 import { CopyAction, ForkAction, TurnAction, TurnRegion } from "@gigachad/chat-ui"
@@ -9,6 +9,12 @@ import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const QUIET_BUTTON_CLASS = "rounded-full px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 const CONFIRM_BUTTON_CLASS = "rounded-full border border-divider bg-surface-elevated px-3 py-1.5 text-xs font-medium text-danger transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
+
+/**
+ * True while a reply streams in the conversation: no turn offers edit or delete then, in the chat as in Pi. A context, not
+ * props: a settled turn's props stay as they were when a send starts or ends, only its actions change.
+ */
+export const TurnEditsPaused = createContext(false)
 
 function turnCount(count: number): string {
   return count === 1 ? "1 later turn" : `${count} later turns`
@@ -78,11 +84,12 @@ function QuestionEditor({ initial, paused, onSubmit, onCancel }: { initial: stri
  * - `live`: no actions. Otherwise copy (when there is `text`), edit with `onEdit`, delete with `onDelete`: a read-only column
  *   passes neither and gets copy only
  * - Edit turns the question into a textarea holding `text`, focused. Enter confirms, Escape cancels, Shift+Enter is a newline;
- *   an unchanged or empty text cancels. With `laterTurns` the edit asks first, naming how many later turns go with it
+ *   an unchanged or empty text cancels. When `laterTurns` counts any, the edit asks first, naming how many later turns go
  * - Delete asks first
+ * - Inside `TurnEditsPaused` neither edit nor delete is offered, and an open editor or confirmation closes
  * - The editor's draft lives in this component, which the column keys by the turn's key: a deleted turn's draft goes with it
  */
-export function TurnQuestion({ text, live = false, onEdit, onDelete, laterTurns = 0, icon, onCollapse, collapseRef, children }: {
+export function TurnQuestion({ text, live = false, onEdit: edit, onDelete: remove, laterTurns, icon, onCollapse, collapseRef, children }: {
   /** The prompt: what copy copies and the editor starts from. */
   text: string
   live?: boolean
@@ -90,28 +97,38 @@ export function TurnQuestion({ text, live = false, onEdit, onDelete, laterTurns 
   onEdit?: (text: string) => void
   /** Runs once the delete is confirmed. */
   onDelete?: () => void
-  /** Turns after this one, removed by an edit. */
-  laterTurns?: number
+  /** Counts the turns after this one, removed by an edit; called when the edit is submitted. A getter: the count changes with
+   *  every send and delete, a settled turn's props must not. */
+  laterTurns?: () => number
   icon?: ReactNode
   onCollapse?: () => void
   collapseRef?: Ref<HTMLButtonElement>
   children: ReactNode
 }) {
+  const paused = useContext(TurnEditsPaused)
+  const onEdit = paused ? undefined : edit
+  const onDelete = paused ? undefined : remove
   const [editing, setEditing] = useState(false)
-  const [pendingEdit, setPendingEdit] = useState<string | null>(null)
+  const [pendingEdit, setPendingEdit] = useState<{ draft: string; later: number } | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  if (paused && (editing || pendingEdit !== null || confirmingDelete)) {
+    setEditing(false)
+    setPendingEdit(null)
+    setConfirmingDelete(false)
+  }
 
   const submit = (draft: string) => {
     if (!draft.trim() || draft.trim() === text.trim()) return setEditing(false)
-    if (laterTurns > 0) return setPendingEdit(draft)
+    const later = laterTurns?.() ?? 0
+    if (later > 0) return setPendingEdit({ draft, later })
     setEditing(false)
     onEdit?.(draft)
   }
   const confirmEdit = () => {
-    const draft = pendingEdit
+    const pending = pendingEdit
     setPendingEdit(null)
     setEditing(false)
-    if (draft !== null) onEdit?.(draft)
+    if (pending !== null) onEdit?.(pending.draft)
   }
   const confirmDelete = () => {
     setConfirmingDelete(false)
@@ -134,7 +151,7 @@ export function TurnQuestion({ text, live = false, onEdit, onDelete, laterTurns 
           open={pendingEdit !== null}
           icon={Pencil}
           title="Edit this turn?"
-          body={`The edit also removes the ${turnCount(laterTurns)}.`}
+          body={`The edit also removes the ${turnCount(pendingEdit?.later ?? 0)}.`}
           confirmLabel="Edit"
           onConfirm={confirmEdit}
           onCancel={() => setPendingEdit(null)}

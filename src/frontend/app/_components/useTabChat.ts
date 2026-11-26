@@ -50,6 +50,7 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
     config,
     reasoningEffort,
     prompts,
+    save: persistence.handleSave,
     autosave: persistence.handleAutosave,
   })
   const { syncReferences } = turns
@@ -131,11 +132,12 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
     })
   }, [tab.historyFile, createBranch, onOpenChat])
 
-  // A failed send keeps the edited text: it goes into the composer, ahead of any draft there
+  // A send that failed after the cut keeps the edited text: it goes into the composer, ahead of any draft there. A cut that
+  // failed leaves the pair, and `turns.turnError` says why
   const { handleEditPair } = turns
   const onEditPair = useCallback((index: number, text: string) => {
-    void handleEditPair(index, text).catch(() => false).then((sent) => {
-      if (!sent) chatInputRef.current?.updateText((draft) => (draft ? `${text}\n\n${draft}` : text))
+    void handleEditPair(index, text).then((outcome) => {
+      if (outcome === "unsent") chatInputRef.current?.updateText((draft) => (draft ? `${text}\n\n${draft}` : text))
     })
   }, [handleEditPair])
 

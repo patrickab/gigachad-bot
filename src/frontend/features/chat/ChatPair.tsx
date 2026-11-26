@@ -57,13 +57,13 @@ interface ChatPairBodyProps {
   onDelete?: (index: number) => void
   /** The question's edit with the new text. Unset -> no edit action. */
   onEdit?: (index: number, text: string) => void
-  /** Pairs after this one, removed by an edit. */
-  laterTurns?: number
+  /** Counts the pairs after the one whose question is at message `index`, removed by an edit: read when an edit is submitted. */
+  laterTurnsOf?: (index: number) => number
   onBranch?: (qaIndex: number) => void
 }
 
 /** An open pair's card content: the question, its tool calls and the answer. Props stay equal for a settled pair, so a streamed frame skips it. */
-export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onEdit, laterTurns, onBranch }: ChatPairBodyProps) {
+export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onEdit, laterTurnsOf, onBranch }: ChatPairBodyProps) {
   return (
     <>
       <ChatMessage
@@ -75,7 +75,7 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         onAttachmentClick={onAttachmentClick && ((attachment) => onAttachmentClick(globalIndex, attachment))}
         onDelete={onDelete}
         onEdit={onEdit}
-        laterTurns={laterTurns}
+        laterTurnsOf={laterTurnsOf}
         onCollapse={onCollapse}
       />
       {assistant.tool_calls?.map((call) => (

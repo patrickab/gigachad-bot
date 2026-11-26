@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { TurnAnswer, TurnQuestion } from "../TurnQuestion"
+import { TurnAnswer, TurnEditsPaused, TurnQuestion } from "../TurnQuestion"
 
 function Question(props: Partial<Parameters<typeof TurnQuestion>[0]>) {
   return <TurnQuestion text="Prompt" {...props}><p>Prompt</p></TurnQuestion>
@@ -29,6 +29,18 @@ describe("TurnQuestion actions", () => {
   it("offers none on a live turn", () => {
     render(<Question live onEdit={() => {}} onDelete={() => {}} />)
     expect(actionNames("Question actions")).toEqual([])
+  })
+
+  it("offers copy only while edits are paused, and closes an open editor", () => {
+    const { rerender } = render(<TurnEditsPaused.Provider value={false}><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }))
+    expect(screen.getByRole("textbox")).toBeTruthy()
+    rerender(<TurnEditsPaused.Provider value><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(actionNames("Question actions")).toEqual(["Copy message"])
+    rerender(<TurnEditsPaused.Provider value={false}><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(actionNames("Question actions")).toEqual(["Copy message", "Edit message", "Delete turn"])
   })
 
   it("offers copy only without handlers", () => {
@@ -88,7 +100,7 @@ describe("TurnQuestion editor", () => {
 
   it.each([["unchanged", "Prompt"], ["empty", "  "]])("cancels an %s text", (_case, value) => {
     const onEdit = vi.fn()
-    render(<Question onEdit={onEdit} laterTurns={2} />)
+    render(<Question onEdit={onEdit} laterTurns={() => 2} />)
     const editor = openEditor()
     fireEvent.change(editor, { target: { value } })
     fireEvent.keyDown(editor, { key: "Enter" })
@@ -99,7 +111,7 @@ describe("TurnQuestion editor", () => {
 
   it("asks first with later turns, naming how many go, and confirms with Enter", () => {
     const onEdit = vi.fn()
-    render(<Question onEdit={onEdit} laterTurns={2} />)
+    render(<Question onEdit={onEdit} laterTurns={() => 2} />)
     const editor = openEditor()
     fireEvent.change(editor, { target: { value: "New prompt" } })
     fireEvent.keyDown(editor, { key: "Enter" })
@@ -113,7 +125,7 @@ describe("TurnQuestion editor", () => {
 
   it("goes back to the editor when the confirmation is cancelled with Escape", () => {
     const onEdit = vi.fn()
-    render(<Question onEdit={onEdit} laterTurns={1} />)
+    render(<Question onEdit={onEdit} laterTurns={() => 1} />)
     const editor = openEditor()
     fireEvent.change(editor, { target: { value: "New prompt" } })
     fireEvent.keyDown(editor, { key: "Enter" })

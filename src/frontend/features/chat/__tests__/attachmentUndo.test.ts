@@ -33,6 +33,7 @@ function renderChat() {
       config: DEFAULT_TAB_CONFIG,
       reasoningEffort: "none",
       prompts: {},
+      save: async () => {},
       autosave: async () => {},
     })
     return { chat, turns }

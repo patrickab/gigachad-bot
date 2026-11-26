@@ -1,12 +1,13 @@
 "use client"
 
 import { CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
-import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { GitFork } from "lucide-react"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
+import { TurnEditsPaused } from "@/features/conversation/TurnQuestion"
 import { ChatPairBody, chatPairPreview, pairLabel } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
 import { keyPairs, pairMessages, type Pair } from "@/lib/domain/pairs"
@@ -123,6 +124,10 @@ export function ChatContainer({
   const [wide, setWide] = useState(false)
 
   const pairs = useMemo(() => pairMessages(messages), [messages])
+  // Read when an edit is submitted: a count handed to each pair would change for every settled pair on each send and delete
+  const pairsRef = useRef(pairs)
+  useLayoutEffect(() => { pairsRef.current = pairs }, [pairs])
+  const laterTurnsOf = useCallback((index: number) => pairsRef.current.filter((pair) => pair.globalIndex > index).length, [])
   const keys = usePairKeys(pairs)
   const turns = useMemo(() => pairs.map((pair, index): ChatTurn => ({
     key: keys[index],
@@ -181,10 +186,10 @@ export function ChatContainer({
     [attachmentActions, messages, openPreview],
   )
 
-  // Settled pairs get equal props each streamed frame, so the column skips them
+  // Settled pairs get equal props each streamed frame, send and delete of another pair, so the column skips them
   const renderPreview = (turn: ChatTurn) => chatPairPreview(turn.pair.assistant)
   const previewText = (turn: ChatTurn) => turn.pair.assistant.content
-  const renderBody = (turn: ChatTurn, index: number, collapse: (() => void) | undefined) => (
+  const renderBody = (turn: ChatTurn, _index: number, collapse: (() => void) | undefined) => (
     <ChatPairBody
       user={turn.pair.user}
       assistant={turn.pair.assistant}
@@ -195,7 +200,7 @@ export function ChatContainer({
       onAttachmentClick={openPreview}
       onDelete={handleDelete}
       onEdit={handleEdit}
-      laterTurns={turns.length - 1 - index}
+      laterTurnsOf={laterTurnsOf}
       onBranch={onBranch}
     />
   )
@@ -204,21 +209,23 @@ export function ChatContainer({
   return (
     <div className="absolute inset-0 flex">
       <div ref={mountColumn} className="flex-1 min-w-0 flex flex-col relative">
-        {/* Another chat opens at its end again */}
-        <ConversationColumn
-          key={chatId}
-          turns={turns}
-          renderPreview={renderPreview}
-          previewText={previewText}
-          renderBody={renderBody}
-          renderAfter={renderAfter}
-          reveal={columnReveal}
-          wide={wide}
-          onWideChange={setWide}
-          followSeq={followSeq}
-          paddingBottom={dock.paddingBottom}
-          onColumnChange={onChatColumnChange}
-        />
+        {/* Another chat opens at its end again. No pair is edited or deleted while a reply streams */}
+        <TurnEditsPaused.Provider value={isStreaming}>
+          <ConversationColumn
+            key={chatId}
+            turns={turns}
+            renderPreview={renderPreview}
+            previewText={previewText}
+            renderBody={renderBody}
+            renderAfter={renderAfter}
+            reveal={columnReveal}
+            wide={wide}
+            onWideChange={setWide}
+            followSeq={followSeq}
+            paddingBottom={dock.paddingBottom}
+            onColumnChange={onChatColumnChange}
+          />
+        </TurnEditsPaused.Provider>
         <ComposerDock dock={dock} animate={launchedChatId === chatId}>
           <ChatInput
             ref={chatInputRef}

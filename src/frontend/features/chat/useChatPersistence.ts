@@ -41,13 +41,17 @@ export function useChatPersistence({
     await saveHistory(messages, usage)
   }, [saveHistory, messages, usage])
 
-  // Saves are chained so overlapping autosaves never write out of order.
-  const handleAutosave = useCallback((messagesToSave: Message[], usageToSave: Usage) => {
+  // Saves are chained so overlapping saves never write out of order. A failed one rejects: the caller tells the reader.
+  const handleSave = useCallback((messagesToSave: Message[], usageToSave: Usage) => {
     if (!tab.historyFile) return Promise.resolve()
     const queued = autosaveRef.current.catch(() => {}).then(() => saveHistory(messagesToSave, usageToSave))
     autosaveRef.current = queued
-    return queued.catch(() => {})
+    return queued
   }, [tab.historyFile, saveHistory])
+
+  const handleAutosave = useCallback((messagesToSave: Message[], usageToSave: Usage) => {
+    return handleSave(messagesToSave, usageToSave).catch(() => {})
+  }, [handleSave])
 
   const handleSaveSubmit = useCallback(async (name: string) => {
     const historyFile = buildHistoryFile(name + ".json", projectSlug)
@@ -63,6 +67,7 @@ export function useChatPersistence({
     saveModalOpen,
     setSaveModalOpen,
     handleQuickSave,
+    handleSave,
     handleAutosave,
     handleSaveSubmit,
   }
