@@ -48,6 +48,9 @@ interface ChatInputProps {
   leading?: ReactNode
   /** Takes pasted, dropped and attached videos (a Pi tab stores them for an `@` mention), without it they upload like other files. */
   onVideo?: (video: File) => void
+  /** Refuses attached, pasted and dropped files it returns `false` for (videos go to `onVideo` first), they are reported to `onRefused` and not uploaded. */
+  accept?: (file: File) => boolean
+  onRefused?: (files: File[]) => void
 }
 
 /** Attachments already in the chat with their context actions. */
@@ -92,6 +95,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   attachMenuItems = [],
   leading,
   onVideo,
+  accept,
+  onRefused,
 }, ref) {
   const drafts = useDraftAttachments(chatId, slug)
   const { attachments, upload } = drafts
@@ -117,11 +122,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   /** Videos go to `onVideo` when given, other files upload as attachments. */
   const takeFiles = useCallback((files: File[]) => {
+    const refused: File[] = []
     for (const file of files) {
       if (onVideo && file.type.startsWith("video/")) onVideo(file)
+      else if (accept && !accept(file)) refused.push(file)
       else upload(file, file.name)
     }
-  }, [onVideo, upload])
+    if (refused.length > 0) onRefused?.(refused)
+  }, [onVideo, accept, onRefused, upload])
 
   useImperativeHandle(ref, () => ({
     addAttachment: drafts.add,
@@ -168,6 +176,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (videos.length > 0) {
       e.preventDefault()
       takeFiles(videos)
+      return
+    }
+    const refused = accept ? [...e.clipboardData.files].filter((file) => !accept(file)) : []
+    if (refused.length > 0) {
+      e.preventDefault()
+      onRefused?.(refused)
       return
     }
     for (const item of e.clipboardData.items) {
@@ -298,7 +312,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         chatId={chatId}
         onClose={() => setDrawing(null)}
         onAttach={drafts.add}
-        onUpload={(file) => upload(file, file.name)}
+        onUpload={(file) => takeFiles([file])}
       />
       <AttachmentPreview attachment={drafts.preview} onClose={drafts.closePreview} onContentChange={drafts.editPreview} />
     </motion.div>

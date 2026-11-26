@@ -13,6 +13,9 @@ import { composerAction, piCompletions, type ComposerAction } from "./composerIn
 import type { ExtensionDialog, ImageContent, PiCommand } from "./types"
 import type { Notice, QueueMode } from "./usePiSession"
 
+/** The composer sends images (Pi image blocks) and videos (a mention), nothing else. */
+const acceptsFile = (file: File) => file.type.startsWith("image/") || file.type.startsWith("video/")
+
 const CONFIRM_OPTIONS = ["Yes", "No"]
 
 /** One composer send: what it does, its images, and how it queues while a run streams (Enter steers, Alt+Enter follows up). */
@@ -137,6 +140,8 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
   /** Set while an Alt+Enter keydown passes through `ChatInput`, so its send queues a follow-up. */
   const followUpRef = useRef(false)
   useInsertion(insertion, !disabled, draftKey, onInserted, inputRef)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const refuse = (refused: File[]) => setRefusal(`Pi takes images and videos only, not ${refused.map((file) => file.name || "this file").join(", ")}`)
   const { run: pasteVideo, pending: pasting, error: pasteError } = useAsyncAction(async (video: File) => {
     const mention = await pastePiVideo(video, fileScope)
     inputRef.current?.updateText((current) => `${current}${/(^|\s)$/.test(current) ? "" : " "}@${mention} `)
@@ -157,6 +162,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
     const action = composerAction(text, staged.map((chip) => chip.text))
     // `ChatInput` clears the chips right after this send: a command did not use them, so they wait for the next message
     if (action.kind === "bash" && staged.length > 0) queueMicrotask(() => staged.forEach((chip) => stageChip(draftKey, chip)))
+    setRefusal(null)
     const images = action.kind === "prompt" ? await Promise.all(attachments.filter((attachment) => attachment.mime.startsWith("image/")).map(imageOf)) : []
     return (await onSubmit({ action, images, mode })) ?? true
   }
@@ -185,7 +191,7 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
       {roster}
       {/* Floats over the transcript with the composer, so it masks the turns beneath */}
       <div className="mx-auto mb-2 flex w-full max-w-2xl flex-col gap-1 rounded-xl bg-paper px-3 py-1.5 text-xs empty:hidden">
-        <ErrorText>{pasteError}</ErrorText>
+        <ErrorText>{refusal ?? pasteError}</ErrorText>
         {notices.map((notice) => (
           <p key={notice.id} role="status" className={notice.tone === "error" ? "text-danger" : notice.tone === "warning" ? "text-warning" : "text-ink-muted"}>{notice.text}</p>
         ))}
@@ -216,7 +222,9 @@ export function PiComposer({ sessionKey, files: fileScope, running, disabled, co
         placeholder={textDialog && textDialog.method === "input" ? textDialog.placeholder ?? "Message" : "Message"}
         complete={textDialog ? undefined : complete}
         picker={picker}
-        onVideo={(video) => void pasteVideo(video)}
+        onVideo={(video) => { setRefusal(null); void pasteVideo(video) }}
+        accept={acceptsFile}
+        onRefused={refuse}
         leading={leading}
       />
     </div>

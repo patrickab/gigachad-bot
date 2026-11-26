@@ -1,4 +1,6 @@
+import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import type { HeldMessage } from "./outbox"
+import { toolImageAttachments } from "./toolImages"
 
 const LABELS = { steer: "Steer", followUp: "Follow-up" }
 
@@ -15,7 +17,8 @@ export function HeldMessages({ held, onRetry, onDelete }: { held: readonly HeldM
     <ul aria-label="Held messages" className="flex flex-col items-end gap-2 px-4 pb-3">
       {held.map((entry) => (
         <li key={entry.id} className="max-w-[85%] rounded-xl bg-paper px-3 py-2 text-sm text-ink-muted">
-          <p className="whitespace-pre-wrap break-words">{entry.text}</p>
+          {entry.text && <p className="whitespace-pre-wrap break-words">{entry.text}</p>}
+          {entry.images.length > 0 && <MessageAttachments attachments={toolImageAttachments("image", entry.images)} onClick={() => {}} />}
           <p className={`mt-1 flex items-center gap-2 text-xs ${entry.state === "failed" ? "text-danger" : "text-ink-faint"}`}>
             <span>{statusOf(entry)}</span>
             {entry.state === "failed" && (

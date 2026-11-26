@@ -165,4 +165,22 @@ describe("PiComposer", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Videos are at most 200 MB")
     expect(textbox).toHaveValue("")
   })
+
+  it("refuses a file that is neither image nor video at attach, paste and drop", async () => {
+    const doc = new File(["d"], "notes.pdf", { type: "application/pdf" })
+    const { textbox, update, onSubmit } = renderComposer()
+    fireEvent.paste(textbox, { clipboardData: { files: [doc], items: [], getData: () => "" } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf")
+    cleanup()
+    const second = renderComposer()
+    fireEvent.drop(second.textbox, { dataTransfer: { files: [doc], types: ["Files"] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf")
+    cleanup()
+    const third = renderComposer()
+    third.update({ disabled: false, insertion: { id: 9, text: "", files: [doc] } })
+    expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf")
+    expect(screen.queryByText("notes.pdf", { selector: "button *" })).toBeNull()
+    expect(onSubmit).not.toHaveBeenCalled()
+    void update
+  })
 })
