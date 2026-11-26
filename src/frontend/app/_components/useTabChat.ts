@@ -109,6 +109,7 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
     }
   }, { active: isActive && appMode === "chat", capture: true })
 
+  // One object per chat: its members read the latest messages through refs, so the settled pairs they reach skip streamed frames
   const attachmentActions = useMemo(() => ({
     onToggleActive: turns.handleToggleAttachmentActive,
     onRemove: turns.handleRemoveAttachment,

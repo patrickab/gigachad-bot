@@ -78,9 +78,14 @@ export function useChatTurns({
   // Undo restores run up to six seconds later, they must not land in a different chat loaded into this tab meanwhile.
   const chatIdRef = useRef(chatId)
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
-  // The pair handlers read the messages here, so they stay the same while a reply streams and settled pairs skip its frames
+  // Every handler reads the messages and the streaming flag here: created once per chat, they stay the same while a reply
+  // streams, so settled pairs skip its frames
   const messagesRef = useRef(messages)
-  useLayoutEffect(() => { messagesRef.current = messages }, [messages])
+  const isStreamingRef = useRef(isStreaming)
+  useLayoutEffect(() => {
+    messagesRef.current = messages
+    isStreamingRef.current = isStreaming
+  }, [messages, isStreaming])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -151,7 +156,7 @@ export function useChatTurns({
   }, [refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
   const handleRegenerate = useCallback(async (globalIndex: number) => {
-    if (isStreaming) return
+    if (isStreamingRef.current) return
     const current = messagesRef.current
     const assistantMsg = current[globalIndex + 1]
     if (current[globalIndex]?.role !== "user" || assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
@@ -169,14 +174,14 @@ export function useChatTurns({
       img_paths: collectActiveImagePaths(history, { userIndex: globalIndex }),
       project_slug: projectSlug,
     }))
-  }, [isStreaming, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
+  }, [refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
     updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
   }, [setMessages])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
-    const original = messages[messageIndex]
+    const original = messagesRef.current[messageIndex]
     const att = findAttachment(original, attachmentName)
     const stripped = att ? withAttachment(original, attachmentName, () => null) : null
     if (!att || !stripped) return
@@ -201,7 +206,7 @@ export function useChatTurns({
       },
       restore,
     )
-  }, [messages, replaceMessages, chatId, projectSlug, scheduleDelete])
+  }, [replaceMessages, chatId, projectSlug, scheduleDelete])
 
   // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
   const handleDeletePair = useCallback((index: number) => {
@@ -216,11 +221,11 @@ export function useChatTurns({
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
-    const attachment = findAttachment(messages[messageIndex], attachmentName)
+    const attachment = findAttachment(messagesRef.current[messageIndex], attachmentName)
     if (!attachment) return
     const saved = await saveAttachmentEdit(attachment, newContent)
     updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved))
-  }, [messages, setMessages])
+  }, [setMessages])
 
   return {
     handleSend,
