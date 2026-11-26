@@ -13,6 +13,7 @@ import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { TabPicker } from "@/features/navigation/TabPicker"
+import { ChatPicker } from "@/features/chat/ChatPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
@@ -245,6 +246,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
         />
       )}
       <TabPicker />
+      <ChatPicker onOpenChat={onOpenChat} />
     </div>
   )
 }

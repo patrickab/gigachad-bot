@@ -1,6 +1,6 @@
 // Chat stream and chat history routes.
 import type { SSEStreamResult } from "../sse"
-import { encodePath } from "../urls"
+import { encodePath, toQuery } from "../urls"
 import { del, post, put, request, sseStream } from "./http"
 import type { BranchMeta, ChatHistoriesResponse, ChatHistory } from "@/lib/domain/histories"
 import type { ChatRequest, Message, Usage } from "@/lib/domain/types"
@@ -103,7 +103,6 @@ export async function listAllChats(signal?: AbortSignal): Promise<ChatListing[]>
 
 /** Chats whose question or answer text holds `query` (case-insensitive), newest first, at most `limit` (1..100) chats. */
 export async function searchChats(query: string, limit = 20, signal?: AbortSignal): Promise<ChatSearchHit[]> {
-  const params = new URLSearchParams({ q: query, limit: String(limit) })
-  const { hits } = await request<{ hits: ChatSearchHit[] }>(`/chat-histories/search?${params}`, { signal })
+  const { hits } = await request<{ hits: ChatSearchHit[] }>(`/chat-histories/search${toQuery({ q: query, limit })}`, { signal })
   return hits
 }

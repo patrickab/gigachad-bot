@@ -56,7 +56,7 @@ def list_all_chats(store: ChatStore = Depends(get_chat_store)) -> dict[str, list
 @router.get("/search")
 # Registered before `/{filename:path}`, like `/branch-meta`
 def search_chats(
-    q: str = "", limit: int = Query(20, ge=1, le=100), store: ChatStore = Depends(get_chat_store)
+    q: str = Query("", max_length=200), limit: int = Query(20, ge=1, le=100), store: ChatStore = Depends(get_chat_store)
 ) -> dict[str, list[dict[str, Any]]]:
     """Chats whose question or answer text holds *q*, case-insensitive, at most *limit* of them, newest first."""
     if not q.strip():

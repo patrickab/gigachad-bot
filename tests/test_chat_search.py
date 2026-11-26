@@ -146,6 +146,13 @@ def test_empty_query_is_refused(postgres_pool, alice, params) -> None:
     assert response.status_code == 400
 
 
+def test_query_over_200_characters_is_refused(postgres_pool, alice) -> None:
+    client = client_for(postgres_pool, alice)
+
+    assert client.get("/api/chat-histories/search", params={"q": "x" * 201}).status_code == 422
+    assert client.get("/api/chat-histories/search", params={"q": "x" * 200}).status_code == 200
+
+
 def test_search_over_200_chats_of_40_messages(alice_store, capsys) -> None:
     filler = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 20
     writes = []
