@@ -8,6 +8,7 @@ import { useTabActive } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import type { ChatListing, ChatSearchMatch } from "@/lib/backend/api"
+import type { ChatRevealHit } from "./ChatContainer"
 import type { ProjectListItem } from "@/lib/domain/projects"
 import { cn, compactElapsed, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
 import { useAllChats, useChatSearch } from "./useChatPicker"
@@ -20,6 +21,8 @@ const ROW_TEXT_WIDTH = "max-w-[16rem]"
 interface Entry { chat: ChatListing; match?: ChatSearchMatch; first?: boolean }
 
 const entryKey = ({ chat, match }: Entry) => (match ? `${chat.historyFile}:${match.qaIndex}:${match.role}:${match.ordinal}` : chat.historyFile)
+
+type OpenChat = (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
 
 const newestFirst = (left: ChatListing, right: ChatListing) => right.updatedAt.localeCompare(left.updatedAt)
 
@@ -73,9 +76,9 @@ function ChatRow({ entry: { chat, match, first = true }, query, now }: { entry: 
  *
  * - No query: the chats grouped by project, the group with the newest chat first, chats newest first
  * - A query: chats whose title holds every word, then every content hit of the other chats, one row each
- * - Picking a chat opens it in the active tab, picking a hit reveals its pair (`onOpenChat`)
+ * - Picking a chat opens it in the active tab, picking a hit reveals its pair and paints its match (`onOpenChat`)
  */
-export function ChatPicker({ onOpenChat }: { onOpenChat: (historyFile: string, qaIndex?: number) => void }) {
+export function ChatPicker({ onOpenChat }: { onOpenChat: OpenChat }) {
   const tabActive = useTabActive()
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
@@ -91,7 +94,7 @@ export function ChatPicker({ onOpenChat }: { onOpenChat: (historyFile: string, q
 }
 
 /** The open picker: mounted per opening, so each opening reads the chats afresh and starts with an empty query. */
-function ChatPickerPanel({ onOpenChat, onClose }: { onOpenChat: (historyFile: string, qaIndex?: number) => void; onClose: () => void }) {
+function ChatPickerPanel({ onOpenChat, onClose }: { onOpenChat: OpenChat; onClose: () => void }) {
   const { projects } = useProject()
   const now = useNowMs()
   const [query, setQuery] = useState("")
@@ -130,7 +133,8 @@ function ChatPickerPanel({ onOpenChat, onClose }: { onOpenChat: (historyFile: st
     emptyText={loading ? (words.length > 0 ? "Searching…" : "Loading…") : "No chats"}
     renderItem={(entry) => <ChatRow entry={entry} query={trimmed} now={now} />}
     onPick={({ chat, match }) => {
-      onOpenChat(chat.historyFile, match?.qaIndex)
+      if (match) onOpenChat(chat.historyFile, match.qaIndex, { query: trimmed, role: match.role, ordinal: match.ordinal })
+      else onOpenChat(chat.historyFile)
       return true
     }}
   />

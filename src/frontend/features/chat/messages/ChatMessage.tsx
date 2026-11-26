@@ -124,17 +124,19 @@ function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf
     <>
       {isUser ? (
         <>
-          {content && <div><LaTeXMarkdown content={content} /></div>}
+          {content && <div data-chat-text={`${index}:user`}><LaTeXMarkdown content={content} /></div>}
           {attachments && attachments.length > 0 && (
             <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
           )}
         </>
       ) : (content || search_result) && !isResearchRunning ? (
-        <AssistantMessageContent
-          content={content}
-          isStreaming={isStreaming}
-          search_result={search_result}
-        />
+        <div data-chat-text={`${index}:assistant`}>
+          <AssistantMessageContent
+            content={content}
+            isStreaming={isStreaming}
+            search_result={search_result}
+          />
+        </div>
       ) : content ? (
         <span role="status" className="inline-flex items-center gap-1 text-ink text-sm">
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" aria-hidden="true" />

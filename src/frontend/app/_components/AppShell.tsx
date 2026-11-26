@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { installClickHints } from "@gigachad/chat-ui/hints"
 import "@gigachad/chat-ui/hints.css"
-import type { ChatReveal } from "@/features/chat/ChatContainer"
+import type { ChatReveal, ChatRevealHit } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
@@ -121,8 +121,8 @@ export function AppShell() {
     else handleNewChat(slug)
   }, [handleNewChat])
 
-  const handleOpenChat = useCallback((historyFile: string, qaIndex?: number) => {
-    setReveal((current) => ({ historyFile, qaIndex: qaIndex ?? null, seq: current.seq + 1 }))
+  const handleOpenChat = useCallback((historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => {
+    setReveal((current) => ({ historyFile, qaIndex: qaIndex ?? null, hit: hit ?? null, seq: current.seq + 1 }))
     tabManagerRef.current?.showChat(historyFile)
   }, [])
 

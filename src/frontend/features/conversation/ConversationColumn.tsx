@@ -172,7 +172,7 @@ function isTextField(target: EventTarget | null): boolean {
 }
 
 /** Scrolls the turn `key` to the top of the view, true when it is mounted. */
-function scrollToTurn(root: HTMLElement, key: string): boolean {
+export function scrollToTurn(root: HTMLElement, key: string): boolean {
   const element = turnElement(root, key)
   element?.scrollIntoView({ block: "start", behavior: "instant" })
   return element !== undefined

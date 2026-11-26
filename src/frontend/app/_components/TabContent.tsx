@@ -5,7 +5,7 @@ import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
-import { ChatContainer, type ChatReveal } from "@/features/chat/ChatContainer"
+import { ChatContainer, type ChatReveal, type ChatRevealHit } from "@/features/chat/ChatContainer"
 import { newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
 import { PromptEditor } from "@/features/settings/PromptEditor"
@@ -32,7 +32,7 @@ import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
 
 interface TabContentProps {
-  onOpenChat: (historyFile: string, qaIndex?: number) => void
+  onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
   onOpenProject: (slug: string) => void
   onProjectRenamed: (oldSlug: string, newSlug: string) => void
   onDocumentRenamed: (oldPath: string, newPath: string) => void

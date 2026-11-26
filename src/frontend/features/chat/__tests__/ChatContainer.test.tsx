@@ -15,7 +15,7 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
 }))
 vi.mock("@/features/chat/messages/ChatMessage", () => ({
   AssistantMessageContent: ({ content }: { content: string }) => <div>{content}</div>,
-  ChatMessage: ({ content, index, laterTurnsOf }: { content: string; index: number; laterTurnsOf?: (index: number) => number }) => <div data-later-turns={laterTurnsOf?.(index)}>{content}</div>,
+  ChatMessage: ({ role, content, index, laterTurnsOf }: { role: string; content: string; index: number; laterTurnsOf?: (index: number) => number }) => <div data-chat-text={`${index}:${role}`} data-later-turns={laterTurnsOf?.(index)}>{content}</div>,
 }))
 // The top bar's slot is not mounted here: the toggle renders in place
 vi.mock("@/features/conversation/WideModeToggle", () => ({
@@ -134,6 +134,40 @@ describe("ChatContainer column", () => {
     })
     expect(isOpen("Question 1")).toBe(true)
     expect(scrolled.at(-1)?.contains(screen.getByText("Question 1"))).toBe(true)
+  })
+
+  it("paints a revealed hit's query with its match apart, and clears it on a reveal without a query", () => {
+    const registry = new Map<string, { ranges: Range[] }>()
+    class FakeHighlight { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } add(range: Range) { this.ranges.push(range) } }
+    vi.stubGlobal("Highlight", FakeHighlight)
+    Object.defineProperty(CSS, "highlights", { configurable: true, value: registry })
+    const { scrollTo } = Element.prototype
+    const { getBoundingClientRect } = Range.prototype
+    Element.prototype.scrollTo = () => {}
+    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 40, 10, 10)
+    try {
+      const messages = pairsOf(3)
+      const { rerender } = render(chat({ messages, historyFile: "a.json", reveal: { historyFile: null, qaIndex: null, seq: 0 } }))
+      const scrolled = scrolledDuring(() => {
+        rerender(chat({ messages, historyFile: "a.json", reveal: { historyFile: "a.json", qaIndex: 1, hit: { query: "answer", role: "assistant", ordinal: 0 }, seq: 1 } }))
+      })
+      // The open pairs' answers: the revealed one and the newest
+      expect(registry.get("chat-search")?.ranges.map((range) => range.toString())).toEqual(["Answer", "Answer"])
+      const current = registry.get("chat-search-current")?.ranges
+      expect(current).toHaveLength(1)
+      expect(current?.[0].startContainer.textContent).toBe("Answer 1")
+      expect(scrolled.at(-1)?.textContent).toBe("Answer 1")
+
+      rerender(chat({ messages, historyFile: "a.json", reveal: { historyFile: "a.json", qaIndex: null, seq: 2 } }))
+      expect(registry.has("chat-search")).toBe(false)
+      expect(registry.has("chat-search-current")).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
+      Reflect.deleteProperty(CSS, "highlights")
+      Element.prototype.scrollTo = scrollTo
+      Range.prototype.getBoundingClientRect = getBoundingClientRect
+    }
   })
 
   it.each([

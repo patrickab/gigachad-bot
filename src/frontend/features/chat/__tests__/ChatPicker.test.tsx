@@ -65,7 +65,7 @@ describe("ChatPicker", () => {
     const onOpenChat = renderPicker()
 
     fireEvent.click(await screen.findByRole("option", { name: /Loose/ }))
-    expect(onOpenChat).toHaveBeenCalledWith("loose.json", undefined)
+    expect(onOpenChat).toHaveBeenCalledWith("loose.json")
     expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
   })
 
@@ -94,7 +94,7 @@ describe("ChatPicker", () => {
     expect(within(rows[1]).getByText("refactor").tagName).toBe("STRONG")
 
     fireEvent.click(rows[1])
-    expect(onOpenChat).toHaveBeenCalledWith("other.json", 3)
+    expect(onOpenChat).toHaveBeenCalledWith("other.json", 3, { query: "refactor", role: "assistant", ordinal: 0 })
   })
 
   it("aborts the request of a superseded query", async () => {

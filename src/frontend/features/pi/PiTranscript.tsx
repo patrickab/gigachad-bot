@@ -13,6 +13,7 @@ import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
 import { TurnAnswer, TurnEditsPaused, TurnQuestion } from "@/features/conversation/TurnQuestion"
+import { scrollToRange } from "@/features/conversation/useTextHighlights"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { PiSearchBar } from "./PiSearchBar"
@@ -494,16 +495,14 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
     seq: search.seq,
     scroll: (root) => {
       const range = currentRange(root, search)
-      // Else the entry's text, e.g. when a hit's ordinal is past what rendered (a message too large to render shows less)
-      const target = range?.startContainer.parentElement ?? root.querySelector(`${ENTRY_TEXT}[data-entry-id="${CSS.escape(hit.entryId)}"]`)
-      if (!target) return false
-      // Instant: a smooth scroll would race the sentinel that loads the earlier page
-      target.scrollIntoView({ block: "center", behavior: "instant" })
       if (range) {
-        const rect = range.getBoundingClientRect()
-        const view = root.getBoundingClientRect()
-        root.scrollTo({ top: root.scrollTop + rect.top + rect.height / 2 - (view.top + view.height / 2), behavior: "instant" })
+        scrollToRange(root, range)
+        return true
       }
+      // Else the entry's text, e.g. when a hit's ordinal is past what rendered (a message too large to render shows less)
+      const target = root.querySelector(`${ENTRY_TEXT}[data-entry-id="${CSS.escape(hit.entryId)}"]`)
+      if (!target) return false
+      target.scrollIntoView({ block: "center", behavior: "instant" })
       return true
     },
   } : null), [search, hit, hitKey])

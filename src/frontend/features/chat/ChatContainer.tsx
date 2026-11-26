@@ -6,7 +6,8 @@ import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { GitFork } from "lucide-react"
-import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
+import { ConversationColumn, scrollToTurn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
+import { currentRange, scrollToRange, useTextHighlights, type TextHighlight, type TextMatcher } from "@/features/conversation/useTextHighlights"
 import { TurnEditsPaused } from "@/features/conversation/TurnQuestion"
 import { ChatPairBody, chatPairPreview, pairLabel } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
@@ -16,11 +17,34 @@ import { ComposerDock, useComposerDock } from "./ComposerDock"
 /** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
 export { CHAT_COLUMN_MAX_PX }
 
-/** Asks the chat of `historyFile` to open and scroll to one question, the column's `reveal` by pair; a new `seq` re-fires it for the same index. */
+/** A search hit in a pair: the `ordinal`-th match of `query` in its question or answer text, as the chat search counts it. */
+export interface ChatRevealHit {
+  query: string
+  role: "user" | "assistant"
+  ordinal: number
+}
+
+/**
+ * Asks the chat of `historyFile` to open and scroll to one question, the column's `reveal` by pair; a new `seq` re-fires it for the same index.
+ * With a `hit` it scrolls to the match and paints the query's matches until a reveal without one, or another chat.
+ */
 export interface ChatReveal {
   historyFile: string | null
   qaIndex: number | null
+  hit?: ChatRevealHit | null
   seq: number
+}
+
+/** The chat search's matching: the query verbatim, case-insensitive (`ChatStore.search`). */
+const chatMatcher: TextMatcher = (query) => {
+  if (!query) return null
+  const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+  return (text) => [...text.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length }))
+}
+
+/** The painted query of a revealed hit in the pair whose question is at message `globalIndex`. */
+function chatHighlight(hit: ChatRevealHit, globalIndex: number): TextHighlight {
+  return { name: "chat-search", query: hit.query, matcher: chatMatcher, attribute: "data-chat-text", current: { value: `${globalIndex}:${hit.role}`, ordinal: hit.ordinal } }
 }
 
 /** What the chat does with its attachments: composer chips and the previews of message attachments. */
@@ -137,14 +161,33 @@ export function ChatContainer({
   })), [pairs, keys, isStreaming])
   // A reveal is settled once, when its own chat has loaded: there its pair's key, or nothing when the pair does not exist.
   // Another chat's reveal never applies here, and a settled one does not wait for later messages
-  const [settled, setSettled] = useState<{ seq: number | null; historyFile: string | null; reveal: ConversationReveal | null }>({ seq: null, historyFile, reveal: null })
+  const [settled, setSettled] = useState<{ seq: number | null; historyFile: string | null; reveal: ConversationReveal | null; highlight: TextHighlight | null }>({ seq: null, historyFile, reveal: null, highlight: null })
   if (settled.historyFile !== historyFile) {
-    setSettled({ seq: settled.seq, historyFile, reveal: null })
+    setSettled({ seq: settled.seq, historyFile, reveal: null, highlight: null })
   } else if (reveal && historyFile !== null && reveal.historyFile === historyFile && reveal.seq !== settled.seq && !historyLoading) {
-    const key = reveal.qaIndex === null ? undefined : turns[reveal.qaIndex]?.key
-    setSettled({ seq: reveal.seq, historyFile, reveal: key === undefined ? null : { key, seq: reveal.seq } })
+    const turn = reveal.qaIndex === null ? undefined : turns[reveal.qaIndex]
+    const highlight = turn && reveal.hit ? chatHighlight(reveal.hit, turn.pair.globalIndex) : null
+    const key = turn?.key
+    setSettled({
+      seq: reveal.seq,
+      historyFile,
+      highlight,
+      reveal: key === undefined ? null : {
+        key,
+        seq: reveal.seq,
+        scroll: highlight ? (root) => {
+          const range = currentRange(root, highlight)
+          if (!range) return scrollToTurn(root, key)
+          scrollToRange(root, range)
+          return true
+        } : undefined,
+      },
+    })
   }
-  const columnReveal = settled.historyFile === historyFile ? settled.reveal : null
+  const current = settled.historyFile === historyFile ? settled : null
+  const columnReveal = current?.reveal ?? null
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useTextHighlights(scrollRef, current?.highlight ?? null)
 
   // A chat known to be empty lifts the composer to just below the column's middle. A loading one keeps it at the bottom
   const dock = useComposerDock(messages.length === 0 && !historyLoading)
@@ -219,6 +262,7 @@ export function ChatContainer({
             renderBody={renderBody}
             renderAfter={renderAfter}
             reveal={columnReveal}
+            scrollRef={scrollRef}
             wide={wide}
             onWideChange={setWide}
             followSeq={followSeq}

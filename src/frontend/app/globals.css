@@ -966,3 +966,5 @@ code {
 /* Session search hits in a Pi transcript (CSS Custom Highlight API, features/pi/useSearchHighlights.ts) */
 ::highlight(pi-search) { background-color: color-mix(in oklab, var(--ink) 18%, transparent); color: inherit; }
 ::highlight(pi-search-current) { background-color: var(--ink); color: var(--paper); }
+::highlight(chat-search) { background-color: color-mix(in oklab, var(--ink) 18%, transparent); color: inherit; }
+::highlight(chat-search-current) { background-color: var(--ink); color: var(--paper); }
