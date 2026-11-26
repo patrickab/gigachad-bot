@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime
 import logging
 from pathlib import Path as FilePath
+import re
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, Response, UploadFile, WebSocket
@@ -178,7 +179,8 @@ class TurnDeleteBody(BaseModel):
 async def post_delete_turn(session_id: SessionId, entry_id: SessionId, body: TurnDeleteBody) -> pi_host.TurnDeleted:
     """Delete a turn for good. Its thumbnails of the removed tool images go too: pi-host's cleanup does not reach them."""
     deleted = await _call(pi_host.delete_turn(session_id, entry_id, body.through))
-    pi_media.forget(deleted.removed_media)
+    # A failed scan leaves the images' hashes only in `not_removed`, among paste ids and other names.
+    pi_media.forget([*deleted.removed_media, *(name for name in deleted.not_removed if re.fullmatch(pi_media.HASH_PATTERN, name))])
     return deleted
 
 
