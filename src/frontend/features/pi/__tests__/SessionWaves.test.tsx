@@ -233,6 +233,16 @@ describe("SessionWaves above the composer", () => {
     expect(screen.getByText("answered the coder")).toBeTruthy()
   })
 
+  it("drops a decisions.list entry without a card", async () => {
+    api.callFactory.mockImplementation(async (action: string) => {
+      if (action === "decisions.list") return { decisions: [{ at: "t", answers: "k0" }, decision("k1")] }
+      return action === "waves.list" ? { waves: [wave("w1")] } : { tasks: [] }
+    })
+    renderPanel()
+    fireEvent.click(await screen.findByRole("button", { name: /Decisions · 1/ }))
+    expect(screen.getByText("answered the coder")).toBeTruthy()
+  })
+
   it("has no Decisions entry and no error when the action is unknown", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     api.callFactory.mockImplementation(async (action: string) => {

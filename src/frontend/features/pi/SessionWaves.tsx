@@ -9,10 +9,25 @@ import { concernsFactory, isUnknownAction, waveNeedsUser, waveStageLabel, type F
 import { cn } from "@/lib/utils"
 import { observePiSocket } from "./piSocket"
 import { formatCost, formatTokens } from "./subagents"
-import type { FactoryCard } from "./factoryCard"
+import { factoryCard, type FactoryCard } from "./factoryCard"
 
 /** A ruling the supervisor gave in this session, from `decisions.list`. */
 export interface FactoryDecision { at: string; key?: string; answers?: string; card: FactoryCard }
+
+/** The notice key a decision answers: the one place it is read (the decision's own `key` is never a notice key). */
+function decisionAnswers(decision: FactoryDecision): string | undefined {
+  return decision.answers ?? decision.card.answers
+}
+
+/** The decisions of a `decisions.list` answer, each card validated by `factoryCard`; malformed entries are dropped. */
+function validDecisions(listed: unknown): FactoryDecision[] {
+  if (!Array.isArray(listed)) return []
+  return listed.flatMap((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null) return []
+    const card = factoryCard({ card: (entry as { card?: unknown }).card })
+    return card ? [{ ...(entry as FactoryDecision), card }] : []
+  })
+}
 
 const RESTING = new Set(["merged", "cancelled"])
 const FINISHED_TASK = new Set(["done", "cancelled"])
@@ -106,8 +121,8 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
           else console.error("waves.list failed", cause)
         },
       )
-      callFactory<{ decisions: FactoryDecision[] }>("decisions.list", { origin: sessionId }).then(
-        (answer) => { if (current()) setDecisions(answer.decisions ?? []) },
+      callFactory<{ decisions?: unknown }>("decisions.list", { origin: sessionId }).then(
+        (answer) => { if (current()) setDecisions(validDecisions(answer.decisions)) },
         (cause: unknown) => {
           if (!current()) return
           if (isUnknownAction(cause)) setDecisions(null)
@@ -202,7 +217,7 @@ function DecisionsEntry({ decisions, cards }: { decisions: readonly FactoryDecis
       <Disclosure summary={<span className="min-w-0 flex-1">Decisions · {decisions.length}</span>} summaryClassName={ROW}>
         <ul aria-label="Decisions" className="ml-5 flex flex-col">
           {decisions.map((decision, index) => {
-            const target = decision.answers ?? decision.key
+            const target = decisionAnswers(decision)
             return (
               <li key={`${decision.at}-${index}`} className="flex items-center py-0.5">
                 {target && cards.notices.has(target) ? (
@@ -258,7 +273,7 @@ export function SessionWaves({ waves, models = NO_MODELS, decisions = null, card
 }) {
   const { active, finished } = useMemo(() => splitWaves(waves), [waves])
   const needsUser = useMemo(() => {
-    const answered = new Set(decisions?.map((decision) => decision.answers ?? decision.card.answers))
+    const answered = new Set(decisions?.map(decisionAnswers))
     return cards.waiting.filter((key) => !answered.has(key)).length
   }, [decisions, cards.waiting])
   const hasDecisions = !!decisions && decisions.length > 0

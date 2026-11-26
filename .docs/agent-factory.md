@@ -353,7 +353,7 @@ settings once at `waves.start`.
   or `<n> finished` without active ones, and collapses the element (open while a wave is active). `<n> needs you`
   counts the transcript's attention cards that no decision answers, in the transcript or from `decisions.list`
   (`origin`: the session). A `Decisions · <n>` entry lists the session's decisions, each jumping to the card it answers
-  while that card is in the transcript. Active waves come first, those needing the user at the top; merged and
+  while that card is in the transcript (entries without a valid card are dropped). Active waves come first, those needing the user at the top; merged and
   cancelled waves sit behind one collapsed `<n> finished` row. Every wave opens to its tasks, unfinished ones first:
   the coder's model (from `tasks.list`), tokens in and out, state. A started one has a button that opens its task view
   (the coder's session, brief and handoff). Without waves, decisions or waiting cards it is absent.
