@@ -81,6 +81,11 @@ export function stageChip(conversationKey: string, chip: { label: string; text: 
   return id
 }
 
+/** Replace the text of chip `id`, e.g. after the user edited a pasted text. */
+export function updateChipText(conversationKey: string, id: string, text: string): void {
+  setChips(conversationKey, chipsOf(conversationKey).map((chip) => (chip.id === id ? { ...chip, text } : chip)))
+}
+
 /** Drop the chip `id` from `conversationKey`. */
 export function removeChip(conversationKey: string, id: string): void {
   setChips(conversationKey, chipsOf(conversationKey).filter((chip) => chip.id !== id))
@@ -117,6 +122,7 @@ export function useComposerChips(conversationKey: string | null) {
   return {
     chips,
     stage: useCallback((chip: { label: string; text: string }) => stageChip(key, chip), [key]),
+    update: useCallback((id: string, text: string) => updateChipText(key, id, text), [key]),
     remove: useCallback((id: string) => removeChip(key, id), [key]),
     clear: useCallback(() => clearChips(key), [key]),
   }

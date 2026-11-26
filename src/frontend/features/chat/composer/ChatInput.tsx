@@ -218,7 +218,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   ]
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} data-composer className="mx-auto w-full max-w-2xl">
       {((context?.attachments.length ?? 0) > 0 || attachments.length > 0 || chips.chips.length > 0) && (
         <div className="relative z-10 mb-2 flex flex-wrap gap-1.5">
           {activeContext.map(contextChip)}
@@ -231,7 +231,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onRemove={() => drafts.remove(attachment.name)}
             />
           ))}
-          {chips.chips.map((chip) => <TextChip key={chip.id} chip={chip} onRemove={() => chips.remove(chip.id)} />)}
+          {chips.chips.map((chip) => <TextChip key={chip.id} chip={chip} onChange={(text) => chips.update(chip.id, text)} onRemove={() => chips.remove(chip.id)} />)}
           {inactiveContext.length > 0 && (
             <InactiveAttachments count={inactiveContext.length}>{inactiveContext.map(contextChip)}</InactiveAttachments>
           )}
