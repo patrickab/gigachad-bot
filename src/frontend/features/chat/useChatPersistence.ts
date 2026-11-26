@@ -34,7 +34,8 @@ export function useChatPersistence({
     if (!tab.historyFile) return
     const title = tab.title ?? parseHistoryFile(tab.historyFile).filename.replace(".json", "")
     await saveChat(tab.historyFile, projectSlug, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
-    await refreshAll()
+    // The file is written: a failed refresh of the lists must not read as a failed save
+    await refreshAll().catch(() => {})
   }, [tab.historyFile, tab.title, tab.name, projectSlug, chatId, refreshAll])
 
   const handleQuickSave = useCallback(async () => {

@@ -102,17 +102,28 @@ function store(base64: string): string | undefined {
   return hash;
 }
 
+/** Drop the base64 of `hashes` from the map of recently stored images; their files stay. */
+export function forgetRecent(hashes: ReadonlySet<string>): void {
+  for (const [base64, hash] of recent) {
+    if (!hashes.has(hash)) continue;
+    recent.delete(base64);
+    recentChars -= base64.length;
+  }
+}
+
+/** True when the base64 of `hash` is still in the map of recently stored images. */
+export function isRemembered(hash: string): boolean {
+  for (const known of recent.values()) if (known === hash) return true;
+  return false;
+}
+
 /**
  * Forget the base64 of `hashes`, then remove their stored images, each on its own, so nothing of them stays in memory
  * and as little as possible on disk. Answers the hashes whose file could not be removed.
  */
 export function forgetMedia(hashes: readonly string[]): string[] {
   const gone = new Set(hashes.filter((hash) => HASH_RE.test(hash)));
-  for (const [base64, hash] of recent) {
-    if (!gone.has(hash)) continue;
-    recent.delete(base64);
-    recentChars -= base64.length;
-  }
+  forgetRecent(gone);
   const left: string[] = [];
   for (const hash of gone) {
     try {

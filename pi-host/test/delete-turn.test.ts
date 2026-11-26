@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Server } from "bun";
 import { startServer } from "../src/server.ts";
 import { deleteTurn } from "../src/host/local/delete-turn.ts";
-import { forgetMedia, mediaBytes, useMediaDir } from "../src/media.ts";
+import { forgetMedia, isRemembered, mediaBytes, useMediaDir, withMediaHashes } from "../src/media.ts";
 import type { DeleteTurnRequest, Host } from "../src/host/index.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 
@@ -402,4 +402,22 @@ test("lines that do not parse and entries without an id survive a delete byte fo
   expect(result).toEqual({ ok: true, removedEntries: 2, removedMedia: [] });
   const kept = [lines[0], lines[2], lines[4], lines[5], lines[6], JSON.stringify({ ...u2, parentId: null }), lines[8]];
   expect(readFileSync(sessionPath, "utf8")).toBe(`${kept.join("\n")}\n`);
+});
+
+test("a failed scan still forgets the images in memory and names their hashes", async () => {
+  const cwd = workdir("scan-fails");
+  const image = png("scan failure");
+  const hash = sha256(image);
+  const { sessionPath } = writeSessionFile(cwd, [
+    message("u1", null, "user", "first"),
+    toolResult("t1", "u1", "shot", image),
+    message("u2", "t1", "user", "kept"),
+  ]);
+  withMediaHashes({ role: "toolResult", content: [{ type: "image", mimeType: "image/png", data: image }] });
+  expect(isRemembered(hash)).toBe(true);
+  const result = await deleteTurn({ sessionPath, entryId: "u1", through: "turn" }, undefined, async () => {
+    throw new Error("scan failed");
+  });
+  expect(result).toEqual({ ok: true, removedEntries: 2, removedMedia: [], notRemoved: [hash] });
+  expect(isRemembered(hash)).toBe(false);
 });

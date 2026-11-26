@@ -16,6 +16,7 @@ import { lstat, open, readdir, readFile, realpath, rename, rm, stat } from "node
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { DeleteTurnRequest, DeleteTurnResult } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
+import { forgetRecent } from "../../media.ts";
 import { archiveRoot, cwdSessionDir, sessionsRoot } from "./paths.ts";
 import { forgetTranscript } from "./search.ts";
 import { forgetSummary } from "./sessions.ts";
@@ -159,6 +160,7 @@ async function syncDir(dir: string): Promise<void> {
 export async function deleteTurn(
   { sessionPath, entryId, through, dryRun }: DeleteTurnRequest,
   beforeRename: () => Promise<void> = async () => undefined,
+  scan: typeof unheld = unheld,
 ): Promise<DeleteTurnResult> {
   // A symlinked session path is rewritten at its target, the link stays a link
   const filePath = await realpath(sessionPath).catch(() => undefined);
@@ -210,15 +212,18 @@ export async function deleteTurn(
     const hashOf = (data: string) => createHash("sha256").update(Buffer.from(data, "base64")).digest("hex");
     let removedMedia: string[] = [];
     try {
-      removedMedia = [...new Set((await unheld(images, await others)).map(hashOf))];
+      removedMedia = [...new Set((await scan(images, await others)).map(hashOf))];
     } catch {
-      notRemoved.push(...new Set(images.map(hashOf)));
+      // Unknown whether another session holds them: the files stay and are named, the in-memory data goes anyway
+      const hashes = new Set(images.map(hashOf));
+      forgetRecent(hashes);
+      notRemoved.push(...hashes);
     }
     if (isAbsolute(parsed.cwd)) {
       const pastes = pasteMentions(result.removed).filter((mention) => !text.includes(mention));
       let unused: string[] = [];
       try {
-        unused = await unheld(pastes, await others);
+        unused = await scan(pastes, await others);
       } catch {
         notRemoved.push(...pastes);
       }
