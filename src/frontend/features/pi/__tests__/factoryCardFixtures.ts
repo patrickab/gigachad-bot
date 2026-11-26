@@ -1,0 +1,83 @@
+// One card of contract `cards` per kind, as the factory sends it in `details.card` (unknown fields included: a
+// renderer ignores them). Shared by the tests of the card, the notices, the factory tool and the session strip.
+
+import type { FactoryCard, FactoryCardKind } from "../factoryCard"
+
+export const CARD_FIXTURES = {
+  wave: {
+    v: 1,
+    kind: "wave",
+    tone: "attention",
+    title: "wave ui/2 was rejected",
+    tag: "ui/2",
+    id: "2a9081c8",
+    state: "rejected",
+    cost: 142,
+    progress: { done: 2, total: 3 },
+    rows: [{ label: "why", text: "the turn card drops its edit state" }],
+    findings: [
+      { severity: "blocker", file: "src/frontend/features/pi/PiTab.tsx", line: 42, text: "the live turn re-renders every settled one" },
+      { severity: "major", file: "src/frontend/features/pi/types.ts", text: "a new field is never read" },
+      { severity: "minor", text: "a comment repeats the code" },
+      { severity: "minor", file: "README.md", line: 3, text: "a stale link" },
+    ],
+    reviewer: "opus",
+  },
+  task: {
+    v: 1,
+    kind: "task",
+    tone: "attention",
+    title: "a coder asks",
+    tag: "ui/2",
+    id: "c8eb1223",
+    state: "waiting_answer",
+    cost: 37,
+    text: "Should the card start **open** for quiet notices?",
+  },
+  scout: {
+    v: 1,
+    kind: "scout",
+    tone: "quiet",
+    title: "scout reported",
+    id: "5f1e0a77",
+    state: "done",
+    cost: 9,
+    text: "## Key facts\n- `FactoryNotices.tsx` renders the content only",
+  },
+  proof: {
+    v: 1,
+    kind: "proof",
+    tone: "attention",
+    title: "gates on ui/2 are failing",
+    id: "77ab01cd",
+    state: "failing",
+    rows: [{ label: "step", text: "frontend" }],
+  },
+  contract: {
+    v: 1,
+    kind: "contract",
+    tone: "quiet",
+    title: "contract cards changed",
+    rows: [{ label: "fact", text: "a decision names what it answers" }],
+  },
+  decision: {
+    v: 1,
+    kind: "decision",
+    tone: "quiet",
+    title: "answered a coder",
+    tag: "ui/2",
+    id: "c8eb1223",
+    text: "Keep quiet cards collapsed.",
+    answers: "task:c8eb1223:question:1",
+  },
+  action: {
+    v: 1,
+    kind: "action",
+    tone: "quiet",
+    title: "wave ui/2 was merged",
+    tag: "ui/2",
+    state: "merged",
+    progress: { done: 3, total: 3 },
+    cost: 512,
+  },
+} satisfies Record<FactoryCardKind, FactoryCard & Record<string, unknown>>
