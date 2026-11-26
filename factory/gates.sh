@@ -46,6 +46,7 @@ if [[ -z ${GIGACHAD_CHECK_CLEAN:-} ]]; then
     exec nice -n 10 env -i \
         GIGACHAD_CHECK_CLEAN=1 HOME="$HOME" USER="${USER:-$(id -un)}" LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" \
         TMPDIR="${TMPDIR:-/tmp}" PATH="$PATH" \
+        ${FACTORY_SLOT_HELD:+FACTORY_SLOT_HELD="$FACTORY_SLOT_HELD"} \
         ${POSTGRES_TEST_DATABASE_URL:+POSTGRES_TEST_DATABASE_URL="$POSTGRES_TEST_DATABASE_URL"} \
         bash "${BASH_SOURCE[0]}" "$@"
 fi
@@ -55,10 +56,12 @@ source deploy/lib.sh
 
 changed_mode=0
 reuse=0
+dry_run=0
 while [[ ${1:-} == --* ]]; do
     case "$1" in
         --changed) changed_mode=1 ;;
         --reuse) reuse=1 ;;
+        --dry-run) dry_run=1 ;;  # test steps append their command to $TMPDIR/gates-dry-run, not run
         *) printf 'unknown option %s\n' "$1" >&2; exit 2 ;;
     esac
     shift
@@ -223,6 +226,20 @@ with psycopg.connect(make_conninfo(url, dbname="postgres"), autocommit=True) as 
 PY
 }
 
+# Runs a test command through `factory slot -- ...` (the machine's shared test slots) when the `factory` command has
+# `slot` and the caller does not hold one (FACTORY_SLOT_HELD); else as it is. --dry-run prints the command.
+slot_run() {
+    local prefix=()
+    if [[ -z ${FACTORY_SLOT_HELD:-} ]] && command -v factory >/dev/null 2>&1 && factory actions slot >/dev/null 2>&1; then
+        prefix=(factory slot --)
+    fi
+    if [[ $dry_run -eq 1 ]]; then
+        printf '%s\n' "${prefix[*]:+${prefix[*]} }$*" >>"${TMPDIR:-/tmp}/gates-dry-run"
+        return 0
+    fi
+    "${prefix[@]}" "$@"
+}
+
 step_lint() {
     local base files=()
     need_node_modules src/frontend || return
@@ -271,12 +288,12 @@ step_python() {
     cache="$(mktemp -d)"
     # One worker per core but one, each on a database of its own (tests/conftest.py). The factory's merge queue runs
     # one test suite per repository at a time, so it may take the machine.
-    POSTGRES_TEST_DATABASE_URL="$url" "$python" -m pytest -q -o cache_dir="$cache" -n "$workers" --dist loadfile || status=$?
+    slot_run env POSTGRES_TEST_DATABASE_URL="$url" "$python" -m pytest -q -o cache_dir="$cache" -n "$workers" --dist loadfile || status=$?
     # Exit 1 is failed tests: those run once more, alone. Anything else (collection, usage) is not flaky.
     if [[ $status -eq 1 ]]; then
         printf '\n-- rerunning the failed tests once\n'
         status=0
-        POSTGRES_TEST_DATABASE_URL="$url" "$python" -m pytest -q -o cache_dir="$cache" --last-failed || status=$?
+        slot_run env POSTGRES_TEST_DATABASE_URL="$url" "$python" -m pytest -q -o cache_dir="$cache" --last-failed || status=$?
         [[ $status -eq 0 ]] && printf 'flaky: the failed tests passed on the rerun\n'
     fi
     rm -rf "$cache"
@@ -291,13 +308,13 @@ step_frontend() {
     [[ ${#steps[@]} -gt 1 ]] && args+=(--maxWorkers=50%)
     # A test that is slow on a loaded machine is not failing: 15 s instead of vitest's 5 s.
     [[ ${#steps[@]} -gt 1 ]] && args+=(--testTimeout=15000)
-    (cd src/frontend && node_modules/.bin/vitest "${args[@]}")
+    (cd src/frontend && slot_run node_modules/.bin/vitest "${args[@]}")
 }
 
 step_pi_host() {
     local status=0
     need_node_modules pi-host || return
-    (cd pi-host && bun test) || status=1
+    (cd pi-host && slot_run bun test) || status=1
     return "$status"
 }
 
