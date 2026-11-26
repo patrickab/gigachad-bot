@@ -33,7 +33,7 @@ const noop = () => {}
 function Session({ onDispatch }: { onDispatch: (dispatch: (action: TranscriptAction) => void) => void }) {
   const [transcript, dispatch] = useReducer(transcriptReducer, initial)
   onDispatch(dispatch)
-  return <PiTranscript transcript={transcript} held={[]} onRetryHeld={noop} onDeleteHeld={noop} fileLinks={fileLinks} onBranch={noop} onColumnChange={noop} />
+  return <PiTranscript transcript={transcript} held={[]} onRetryHeld={noop} onDeleteHeld={noop} fileLinks={fileLinks} onBranch={noop} onDeleteTurn={noop} onEditTurn={noop} onColumnChange={noop} />
 }
 
 const event = (record: Record<string, unknown>): TranscriptAction => ({ kind: "event", event: { type: String(record.type), ...record } })

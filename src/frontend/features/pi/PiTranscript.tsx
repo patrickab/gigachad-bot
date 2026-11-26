@@ -23,7 +23,7 @@ import { ProcessDetails } from "./tools/ProcessDetails"
 import { ToolCallRow } from "./tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
-import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ToolCall, ToolRun } from "./types"
+import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ImageContent, ToolCall, ToolRun } from "./types"
 import "./FactoryNotices"
 import "./FactoryTool"
 import "./MemoryTool"
@@ -268,6 +268,13 @@ function promptOf(message: AgentMessage): { text: string; compaction: boolean; s
   return { ...splitSkill(textOf((message as { content: string | { type: string; text?: string }[] }).content)), compaction: false }
 }
 
+/** The prompt's own image blocks (base64), as sent: what an edit sends again. */
+function promptImageBlocks(message: AgentMessage): ImageContent[] {
+  const { content } = message as { content?: unknown }
+  if (!Array.isArray(content)) return []
+  return content.filter((block): block is ImageContent => block?.type === "image" && typeof block.data === "string")
+}
+
 /** The skill a prompt loaded, folded like "Thinking": its name, the skill file on expand. */
 function SkillFold({ skill, fileLinks }: { skill: SkillBlock; fileLinks: FileLinks }) {
   const [open, setOpen] = useState(false)
@@ -298,13 +305,19 @@ const PiTurnPreview = memo(function PiTurnPreview({ messages, turn, confirmed, r
 })
 
 /** One open turn's question and answer; memoized so a streamed delta re-renders the newest turn only. */
-const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirmed, runs, live, onCollapse, onBranch, fileLinks }: PiTurnProps & {
+const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirmed, runs, live, laterTurns, onCollapse, onBranch, onDeleteTurn, onEditTurn, fileLinks }: PiTurnProps & {
   /** The streaming reply, for the newest turn only. */
   streaming: AssistantMessage | null
   live: boolean
+  /** Turns after this one, what an edit removes with it. */
+  laterTurns: number
   onCollapse?: () => void
   /** Branch keeping `entryId`. */
   onBranch?: (entryId: string) => void
+  /** Delete the turn whose prompt is `entryId`. */
+  onDeleteTurn?: (entryId: string) => void
+  /** Delete the turn whose prompt is `entryId` and every later one, then send `text` with `images`. */
+  onEditTurn?: (entryId: string, text: string, images: ImageContent[]) => void
 }) {
   const prompt = messages[turn.start]
   const { text, compaction, skill } = promptOf(prompt)
@@ -317,9 +330,14 @@ const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirm
   // Branch from the turn's last persisted entry; a turn with none yet (live, optimistic) has no branch point
   const lastConfirmed = Math.min(turn.end, confirmed.count) - 1
   const branchFrom = !live && onBranch && lastConfirmed >= turn.start ? confirmed.entryIds[lastConfirmed] : undefined
+  // Edit and delete address the prompt's entry: a turn without one yet, and a compaction, have neither
+  const editFrom = !live && !compaction ? promptEntryId : undefined
+  // A skill prompt is edited as its args, sent again as the command that loads the skill
+  const edit = editFrom && onEditTurn ? (draft: string) => onEditTurn(editFrom, skill ? `/skill:${skill.name} ${draft}` : draft, promptImageBlocks(prompt)) : undefined
+  const remove = editFrom && onDeleteTurn ? () => onDeleteTurn(editFrom) : undefined
   return (
     <>
-      <TurnQuestion text={text} live={live} icon={icon} onCollapse={onCollapse}>
+      <TurnQuestion text={text} live={live} icon={icon} onCollapse={onCollapse} onEdit={edit} onDelete={remove} laterTurns={laterTurns}>
         {promptMarks && <MarksLine marks={promptMarks} />}
         {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
         {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
@@ -356,10 +374,12 @@ interface PiColumnTurn extends ConversationTurn {
  * - A search hit (`search`) reveals its turn, scrolls to the hit, centred, and holds the view there; Enter and Shift+Enter
  *   (outside text fields) step through the session's hits, Escape clears
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message
+ * - `onDeleteTurn` and `onEditTurn` add delete and edit to the question of each turn with a persisted prompt, compactions
+ *   aside, and to none while a run is live. Both get the prompt's entry id; the transcript follows the host's resync
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  * - `readOnly` (a session preview): keys never reach its column
  */
-export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, paddingBottom, onColumnChange, readOnly }: {
+export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, onDeleteTurn, onEditTurn, paddingBottom, onColumnChange, readOnly }: {
   transcript: Transcript
   /** Sent but unconfirmed messages, shown below the turns. */
   held?: readonly HeldMessage[]
@@ -369,6 +389,8 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   /** The session search hit to show: its turn is mounted and opened, the view scrolls to it and every hit is painted (CSS Custom Highlight API). */
   search?: PiSearchFocus | null
   onBranch?: (entryId: string) => void
+  onDeleteTurn?: (entryId: string) => void
+  onEditTurn?: (entryId: string, text: string, images: ImageContent[]) => void
   paddingBottom?: number
   onColumnChange?: (column: HTMLDivElement | null) => void
   readOnly?: boolean
@@ -380,6 +402,9 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   const runs = useMemo(() => toolRunsOf({ messages: confirmedMessages, unconfirmed, optimistic, runs: liveRuns }), [confirmedMessages, unconfirmed, optimistic, liveRuns])
   const confirmed = useMemo<Confirmed>(() => ({ count: confirmedMessages.length, entryIds, marks }), [confirmedMessages.length, entryIds, marks])
   const liveTail = running || streaming !== null || optimistic !== null
+  // While a run is live no turn is edited or deleted: the host refuses a running session
+  const deleteTurn = liveTail || readOnly ? undefined : onDeleteTurn
+  const editTurn = liveTail || readOnly ? undefined : onEditTurn
   const columnTurns = useMemo(() => turns.map((turn, index): PiColumnTurn => {
     const { text, compaction, skill } = promptOf(messages[turn.start])
     return {
@@ -438,8 +463,11 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
       confirmed={confirmed}
       runs={runs}
       live={item.live}
+      laterTurns={turns.length - 1 - index}
       onCollapse={collapse}
       onBranch={onBranch}
+      onDeleteTurn={deleteTurn}
+      onEditTurn={editTurn}
       fileLinks={fileLinks}
     />
   )

@@ -6,7 +6,7 @@ import type { FileLinks } from "@/components/content/LaTeXMarkdown"
 import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useOpenFile } from "@/features/editor/FilePanel"
-import { ApiError, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
+import { ApiError, deletePiTurn, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, PiCatalog, PiView } from "@/lib/domain/types"
 import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
 import { BtwPanel } from "./BtwPanel"
@@ -20,7 +20,7 @@ import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import { PiSessionDot } from "./usePiSidebar"
 import type { SubagentRow } from "./subagents"
-import type { PiCommand, PiModel } from "./types"
+import type { ImageContent, PiCommand, PiModel } from "./types"
 import { usePiSession, type Notice } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
@@ -50,6 +50,16 @@ const NO_SLOTS: PiTopBarSlots = { thinking: null, model: null, usage: null }
 function piOpenError(reason: unknown, repo?: string): string {
   if (reason instanceof ApiError && reason.status === 409) return "Another Pi process holds this session"
   if (reason instanceof ApiError && reason.status === 404 && repo !== undefined && reason.message.startsWith("Unknown repository")) return `${repo} is not a folder`
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
+/** The sentence a refused or failed turn delete shows: a 409's reason in words, any other failure's reason as it came. */
+export function piTurnError(reason: unknown): string {
+  if (reason instanceof ApiError && reason.status === 409) {
+    if (reason.code === "running") return "Wait for the run to finish"
+    if (reason.code === "compacted") return "A compaction already summarized this turn"
+    if (reason.code === "locked" || reason.code === "changed") return "The session file is in use"
+  }
   return reason instanceof Error ? reason.message : String(reason)
 }
 
@@ -119,6 +129,8 @@ export function withLead(text: string, lead: string | undefined): string {
  * - `insertion` goes into the composer once it is enabled (a quote, a canvas screenshot), `onInserted` follows
  * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
  * - Each settled turn branches through `onBranch` (D11); a failed branch shows as a notice
+ * - A turn's delete and edit rewrite the session file (`deletePiTurn`), the transcript follows the host's resync. An edit then
+ *   sends its text with the turn's images; a refusal shows as a notice, a failed send puts the text into the composer
  * - A closed session's reason shows with the composer's notices
  * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
@@ -157,6 +169,21 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const dock = useComposerDock(empty && !docked)
   const { mountColumn } = dock
   const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
+
+  // An edit's text whose send failed goes into the composer, before the owner's insertion
+  const [editInsertion, setEditInsertion] = useState<PiInsertion | null>(null)
+  const editInserted = useCallback(() => setEditInsertion(null), [])
+  const deleteTurn = useCallback((entryId: string) => {
+    deletePiTurn(sessionId, entryId, "turn").catch((reason: unknown) => notify(piTurnError(reason), "error"))
+  }, [sessionId, notify])
+  const editTurn = useCallback(async (entryId: string, text: string, images: ImageContent[]) => {
+    try {
+      await deletePiTurn(sessionId, entryId, "end")
+    } catch (reason) {
+      return notify(piTurnError(reason), "error")
+    }
+    if (!(await send(text, images))) setEditInsertion({ id: Date.now(), text })
+  }, [sessionId, notify, send])
 
   // The lead already sent: one the owner has not cleared yet never leads a second prompt
   const sentLead = useRef<string | null>(null)
@@ -224,7 +251,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   return (
     <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
+      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} onDeleteTurn={deleteTurn} onEditTurn={editTurn} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} />
       <ComposerDock dock={dock}>
         <BtwPanel threads={session.btw.threads} actions={session.btw} fileLinks={fileLinks} />
         <PiComposer
@@ -239,8 +266,8 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
           statusLines={session.statusLines}
           roster={<>{waves}<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} /></>}
           editorText={session.editorText}
-          insertion={insertion}
-          onInserted={onInserted}
+          insertion={editInsertion ?? insertion}
+          onInserted={editInsertion ? editInserted : onInserted}
           leading={composerLeading?.(header)}
           onSubmit={(request) => void submit(request)}
           onAbort={session.abort}

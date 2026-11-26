@@ -298,25 +298,26 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     }
   }, [sessionId, post])
 
-  /** Start a run, or hold the message and deliver it into the running one as `mode`. A new run's prompt shows optimistically until Pi reports it. Failures become a notice. */
-  const send = useCallback(async (message: string, images: ImageContent[], mode: QueueMode = "steer") => {
+  /** Start a run, or hold the message and deliver it into the running one as `mode`. A new run's prompt shows optimistically until Pi reports it. Failures become a notice; resolves to whether Pi took the message (a held one counts). */
+  const send = useCallback(async (message: string, images: ImageContent[], mode: QueueMode = "steer"): Promise<boolean> => {
     // A btw command is handled at once by its extension, also mid-run: never held, steered or queued, no optimistic prompt
     if (isBtwCommand(message)) {
       const response = await command("prompt", { message })
       if (!response.success) notify(response.error ?? "Side question refused", "error")
-      return
+      return response.success
     }
     if (transcript.running) {
       hold(sessionId, { text: message, images, mode })
       flush()
-      return
+      return true
     }
     const prompt: UserMessage = { role: "user", content: images.length > 0 ? [{ type: "text", text: message }, ...images] : message, timestamp: Date.now() }
     dispatch({ kind: "prompt", prompt })
     const response = await command("prompt", { message, ...(images.length > 0 ? { images } : {}) })
-    if (response.success) return
+    if (response.success) return true
     dispatch({ kind: "prompt", prompt: null })
     notify(response.error ?? "Prompt refused", "error")
+    return false
   }, [command, notify, dispatch, transcript.running, sessionId, flush])
 
   const btw = useMemo(() => ({
