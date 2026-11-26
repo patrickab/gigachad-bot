@@ -380,8 +380,9 @@ interface PiColumnTurn extends ConversationTurn {
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
  *   and Edit, with the entry before the prompt and the prompt
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
+ * - `readOnly` (a session preview): keys never reach its column
  */
-export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, paddingBottom, onColumnChange }: {
+export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld, fileLinks, search = null, onBranch, paddingBottom, onColumnChange, readOnly }: {
   transcript: Transcript
   /** Sent but unconfirmed messages, shown below the turns. */
   held?: readonly HeldMessage[]
@@ -393,6 +394,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   onBranch?: (entryId: string, prompt?: string) => void
   paddingBottom?: number
   onColumnChange?: (column: HTMLDivElement | null) => void
+  readOnly?: boolean
 }) {
   const { messages: confirmedMessages, unconfirmed, optimistic, entryIds, marks, streaming, running, runs: liveRuns } = transcript
   // Derived from the fields that change per message, not per streamed delta, so settled turns keep their props
@@ -480,6 +482,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
         paddingBottom={paddingBottom}
         onColumnChange={onColumnChange}
         scrollRef={scrollRef}
+        readOnly={readOnly}
       />
     </PreviewContext.Provider>
   )

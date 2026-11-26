@@ -11,7 +11,7 @@ vi.mock("@/features/chat/messages/ChatMessage", () => ({
 }))
 vi.mock("@/features/chat/messages/ToolCallElement", () => ({ ToolCallElement: () => <div>Full tool output</div> }))
 
-import { ChatPairBody, ChatPairPreview, pairLabel } from "@/features/chat/ChatPair"
+import { ChatPairBody, ChatPairPreview, chatPairPreview, pairLabel } from "@/features/chat/ChatPair"
 
 beforeEach(() => markdown.mockClear())
 afterEach(cleanup)
@@ -43,6 +43,12 @@ it("gives the collapsed preview the search result so citations resolve to links"
   const search_result = { query: "banach", sources: [], images: [], videos: [], citationMap: {} }
   render(<ChatPairPreview assistant={{ ...assistant, search_result }} />)
   expect(markdown).toHaveBeenCalledWith(assistant.content, search_result)
+})
+
+it("has no preview for an empty answer without tools, so the column reserves no space for it", () => {
+  expect(chatPairPreview({ role: "assistant", content: "" })).toBeNull()
+  expect(chatPairPreview({ ...assistant, content: "" })).not.toBeNull()
+  expect(chatPairPreview({ role: "assistant", content: "Answer" })).not.toBeNull()
 })
 
 it("renders the full messages and tool output of an open pair", () => {

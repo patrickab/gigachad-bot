@@ -7,7 +7,7 @@ import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle 
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { GitFork } from "lucide-react"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
-import { ChatPairBody, ChatPairPreview, pairLabel } from "./ChatPair"
+import { ChatPairBody, chatPairPreview, pairLabel } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
 import { keyPairs, pairMessages, type Pair } from "@/lib/domain/pairs"
 import { ComposerDock, useComposerDock } from "./ComposerDock"
@@ -169,7 +169,8 @@ export function ChatContainer({
   )
 
   // Settled pairs get equal props each streamed frame, so the column skips them
-  const renderPreview = (turn: ChatTurn) => <ChatPairPreview assistant={turn.pair.assistant} />
+  const renderPreview = (turn: ChatTurn) => chatPairPreview(turn.pair.assistant)
+  const previewText = (turn: ChatTurn) => turn.pair.assistant.content
   const renderBody = (turn: ChatTurn, _index: number, collapse: (() => void) | undefined) => (
     <ChatPairBody
       user={turn.pair.user}
@@ -194,6 +195,7 @@ export function ChatContainer({
           key={chatId}
           turns={turns}
           renderPreview={renderPreview}
+          previewText={previewText}
           renderBody={renderBody}
           renderAfter={renderAfter}
           reveal={columnReveal}

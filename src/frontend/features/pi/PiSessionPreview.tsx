@@ -59,6 +59,6 @@ function usePreview(session: PiSessionInfo): Transcript | null {
 export function PiSessionPreview({ session }: { session: PiSessionInfo }) {
   const transcript = usePreview(session)
   return <div className="flex h-full w-full flex-col overflow-hidden">
-    {transcript && <PiTranscript transcript={transcript} fileLinks={NO_FILE_LINKS} />}
+    {transcript && <PiTranscript transcript={transcript} fileLinks={NO_FILE_LINKS} readOnly />}
   </div>
 }

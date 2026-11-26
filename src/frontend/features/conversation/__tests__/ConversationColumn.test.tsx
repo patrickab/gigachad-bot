@@ -13,13 +13,15 @@ function turnsOf(count: number, { live = false, streaming = "" } = {}): TestTurn
   }))
 }
 
-function Column({ turns, reveal = null, followSeq, after }: { turns: TestTurn[]; reveal?: ConversationReveal | null; followSeq?: number; after?: string }) {
+function Column({ turns, reveal = null, followSeq, after, readOnly }: { turns: TestTurn[]; reveal?: ConversationReveal | null; followSeq?: number; after?: string; readOnly?: boolean }) {
   return (
     <ConversationColumn
       turns={turns}
       followSeq={followSeq}
+      readOnly={readOnly}
       renderAfter={(turn) => (turn.key === after ? <hr aria-label="After" /> : null)}
-      renderPreview={(turn) => <p>{turn.answer}</p>}
+      renderPreview={(turn) => (turn.answer ? <p>{turn.answer}</p> : null)}
+      previewText={(turn) => turn.answer}
       renderBody={(turn, _index, collapse) => (
         <>
           <p>{turn.label}</p>
@@ -185,15 +187,24 @@ describe("ConversationColumn rows and previews", () => {
       disconnect() {}
     })
     render(<Column turns={turnsOf(3)} />)
-    expect(screen.queryByText("Answer 0")).toBeNull()
-    expect(screen.queryByText("Answer 1")).toBeNull()
+    expect(screen.queryByText("Answer 0", { selector: "p" })).toBeNull()
+    expect(screen.queryByText("Answer 1", { selector: "p" })).toBeNull()
 
     const pending = document.querySelector("[data-turn-key='k0'] [data-preview-pending]")!
     act(() => observed.get(pending)!([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver))
-    expect(screen.getByText("Answer 0")).toBeTruthy()
+    expect(screen.getByText("Answer 0", { selector: "p" })).toBeTruthy()
 
     fireEvent.focus(screen.getByRole("button", { name: "Prompt 1" }))
-    expect(screen.getByText("Answer 1")).toBeTruthy()
+    expect(screen.getByText("Answer 1", { selector: "p" })).toBeTruthy()
+    vi.unstubAllGlobals()
+  })
+
+  it("holds a waiting preview's text for screen readers, and reserves nothing for a turn without a preview", () => {
+    vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} })
+    render(<Column turns={[{ ...turnsOf(1)[0], key: "empty", answer: "" }, ...turnsOf(3)]} />)
+    const pending = document.querySelector("[data-turn-key='k0'] [data-preview-pending]")!
+    expect(pending.querySelector(".sr-only")?.textContent).toBe("Answer 0")
+    expect(document.querySelector("[data-turn-key='empty'] [data-preview-pending]")).toBeNull()
     vi.unstubAllGlobals()
   })
 
@@ -238,5 +249,44 @@ describe("ConversationColumn keyboard focus", () => {
     expect(isFocused("k4")).toBe(true)
     expect(screen.getByText("Prompt 1")).toBeTruthy()
     outside.remove()
+  })
+
+  it("moves from a control elsewhere in the tab, e.g. the sidebar, where Enter stays the control's", () => {
+    const sidebar = document.createElement("button")
+    document.body.append(sidebar)
+    render(<Column turns={turnsOf(3)} />)
+    key({ key: "ArrowUp", ctrlKey: true }, sidebar)
+    expect(isFocused("k2")).toBe(true)
+    key({ key: "Enter" }, sidebar)
+    expect(isFocused("k2")).toBe(true)
+    sidebar.remove()
+  })
+
+  it("never reaches a read-only column", () => {
+    render(<Column turns={turnsOf(3)} readOnly />)
+    key({ key: "ArrowUp", ctrlKey: true })
+    expect(document.querySelector(".gc-turn[data-focused]")).toBeNull()
+  })
+
+  it("reaches one column only: the one whose surface holds the key, else the first", () => {
+    const sidebar = document.createElement("button")
+    document.body.append(sidebar)
+    render(<><div data-testid="first"><Column turns={turnsOf(3)} /></div><div data-testid="second"><Column turns={turnsOf(3)} /></div></>)
+    const focusedIn = (id: string) => screen.getByTestId(id).querySelectorAll(".gc-turn[data-focused]").length
+    const composer = document.createElement("textarea")
+    screen.getByTestId("second").append(composer)
+    key({ key: "ArrowUp", ctrlKey: true }, composer)
+    expect([focusedIn("first"), focusedIn("second")]).toEqual([0, 1])
+
+    key({ key: "ArrowUp", ctrlKey: true }, sidebar)
+    expect(focusedIn("first") + focusedIn("second")).toBe(2)
+    sidebar.remove()
+  })
+
+  it("leaves a key inside a read-only column to it, which takes none", () => {
+    render(<><div><Column turns={turnsOf(3)} /></div><div data-testid="preview"><Column turns={turnsOf(3)} readOnly /></div></>)
+    const inPreview = screen.getByTestId("preview").querySelector("[data-turn-key='k2']")!
+    key({ key: "ArrowUp", ctrlKey: true }, inPreview)
+    expect(document.querySelector(".gc-turn[data-focused]")).toBeNull()
   })
 })

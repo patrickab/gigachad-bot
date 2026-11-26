@@ -9,7 +9,7 @@ import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { isModKey, isTerminalKeyEvent } from "@/lib/utils"
-import { WideModeToggle } from "@/features/chat/WideModeToggle"
+import { WideModeToggle } from "./WideModeToggle"
 
 /** Turns mounted at first and added per "Show earlier turns": older ones create no elements (smooth streaming). */
 export const TURN_PAGE_SIZE = 20
@@ -44,8 +44,10 @@ export interface ConversationReveal {
 
 export interface ConversationColumnProps<T extends ConversationTurn> {
   turns: readonly T[]
-  /** A collapsed turn's preview under its header (e.g. a `TurnPreview`), null for none. */
+  /** A collapsed turn's preview under its header (e.g. a `TurnPreview`), null for none (no space is reserved for it then). */
   renderPreview: (turn: T, index: number) => ReactNode
+  /** A collapsed turn's text for screen readers while its preview waits to render. */
+  previewText?: (turn: T, index: number) => string | undefined
   /** An open turn's card content (its regions); `collapse` is unset for a live turn. */
   renderBody: (turn: T, index: number, collapse: (() => void) | undefined) => ReactNode
   /** A row after a turn, e.g. a separator. */
@@ -66,6 +68,8 @@ export interface ConversationColumnProps<T extends ConversationTurn> {
   /** Wide mode held by the caller, e.g. across chats that remount the column; unset: the column holds its own. */
   wide?: boolean
   onWideChange?: (wide: boolean) => void
+  /** A read-only view (e.g. a session preview): keys never reach it. */
+  readOnly?: boolean
 }
 
 /** Same element type, key and shallowly equal props: a re-created element of a memoized turn changes nothing. */
@@ -80,9 +84,9 @@ function sameNode(a: ReactNode, b: ReactNode): boolean {
 
 /**
  * A collapsed turn's preview, rendered once it nears the viewport (or `wake` is set): a long history then parses only what is read.
- * Until then it reserves the preview's height cap. A card in a hidden tab (no size) waits for its intersection.
+ * Until then it reserves the preview's height cap and holds `text` for screen readers. A card in a hidden tab (no size) waits for its intersection.
  */
-function LazyPreview({ wake, children }: { wake: boolean; children: ReactNode }) {
+function LazyPreview({ wake, text, children }: { wake: boolean; text: string | undefined; children: ReactNode }) {
   const [near, setNear] = useState(false)
   const attach = useCallback((host: HTMLDivElement | null) => {
     if (!host) return
@@ -100,7 +104,8 @@ function LazyPreview({ wake, children }: { wake: boolean; children: ReactNode })
   }, [])
   if (children == null) return null
   // Without an observer nothing would wake it
-  return near || wake || typeof IntersectionObserver === "undefined" ? children : <div ref={attach} data-preview-pending style={{ height: "15vh" }} />
+  if (near || wake || typeof IntersectionObserver === "undefined") return children
+  return <div ref={attach} data-preview-pending style={{ height: "15vh" }}>{text && <span className="sr-only">{text}</span>}</div>
 }
 
 interface ColumnTurnProps {
@@ -112,12 +117,14 @@ interface ColumnTurnProps {
   focused: boolean
   /** The preview when collapsed, the card content when open. */
   content: ReactNode
+  /** The collapsed preview's text for screen readers until it renders. */
+  pendingText: string | undefined
   onExpand: () => void
   onResizeStart?: ResizeStart
 }
 
 /** One turn's card; skipped while its props hold, so a streamed frame re-renders the live turn only. */
-const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, focused, content, onExpand, onResizeStart }: ColumnTurnProps) {
+const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, focused, content, pendingText, onExpand, onResizeStart }: ColumnTurnProps) {
   // Focus inside the card (its header by Tab) loads the preview, so the next Tab reaches it
   const [woken, setWoken] = useState(false)
   if (!open) {
@@ -125,7 +132,7 @@ const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, focuse
       <div data-turn-key={turnKey} onFocus={() => setWoken(true)}>
         <TurnCard expanded={false} focused={focused}>
           <TurnHeader label={label} icon={icon} onExpand={onExpand} />
-          <LazyPreview wake={woken || focused}>{content}</LazyPreview>
+          <LazyPreview wake={woken || focused} text={pendingText}>{content}</LazyPreview>
         </TurnCard>
       </div>
     )
@@ -136,12 +143,32 @@ const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, focuse
       <TurnCard expanded focused={focused}>{content}</TurnCard>
     </div>
   )
-}, (prev, next) => prev.turnKey === next.turnKey && prev.label === next.label && prev.open === next.open && prev.focused === next.focused
+}, (prev, next) => prev.turnKey === next.turnKey && prev.label === next.label && prev.open === next.open && prev.focused === next.focused && prev.pendingText === next.pendingText
   && prev.onExpand === next.onExpand && prev.onResizeStart === next.onResizeStart && sameNode(prev.icon, next.icon) && sameNode(prev.content, next.content))
 
 /** The mounted card of the turn `key`. */
 function turnElement(root: HTMLElement, key: string): Element | undefined {
   return [...root.querySelectorAll("[data-turn-key]")].find((candidate) => candidate.getAttribute("data-turn-key") === key)
+}
+
+/** Every mounted column's scroller, so a key is routed to one column only. */
+const scrollers = new Set<RefObject<HTMLDivElement | null>>()
+/** Keys a column took: a key from outside every column reaches the first column that takes it. */
+const claimedKeys = new WeakSet<Event>()
+
+/** The surface (scroller's parent, with its composer) of the innermost column holding `target`, null outside every column. */
+function columnSurfaceOf(target: EventTarget | null): Element | null {
+  if (!(target instanceof Node)) return null
+  let found: Element | null = null
+  for (const scroller of scrollers) {
+    const surface = scroller.current?.parentElement
+    if (surface?.contains(target) && (!found || found.contains(surface))) found = surface
+  }
+  return found
+}
+
+function isTextField(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']") !== null
 }
 
 /** Scrolls the turn `key` to the top of the view, true when it is mounted. */
@@ -167,12 +194,13 @@ function glideTo(element: HTMLElement, top: number) {
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
  *   from the end the window's top stays put, so appended turns do not push the read ones out
  * - A collapsed turn renders its preview near the viewport only
- * - Ctrl/Cmd+Up/Down from the column or its surface (e.g. the composer) moves a keyboard focus over the turns, Enter opens or
- *   collapses the focused one, Escape drops the focus
+ * - Ctrl/Cmd+Up/Down moves a keyboard focus over the turns, Enter opens or collapses the focused one, Escape drops the focus.
+ *   A key from inside a column's surface (its composer too) reaches that column only, one from elsewhere in the active tab the
+ *   first column that takes it, a text field outside every column keeps its keys. A `readOnly` column takes none
  * - `reveal` mounts and opens its turn, then scrolls to it (or where its `scroll` says) and holds the view there
  * - Column width (drag a card edge, shared app-wide) and wide mode (the top bar's toggle)
  */
-export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, renderBody, renderAfter, header, footer, reveal = null, followSeq = 0, paddingBottom, onColumnChange, scrollRef: outerScrollRef, wide: heldWide, onWideChange }: ConversationColumnProps<T>) {
+export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, previewText, renderBody, renderAfter, header, footer, reveal = null, followSeq = 0, paddingBottom, onColumnChange, scrollRef: outerScrollRef, wide: heldWide, onWideChange, readOnly = false }: ConversationColumnProps<T>) {
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [pageCount, setPageCount] = useState(TURN_PAGE_SIZE)
   /** First mounted turn while the reader is away from the end, null while following the end. */
@@ -330,23 +358,27 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
     setFocusedKey(null)
   }
   const tabActive = useTabActive()
-  // Capture phase so these shortcuts win over editor and input handlers; only from this column's surface (its composer too)
+  useEffect(() => {
+    scrollers.add(scrollRef)
+    return () => { scrollers.delete(scrollRef) }
+  }, [])
+  // Capture phase so these shortcuts win over editor and input handlers
   useEventListener("window", "keydown", (event) => {
-    if (isTerminalKeyEvent(event)) return
-    const target = event.target
-    const surface = scrollRef.current?.parentElement
-    if (!(target === document.body || (target instanceof Node && surface?.contains(target)))) return
-    if (isModKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-      event.preventDefault()
-      event.stopPropagation()
-      moveFocus(event.key === "ArrowDown" ? 1 : -1)
-      scrollRef.current?.focus({ preventScroll: true })
-    } else if (event.key === "Enter" && focusIndex >= 0) {
-      event.preventDefault()
-      event.stopPropagation()
-      toggleFocused()
-    }
-  }, { capture: true, active: tabActive })
+    if (isTerminalKeyEvent(event) || claimedKeys.has(event)) return
+    const own = scrollRef.current?.parentElement
+    const surface = columnSurfaceOf(event.target)
+    if (!own || (surface ? surface !== own : isTextField(event.target))) return
+    const move = isModKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")
+    // Enter only from this surface or the page, never from a control elsewhere
+    const confirm = event.key === "Enter" && focusIndex >= 0 && (surface === own || event.target === document.body)
+    if (!move && !confirm) return
+    claimedKeys.add(event)
+    event.preventDefault()
+    event.stopPropagation()
+    if (confirm) return toggleFocused()
+    moveFocus(event.key === "ArrowDown" ? 1 : -1)
+    scrollRef.current?.focus({ preventScroll: true })
+  }, { capture: true, active: tabActive && !readOnly })
   useEscapeLayer(() => setFocusedKey(null), focusIndex >= 0)
 
   // The focused turn sits FOCUS_ROWS_ABOVE turns below the top, or the first turn at the top
@@ -404,6 +436,7 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
                 open={open}
                 focused={turn.key === focusedKey}
                 content={open ? renderBody(turn, index, turn.live ? undefined : collapse) : renderPreview(turn, index)}
+                pendingText={open ? undefined : previewText?.(turn, index)}
                 onExpand={expand}
                 onResizeStart={wide ? undefined : startResize}
               />

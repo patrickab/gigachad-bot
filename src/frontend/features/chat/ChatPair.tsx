@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
@@ -23,7 +24,11 @@ function CollapsedAnswer({ content, search_result }: { content: string; search_r
   return <div ref={attach} className="contents"><AssistantMessageContent content={full ? content : previewHead(content)} search_result={search_result} compact /></div>
 }
 
-/** A collapsed pair's preview: the tools its answer used and the answer's head. The column renders it near the viewport only. */
+/** A collapsed pair's preview: the tools its answer used and the answer's head, null for an empty answer without tools. The column renders it near the viewport only. */
+export function chatPairPreview(assistant: Message): ReactNode {
+  return assistant.content || assistant.tool_calls?.length ? <ChatPairPreview assistant={assistant} /> : null
+}
+
 export function ChatPairPreview({ assistant }: { assistant: Message }) {
   const tools = (assistant.tool_calls ?? []).map((call) => {
     const { icon: Icon, label } = toolDisplay(call.name)

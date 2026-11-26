@@ -18,7 +18,7 @@ vi.mock("@/features/chat/messages/ChatMessage", () => ({
   ChatMessage: ({ content }: { content: string }) => <div>{content}</div>,
 }))
 // The top bar's slot is not mounted here: the toggle renders in place
-vi.mock("@/features/chat/WideModeToggle", () => ({
+vi.mock("@/features/conversation/WideModeToggle", () => ({
   WideModeToggle: ({ wide, onToggle }: { wide: boolean; onToggle: () => void }) => <button type="button" onClick={onToggle}>{wide ? "Exit wide mode" : "Enter wide mode"}</button>,
 }))
 const GREETING = vi.hoisted(() => "What's on your mind?")

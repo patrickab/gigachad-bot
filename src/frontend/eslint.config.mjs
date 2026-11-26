@@ -45,7 +45,7 @@ export default defineConfig([
           { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "package", fileInternalPath: PACKAGE_FILES_BESIDES_PROTOCOL } } } },
           { from: { element: { type: "app" } }, allow: { to: { element: { type: "feature", fileInternalPath: publicEntry } } } },
           { from: { element: { type: "feature", captured: { feature: "learn" } } }, allow: { to: { element: { type: "package", fileInternalPath: "src/learn-protocol.*" } } } },
-          crossFeature("conversation", "chat"),
+          crossFeature("conversation", "navigation"),
           crossFeature("chat", "editor"),
           crossFeature("chat", "learn"),
           crossFeature("chat", "navigation"),
