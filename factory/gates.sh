@@ -151,6 +151,7 @@ infra() {
 # Waits up to 5 minutes for a node_modules a worktree is still copying (`agent-worktree create --background`).
 need_node_modules() {
     local dir="$1" tries=0
+    [[ $dry_run -eq 1 ]] && return 0
     while [[ ! -d $dir/node_modules ]]; do
         ((tries++ < 60)) || { infra "$dir/node_modules is missing, install the packages in the main checkout"; return; }
         sleep 5
@@ -230,7 +231,7 @@ PY
 # `slot` and the caller does not hold one (FACTORY_SLOT_HELD); else as it is. --dry-run prints the command.
 slot_run() {
     local prefix=()
-    if [[ -z ${FACTORY_SLOT_HELD:-} ]] && command -v factory >/dev/null 2>&1 && factory --help 2>/dev/null | grep -q 'factory slot'; then
+    if [[ -z ${FACTORY_SLOT_HELD:-} ]] && command -v factory >/dev/null 2>&1 && [[ $(factory --help 2>/dev/null) == *'factory slot'* ]]; then
         prefix=(factory slot --)
     fi
     if [[ $dry_run -eq 1 ]]; then
@@ -375,9 +376,11 @@ for step in "${steps[@]}"; do
         touch "$passed_dir/$passed_key-$step"
     fi
 done
-mkdir -p "$kept" && cp "$logs"/* "$kept"/ 2>/dev/null || true
-# Keep the last 20 runs' logs.
-ls -1dt "$(dirname "$kept")"/*/ 2>/dev/null | tail -n +21 | xargs -r rm -rf
+if [[ $dry_run -eq 0 ]]; then
+    mkdir -p "$kept" && cp "$logs"/* "$kept"/ 2>/dev/null || true
+    # Keep the last 20 runs' logs.
+    ls -1dt "$(dirname "$kept")"/*/ 2>/dev/null | tail -n +21 | xargs -r rm -rf
+fi
 for step in "${steps[@]}"; do
     [[ " ${failed[*]} ${broken[*]} " == *" $step "* ]] || printf '== %s: %s\n' "$step" "$(tail -n 1 "$logs/$step" | grep -q 'passed on this tree before' && echo 'passed before on this tree' || echo passed)"
 done
