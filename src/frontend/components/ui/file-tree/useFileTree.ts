@@ -7,6 +7,8 @@ export interface FileBranchController {
   isExpanded: (id: string) => boolean
   toggleBranch: (id: string) => void
   expand: (id: string) => void
+  /** Expand or collapse several branches in one update, e.g. closing one section while opening another. */
+  set: (changes: Record<string, boolean>) => void
 }
 
 function parseSaved(saved: string | null): Record<string, boolean> {
@@ -38,7 +40,11 @@ export function useFileTree({ storageKey, defaultExpanded = [] }: { storageKey?:
     persist({ ...expanded, [id]: !isExpanded(id) })
   }, [persist, expanded, isExpanded])
 
-  return { isExpanded, toggleBranch, expand }
+  const set = useCallback((changes: Record<string, boolean>) => {
+    persist({ ...expanded, ...changes })
+  }, [persist, expanded])
+
+  return { isExpanded, toggleBranch, expand, set }
 }
 
 /** Unpersisted expansion for path-keyed trees: everything starts collapsed, and collapsing a folder collapses its contents. */
@@ -49,5 +55,10 @@ export function usePathTree(): FileBranchController {
   const toggleBranch = useCallback((id: string) => setExpanded((current) => current.has(id)
     ? new Set([...current].filter((other) => other !== id && !other.startsWith(`${id}/`)))
     : new Set(current).add(id)), [])
-  return { isExpanded, toggleBranch, expand }
+  const set = useCallback((changes: Record<string, boolean>) => setExpanded((current) => {
+    const next = new Set(current)
+    for (const [id, open] of Object.entries(changes)) if (open) next.add(id); else next.delete(id)
+    return next
+  }), [])
+  return { isExpanded, toggleBranch, expand, set }
 }

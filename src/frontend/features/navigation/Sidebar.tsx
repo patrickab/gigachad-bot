@@ -65,8 +65,8 @@ export function Sidebar(props: SidebarProps) {
   const { pending } = useUndoDelete()
   const deleteChat = useDeleteChat()
   const defaultExpanded = useMemo(() => [
-    "shared", "shared:canvases",
-    ...projects.flatMap((project) => ["chats", "canvases", "files", "learn"].map((category) => `project:${project.slug}:${category}`)),
+    "shared", "shared:chats",
+    ...projects.map((project) => `project:${project.slug}:chats`),
   ], [projects])
   const stored = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   // Folders on disk (ids are absolute paths) reopen collapsed, the rest keeps its saved expansion
@@ -76,6 +76,11 @@ export function Sidebar(props: SidebarProps) {
     isExpanded: (id: string) => pick(id).isExpanded(id),
     toggleBranch: (id: string) => pick(id).toggleBranch(id),
     expand: (id: string) => pick(id).expand(id),
+    set: (changes: Record<string, boolean>) => {
+      const entries = Object.entries(changes)
+      stored.set(Object.fromEntries(entries.filter(([id]) => !id.startsWith("/"))))
+      paths.set(Object.fromEntries(entries.filter(([id]) => id.startsWith("/"))))
+    },
   }
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)

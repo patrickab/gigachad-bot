@@ -103,7 +103,8 @@ const sidebar = (view: RenderResult) => within(view.getAllByLabelText("Proj cont
 let stopWatching = () => {}
 
 beforeEach(() => {
-  const stored = new Map<string, string>()
+  // The project's Files section open, where folder entries list
+  const stored = new Map<string, string>([["expanded_workspace_projects", JSON.stringify({ "project:proj:chats": false, "project:proj:files": true })]])
   vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value) } })
   fixtures.documents = [ENTRY, NOTE]
   api.listProjectDocuments.mockImplementation(async () => fixtures.documents)

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { Archive, Upload } from "lucide-react"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 
-const controller = { isExpanded: () => true, toggleBranch: () => {}, expand: () => {} }
+const controller = { isExpanded: () => true, toggleBranch: () => {}, expand: () => {}, set: () => {} }
 
 function folder(count: number, { activeIndex }: { activeIndex?: number } = {}): FileTreeItem {
   return {

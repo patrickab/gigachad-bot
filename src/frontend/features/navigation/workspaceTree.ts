@@ -91,7 +91,6 @@ export function owningProject(path: string, documents: Record<string, ProjectDoc
 /** Project roots followed by the shared "general" root. */
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
   const { projects, pending, hasArchitecture, move, importFiles } = context
-  const [generalChats, ...generalCategories] = categoryItems(context, null)
   return [
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: context.activeProjectSlug === project.slug,
@@ -108,13 +107,14 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
       onMoveHere: (path) => move(path, project.slug),
       accepts: [DEFAULT_DRAG_KIND, PROJECT_FILE_DRAG_KIND],
       onDropFiles: (paths) => importFiles(project.slug, paths),
-      children: categoryItems(context, project),
+      sections: categoryItems(context, project),
+      children: [],
     })),
     {
       id: "shared", label: "general", type: "root",
-      create: generalChats.create,
       onMoveHere: (path) => move(path, ""),
-      children: [...generalCategories, ...(generalChats.children ?? [])],
+      sections: categoryItems(context, null),
+      children: [],
     },
   ]
 }
@@ -243,7 +243,7 @@ export function workspaceItems(projectRoots: FileTreeItem<string>[], context: Co
     linked.add(mount.id)
     // The project's own Archive and Delete stand for the whole root
     const mountActions = (mount.actions ?? []).filter((action) => action.menuLabel !== "Archive")
-    return { ...root, actions: [...mountActions, ...(root.actions ?? [])], children: [...(root.children ?? []), ...(mount.children ?? [])] }
+    return { ...root, actions: [...mountActions, ...(root.actions ?? [])], sections: [...(root.sections ?? []), ...(mount.sections ?? [])], children: mount.children }
   })
   const general = roots.filter((root) => root.id === "shared")
   return [
@@ -276,7 +276,8 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
         onDelete: () => context.removeMount(mount, node.name),
         onMoveHere: (path) => context.moveToFolder(path, node.path),
         accepts: [PROJECT_FILE_DRAG_KIND],
-        children: [...generatedRows([context.folder(mount), code]), ...rootFileItems(context, node.children ?? [])],
+        sections: [context.folder(mount), code].filter((section) => section !== null),
+        children: rootFileItems(context, node.children ?? []),
       }
     })
 }
@@ -322,7 +323,8 @@ function unmountedItems({ unmounted, archived, sessions, setArchived }: CodeTree
           { label: `Archive ${workspace.label}`, menuLabel: "Archive", icon: Archive, onClick: () => setArchived(workspace.path, true) },
           ...sessions.directoryActions(workspace.path, workspace.label),
         ],
-        children: [code],
+        sections: [code],
+        children: [],
       }
     })
 }
@@ -355,10 +357,4 @@ export function directoryEntries({ rootTreeData, unmounted, pending, archived }:
     ...rootTreeData.filter((node) => !pending(`root:${mountOf(node)}`)).map((node) => ({ key: mountOf(node), name: node.name })),
     ...unmounted.map((workspace) => ({ key: workspace.path, name: workspace.label })),
   ].map((entry) => ({ ...entry, archived: archived.has(entry.key) }))
-}
-
-/** Worktrees and Sessions rows that exist, the last one spaced from the files below it. */
-function generatedRows(rows: (FileTreeItem<string> | null)[]): FileTreeItem<string>[] {
-  const present = rows.filter((row) => row !== null)
-  return present.map((row, index) => index === present.length - 1 ? { ...row, gapAfter: true } : row)
 }

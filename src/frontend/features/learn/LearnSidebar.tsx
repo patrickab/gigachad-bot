@@ -259,7 +259,7 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     const folder: FileTreeItem<string> = {
       id: `project:${project.slug}:learn`, label: "Learn", icon: GraduationCap, type: "folder", children: own.map((session) => sessionRow(session, { place: "project" })),
     }
-    return { ...root, actions: [...root.actions ?? [], action], children: own.length > 0 ? [...root.children ?? [], folder] : root.children }
+    return { ...root, actions: [...root.actions ?? [], action], sections: own.length > 0 ? [...root.sections ?? [], folder] : root.sections }
   }
 
   const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name

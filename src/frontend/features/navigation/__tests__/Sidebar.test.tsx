@@ -200,9 +200,18 @@ afterEach(() => {
 })
 
 /** The contents of project "Proj" once the test expanded it. */
-function openedProject(view: RenderResult) {
+/** Proj expanded, with its section `section` open. */
+function openedProject(view: RenderResult, section = "Files") {
   fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-  return within(view.getByLabelText("Proj contents"))
+  const project = within(view.getByLabelText("Proj contents"))
+  openSection(project, section)
+  return project
+}
+
+/** Open the section `name` of a project or directory row in `scope`, unless it is open. */
+function openSection(scope: Pick<RenderResult, "getByRole">, name: string) {
+  const button = scope.getByRole("button", { name })
+  if (button.getAttribute("aria-pressed") !== "true") fireEvent.click(button)
 }
 
 /** Whether any root is mounted, as the file pickers read it. */
@@ -298,6 +307,7 @@ describe("Project navigation", () => {
     expect(fixtures.renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/notes.md", "ideas")
     await waitFor(() => expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument())
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     expect(await project.findByRole("button", { name: "ideas.md" })).toBeInTheDocument()
     expect(project.queryByRole("button", { name: "notes.md" })).not.toBeInTheDocument()
   })
@@ -485,11 +495,12 @@ describe("Project navigation", () => {
     await waitFor(() => expect(api.promoteToTexProject).toHaveBeenCalledWith("proj", "/data/workbench/latex/proj/test2/test.tex"))
   })
 
-  it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
+  it("opens Chats by default in a strip of sections, one open at a time, and lists mounted roots collapsed", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
     const general = within(view.getByLabelText("general contents"))
-    expect(general.getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "true")
+    expect(general.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "true")
+    expect(general.getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "false")
     expect(general.queryByRole("button", { name: "Files" })).not.toBeInTheDocument()
     const fileMounts = within(view.getByLabelText("Projects"))
     expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
@@ -497,19 +508,23 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    for (const category of ["Chats", "Canvases", "Files"]) {
-      expect(project.getByRole("button", { name: category })).toHaveAttribute("aria-expanded", "true")
-    }
+    expect(project.getByRole("toolbar", { name: "Proj sections" })).toBeVisible()
+    expect(project.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(project.getByRole("button", { name: "Files" }))
+    expect(project.getByRole("button", { name: "Files" })).toHaveAttribute("aria-pressed", "true")
+    expect(project.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "false")
+    expect(project.getByRole("group", { name: "Files contents" })).toBeVisible()
+    fireEvent.click(project.getByRole("button", { name: "Files" }))
+    expect(project.queryByRole("group", { name: "Files contents" })).not.toBeInTheDocument()
     expect(project.queryByRole("button", { name: "architecture" })).not.toBeInTheDocument()
-    expect(await project.findByRole("button", { name: "board" })).toBeVisible()
-    expect(project.getByRole("button", { name: "notes.md" })).toBeVisible()
     fireEvent.click(project.getByRole("button", { name: "Canvases" }))
+    expect(await project.findByRole("button", { name: "board" })).toBeVisible()
     fireEvent.click(view.getByRole("button", { name: "Collapse Proj" }))
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "false")
+    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "true")
     view.unmount()
     const reopened = render(<Sidebar appMode="chat" />)
-    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "false")
+    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "true")
   })
 
   it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
@@ -596,10 +611,12 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Canvases")
     fireEvent.click(await project.findByText("board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj")
     fireEvent.click(rowMenuItem(view, "Proj", "Open architecture for Proj"))
     expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
+    openSection(project, "Files")
     fireEvent.click(await project.findByText("notes.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
     expect(project.queryByText("board.canvas")).not.toBeInTheDocument()
@@ -616,6 +633,7 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     fireEvent.click(await project.findByText("Roadmap.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/plan.md", "proj")
     expect(project.queryByText("plan.md")).not.toBeInTheDocument()
@@ -635,6 +653,7 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     fireEvent.click(await project.findByText("notes.md"))
     expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
     fireEvent.click(project.getByText("paper.tex"))
@@ -654,6 +673,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     await project.findByText("Paper.pdf")
     expect(project.queryByText("Paper.md")).toBeNull()
 
@@ -670,6 +690,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
 
     fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
@@ -710,6 +731,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
 
     fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
@@ -727,6 +749,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" onWorkbenchSelect={vi.fn()} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
 
     fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
@@ -984,13 +1007,13 @@ describe("Project navigation", () => {
       await act(async () => {})
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       const project = within(view.getByLabelText("Proj contents"))
-      expect(project.getByRole("button", { name: "Learn" })).toHaveAttribute("aria-expanded", "true")
+      openSection(project, "Learn")
       fireEvent.click(project.getByRole("button", { name: "Fourier series" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "session", sessionId: "chat_a" } })
       fireEvent.click(rowMenuItem(view, "Proj", "New learn session in Proj"))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "new" } }, true)
 
-      const section = within(view.getByLabelText("Learn"))
+      const section = within(view.getAllByLabelText("Learn").find((element) => element.hasAttribute("data-file-tree"))!)
       expect(section.queryByRole("button", { name: "Fourier series" })).not.toBeInTheDocument()
       fireEvent.click(section.getByRole("button", { name: "Eigenvalues" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "session", sessionId: "chat_b" } })
@@ -1141,6 +1164,7 @@ describe("Project navigation", () => {
 
       // No plan reported: no Plan entry.
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+      openSection(within(view.getByLabelText("Proj contents")), "Learn")
       fireEvent.click(view.getByRole("button", { name: "More actions for Fourier series" }))
       expect(within(view.getByRole("menu", { name: "Fourier series actions" })).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument()
     } finally {
@@ -1236,6 +1260,7 @@ describe("Project navigation", () => {
     fireEvent.click(first.getByRole("button", { name: "Expand Proj" }))
     expect(onProjectSelect).not.toHaveBeenCalled()
     const project = within(first.getByLabelText("Proj contents"))
+    openSection(project, "Canvases")
     await project.findByText("board")
 
     const second = within(render(<Sidebar appMode="canvas" onProjectSelect={onProjectSelect} />).container)
@@ -1259,6 +1284,7 @@ describe("Project navigation", () => {
     expect(onNewChat).toHaveBeenLastCalledWith("empty")
 
     const general = within(view.getByLabelText("general contents"))
+    openSection(general, "Canvases")
     fireEvent.click(await general.findByText("loose-board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose-board.canvas", "")
   })
@@ -1269,6 +1295,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" onCanvasSelect={onCanvasSelect} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Canvases")
     fireEvent.click(project.getByRole("button", { name: "New canvas in Proj" }))
     const input = project.getByRole("textbox", { name: "Canvas name" })
     fireEvent.change(input, { target: { value: "draft" } })
@@ -1295,6 +1322,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
+    openSection(project, "Files")
     const shared = within(view.getByLabelText("Projects"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })

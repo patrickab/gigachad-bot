@@ -48,6 +48,11 @@ export interface FileTreeItem<T = unknown> {
   type: "root" | "folder" | "element"
   data?: T
   children?: FileTreeItem<T>[]
+  /**
+   * App-made groups shown above `children` as a strip of their icons (e.g. a project's chats, its sessions): one open at a time, its contents below the strip.
+   * Each is a branch with an `icon`; its `label`, `meta`, `actions` and `create` show in the strip while it is open.
+   */
+  sections?: FileTreeItem<T>[]
   /** Children shown before a "Show more" row, a child holding the active item always shows. */
   childLimit?: number
   isActive?: boolean
@@ -158,7 +163,10 @@ function holdsActive<T>(item: FileTreeItem<T>): boolean {
 function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchController, uncappedIds: ReadonlySet<string>): string[] {
   return items.flatMap((item) => [
     ...(item.multiSelect ? [item.id] : []),
-    ...(item.children && controller.isExpanded(item.id) ? selectableIds(visibleChildren(item, uncappedIds.has(item.id)), controller, uncappedIds) : []),
+    ...(item.children && controller.isExpanded(item.id) ? selectableIds([
+      ...(item.sections ?? []).filter((section) => controller.isExpanded(section.id)).slice(0, 1).flatMap((section) => visibleChildren(section, uncappedIds.has(section.id))),
+      ...visibleChildren(item, uncappedIds.has(item.id)),
+    ], controller, uncappedIds) : []),
   ])
 }
 
@@ -339,18 +347,90 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       </div>}
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`} className="motion-expand-in">
-        {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1, new Set(ancestors).add(item.id))}
-        {item.children?.length === 0 && creation?.parentId !== item.id && <div
-          style={{ marginLeft: INDENT_BASE + (depth + 1) * INDENT_STEP + 20 }} className={cn("flex items-center px-1 text-xs text-ink-faint", rowHeight(depth + 1))}>Empty</div>}
-        <CapToggle item={item} depth={depth + 1} uncapped={uncappedIds.has(item.id)} onToggle={() => toggleCap(item.id)} />
-        {creation?.parentId === item.id && <InlineCreateForm
-          action={creation.action} depth={depth + 1}
-          onDone={() => setCreation((current) => current === creation ? null : current)}
-          onCancel={() => setCreation(null)}
-        />}
+        {item.sections?.length ? renderSections(item, item.sections, depth + 1, ancestors) : null}
+        {renderContents(item, depth, ancestors, !item.sections?.length)}
       </div>}
     </div>
   })
+
+  /** The children of `item` at `depth + 1`, "Empty" when it has none unless `showEmpty` is off, its "Show more" and its create form. */
+  const renderContents = (item: FileTreeItem<T>, depth: number, ancestors: ReadonlySet<string>, showEmpty = true): ReactNode => <>
+    {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1, new Set(ancestors).add(item.id))}
+    {showEmpty && item.children?.length === 0 && creation?.parentId !== item.id && <div
+      style={{ marginLeft: INDENT_BASE + (depth + 1) * INDENT_STEP + 20 }} className={cn("flex items-center px-1 text-xs text-ink-faint", rowHeight(depth + 1))}>Empty</div>}
+    <CapToggle item={item} depth={depth + 1} uncapped={uncappedIds.has(item.id)} onToggle={() => toggleCap(item.id)} />
+    {creation?.parentId === item.id && <InlineCreateForm
+      action={creation.action} depth={depth + 1}
+      onDone={() => setCreation((current) => current === creation ? null : current)}
+      onCancel={() => setCreation(null)}
+    />}
+  </>
+
+  /** The section strip of `parent` at `depth`, then the open section's contents at the same depth. */
+  const renderSections = (parent: FileTreeItem<T>, sections: FileTreeItem<T>[], depth: number, ancestors: ReadonlySet<string>): ReactNode => {
+    const open = sections.find((section) => controller.isExpanded(section.id))
+    /** Open `section` alone, or close it when it is the open one. */
+    const choose = (section: FileTreeItem<T>) => {
+      controller.set(Object.fromEntries(sections.map((other) => [other.id, other === section && !controller.isExpanded(section.id)])))
+    }
+    const { inline, menu } = open ? splitActions(open) : { inline: [], menu: [] }
+    const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Escape" && open) {
+        event.stopPropagation()
+        choose(open)
+        return
+      }
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-section]")]
+      const at = buttons.indexOf(document.activeElement as HTMLElement)
+      if (at < 0) return
+      event.preventDefault()
+      buttons[(at + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length]?.focus()
+    }
+    return <div className={cn((parent.children?.length ?? 0) > 0 && "mb-2")}>
+      <div role="toolbar" aria-label={`${parent.label} sections`} onKeyDown={onKeyDown}
+        className={cn("group/row flex min-w-0 items-center gap-1 pr-1", rowHeight(depth))} style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP - 4 }}>
+        {sections.map((section) => {
+          const Icon = section.icon ?? ChevronRight
+          const isOpen = section === open
+          return <button key={section.id} type="button" data-section aria-label={section.label} aria-pressed={isOpen}
+            tabIndex={isOpen || (!open && section === sections[0]) ? 0 : -1}
+            onClick={() => choose(section)}
+            onDragOver={(event) => {
+              const files = event.dataTransfer.types.includes(FILE_DRAG_TYPE)
+              if (files ? !section.onDropFiles : !section.onMoveHere || !carriesKind(event.dataTransfer.types, section.accepts)) return
+              event.preventDefault()
+              event.stopPropagation()
+              event.dataTransfer.dropEffect = files ? "copy" : "move"
+              setDragOverId(section.id)
+            }}
+            onDragLeave={() => setDragOverId(null)}
+            onDrop={(event) => { void handleDrop(event, section) }}
+            className={cn("shrink-0 rounded-md p-1 transition-colors duration-160 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted motion-reduce:transition-none",
+              isOpen ? "bg-surface-elevated text-ink" : section.children?.length === 0 ? "text-ink-faint/50 hover:text-ink" : "text-ink-faint hover:text-ink",
+              dragOverId === section.id && "ring-1 ring-ink-muted bg-surface-elevated")}>
+            <Icon aria-hidden className="h-3 w-3" />
+          </button>
+        })}
+        {open && <span className="ml-1 min-w-0 truncate text-xs text-ink-subtle">{open.label}</span>}
+        {open && <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {open.meta != null && <span className="flex shrink-0 gap-1.5 text-[10px] tabular-nums">{open.meta}</span>}
+          {(inline.length > 0 || menu.length > 0) && <span className={ACTIONS_CLASS}>
+            {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
+              <action.icon className="h-3 w-3" />
+            </button>)}
+            {menu.length > 0 && <RowMenu label={open.label} actions={menu} />}
+          </span>}
+          {open.create && <button aria-label={open.create.label} onClick={() => { void startCreate(open.id, open.create!) }} className={ACTION_CLASS}>
+            <Plus className="h-3 w-3" />
+          </button>}
+        </span>}
+      </div>
+      {open && <div role="group" aria-label={`${open.label} contents`} className="motion-expand-in">
+        {renderContents(open, depth - 1, new Set(ancestors).add(parent.id))}
+      </div>}
+    </div>
+  }
 
   const collapsed = labelAction?.expanded === false
   return <div aria-label={label} data-file-tree>
