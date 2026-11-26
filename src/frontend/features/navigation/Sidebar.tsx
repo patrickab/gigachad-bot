@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Brain } from "lucide-react"
+import { Brain, FolderPlus } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FileTree } from "@/components/ui/file-tree/FileTree"
@@ -27,7 +27,7 @@ import { useDeleteChat } from "./useDeleteChat"
 import { useFileRename } from "./useFileRename"
 import { useProjectActions } from "./useProjectActions"
 import { useWorkspaceDocuments } from "./useWorkspaceDocuments"
-import { codeItems, directoryEntries, owningProject, projectItems } from "./workspaceTree"
+import { directoryEntries, owningProject, projectItems, workspaceItems } from "./workspaceTree"
 
 /** `name` as a LaTeX project file name: `.tex` appended unless it names its own extension. */
 const texFileName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}.tex`)
@@ -68,8 +68,15 @@ export function Sidebar(props: SidebarProps) {
     "shared", "shared:canvases",
     ...projects.flatMap((project) => ["chats", "canvases", "files", "learn"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
-  const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
-  const fileMountController = usePathTree()
+  const stored = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
+  // Folders on disk (ids are absolute paths) reopen collapsed, the rest keeps its saved expansion
+  const paths = usePathTree()
+  const pick = (id: string) => id.startsWith("/") ? paths : stored
+  const controller = {
+    isExpanded: (id: string) => pick(id).isExpanded(id),
+    toggleBranch: (id: string) => pick(id).toggleBranch(id),
+    expand: (id: string) => pick(id).expand(id),
+  }
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)
   const { renameOf } = useInlineRename()
@@ -111,6 +118,13 @@ export function Sidebar(props: SidebarProps) {
     return project ? learn.withProjectLearn(root, project) : root
   }) : projectTree
   const codeContext = { ...props, ...code, ...fileRename, ...folderRows, renameOf, projects, pending }
+  const archiveEntries = [
+    ...projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: `project:${project.slug}`, name: project.name, archived: Boolean(project.archived) })),
+    ...directoryEntries(codeContext).map((entry) => ({ ...entry, key: `directory:${entry.key}` })),
+  ]
+  const restore = (key: string) => key.startsWith("project:")
+    ? projectActions.changeArchive(key.slice("project:".length), false)
+    : code.setArchived(key.slice("directory:".length), false)
 
   return <>
     <SidePanel side="left" open={!collapsed} width={width} onWidthChange={setWidth} label="Sidebar" className="z-10">
@@ -123,12 +137,14 @@ export function Sidebar(props: SidebarProps) {
       </div>
       <nav aria-label="Workspace" className="flex min-h-0 flex-1 flex-col">
         <SidePanelScroll className="px-2 pb-3">
-          <FileTree label="Projects" items={items} controller={controller} loading={branches.historiesLoading}
-            headerActions={<ArchiveSelector
-              noun="projects"
-              entries={projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: project.slug, name: project.name, archived: Boolean(project.archived) }))}
-              onRestore={(slug) => projectActions.changeArchive(slug, false)}
-            />}
+          <FileTree label="Projects" items={workspaceItems(items, codeContext)} controller={controller} loading={branches.historiesLoading}
+            headerActions={<>
+              <ArchiveSelector noun="projects" entries={archiveEntries} onRestore={restore} />
+              {code.hostAccess && <button aria-label="Add file mount" onClick={() => setFileMountPickerOpen(true)}
+                className="rounded p-1 text-ink-faint opacity-0 hover:text-ink group-hover/row:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+                <FolderPlus className="h-3 w-3" />
+              </button>}
+            </>}
             create={{ label: "New project", placeholder: "Project name", onSubmit: async (name) => {
               const slug = await createProject(name)
               controller.expand(slug)
@@ -139,11 +155,6 @@ export function Sidebar(props: SidebarProps) {
           />
           <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>
           <ErrorText className="px-2 py-1">{documents.fileError}</ErrorText>
-          <div role="separator" className="my-3 border-t border-divider/50" />
-          <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
-            headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}
-            create={code.hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
-          />
           <ErrorText className="px-2 py-1">{code.sessions.error}</ErrorText>
           {code.hostAccess && <>
             <div role="separator" className="my-3 border-t border-divider/50" />

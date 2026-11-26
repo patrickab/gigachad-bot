@@ -343,7 +343,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown", changed: [] })
     const onDocumentRenamed = vi.fn()
     const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
-    const code = within(view.getByLabelText("Code"))
+    const code = within(view.getByLabelText("Projects"))
     fireEvent.click(await code.findByRole("button", { name: "source" }))
     fireEvent.doubleClick(code.getByRole("button", { name: "first.md" }))
     const input = code.getByRole("textbox", { name: "Rename first.md" })
@@ -359,7 +359,7 @@ describe("Project navigation", () => {
     try {
       const view = render(<Sidebar appMode="chat" />)
       fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "paper.pdf" }))
-      const code = within(view.getByLabelText("Code"))
+      const code = within(view.getByLabelText("Projects"))
       fireEvent.click(await code.findByRole("button", { name: "source" }))
       fireEvent.doubleClick(code.getByRole("button", { name: "docs" }))
       expect(view.queryByRole("textbox", { name: /^Rename / })).not.toBeInTheDocument()
@@ -449,7 +449,7 @@ describe("Project navigation", () => {
     api.createTexProjectFile.mockResolvedValue(`${folder}/chapters/two.tex`)
     const onFileSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onFileSelect={onFileSelect} />)
-    const code = within(view.getByLabelText("Code"))
+    const code = within(view.getByLabelText("Projects"))
     expect(await code.findByRole("button", { name: "Open diff for paper" })).toBeInTheDocument()
     expect(code.queryByRole("button", { name: /New file in (paper|source)/ })).not.toBeInTheDocument()
     const project = openedProject(view)
@@ -489,33 +489,33 @@ describe("Project navigation", () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
     const general = within(view.getByLabelText("general contents"))
-    expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
-    expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
-    const fileMounts = within(view.getByLabelText("Code"))
+    expect(general.getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "true")
+    expect(general.queryByRole("button", { name: "Files" })).not.toBeInTheDocument()
+    const fileMounts = within(view.getByLabelText("Projects"))
     expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
     expect(fileMounts.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    for (const category of ["chats", "canvases", "files"]) {
+    for (const category of ["Chats", "Canvases", "Files"]) {
       expect(project.getByRole("button", { name: category })).toHaveAttribute("aria-expanded", "true")
     }
     expect(project.queryByRole("button", { name: "architecture" })).not.toBeInTheDocument()
     expect(await project.findByRole("button", { name: "board" })).toBeVisible()
     expect(project.getByRole("button", { name: "notes.md" })).toBeVisible()
-    fireEvent.click(project.getByRole("button", { name: "canvases" }))
+    fireEvent.click(project.getByRole("button", { name: "Canvases" }))
     fireEvent.click(view.getByRole("button", { name: "Collapse Proj" }))
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
+    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "false")
     view.unmount()
     const reopened = render(<Sidebar appMode="chat" />)
-    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
+    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-expanded", "false")
   })
 
   it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
     localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
     const view = render(<Sidebar appMode="chat" />)
-    const fileMounts = within(view.getByLabelText("Code"))
+    const fileMounts = within(view.getByLabelText("Projects"))
     const source = await fileMounts.findByRole("button", { name: "source" })
     expect(source).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(source)
@@ -532,7 +532,7 @@ describe("Project navigation", () => {
     await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("true"))
 
     api.fileRootsEnabled.mockResolvedValue({ enabled: false })
-    fireEvent.click(await within(view.getByLabelText("Code")).findByRole("button", { name: "Delete source" }))
+    fireEvent.click(await within(view.getByLabelText("Projects")).findByRole("button", { name: "Delete source" }))
     await act(() => undo.schedule.mock.lastCall![2]())
     await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("false"))
   })
@@ -540,7 +540,7 @@ describe("Project navigation", () => {
   it("opens the diff of a file mount from its hover action", async () => {
     const onDiffSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
-    fireEvent.click(await within(view.getByLabelText("Code")).findByRole("button", { name: "Open diff for source" }))
+    fireEvent.click(await within(view.getByLabelText("Projects")).findByRole("button", { name: "Open diff for source" }))
     expect(onDiffSelect).toHaveBeenCalledWith("/source")
   })
 
@@ -554,7 +554,7 @@ describe("Project navigation", () => {
     api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const fileMounts = within(view.getByLabelText("Code"))
+      const fileMounts = within(view.getByLabelText("Projects"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
       fireEvent.click(await fileMounts.findByRole("button", { name: /^Worktrees/ }))
       const mainCheckout = fileMounts.getByRole("button", { name: "dev" })
@@ -748,7 +748,7 @@ describe("Project navigation", () => {
     expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
   })
 
-  it("lists a mount's Pi sessions (worktrees included) under its Sessions, not under the project named like it, and keeps the project link", async () => {
+  it("merges a project with its linked mount: the mount's Pi sessions (worktrees included) sit under the project's Sessions", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
     pi.repositories = piRepositories("proj", "project-old")
@@ -760,11 +760,9 @@ describe("Project navigation", () => {
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-      expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Sessions" })).not.toBeInTheDocument()
-      const section = within(view.getByLabelText("Code"))
-      fireEvent.click(await section.findByRole("button", { name: "proj" }))
-      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const section = within(view.getByLabelText("Projects"))
+      fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
+      fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
       expect(code.getByRole("button", { name: "worktree feat" })).toBeVisible()
       expect(code.queryByRole("button", { name: "elsewhere" })).not.toBeInTheDocument()
@@ -800,9 +798,9 @@ describe("Project navigation", () => {
     }
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code"))
-      fireEvent.click(await section.findByRole("button", { name: "proj" }))
-      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const section = within(view.getByLabelText("Projects"))
+      fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
+      fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
       fireEvent.click(code.getByRole("button", { name: "main" }))
       const forks = within(code.getByRole("group", { name: "main contents" }))
@@ -825,9 +823,9 @@ describe("Project navigation", () => {
     api.pinPiSession.mockImplementation(async (id, pinned) => piSession(id, "/git/proj", { pinned }))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code"))
-      fireEvent.click(await section.findByRole("button", { name: "proj" }))
-      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const section = within(view.getByLabelText("Projects"))
+      fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
+      fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
 
       fireEvent.click(code.getByRole("button", { name: "Pin keep" }))
@@ -851,10 +849,10 @@ describe("Project navigation", () => {
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      const section = within(view.getByLabelText("Code"))
-      fireEvent.click(await section.findByRole("button", { name: "proj" }))
-      const mount = within(section.getByRole("group", { name: "proj contents" }))
-      fireEvent.click(mount.getByRole("button", { name: "Sessions" }))
+      const section = within(view.getByLabelText("Projects"))
+      fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
+      const mount = within(section.getByRole("group", { name: "Proj contents" }))
+      fireEvent.click(await mount.findByRole("button", { name: "Sessions" }))
       expect(mount.getByRole("button", { name: "linked" })).toBeVisible()
       expect(mount.queryByRole("button", { name: "tooling" })).not.toBeInTheDocument()
 
@@ -880,7 +878,7 @@ describe("Project navigation", () => {
     pi.sessions = [piSession("tooling", "/git/tool")]
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code"))
+      const section = within(view.getByLabelText("Projects"))
       await section.findByRole("button", { name: "source" })
 
       fireEvent.click(rowMenuItem(section, "source", "Archive source"))
@@ -888,7 +886,7 @@ describe("Project navigation", () => {
       expect(section.queryByRole("button", { name: "source" })).not.toBeInTheDocument()
       expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
 
-      fireEvent.click(section.getByRole("button", { name: "Show all directories" }))
+      fireEvent.click(section.getByRole("button", { name: "Show all projects" }))
       fireEvent.click(await view.findByText("source"))
       expect(await section.findByRole("button", { name: "source" })).toBeVisible()
       expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
@@ -965,7 +963,7 @@ describe("Project navigation", () => {
 
       // A project without learn sessions shows no learn folder, only the action starting one.
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-      expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "learn" })).not.toBeInTheDocument()
+      expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Learn" })).not.toBeInTheDocument()
       expect(rowMenuItem(view, "Proj", "New learn session in Proj")).toBeInTheDocument()
     } finally {
       login.hostAccess = false
@@ -986,7 +984,7 @@ describe("Project navigation", () => {
       await act(async () => {})
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       const project = within(view.getByLabelText("Proj contents"))
-      expect(project.getByRole("button", { name: "learn" })).toHaveAttribute("aria-expanded", "true")
+      expect(project.getByRole("button", { name: "Learn" })).toHaveAttribute("aria-expanded", "true")
       fireEvent.click(project.getByRole("button", { name: "Fourier series" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "session", sessionId: "chat_a" } })
       fireEvent.click(rowMenuItem(view, "Proj", "New learn session in Proj"))
@@ -1220,7 +1218,7 @@ describe("Project navigation", () => {
     api.deletePiSession.mockRejectedValueOnce(new ApiError("live", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code"))
+      const section = within(view.getByLabelText("Projects"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
       fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
 
@@ -1243,7 +1241,7 @@ describe("Project navigation", () => {
     const second = within(render(<Sidebar appMode="canvas" onProjectSelect={onProjectSelect} />).container)
     const secondProject = within(second.getByLabelText("Proj contents"))
     await secondProject.findByText("board")
-    fireEvent.click(project.getByRole("button", { name: "canvases" }))
+    fireEvent.click(project.getByRole("button", { name: "Canvases" }))
     await waitFor(() => expect(secondProject.queryByText("board")).not.toBeInTheDocument())
     fireEvent.click(second.getByRole("button", { name: "Proj" }))
     expect(onProjectSelect).toHaveBeenCalledTimes(1)
@@ -1297,7 +1295,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    const shared = within(view.getByLabelText("Code"))
+    const shared = within(view.getByLabelText("Projects"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })
@@ -1310,8 +1308,8 @@ describe("Project navigation", () => {
       getData: (type: string) => payload.get(type) ?? "",
     }
     fireEvent.dragStart(first, { dataTransfer })
-    fireEvent.dragOver(project.getByRole("button", { name: "files" }), { dataTransfer })
-    fireEvent.drop(project.getByRole("button", { name: "files" }), { dataTransfer })
+    fireEvent.dragOver(project.getByRole("button", { name: "Files" }), { dataTransfer })
+    fireEvent.drop(project.getByRole("button", { name: "Files" }), { dataTransfer })
     expect(await project.findByRole("button", { name: "imported.md" })).toBeInTheDocument()
     expect(api.addRootFilesToProject).toHaveBeenCalledWith("proj", ["/source/first.md", "/source/second.md"])
   })
@@ -1322,7 +1320,7 @@ describe("Project navigation", () => {
     act(() => manager.current!.openTab({ ...nextTab(), name: "Second workspace" }))
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getAllByLabelText("Proj contents").at(-1)!)
-    const category = project.getByRole("button", { name: "canvases" })
+    const category = project.getByRole("button", { name: "Canvases" })
     fireEvent.keyDown(category, { key: "Tab" })
     expect(view.getByRole("status")).toHaveTextContent("Second workspace")
     fireEvent.keyDown(category, { key: "Tab", shiftKey: true })

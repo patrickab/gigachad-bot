@@ -123,7 +123,7 @@ describe("the sidebar's shared lists", () => {
     view.rerender(<TabView tab={tab} isActive />)
 
     await waitFor(() => expect(api.fileRootTree).toHaveBeenCalledOnce())
-    expect(within(view.getByLabelText("Code")).getByRole("button", { name: "source" })).toBeInTheDocument()
+    expect(within(view.getByLabelText("Projects")).getByRole("button", { name: "source" })).toBeInTheDocument()
     await act(async () => answerTree(TREE))
     expect(api.fetchWorktrees).toHaveBeenCalledExactlyOnceWith("/source")
     for (const read of [api.listNotes, api.listProjectDocuments, api.listAllDocuments, api.loadTemplateSets]) expect(read).not.toHaveBeenCalled()

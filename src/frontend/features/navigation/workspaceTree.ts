@@ -1,4 +1,4 @@
-import { Archive, FilePlus, FolderPlus, GitCompare, Upload } from "lucide-react"
+import { Archive, FilePlus, FileText, FolderPlus, GitCompare, MessageSquare, Shapes, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
@@ -138,7 +138,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
   const chats = project ? projectChats(project, branchMeta) : context.visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
   return [
     {
-      id: `${prefix}:chats`, label: "chats", type: "folder",
+      id: `${prefix}:chats`, label: "Chats", icon: MessageSquare, type: "folder",
       create: { label: `New chat in ${owner}`, onClick: () => context.onNewChat?.(scope || null) },
       onMoveHere: (path) => move(path, scope),
       children: chats.filter((chat) => !pending(`history:${chat.path}`)).map((chat) => {
@@ -153,7 +153,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       }),
     },
     {
-      id: `${prefix}:canvases`, label: "canvases", type: "folder",
+      id: `${prefix}:canvases`, label: "Canvases", icon: Shapes, type: "folder",
       onMoveHere: (path) => move(path, scope),
       create: {
         label: `New canvas in ${owner}`, placeholder: "Canvas name",
@@ -167,7 +167,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       })),
     },
     ...(project ? [{
-      id: `${prefix}:files`, label: "files", type: "folder" as const,
+      id: `${prefix}:files`, label: "Files", icon: FileText, type: "folder" as const,
       actions: [{ label: `Upload files to ${owner}`, icon: Upload, onClick: () => void context.uploadFiles(scope) }],
       create: {
         label: `New file in ${owner}`, placeholder: "File name",
@@ -227,9 +227,31 @@ function projectChats(project: ProjectListItem, branchMeta: Record<string, Branc
   })
 }
 
-/** Mount rows and checkouts with Pi sessions outside every mount. */
-export function codeItems(context: CodeTreeContext): FileTreeItem<string>[] {
-  return [...mountItems(context), ...unmountedItems(context), ...unusedItems(context)]
+/**
+ * One tree of projects and code: `projectRoots` (projects, then "general") with the mount, unmounted and unused rows.
+ * - A project with a linked mount is one root: its Chats, Canvases, Files, then the mount's Worktrees, Sessions and files
+ * - Mounts without a visible project sit between the projects and "general"
+ */
+export function workspaceItems(projectRoots: FileTreeItem<string>[], context: CodeTreeContext): FileTreeItem<string>[] {
+  const mountRoots = new Map(mountItems(context).map((root) => [root.id, root]))
+  const linked = new Set<string>()
+  const roots = projectRoots.map((root) => {
+    const project = context.projects.find((candidate) => candidate.slug === root.id)
+    const folder = project && (project.linked_root ?? projectMount(project.slug, context.mounts))
+    const mount = folder ? mountRoots.get(folder) : undefined
+    if (!mount) return root
+    linked.add(mount.id)
+    // The project's own Archive and Delete stand for the whole root
+    const mountActions = (mount.actions ?? []).filter((action) => action.menuLabel !== "Archive")
+    return { ...root, actions: [...mountActions, ...(root.actions ?? [])], children: [...(root.children ?? []), ...(mount.children ?? [])] }
+  })
+  const general = roots.filter((root) => root.id === "shared")
+  return [
+    ...roots.filter((root) => root.id !== "shared"),
+    ...[...mountRoots.values()].filter((root) => !linked.has(root.id)),
+    ...general,
+    ...unmountedItems(context), ...unusedItems(context),
+  ]
 }
 
 /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */

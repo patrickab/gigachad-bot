@@ -257,7 +257,7 @@ export function useLearnSidebar({ open, projects, sidebar }: {
     const own = listed.filter((session) => session.project_slug === project.slug)
     const action = { label: `New learn session in ${project.name}`, menuLabel: "New learn session", icon: GraduationCap, onClick: () => open(learnItem({ kind: "new" }, project.slug), true) }
     const folder: FileTreeItem<string> = {
-      id: `project:${project.slug}:learn`, label: "learn", type: "folder", children: own.map((session) => sessionRow(session, { place: "project" })),
+      id: `project:${project.slug}:learn`, label: "Learn", icon: GraduationCap, type: "folder", children: own.map((session) => sessionRow(session, { place: "project" })),
     }
     return { ...root, actions: [...root.actions ?? [], action], children: own.length > 0 ? [...root.children ?? [], folder] : root.children }
   }
