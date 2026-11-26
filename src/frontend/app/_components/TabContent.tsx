@@ -19,7 +19,9 @@ import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
 import { newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import type { Attachment } from "@/lib/domain/types"
-import type { PiLaunch } from "@/features/pi/PiTab"
+import { clampThinking, useNewSessionModels, type PiLaunch } from "@/features/pi/PiTab"
+import { piGatewayId, type PiModelControls } from "@/features/pi/PiTopBar"
+import type { PiModel } from "@/features/pi/types"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
 import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
@@ -117,12 +119,24 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const { folder, folderError, pickFolder } = usePiFolder()
   const [launch, setLaunch] = useState<PiLaunch | null>(null)
   const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
+  // With a folder picked the model and thinking pickers offer Pi's catalog, the first message starts the session on them
+  const piStartActive = folder !== null && isEmptyChat
+  const piCatalog = useNewSessionModels(piStartActive)
+  const [piChoice, setPiChoice] = useState<{ model: PiModel | null; thinking: string }>({ model: null, thinking: "medium" })
+  const piStart: PiModelControls | null = piStartActive ? {
+    model: piChoice.model,
+    models: piCatalog.models,
+    thinkingLevel: piChoice.thinking,
+    thinkingLevels: piChoice.model ? piCatalog.levels.get(piGatewayId(piChoice.model)) ?? [] : piCatalog.defaultLevels,
+    onModel: (model) => setPiChoice((current) => ({ model, thinking: clampThinking(current.thinking, piCatalog.levels.get(piGatewayId(model)) ?? []) })),
+    onThinking: (thinking) => setPiChoice((current) => ({ ...current, thinking })),
+  } : null
   const handleSend = (text: string, attachments: Attachment[]) => {
     if (folder === null || !isEmptyChat) {
       turns.handleSend(text, attachments)
       return
     }
-    setLaunch({ text, attachments })
+    setLaunch({ text, attachments, model: piChoice.model, thinking: piChoice.thinking })
     pickFolder(null)
     onOpenItem(newPiItem(folder, projectSlug))
   }
@@ -174,6 +188,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           chatColumn={chatColumn}
           chatBody={chatBody}
           launch={launch}
+          piStart={piStart}
           onLaunched={() => setLaunch(null)}
           onOpenItem={onOpenItem}
         />

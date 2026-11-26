@@ -26,6 +26,9 @@ import { usePiSession, type Notice } from "./usePiSession"
 export interface PiLaunch {
   text: string
   attachments: Attachment[]
+  /** The Pi model and thinking level picked on the start screen, the session starts on them. */
+  model?: PiModel | null
+  thinking?: string
 }
 
 /** Where a branch starts: the session file and the last entry it keeps (D11). */
@@ -67,12 +70,13 @@ async function resumableSession(repo: string, sessionId: string): Promise<PiSess
  *
  * `defaultLevels` (for Pi's default model, whose ladder the catalog does not name) is the longest ladder: Pi clamps a level its model lacks.
  */
-function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<string, string[]>; defaultLevels: string[] } {
+export function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<string, string[]>; defaultLevels: string[]; settled: boolean } {
   const [catalog, setCatalog] = useState<PiCatalog | null>(null)
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     if (!enabled || catalog) return
     let cancelled = false
-    fetchPiCatalog().then((loaded) => cancelled || setCatalog(loaded), () => {})
+    fetchPiCatalog().then((loaded) => cancelled || setCatalog(loaded), () => cancelled || setFailed(true))
     return () => {
       cancelled = true
     }
@@ -88,12 +92,12 @@ function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map
       }
     }
     const defaultLevels = [...levels.values()].reduce<string[]>((longest, ladder) => (ladder.length > longest.length ? ladder : longest), [])
-    return { models, levels, defaultLevels }
-  }, [catalog])
+    return { models, levels, defaultLevels, settled: catalog !== null || failed }
+  }, [catalog, failed])
 }
 
 /** `level` if `levels` offers it, else medium, else the highest offered. Any level for a model without reasoning (Pi turns thinking off). */
-function clampThinking(level: string, levels: string[]): string {
+export function clampThinking(level: string, levels: string[]): string {
   if (levels.length === 0 || levels.includes(level)) return level
   return levels.includes("medium") ? "medium" : levels[levels.length - 1]
 }
@@ -295,12 +299,13 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   }, [sessionId, repo, opened?.sessionId, resumeAttempt])
 
   const { model: chosenModel, thinking: chosenThinking } = choice
-  const start = useCallback(async (submit: PiSubmit): Promise<boolean> => {
+  const start = useCallback(async (submit: PiSubmit, picked?: { model: PiModel | null; thinking: string }): Promise<boolean> => {
+    const { model: startModel, thinking: startThinking } = picked ?? { model: chosenModel, thinking: chosenThinking }
     setError(null)
     setStarting(true)
     try {
       // No model chosen keeps Pi's default model
-      const options: PiSessionOptions = chosenModel ? { model: { provider: chosenModel.provider, id: chosenModel.id }, thinking: chosenThinking } : { thinking: chosenThinking }
+      const options: PiSessionOptions = startModel ? { model: { provider: startModel.provider, id: startModel.id }, thinking: startThinking } : { thinking: startThinking }
       const session = await openPiSession(repo, null, options)
       setFirstSubmit(submit)
       setOpened({ sessionId: session.sessionId, cwd: session.cwd })
@@ -323,14 +328,17 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   }, [repo, onViewChange])
 
   const launched = useRef(false)
+  const { settled: catalogSettled, levels: catalogLevels } = newSession
   useEffect(() => {
-    if (!launch || sessionId || launched.current) return
+    if (!launch || sessionId || launched.current || !catalogSettled) return
     launched.current = true
+    const model = launch.model ?? null
+    const thinking = clampThinking(launch.thinking || chosenThinking, model ? catalogLevels.get(piGatewayId(model)) ?? [] : [])
     const images = launch.attachments.filter((attachment) => attachment.mime.startsWith("image/")).map(imageOf)
     void Promise.all(images)
-      .then((converted) => start({ action: { kind: "prompt", text: launch.text }, images: converted, mode: "steer" }))
+      .then((converted) => start({ action: { kind: "prompt", text: launch.text }, images: converted, mode: "steer" }, { model, thinking }))
       .finally(() => onLaunched?.())
-  }, [launch, sessionId, start, onLaunched])
+  }, [launch, sessionId, start, onLaunched, catalogSettled, catalogLevels, chosenThinking])
 
   const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
   const clearInsertion = useCallback(() => setInsertion(null), [])

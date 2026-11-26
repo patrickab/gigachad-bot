@@ -26,6 +26,7 @@ import { usePreparedWorkbench } from "@/features/workbench/usePreparedWorkbench"
 import { canvasLead } from "@/features/workbench/fileLead"
 import { FileChat } from "@/features/workbench/FileChat"
 import { PiTab, type PiLaunch } from "@/features/pi/PiTab"
+import { PiModelDropdown, PiThinkingSelector, type PiModelControls } from "@/features/pi/PiTopBar"
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import { ChatContextUsage } from "@/features/chat/ContextUsage"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
@@ -59,6 +60,8 @@ interface WorkspaceSurfaceProps {
   chatBody: ReactNode
   /** First message of a Pi session started from the chat, sent by the Pi tab once its session is ready. */
   launch: PiLaunch | null
+  /** Pi's model and thinking pickers for an empty chat with a folder picked, they replace the chat's. */
+  piStart: PiModelControls | null
   onLaunched: () => void
   /** Opens a session picked in the top bar's "Agents" picker. */
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
@@ -122,7 +125,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, launch, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, launch, piStart, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // The workbench's Pi chats need host access, other logins keep the PDF's local assistant
@@ -179,10 +182,14 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     chat: () => ({
       ...conversationBar({
         reasoning: <TopBarPill>
-          <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
+          {piStart
+            ? <PiThinkingSelector controls={piStart} />
+            : <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />}
         </TopBarPill>,
         model: <TopBarTransparent>
-          <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />
+          {piStart
+            ? <PiModelDropdown controls={piStart} modelProps={modelProps} chatColumn={chatColumn} />
+            : <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />}
         </TopBarTransparent>,
         usage: <ChatContextUsage usage={totalUsage} model={config.selectedModel} />,
       }),

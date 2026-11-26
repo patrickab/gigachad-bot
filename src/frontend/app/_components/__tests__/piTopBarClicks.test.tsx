@@ -48,6 +48,7 @@ describe("WorkspaceSurface Pi top bar", () => {
             chatColumn={null}
             chatBody={null}
             launch={null}
+            piStart={null}
             onLaunched={noop}
             onOpenItem={noop}
           />
