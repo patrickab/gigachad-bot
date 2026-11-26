@@ -64,9 +64,11 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
     if (isActive) setActiveFile(tab.historyFile)
   }, [isActive, tab.historyFile, setActiveFile])
 
+  // Another chat's reveal marks no question of this one
+  const revealedQa = reveal.historyFile === tab.historyFile ? reveal.qaIndex : null
   useEffect(() => {
-    if (isActive) setActiveQaIndex(reveal.qaIndex)
-  }, [isActive, reveal.qaIndex, setActiveQaIndex])
+    if (isActive) setActiveQaIndex(revealedQa)
+  }, [isActive, revealedQa, setActiveQaIndex])
   useEffect(() => cancel, [cancel])
 
   useEffect(() => {

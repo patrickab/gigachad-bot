@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
@@ -78,6 +78,9 @@ export function useChatTurns({
   // Undo restores run up to six seconds later, they must not land in a different chat loaded into this tab meanwhile.
   const chatIdRef = useRef(chatId)
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
+  // The pair handlers read the messages here, so they stay the same while a reply streams and settled pairs skip its frames
+  const messagesRef = useRef(messages)
+  useLayoutEffect(() => { messagesRef.current = messages }, [messages])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -97,12 +100,12 @@ export function useChatTurns({
    * - Each source is read once, the patch applies to whatever the chat holds once the reads finish
    */
   const refreshForSend = useCallback(async (draft: Attachment[] = []) => {
-    const reads = await readReferences(liveReferencePaths([...messages.flatMap((m) => m.attachments ?? []), ...draft]), attachReference)
+    const reads = await readReferences(liveReferencePaths([...messagesRef.current.flatMap((m) => m.attachments ?? []), ...draft]), attachReference)
     return {
       history: replaceMessages((current) => applyReferenceReads(current, reads)),
       draft: draft.map((a) => withReferenceRead(a, reads)),
     }
-  }, [messages, replaceMessages])
+  }, [replaceMessages])
 
   /** Re-read `paths` and patch them into whatever the chat holds once the reads finish. */
   const syncReferences = useCallback(async (paths: string[]) => {
@@ -149,8 +152,9 @@ export function useChatTurns({
 
   const handleRegenerate = useCallback(async (globalIndex: number) => {
     if (isStreaming) return
-    const assistantMsg = messages[globalIndex + 1]
-    if (messages[globalIndex]?.role !== "user" || assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
+    const current = messagesRef.current
+    const assistantMsg = current[globalIndex + 1]
+    if (current[globalIndex]?.role !== "user" || assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
     const { history } = await refreshForSend()
     const userMsg = history[globalIndex]
 
@@ -165,7 +169,7 @@ export function useChatTurns({
       img_paths: collectActiveImagePaths(history, { userIndex: globalIndex }),
       project_slug: projectSlug,
     }))
-  }, [isStreaming, messages, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
+  }, [isStreaming, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
     updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
@@ -201,13 +205,14 @@ export function useChatTurns({
 
   // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
   const handleDeletePair = useCallback((index: number) => {
-    const restore = messages[index] && removePair(messages[index])
+    const message = messagesRef.current[index]
+    const restore = message && removePair(message)
     if (!restore) return
     const scheduledChat = chatId
     scheduleDelete(`pair:${chatId}:${index}`, "message pair", async () => {}, () => {
       if (chatIdRef.current === scheduledChat) restore()
     })
-  }, [messages, removePair, chatId, scheduleDelete])
+  }, [removePair, chatId, scheduleDelete])
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {

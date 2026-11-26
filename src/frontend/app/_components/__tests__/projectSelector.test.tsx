@@ -65,7 +65,7 @@ function renderTab() {
   const onOpenItem = vi.fn()
   render(
     <TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: noop, updateConfig: noop, setAppMode: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop }}>
-      <TabContent onOpenChat={noop} onOpenProject={noop} onProjectRenamed={noop} onDocumentRenamed={noop} onNewChat={noop} onOpenItem={onOpenItem} reveal={{ qaIndex: null, seq: 0 }} />
+      <TabContent onOpenChat={noop} onOpenProject={noop} onProjectRenamed={noop} onDocumentRenamed={noop} onNewChat={noop} onOpenItem={onOpenItem} reveal={{ historyFile: null, qaIndex: null, seq: 0 }} />
     </TabContext.Provider>,
   )
   return onOpenItem

@@ -17,6 +17,10 @@ vi.mock("@/features/chat/messages/ChatMessage", () => ({
   AssistantMessageContent: ({ content }: { content: string }) => <div>{content}</div>,
   ChatMessage: ({ content }: { content: string }) => <div>{content}</div>,
 }))
+// The top bar's slot is not mounted here: the toggle renders in place
+vi.mock("@/features/chat/WideModeToggle", () => ({
+  WideModeToggle: ({ wide, onToggle }: { wide: boolean; onToggle: () => void }) => <button type="button" onClick={onToggle}>{wide ? "Exit wide mode" : "Enter wide mode"}</button>,
+}))
 const GREETING = vi.hoisted(() => "What's on your mind?")
 
 // jsdom lays nothing out: size the composer (the element holding the greeting) and the column so the empty state can center
@@ -93,15 +97,73 @@ describe("ChatContainer column", () => {
     expect(screen.getByText("Question 0")).toBeTruthy()
   })
 
-  it("jumps to the revealed question: mounts, opens and scrolls to it", () => {
+  /** Elements scrolled into view while `run` runs. */
+  function scrolledDuring(run: () => void): Element[] {
     const scrolled: Element[] = []
     Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      run()
+    } finally {
+      Element.prototype.scrollIntoView = () => {}
+    }
+    return scrolled
+  }
+
+  it("jumps to the revealed question: mounts, opens and scrolls to it", () => {
     const messages = pairsOf(25)
-    const { rerender } = render(chat({ messages, reveal: { qaIndex: null, seq: 0 } }))
-    rerender(chat({ messages, reveal: { qaIndex: 1, seq: 1 } }))
+    const scrolled = scrolledDuring(() => {
+      const { rerender } = render(chat({ messages, historyFile: "a.json", reveal: { historyFile: null, qaIndex: null, seq: 0 } }))
+      rerender(chat({ messages, historyFile: "a.json", reveal: { historyFile: "a.json", qaIndex: 1, seq: 1 } }))
+    })
     expect(isOpen("Question 1")).toBe(true)
     expect(scrolled.at(-1)?.contains(screen.getByText("Question 1"))).toBe(true)
-    Element.prototype.scrollIntoView = () => {}
+  })
+
+  it("jumps to the revealed question once its chat's history has loaded", () => {
+    const reveal = { historyFile: "a.json", qaIndex: 1, seq: 1 }
+    const scrolled = scrolledDuring(() => {
+      const { rerender } = render(chat({ chatId: "new", messages: [], historyFile: "a.json", historyLoading: true, reveal }))
+      rerender(chat({ chatId: "c1", messages: pairsOf(25), historyFile: "a.json", reveal }))
+    })
+    expect(isOpen("Question 1")).toBe(true)
+    expect(scrolled.at(-1)?.contains(screen.getByText("Question 1"))).toBe(true)
+  })
+
+  it.each([
+    ["another history file", "b.json"],
+    ["an unsaved chat", null],
+  ])("ignores a reveal for another chat in %s, even after later messages", (_, historyFile) => {
+    const reveal = { historyFile: "a.json", qaIndex: 3, seq: 1 }
+    const scrolled = scrolledDuring(() => {
+      const { rerender } = render(chat({ messages: pairsOf(2), historyFile, reveal }))
+      rerender(chat({ messages: pairsOf(5), historyFile, reveal }))
+    })
+    expect(scrolled).toEqual([])
+    expect(isOpen("Question 3")).toBe(false)
+    expect(isOpen("Question 4")).toBe(true)
+    expect(scroller().scrollTop).toBe(scroller().scrollHeight)
+  })
+
+  it("drops a reveal whose question its loaded chat does not have, later messages do not fire it", () => {
+    const reveal = { historyFile: "a.json", qaIndex: 3, seq: 1 }
+    const scrolled = scrolledDuring(() => {
+      const { rerender } = render(chat({ messages: pairsOf(2), historyFile: "a.json", reveal }))
+      rerender(chat({ messages: pairsOf(5), historyFile: "a.json", reveal }))
+    })
+    expect(scrolled).toEqual([])
+    expect(isOpen("Question 3")).toBe(false)
+    expect(scroller().scrollTop).toBe(scroller().scrollHeight)
+  })
+
+  it("keeps wide mode when another chat opens", () => {
+    const column = () => document.querySelector<HTMLElement>("[data-chat-column]")!
+    const { rerender } = render(chat({ messages: pairsOf(2) }))
+    fireEvent.click(screen.getByRole("button", { name: "Enter wide mode" }))
+    expect(column().style.maxWidth).toBe("")
+
+    rerender(chat({ chatId: "c2", messages: pairsOf(3) }))
+    expect(screen.getByRole("button", { name: "Exit wide mode" })).toBeTruthy()
+    expect(column().style.maxWidth).toBe("")
   })
 
   it("moves keyboard focus with Ctrl+Up from the composer, Enter collapses the focused pair", () => {

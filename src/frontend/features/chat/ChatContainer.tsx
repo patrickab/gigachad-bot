@@ -15,8 +15,9 @@ import { ComposerDock, useComposerDock } from "./ComposerDock"
 /** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
 export { CHAT_COLUMN_MAX_PX }
 
-/** Asks the chat to open and scroll to one question, the column's `reveal` by pair; a new `seq` re-fires it for the same index. */
+/** Asks the chat of `historyFile` to open and scroll to one question, the column's `reveal` by pair; a new `seq` re-fires it for the same index. */
 export interface ChatReveal {
+  historyFile: string | null
   qaIndex: number | null
   seq: number
 }
@@ -34,6 +35,8 @@ interface ChatContainerProps {
   chatId: string
   /** Conversation the composer keeps its unsent text for, see `ChatInput`. */
   draftKey?: string | null
+  /** The saved history shown, null for an unsaved chat: only a reveal for it applies here. */
+  historyFile?: string | null
   messages: Message[]
   /** The chat's saved history is still loading: its empty `messages` must not show the empty state. */
   historyLoading?: boolean
@@ -88,6 +91,7 @@ function BranchSeparator({ at }: { at: number }) {
 export function ChatContainer({
   chatId,
   draftKey,
+  historyFile = null,
   messages,
   historyLoading = false,
   isStreaming,
@@ -113,6 +117,8 @@ export function ChatContainer({
   const previewAttachment = previewTarget ? findAttachment(messages[previewTarget.messageIndex], previewTarget.name) ?? null : null
   // Bumped on send: the column follows the end again
   const [followSeq, setFollowSeq] = useState(0)
+  // Held here, not in the column that remounts per chat: wide mode stays when another chat opens
+  const [wide, setWide] = useState(false)
 
   const pairs = useMemo(() => pairMessages(messages), [messages])
   const keys = usePairKeys(pairs)
@@ -122,11 +128,16 @@ export function ChatContainer({
     live: isStreaming && index === pairs.length - 1,
     pair,
   })), [pairs, keys, isStreaming])
-  const revealQa = reveal?.qaIndex ?? null
-  const revealKey = revealQa === null ? undefined : turns[revealQa]?.key
-  const revealSeq = reveal?.seq ?? 0
-  // Waits for the pair: a chat opened at a question loads its history first
-  const columnReveal = useMemo<ConversationReveal | null>(() => (revealKey === undefined ? null : { key: revealKey, seq: revealSeq }), [revealKey, revealSeq])
+  // A reveal is settled once, when its own chat has loaded: there its pair's key, or nothing when the pair does not exist.
+  // Another chat's reveal never applies here, and a settled one does not wait for later messages
+  const [settled, setSettled] = useState<{ seq: number | null; historyFile: string | null; reveal: ConversationReveal | null }>({ seq: null, historyFile, reveal: null })
+  if (settled.historyFile !== historyFile) {
+    setSettled({ seq: settled.seq, historyFile, reveal: null })
+  } else if (reveal && historyFile !== null && reveal.historyFile === historyFile && reveal.seq !== settled.seq && !historyLoading) {
+    const key = reveal.qaIndex === null ? undefined : turns[reveal.qaIndex]?.key
+    setSettled({ seq: reveal.seq, historyFile, reveal: key === undefined ? null : { key, seq: reveal.seq } })
+  }
+  const columnReveal = settled.historyFile === historyFile ? settled.reveal : null
 
   // A chat known to be empty lifts the composer to just below the column's middle. A loading one keeps it at the bottom
   const dock = useComposerDock(messages.length === 0 && !historyLoading)
@@ -186,6 +197,8 @@ export function ChatContainer({
           renderBody={renderBody}
           renderAfter={renderAfter}
           reveal={columnReveal}
+          wide={wide}
+          onWideChange={setWide}
           followSeq={followSeq}
           paddingBottom={dock.paddingBottom}
           onColumnChange={onChatColumnChange}

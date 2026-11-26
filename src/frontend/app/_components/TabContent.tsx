@@ -144,6 +144,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const chatBody = (
     <ChatContainer
       chatId={chatId}
+      historyFile={tab.historyFile ?? null}
       draftKey={tab.historyFile ? `chat:${projectSlug ?? ""}:${tab.historyFile}` : newChatDraftKey(tab.id)}
       onChatColumnChange={setChatColumn}
       messages={chat.messages}

@@ -204,6 +204,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- composer/         Input, completions, drawings and attachment chips (useDraftAttachments, dictation via hooks/useSpeechInput)
 |       |   |   |-- messages/         Tools, research and rich output rendering
 |       |   |   `-- preview/          Attachment previews
+|       |   |-- conversation/         ConversationColumn: the turn column of the chat and Pi (scroll, follow the end, paging, open state, keyboard focus, lazy previews, width and wide mode)
 |       |   |-- editor/               Documents, viewers and terminal editors
 |       |   |   |-- DocumentEditor.tsx Routes a document path to its viewer or editor (image, architecture source, canvas, text), `WorkspaceSurface` shows notebooks in `NotebookWorkbench` instead
 |       |   |   |-- TextDocumentEditor.tsx Markdown/text save and preview owner (EditorShell, EditorViewSwitch, useEditorView)

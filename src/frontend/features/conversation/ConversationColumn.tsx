@@ -63,6 +63,9 @@ export interface ConversationColumnProps<T extends ConversationTurn> {
   onColumnChange?: (column: HTMLDivElement | null) => void
   /** The scroll container, for a caller that paints or listens in it. */
   scrollRef?: RefObject<HTMLDivElement | null>
+  /** Wide mode held by the caller, e.g. across chats that remount the column; unset: the column holds its own. */
+  wide?: boolean
+  onWideChange?: (wide: boolean) => void
 }
 
 /** Same element type, key and shallowly equal props: a re-created element of a memoized turn changes nothing. */
@@ -169,13 +172,18 @@ function glideTo(element: HTMLElement, top: number) {
  * - `reveal` mounts and opens its turn, then scrolls to it (or where its `scroll` says) and holds the view there
  * - Column width (drag a card edge, shared app-wide) and wide mode (the top bar's toggle)
  */
-export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, renderBody, renderAfter, header, footer, reveal = null, followSeq = 0, paddingBottom, onColumnChange, scrollRef: outerScrollRef }: ConversationColumnProps<T>) {
+export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, renderBody, renderAfter, header, footer, reveal = null, followSeq = 0, paddingBottom, onColumnChange, scrollRef: outerScrollRef, wide: heldWide, onWideChange }: ConversationColumnProps<T>) {
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [pageCount, setPageCount] = useState(TURN_PAGE_SIZE)
   /** First mounted turn while the reader is away from the end, null while following the end. */
   const [anchor, setAnchor] = useState<number | null>(null)
   const [focusedKey, setFocusedKey] = useState<string | null>(null)
-  const [wide, setWide] = useState(false)
+  const [ownWide, setOwnWide] = useState(false)
+  const wide = heldWide ?? ownWide
+  const toggleWide = () => {
+    if (heldWide === undefined) setOwnWide(!ownWide)
+    onWideChange?.(!wide)
+  }
   const { width: columnWidth, startResize } = useColumnWidth()
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The scroller into `scrollRef` and the caller's. */
@@ -405,7 +413,7 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
         })}
         {footer}
       </div>
-      <WideModeToggle wide={wide} onToggle={() => setWide((current) => !current)} />
+      <WideModeToggle wide={wide} onToggle={toggleWide} />
     </div>
   )
 }

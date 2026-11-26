@@ -60,7 +60,7 @@ export function AppShell() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
   const lastProjectTabs = useRef(new Map<string, string>())
   const activeTabRef = useRef<Tab | null>(null)
-  const [reveal, setReveal] = useState<ChatReveal>({ qaIndex: null, seq: 0 })
+  const [reveal, setReveal] = useState<ChatReveal>({ historyFile: null, qaIndex: null, seq: 0 })
   // Project whose dashboard is showing; set from the current tab and never read back as "the" project.
   const [dashboardSlug, setDashboardSlug] = useState<string | null>(null)
   // What the shells (one per tab) need: the frontmost tab and which tabs still exist
@@ -122,7 +122,7 @@ export function AppShell() {
   }, [handleNewChat])
 
   const handleOpenChat = useCallback((historyFile: string, qaIndex?: number) => {
-    setReveal((current) => ({ qaIndex: qaIndex ?? null, seq: current.seq + 1 }))
+    setReveal((current) => ({ historyFile, qaIndex: qaIndex ?? null, seq: current.seq + 1 }))
     tabManagerRef.current?.showChat(historyFile)
   }, [])
 
