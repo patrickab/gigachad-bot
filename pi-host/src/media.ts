@@ -102,16 +102,26 @@ function store(base64: string): string | undefined {
   return hash;
 }
 
-/** Remove the stored images of `hashes` and forget their base64, so nothing of them stays on disk or in memory. */
-export function forgetMedia(hashes: readonly string[]): void {
+/**
+ * Forget the base64 of `hashes`, then remove their stored images, each on its own, so nothing of them stays in memory
+ * and as little as possible on disk. Answers the hashes whose file could not be removed.
+ */
+export function forgetMedia(hashes: readonly string[]): string[] {
   const gone = new Set(hashes.filter((hash) => HASH_RE.test(hash)));
-  if (gone.size === 0) return;
-  for (const hash of gone) rmSync(join(mediaDir(), hash), { force: true });
   for (const [base64, hash] of recent) {
     if (!gone.has(hash)) continue;
     recent.delete(base64);
     recentChars -= base64.length;
   }
+  const left: string[] = [];
+  for (const hash of gone) {
+    try {
+      rmSync(join(mediaDir(), hash), { force: true });
+    } catch {
+      left.push(hash);
+    }
+  }
+  return left;
 }
 
 type Json = Record<string, unknown>;

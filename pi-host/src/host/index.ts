@@ -114,12 +114,13 @@ export type DeleteTurnRequest = { sessionPath: string; entryId: string; through:
 
 /**
  * `removedMedia`: content hashes of the range's tool images that neither a surviving entry nor another session file of
- * the same cwd holds, for the media store and the backend's thumbnails to drop.
+ * the same cwd holds, for the media store and the backend's thumbnails to drop. `notRemoved`, only when a cleanup after
+ * the rewrite failed: the pastes (`.pi/pastes/...`) and media hashes that could not be removed.
  * Refusals: `not_found` no session file, `unknown` no such entry, `not_prompt` / `off_branch` / `compacted` as
  * `removeTurn` (`local/turns.ts`), `locked` another holder has the file, `changed` it changed between read and rename.
  */
 export type DeleteTurnResult =
-  | { ok: true; removedEntries: number; removedMedia: string[] }
+  | { ok: true; removedEntries: number; removedMedia: string[]; notRemoved?: string[] }
   | { ok: false; error: "not_found" | "unknown" | "not_prompt" | "off_branch" | "compacted" | "locked" | "changed" };
 
 /** The entry a fork ends at (inclusive) in a source session file; the source's leaf makes a clone. */

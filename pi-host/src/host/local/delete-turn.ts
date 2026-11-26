@@ -8,7 +8,8 @@
  *
  * The new file is written beside the old one under a name not ending in `.jsonl` (the session watcher and listings
  * skip it), synced, then renamed over it: a crash leaves the old or the new file, no copy of the old one is kept.
- * Entries `removeTurn` passes through unchanged keep their original line bytes.
+ * Entries `removeTurn` passes through unchanged keep their original line bytes, lines that are no entry stay as they are.
+ * Once the file is renamed the caches are always forgotten and a cleanup that fails is named in `notRemoved`.
  */
 import { createHash } from "node:crypto";
 import { lstat, open, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
@@ -23,33 +24,56 @@ import { removeTurn, type TurnEntry } from "./turns.ts";
 /** A `@` mention of a pasted video (`lib/pi_pastes.py`, `paste_mention`), relative to the session's cwd. */
 const PASTE_MENTION = /\.pi\/pastes\/([\w.-]+)/g;
 
-type Parsed = { headerLine: string; cwd: string; entries: TurnEntry[]; lines: Map<TurnEntry, string> };
+/**
+ * The file's lines (without the final newline) and where its entries sit: `slots[i]` is the line of `entries[i]`.
+ * Lines that do not parse, entries without an id and blank lines are no entries: a rewrite keeps them byte for byte.
+ */
+type Parsed = { headerLine: string; cwd: string; lines: string[]; entries: TurnEntry[]; slots: number[]; raw: Map<TurnEntry, string> };
 
-/** Header line, cwd and entries (with their raw lines) of a session file's text; undefined without a session header. */
+/** Header line, cwd, lines and entries of a session file's text; undefined without a session header. */
 function parseSession(text: string): Parsed | undefined {
-  const [headerLine, ...rest] = text.split("\n").filter(Boolean);
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const headerIndex = lines.findIndex(Boolean);
+  const headerLine = lines[headerIndex] ?? "";
   let header: unknown;
   try {
-    header = JSON.parse(headerLine ?? "");
+    header = JSON.parse(headerLine);
   } catch {
     return undefined;
   }
   const { type, cwd } = (header ?? {}) as { type?: unknown; cwd?: unknown };
   if (type !== "session") return undefined;
   const entries: TurnEntry[] = [];
-  const lines = new Map<TurnEntry, string>();
-  for (const line of rest) {
+  const slots: number[] = [];
+  const raw = new Map<TurnEntry, string>();
+  for (let index = headerIndex + 1; index < lines.length; index++) {
+    const line = lines[index]!;
     let entry: TurnEntry;
     try {
       entry = JSON.parse(line);
     } catch {
-      continue; // A half-written last line, Pi skips it too
+      continue; // A half-written line, Pi skips it too
     }
     if (typeof entry?.id !== "string" || entry.type === "session") continue;
     entries.push(entry);
-    lines.set(entry, line);
+    slots.push(index);
+    raw.set(entry, line);
   }
-  return { headerLine: headerLine!, cwd: typeof cwd === "string" ? cwd : "", entries, lines };
+  return { headerLine, cwd: typeof cwd === "string" ? cwd : "", lines, entries, slots, raw };
+}
+
+/**
+ * The file's text with `kept` in the lines of the entries: the removed entries' lines go, every other line stays where
+ * it was. `kept` is in file order but for a moved leaf, so it fills the surviving entry lines in order.
+ */
+function rewritten(parsed: Parsed, kept: TurnEntry[]): string {
+  const removed = new Set(parsed.entries.filter((entry) => !kept.some((next) => next.id === entry.id)));
+  const surviving = parsed.slots.filter((_, index) => !removed.has(parsed.entries[index]!));
+  const lines: (string | undefined)[] = [...parsed.lines];
+  for (const [index, entry] of parsed.entries.entries()) if (removed.has(entry)) lines[parsed.slots[index]!] = undefined;
+  for (const [index, entry] of kept.entries()) lines[surviving[index]!] = parsed.raw.get(entry) ?? JSON.stringify(entry);
+  return lines.filter((line) => line !== undefined).join("\n") + "\n";
 }
 
 /** Text of a message's content (string or text blocks). */
@@ -157,7 +181,7 @@ export async function deleteTurn(
     if (!result.ok) return { ok: false, error: result.reason };
     if (dryRun) return { ok: true, removedEntries: result.removed.length, removedMedia: [] };
 
-    const text = [parsed.headerLine, ...result.entries.map((entry) => parsed.lines.get(entry) ?? JSON.stringify(entry))].join("\n") + "\n";
+    const text = rewritten(parsed, result.entries);
     const temp = join(dirname(filePath), `.${basename(filePath)}.${crypto.randomUUID()}.tmp`);
     try {
       await writeSynced(temp, text, before.mode & 0o777);
@@ -172,26 +196,42 @@ export async function deleteTurn(
       await rm(temp, { force: true });
       throw error;
     }
-    await syncDir(dirname(filePath));
+    // From here the file is rewritten: nothing below may skip forgetting the caches, each cleanup fails on its own
+    await syncDir(dirname(filePath)).catch(() => undefined);
     for (const path of new Set([sessionPath, filePath])) {
       forgetSummary(path);
       forgetTranscript(path);
     }
 
     // What the range held and nothing else holds goes: in this file first, then in the cwd's other session files
-    const others = parsed.cwd ? await otherSessionFiles(parsed.cwd, filePath) : [];
+    const notRemoved: string[] = [];
+    const others = parsed.cwd ? otherSessionFiles(parsed.cwd, filePath) : Promise.resolve([]);
     const images = [...new Set(toolImages(result.removed))].filter((data) => !text.includes(data));
-    const removedMedia = [
-      ...new Set((await unheld(images, others)).map((data) => createHash("sha256").update(Buffer.from(data, "base64")).digest("hex"))),
-    ];
+    const hashOf = (data: string) => createHash("sha256").update(Buffer.from(data, "base64")).digest("hex");
+    let removedMedia: string[] = [];
+    try {
+      removedMedia = [...new Set((await unheld(images, await others)).map(hashOf))];
+    } catch {
+      notRemoved.push(...new Set(images.map(hashOf)));
+    }
     if (isAbsolute(parsed.cwd)) {
       const pastes = pasteMentions(result.removed).filter((mention) => !text.includes(mention));
-      for (const mention of await unheld(pastes, others)) {
+      let unused: string[] = [];
+      try {
+        unused = await unheld(pastes, await others);
+      } catch {
+        notRemoved.push(...pastes);
+      }
+      for (const mention of unused) {
         const path = join(parsed.cwd, mention);
-        if ((await lstat(path).catch(() => undefined))?.isFile()) await rm(path, { force: true });
+        try {
+          if ((await lstat(path).catch(() => undefined))?.isFile()) await rm(path, { force: true });
+        } catch {
+          notRemoved.push(mention);
+        }
       }
     }
-    return { ok: true, removedEntries: result.removed.length, removedMedia };
+    return { ok: true, removedEntries: result.removed.length, removedMedia, ...(notRemoved.length > 0 && { notRemoved }) };
   } finally {
     lock?.release();
   }

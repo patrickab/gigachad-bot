@@ -15,7 +15,7 @@ import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { forgetEntries } from "../catalog/entries.ts";
 import { copyPrivateState, markCacheRetention, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
-import type { DeleteTurnRequest, Host, Profile, SessionMeta } from "../host/index.ts";
+import type { DeleteTurnRequest, DeleteTurnResult, Host, Profile, SessionMeta } from "../host/index.ts";
 import { forgetMedia } from "../media.ts";
 import type { SupervisorConfig } from "./config.ts";
 import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
@@ -35,6 +35,7 @@ type StartRequest = {
 };
 type Failure = { status: number; body: Record<string, unknown> };
 type StartOutcome = { session: LiveSession } | Failure;
+type DeleteTurnAnswer = Extract<DeleteTurnResult, { ok: true }>;
 
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
 const SESSION_PROMPT = /^\/sessions\/([^/]+)\/prompt$/;
@@ -120,6 +121,8 @@ export class SupervisorHost implements Supervisor {
   private readonly byId = new Map<string, LiveSession>();
   private readonly byPath = new Map<string, LiveSession>();
   private readonly starting = new Map<string, Promise<StartOutcome>>();
+  /** The `starting` entries that are a turn delete's rewrite: a start waiting on one tries again once it settled. */
+  private readonly rewrites = new WeakSet<Promise<StartOutcome>>();
   /** Clients of sessions whose child restarts after a turn delete, by session id: they get a `resync` from the new child. */
   private readonly carried = new Map<string, Set<FrameSink>>();
   private readonly evictionTimer: Timer;
@@ -288,7 +291,7 @@ export class SupervisorHost implements Supervisor {
     sessionId: string,
     entryId: string,
     through: DeleteTurnRequest["through"],
-  ): Promise<Failure | { ok: true; removedEntries: number; removedMedia: string[] }> {
+  ): Promise<Failure | DeleteTurnAnswer> {
     const sessionPath = await this.host.findSession(sessionId);
     const meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
     if (!meta) return fail(404, "not_found");
@@ -312,24 +315,27 @@ export class SupervisorHost implements Supervisor {
     const clients = new Set(live?.takeClients() ?? []);
     if (live) this.carried.set(sessionId, clients);
     const stopped = live?.close();
-    let answer: Failure | { ok: true; removedEntries: number; removedMedia: string[] } = fail(409, "locked");
+    let answer: Failure | DeleteTurnAnswer = fail(409, "locked");
     const rewrite = (async (): Promise<StartOutcome> => {
       await (stopped ?? found?.exited);
       try {
         const result = await this.host.deleteTurn(request);
         if (result.ok) {
-          for (const path of new Set([meta.sessionPath, key])) forgetEntries(path);
-          forgetMedia(result.removedMedia);
-          answer = result;
+          const notRemoved = [...(result.notRemoved ?? []), ...forgetMedia(result.removedMedia)];
+          answer = { ...result, ...(notRemoved.length > 0 && { notRemoved }) };
         } else answer = fail(TURN_REFUSALS[result.error] ?? 409, result.error);
       } catch (error) {
         answer = fail(500, "rewrite_failed", { message: String(error) });
+      } finally {
+        // The file may be rewritten whatever the answer: the entries cache never outlives it
+        for (const path of new Set([meta.sessionPath, key])) forgetEntries(path);
       }
       // A start waiting for this path without a child to restart gets what the file lock would have answered
       if (!live) return fail(409, "locked");
       return this.spawn({ cwd: live.cwd, spec: live.spec, resume: { sessionPath: key } }, live.cwd, key);
     })();
     this.starting.set(key, rewrite);
+    this.rewrites.add(rewrite);
     let outcome: StartOutcome;
     try {
       outcome = await rewrite;
@@ -480,10 +486,13 @@ export class SupervisorHost implements Supervisor {
       if (!isRestartable(live, spec)) return fail(409, "profile_mismatch");
       await live.close();
     } else if (live) await live.exited;
-    const inFlight = this.starting.get(sessionPath);
-    if (inFlight) {
+    for (let inFlight = this.starting.get(sessionPath); inFlight; ) {
       const outcome = await inFlight;
-      return "session" in outcome ? this.reuse(outcome.session, spec) : outcome;
+      if ("session" in outcome) return this.reuse(outcome.session, spec);
+      // A turn delete without a child to restart (or failing to) frees the file when it settles: start on it then
+      if (!this.rewrites.has(inFlight)) return outcome;
+      const next = this.starting.get(sessionPath);
+      inFlight = next === inFlight ? undefined : next;
     }
     const started = this.spawn(request, cwd, sessionPath);
     this.starting.set(sessionPath, started);

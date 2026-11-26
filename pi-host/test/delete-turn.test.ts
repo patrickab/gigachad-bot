@@ -7,6 +7,7 @@ import type { Server } from "bun";
 import { startServer } from "../src/server.ts";
 import { deleteTurn } from "../src/host/local/delete-turn.ts";
 import { forgetMedia, mediaBytes, useMediaDir } from "../src/media.ts";
+import type { DeleteTurnRequest, Host } from "../src/host/index.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 
 type Frame = { type: string; sessionId: string; [field: string]: any };
@@ -298,4 +299,107 @@ test("a file changed between read and rename is left as the other writer left it
   expect(result).toEqual({ ok: false, error: "changed" });
   expect(readFileSync(sessionPath, "utf8").endsWith(appended)).toBe(true);
   expect(readFileSync(sessionPath, "utf8")).toContain('"first"');
+});
+
+test("a paste that cannot be removed is named, the caches forget the turn all the same", async () => {
+  const cwd = workdir("stuck-paste");
+  const paste = ".pi/pastes/20261119-100000-stuck.mp4";
+  const pastes = join(cwd, ".pi", "pastes");
+  mkdirSync(pastes, { recursive: true });
+  writeFileSync(join(cwd, paste), "video bytes");
+  const { sessionId } = writeSessionFile(cwd, [
+    message("u1", null, "user", `quokkaprompt @${paste}`),
+    message("a1", "u1", "assistant", "quokkaanswer"),
+    message("u2", "a1", "user", "kept question"),
+    message("a2", "u2", "assistant", "kept answer"),
+  ]);
+  const listed = async () => (await (await api(`/sessions?cwd=${encodeURIComponent(cwd)}`)).json()).sessions;
+  const entries = async () => JSON.stringify(await (await api(`/sessions/${sessionId}/entries?turns=5`)).json());
+  expect((await listed())[0].firstMessage).toContain("quokkaprompt");
+  expect((await (await api("/search?q=quokkaanswer")).json()).hits).toHaveLength(1);
+  expect(await entries()).toContain("quokka");
+
+  chmodSync(pastes, 0o500); // The rm of the paste throws EACCES
+  try {
+    const response = await deleteRequest(sessionId, "u1", { through: "turn" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, removedEntries: 2, removedMedia: [], notRemoved: [paste] });
+  } finally {
+    chmodSync(pastes, 0o700);
+  }
+  expect((await listed())[0].firstMessage).toBe("kept question");
+  expect((await (await api("/search?q=quokkaanswer")).json()).hits).toEqual([]);
+  expect(await entries()).not.toContain("quokka");
+});
+
+test("a start during a delete waits for it and gets a child on the rewritten file", async () => {
+  const cwd = workdir("start-during-delete");
+  const { sessionId, sessionPath } = writeSessionFile(cwd, [
+    message("u1", null, "user", "first"),
+    message("a1", "u1", "assistant", "one"),
+    message("u2", "a1", "user", "second"),
+  ]);
+  // The rewrite waits for the test, so the start lands while the delete is in flight
+  let entered!: () => void;
+  const inside = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const base = supervisor.host;
+  const host = new Proxy(base, {
+    get(target, name) {
+      if (name === "deleteTurn") {
+        return async (request: DeleteTurnRequest) => {
+          if (!request.dryRun) {
+            entered();
+            await gate;
+          }
+          return target.deleteTurn(request);
+        };
+      }
+      const value = Reflect.get(target, name);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Host;
+  const gated = await createSupervisor({ piBin: fakePi, idleMs: 3_600_000, isPinned: async () => false, host });
+  try {
+    const call = (path: string, body: object) => {
+      const url = new URL(`http://pi-host${path}`);
+      return gated.handle(new Request(url, { method: "POST", body: JSON.stringify(body) }), url);
+    };
+    const deleted = call(`/sessions/${sessionId}/turns/u2/delete`, { through: "turn" });
+    await inside;
+    const started = call("/sessions", { cwd, profile: "coding", resume: { sessionPath } });
+    await Bun.sleep(50);
+    release();
+    const [deleteAnswer, startAnswer] = await Promise.all([deleted, started]);
+    expect(deleteAnswer!.status).toBe(200);
+    expect(startAnswer!.status).toBe(200);
+    expect((await startAnswer!.json()).session.sessionId).toBe(sessionId);
+    expect(readFileSync(sessionPath, "utf8")).not.toContain("second");
+  } finally {
+    await gated.shutdown();
+  }
+});
+
+test("lines that do not parse and entries without an id survive a delete byte for byte, in place", async () => {
+  const cwd = workdir("opaque-lines");
+  const { sessionPath } = writeSessionFile(cwd, []);
+  const header = readFileSync(sessionPath, "utf8").trimEnd();
+  const u2 = message("u2", "a1", "user", "second");
+  const lines = [
+    header,
+    JSON.stringify(message("u1", null, "user", "first")),
+    '{"type":"message","id":"half',
+    JSON.stringify(message("a1", "u1", "assistant", "one")),
+    JSON.stringify({ type: "custom", note: "no id" }),
+    "",
+    "not json at all",
+    JSON.stringify(u2),
+    JSON.stringify(message("a2", "u2", "assistant", "two")),
+  ];
+  writeFileSync(sessionPath, `${lines.join("\n")}\n`);
+  const result = await deleteTurn({ sessionPath, entryId: "u1", through: "turn" });
+  expect(result).toEqual({ ok: true, removedEntries: 2, removedMedia: [] });
+  const kept = [lines[0], lines[2], lines[4], lines[5], lines[6], JSON.stringify({ ...u2, parentId: null }), lines[8]];
+  expect(readFileSync(sessionPath, "utf8")).toBe(`${kept.join("\n")}\n`);
 });
