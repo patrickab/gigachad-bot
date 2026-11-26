@@ -317,13 +317,25 @@ export function reduceTranscript(transcript: Transcript, event: PiEvent): Transc
   }
 }
 
+const committedRuns = new WeakMap<ToolResultMessage, ToolRun>()
+
+/** The run of a committed result, the same object for the same message: a tool row is memoized on it, so partial output of one tool re-renders that row only. */
+function committedRun(result: ToolResultMessage): ToolRun {
+  let run = committedRuns.get(result)
+  if (!run) {
+    run = { running: false, isError: result.isError, result: { content: result.content, details: result.details } }
+    committedRuns.set(result, run)
+  }
+  return run
+}
+
 /** Tool state by call id: committed `toolResult` messages, overridden by this connection's live runs (which carry durations). */
 export function toolRunsOf(transcript: Pick<Transcript, "messages" | "unconfirmed" | "optimistic" | "runs">): Record<string, ToolRun> {
   const runs: Record<string, ToolRun> = {}
   for (const message of shownMessages(transcript)) {
     if (message.role !== "toolResult") continue
     const result = message as ToolResultMessage
-    runs[result.toolCallId] = { running: false, isError: result.isError, result: { content: result.content, details: result.details } }
+    runs[result.toolCallId] = committedRun(result)
   }
   // A live run still "running" next to its committed result is stale (resync after the end was missed): the committed result wins, keeping the duration
   for (const [id, run] of Object.entries(transcript.runs)) {

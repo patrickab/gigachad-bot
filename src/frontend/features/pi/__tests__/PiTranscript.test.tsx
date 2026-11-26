@@ -110,6 +110,38 @@ describe("PiTranscript window", () => {
     expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
     expect(screen.getAllByRole("button", { name: "Collapse question and answer" }).length).toBeGreaterThan(2)
   })
+
+  it("renders only the head of an older turn's long answer until its preview is scrolled", () => {
+    const paragraph = (index: number) => `Paragraph ${index} ${"word ".repeat(30)}`.trim()
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Explain", timestamp: 1 },
+      { role: "assistant", content: [{ type: "text", text: Array.from({ length: 40 }, (_, index) => paragraph(index)).join("\n\n") }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 2 },
+      ...history(1).map((message) => ({ ...message, timestamp: message.timestamp + 10 })),
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.getByText(paragraph(0))).toBeTruthy()
+    expect(screen.queryByText(paragraph(39))).toBeNull()
+
+    fireEvent.scroll(screen.getByRole("region", { name: "Answer preview" }))
+    expect(screen.getByText(paragraph(39))).toBeTruthy()
+  })
+
+  it("keeps only the newest activity of a live turn unfolded, the whole run folds once settled", () => {
+    const calls = 20
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Do it", timestamp: 1 },
+      ...Array.from({ length: calls }, (_, index): AgentMessage => ({ role: "assistant", content: [{ type: "toolCall", id: `t${index}`, name: "bash", arguments: { command: `step-${index}` } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 + index })),
+    ]
+    const { rerender } = render(<PiTranscript transcript={transcriptOf(messages, { running: true })} fileLinks={fileLinks} />)
+    expect(screen.getByRole("button", { name: "Process details · 8 messages · 8 tool calls" })).toBeTruthy()
+    expect(screen.queryByText(/step-7/)).toBeNull()
+    expect(screen.getByText(/step-8/)).toBeTruthy()
+    expect(screen.getByText(/step-19/)).toBeTruthy()
+
+    rerender(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.getByRole("button", { name: "Process details · 20 messages · 20 tool calls" })).toBeTruthy()
+    expect(screen.queryByText(/step-19/)).toBeNull()
+  })
 })
 
 describe("PiTranscript entry edits", () => {

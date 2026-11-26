@@ -4,7 +4,7 @@ import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Sparkles, Square, TerminalSquare, Volume2 } from "lucide-react"
-import { CopyAction, ForkAction, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui"
+import { CopyAction, ForkAction, PREVIEW_HEAD_CHARS, previewHead, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
@@ -118,7 +118,8 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
   return pieces
 }
 
-function ThinkingBlock({ text }: { text: string }) {
+/** Memoized like the tool rows: a live turn re-renders on each streamed frame, its settled pieces must not. */
+const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="my-1 text-xs text-ink-muted">
@@ -130,7 +131,7 @@ function ThinkingBlock({ text }: { text: string }) {
       {open && <p className="mt-1 whitespace-pre-wrap pl-5 leading-5">{text}</p>}
     </div>
   )
-}
+})
 
 const PreviewContext = createContext<(attachment: Attachment) => void>(() => {})
 
@@ -140,20 +141,32 @@ function ToolImages({ attachments }: { attachments: Attachment[] }) {
   return <MessageAttachments attachments={attachments} onClick={open} />
 }
 
-function BashBlock({ message }: { message: BashExecutionMessage }) {
+const BashBlock = memo(function BashBlock({ message }: { message: BashExecutionMessage }) {
   return (
     <div className="my-1 font-mono text-xs">
       <div className="flex items-center gap-1.5 text-ink-muted"><TerminalSquare size={12} aria-hidden="true" />$ {message.command}</div>
       {message.output && <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-ink-subtle">{message.output}</pre>}
     </div>
   )
-}
+})
 
 /** Quiet line naming a message's label and `context_edit`, or the error a retried attempt failed with. */
 function MarksLine({ marks, retried }: { marks: MessageMarks; retried?: string }) {
   const context = retried ? `Retried after: ${retried}` : marks.context === "omitted" ? "Omitted from context" : marks.context === "replaced" ? "Replaced in context" : undefined
   const parts = [marks.label, context].filter(Boolean)
   return <p className="my-1 text-xs text-ink-faint">{parts.join(" · ")}</p>
+}
+
+const fileOpeners = new WeakMap<FileLinks, (path: string) => void>()
+
+/** One opener per `fileLinks`: a tool row is memoized on it, a new function per render would re-render every row of a live turn on each streamed frame. */
+function fileOpener(fileLinks: FileLinks): (path: string) => void {
+  let open = fileOpeners.get(fileLinks)
+  if (!open) {
+    open = (path) => fileLinks.open(resolveLocalFileHref(path, fileLinks.base) ?? path)
+    fileOpeners.set(fileLinks, open)
+  }
+  return open
 }
 
 function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean, fileLinks: FileLinks): ReactNode {
@@ -165,7 +178,7 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
     case "thinking": return <ThinkingBlock key={piece.key} text={piece.text} />
     case "tool": {
       const run = runs[piece.call.id]
-      const row = () => <ToolCallRow call={piece.call} run={run} streaming={live} defaultCollapsed onOpenFile={(path) => fileLinks.open(resolveLocalFileHref(path, fileLinks.base) ?? path)} />
+      const row = () => <ToolCallRow call={piece.call} run={run} streaming={live} defaultCollapsed onOpenFile={fileOpener(fileLinks)} />
       return <Fragment key={piece.key}>{renderToolCall(piece.call, run, row)}</Fragment>
     }
     case "images": return <ToolImages key={piece.key} attachments={piece.attachments} />
@@ -179,26 +192,34 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
   }
 }
 
+/** Newest pieces of a live turn's last run of activity that stay unfolded, so tool progress is in view. */
+const LIVE_FLAT_PIECES = 12
+
 /**
  * The answer like omp-web shows it: text stays visible, every run of activity (thinking, tool calls, shell commands) between
- * texts folds into "Process details". `read` calls and the images tools returned (image attachments) are never folded. A live turn stays flat so tool progress is in view, it folds once settled.
+ * texts folds into "Process details". `read` calls and the images tools returned (image attachments) are never folded.
+ * A live turn keeps the newest `LIVE_FLAT_PIECES` of its last run unfolded so tool progress is in view: a long agent turn then
+ * mounts a handful of rows, not hundreds. The run folds whole once the turn settles.
  */
 function Answer({ pieces, runs, live, fileLinks }: { pieces: Piece[]; runs: Record<string, ToolRun>; live: boolean; fileLinks: FileLinks }) {
-  if (live) return <>{pieces.map((piece) => renderPiece(piece, runs, live, fileLinks))}</>
   const rendered: ReactNode[] = []
   let activity: Piece[] = []
-  const flush = () => {
+  const flush = (last: boolean) => {
     if (activity.length === 0) return
-    const group = activity
-    rendered.push(
-      <ProcessDetails
-        key={`activity-${group[0].key}`}
-        messageCount={new Set(group.flatMap((piece) => ("messageKey" in piece ? [piece.messageKey] : [piece.key]))).size}
-        toolCallCount={group.filter((piece) => piece.kind === "tool").length}
-      >
-        {() => group.map((piece) => renderPiece(piece, runs, false, fileLinks))}
-      </ProcessDetails>,
-    )
+    const flat = live && last ? activity.slice(-LIVE_FLAT_PIECES) : []
+    const group = activity.slice(0, activity.length - flat.length)
+    if (group.length > 0) {
+      rendered.push(
+        <ProcessDetails
+          key={`activity-${group[0].key}`}
+          messageCount={new Set(group.flatMap((piece) => ("messageKey" in piece ? [piece.messageKey] : [piece.key]))).size}
+          toolCallCount={group.filter((piece) => piece.kind === "tool").length}
+        >
+          {() => group.map((piece) => renderPiece(piece, runs, live, fileLinks))}
+        </ProcessDetails>,
+      )
+    }
+    for (const piece of flat) rendered.push(renderPiece(piece, runs, live, fileLinks))
     activity = []
   }
   for (const piece of pieces) {
@@ -206,11 +227,34 @@ function Answer({ pieces, runs, live, fileLinks }: { pieces: Piece[]; runs: Reco
       activity.push(piece)
       continue
     }
-    flush()
-    rendered.push(renderPiece(piece, runs, false, fileLinks))
+    flush(false)
+    rendered.push(renderPiece(piece, runs, live, fileLinks))
   }
-  flush()
+  flush(true)
   return <>{rendered}</>
+}
+
+/** The pieces up to the text that fills a collapsed turn's preview, that text cut to its head. Runs of activity stay whole, so their counts hold. */
+function headPieces(pieces: Piece[]): Piece[] {
+  let budget = PREVIEW_HEAD_CHARS
+  const head: Piece[] = []
+  for (const piece of pieces) {
+    if (piece.kind !== "text") {
+      head.push(piece)
+      continue
+    }
+    const text = previewHead(piece.text, budget)
+    head.push(text === piece.text ? piece : { ...piece, text })
+    budget -= text.length
+    if (budget <= 0 || text !== piece.text) break
+  }
+  return head
+}
+
+/** A collapsed turn's answer: its head, the whole once the reader scrolls or focuses the preview. A long agent turn then holds a fraction of its elements while collapsed. */
+function CollapsedAnswer({ pieces, runs, fileLinks }: { pieces: Piece[]; runs: Record<string, ToolRun>; fileLinks: FileLinks }) {
+  const { full, attach } = usePreviewInteraction()
+  return <div ref={attach} className="contents"><Answer pieces={full ? pieces : headPieces(pieces)} runs={runs} live={false} fileLinks={fileLinks} /></div>
 }
 
 /** Speaks `text` with the browser's speech synthesis, a second press stops it. A Pi-only answer action, beside the chat's copy and branch. */
@@ -297,7 +341,7 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     return (
       <TurnCard expanded={false}>
         <TurnHeader label={compaction ? "Compaction" : clip(text) || (skill ? `/skill:${skill.name}` : "(empty)")} icon={icon} onExpand={toggle} />
-        <TurnPreview tools={[]}>{pieces.length > 0 ? <Answer pieces={pieces} runs={runs} live={false} fileLinks={fileLinks} /> : null}</TurnPreview>
+        <TurnPreview tools={[]}>{pieces.length > 0 ? <CollapsedAnswer pieces={pieces} runs={runs} fileLinks={fileLinks} /> : null}</TurnPreview>
       </TurnCard>
     )
   }

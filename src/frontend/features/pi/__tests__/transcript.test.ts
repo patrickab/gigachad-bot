@@ -278,3 +278,12 @@ describe("splitSkill", () => {
     expect(splitSkill("plain")).toEqual({ text: "plain" })
   })
 })
+
+it("keeps a committed result's run across live updates, so only the running tool's row changes", () => {
+  const result = { role: "toolResult" as const, toolCallId: "t1", toolName: "bash", content: [{ type: "text" as const, text: "done" }], isError: false, timestamp: 2 }
+  const base = { ...EMPTY_TRANSCRIPT, messages: [result] }
+  const before = toolRunsOf(base)
+  const after = toolRunsOf({ ...base, runs: { t2: { running: true, isError: false } } })
+  expect(after.t1).toBe(before.t1)
+  expect(after.t1).toEqual({ running: false, isError: false, result: { content: result.content, details: undefined } })
+})
