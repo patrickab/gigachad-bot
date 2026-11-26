@@ -19,7 +19,7 @@ from backend.identity import get_request_identity
 from backend.routes.deps import get_file_roots
 from backend.routes.pi import router
 import config
-from lib import pi_host
+from lib import pi_host, pi_media
 from lib.file_roots import FileRoots
 from tests.conftest import mounted_roots, request_identity, route_client
 
@@ -627,3 +627,42 @@ def test_auto_resume_setting_is_unavailable_without_pi_host(monkeypatch):
     _serve(monkeypatch, {})
 
     assert _client().get("/api/pi/settings").status_code == 503
+
+
+TURN_DELETE = f"POST /sessions/{SESSION_ID}/turns/ab12cd34/delete"
+TURN_URL = f"/api/pi/sessions/{SESSION_ID}/turns/ab12cd34/delete"
+TRUSTED = {"origin": "http://localhost:2999"}
+
+
+def test_a_turn_delete_passes_through_and_drops_the_thumbnails_of_removed_images(monkeypatch):
+    image = "a" * 64
+    pi_media._cache[image] = b"thumb"
+    pi_media._cache_bytes = 5
+    host = _serve(monkeypatch, {TURN_DELETE: (200, {"ok": True, "removedEntries": 4, "removedMedia": [image]})})
+
+    response = _client().post(TURN_URL, json={"through": "end"}, headers=TRUSTED)
+
+    assert response.status_code == 200
+    assert response.json() == {"removedEntries": 4, "removedMedia": [image]}
+    assert json.loads(host.requests[0].content) == {"through": "end"}
+    assert pi_media.thumbnail_for(image) is None
+
+
+@pytest.mark.parametrize("reason", ["running", "compacted", "locked", "changed"])
+def test_a_turn_delete_refusal_keeps_its_status_and_reason(monkeypatch, reason):
+    _serve(monkeypatch, {TURN_DELETE: (409, {"error": reason})})
+
+    response = _client().post(TURN_URL, json={"through": "turn"}, headers=TRUSTED)
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": reason, "body": {"error": reason}}
+
+
+def test_a_turn_delete_from_an_untrusted_request_or_without_host_access_is_refused(monkeypatch):
+    host = _serve(monkeypatch, {TURN_DELETE: (200, {"ok": True, "removedEntries": 1, "removedMedia": []})})
+
+    assert _client().post(TURN_URL, json={"through": "turn"}, headers={"origin": "https://evil.example"}).status_code == 403
+    assert _client().post(TURN_URL, json={"through": "turn"}).status_code == 403
+    assert _client(has_host_access=False).post(TURN_URL, json={"through": "turn"}, headers=TRUSTED).status_code == 403
+    assert _client().post(TURN_URL, json={"through": "all"}, headers=TRUSTED).status_code == 422
+    assert host.requests == []

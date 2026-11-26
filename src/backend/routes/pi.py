@@ -12,6 +12,9 @@
 - `GET /media/{sha256}` and `/media/{sha256}/thumb`: tool-result images pi-host stored under their content hash, and a
   480px WebP of one (`lib.pi_media`). The hash is the whole identity, so both answer `ETag` + `immutable` and a repeat
   with `If-None-Match` is a 304 without asking pi-host
+- `POST /sessions/{id}/turns/{entry_id}/delete` `{through}`: pi-host rewrites the session file (D18), refusals
+  409 `running|compacted|locked|changed` pass through; the thumbnails of the removed images leave `lib.pi_media`.
+  Needs a trusted request besides host access
 - `WS /api/pi/ws`: byte-transparent proxy to pi-host's `/ws` (M16), nothing is parsed. Either side closing closes both
 
 Host code execution: `host_access_only` on HTTP, the origin and host-access gate of `is_allowed_websocket` on the socket.
@@ -22,7 +25,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime
 import logging
 from pathlib import Path as FilePath
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, Response, UploadFile, WebSocket
 from fastapi.responses import JSONResponse
@@ -33,7 +36,7 @@ from backend.http_plumbing import http_errors
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.reverse_proxy import relay_websocket
 from backend.routes.deps import get_file_roots
-from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket
+from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket, require_trusted_request
 import config
 from lib import pi_host, pi_media, pi_pastes, repository_index
 from lib.file_roots import FileRoots
@@ -165,6 +168,18 @@ async def delete_session(session_id: SessionId) -> None:
 @http_router.post("/sessions/{session_id}/archive")
 async def post_archive(session_id: SessionId) -> pi_host.SessionAnswer:
     return pi_host.SessionAnswer(session=await _call(pi_host.archive_session(session_id)))
+
+
+class TurnDeleteBody(BaseModel):
+    through: Literal["turn", "end"]
+
+
+@http_router.post("/sessions/{session_id}/turns/{entry_id}/delete", dependencies=[Depends(require_trusted_request)])
+async def post_delete_turn(session_id: SessionId, entry_id: SessionId, body: TurnDeleteBody) -> pi_host.TurnDeleted:
+    """Delete a turn for good. Its thumbnails of the removed tool images go too: pi-host's cleanup does not reach them."""
+    deleted = await _call(pi_host.delete_turn(session_id, entry_id, body.through))
+    pi_media.forget(deleted.removed_media)
+    return deleted
 
 
 @http_router.post("/sessions/{session_id}/restore")

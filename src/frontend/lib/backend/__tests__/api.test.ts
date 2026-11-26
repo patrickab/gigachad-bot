@@ -215,3 +215,28 @@ describe("api.ts — an unreachable backend (hot reload, restart)", () => {
     await settled
   })
 })
+
+describe("api.ts — deletePiTurn", () => {
+  it("posts the range and resolves to the removed count", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} })
+      return new Response(JSON.stringify({ removedEntries: 3, removedMedia: [] }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }))
+
+    await expect(api.deletePiTurn("s-1", "ab12", "end")).resolves.toEqual({ removedEntries: 3 })
+
+    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/pi\/sessions\/s-1\/turns\/ab12\/delete$/)
+    expect(lastCall(calls).init.method).toBe("POST")
+    expect(JSON.parse(String(lastCall(calls).init.body))).toEqual({ through: "end" })
+  })
+
+  it("exposes the 409 reason to the caller", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "compacted", body: { error: "compacted" } }), { status: 409, headers: { "Content-Type": "application/json" } })))
+
+    const error = await api.deletePiTurn("s-1", "ab12", "turn").catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(api.ApiError)
+    expect(error).toMatchObject({ status: 409, code: "compacted" })
+  })
+})

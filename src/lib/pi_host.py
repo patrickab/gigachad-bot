@@ -258,6 +258,13 @@ class SearchResult(ContractModel):
     hits: list[SearchHit]
 
 
+class TurnDeleted(ContractModel):
+    """What a turn delete removed: session entries, and the sha256 of the tool images whose files went."""
+
+    removed_entries: int
+    removed_media: list[str]
+
+
 class PromptAnswer(ContractModel):
     """How Pi took a prompt: `handled` for an extension command, else Pi's own disposition of a message."""
 
@@ -560,6 +567,16 @@ async def prompt_session(
 async def delete_session(session_id: str) -> None:
     """Remove the session file and its sidecar, stopping a live child first. 404 for an unknown session."""
     await _send("DELETE", f"/sessions/{session_id}")
+
+
+async def delete_turn(session_id: str, entry_id: str, through: Literal["turn", "end"]) -> TurnDeleted:
+    """Remove the turn that *entry_id* (a user prompt) starts from the session file: `turn` that turn, `end` it and all later ones.
+
+    pi-host stops the child, rewrites the file and starts it again, so the timeout is the child's. 409 `running`, `compacted`,
+    `locked` or `changed`, 404 unknown session or entry, 400 not a prompt: `PiHostRejected`.
+    """
+    path = f"/sessions/{session_id}/turns/{entry_id}/delete"
+    return await _request("POST", path, TurnDeleted, json={"through": through}, timeout=CHILD_TIMEOUT_SECONDS)
 
 
 async def search_sessions(query: str, limit: int = 20) -> list[SearchHit]:

@@ -1,6 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
-import { fileForm, jsonInit, post, request, requestVoid } from "./http"
+import { ApiError, fileForm, jsonInit, post, request, requestVoid } from "./http"
 
 export interface PiRepository {
   name: string
@@ -127,6 +127,25 @@ export async function openPiSession(repo: string, resume: PiResume, options: PiS
 /** Delete a session file for good. */
 export function deletePiSession(sessionId: string): Promise<void> {
   return requestVoid(`/pi/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
+}
+
+export type PiTurnRefusal = "running" | "compacted" | "locked" | "changed"
+
+/**
+ * Delete the turn that `entryId` (a user prompt) starts for good: `through: "turn"` that turn, `"end"` it and every later one.
+ * A 409 rejects with an ApiError whose `code` and `message` are the reason (`PiTurnRefusal`).
+ */
+export async function deletePiTurn(sessionId: string, entryId: string, through: "turn" | "end"): Promise<{ removedEntries: number }> {
+  try {
+    const answer = await post<{ removedEntries: number }>(
+      `/pi/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(entryId)}/delete`,
+      { through },
+    )
+    return { removedEntries: answer.removedEntries }
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) throw new ApiError(error.message, 409, error.message)
+    throw error
+  }
 }
 
 /** Move a session file into the archive (M9). */

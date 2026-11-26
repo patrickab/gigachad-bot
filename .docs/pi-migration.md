@@ -91,6 +91,7 @@ Rationale for D1, D2, D6, D7 and the choice of Pi is in the ADR.
 | D15 | No GitHub tool port. Agents use `gh` through bash |
 | D16 | The gateway serves only providers Pi knows. A model on a provider Pi cannot serve fails at send with a clear error. Ollama runs through a Pi custom provider generated from `ollama list`, the app no longer autostarts `ollama serve` |
 | D17 | Sandboxed Pi (AiB one-shot runs and the `sandboxed` profile) gets a gateway-only token, accepted only on `/v1/*`, never the full pi-host token |
+| D18 | Deleting a turn rewrites the session file (`POST /sessions/:id/turns/:entryId/delete`, body `{through: "turn" \| "end"}`): the range leaves the file, the summary, search, entries and replay caches and the tool images no other entry or session of the cwd uses. The session keeps its id and path, the child is stopped before the rewrite and started again after it. Nothing is kept: no `context_edit`, fork or backup. Refused with 409 `running`, `compacted`, `locked` or `changed` |
 
 ## Gateway
 
@@ -108,7 +109,7 @@ Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/g
 
 | # | Rule |
 |---|---|
-| M1 | One writer per session file. Pi does not lock session files (spike: two writers forked the tree silently), so pi-host holds `flock(2)` on the session file (via `bun:ffi`, compatible with the `flock` command) for the child's lifetime, local or sandboxed. Resume opens `--session <path>` after locking, never `--continue`. The Pi TUI is the one writer it cannot see. A held file is refused (409 `locked`) |
+| M1 | One writer per session file. Pi does not lock session files (spike: two writers forked the tree silently), so pi-host holds `flock(2)` on the session file (via `bun:ffi`, compatible with the `flock` command) for the child's lifetime, local or sandboxed. Resume opens `--session <path>` after locking, never `--continue`. The Pi TUI is the one writer it cannot see. A held file is refused (409 `locked`). A turn delete (D18) takes the same lock for its rewrite, with the child stopped |
 | M2 | Replay and resync (after omp-web's "Reconnect and foreground catch-up", `~/git/ompweb_original/DESIGN.md`). Pi never persists a streaming assistant message: pi-host buffers the current turn's events since `message_start` and replays them after the snapshot. Resync takes the last entry id as cursor and answers `mode: append \| replace`: `replace` when compaction or a fork changed the prefix or the cursor entry no longer exists, which a plain `get_entries` since cannot express. A live `message_end` has no durable entry id, so it triggers a catch-up instead of an append (no duplicates when the event and the file read race). The optimistic user prompt and streaming text stay apart from confirmed history |
 | M3 | Open extension dialogs, `setStatus` lines and the queue are session state, replayed on attach. A run waiting on a dialog shows as needing the user |
 | M4 | No code-reload watcher on pi-host: a restart waits until no session runs, or asks. Distinct from the sessions-directory watcher (M25) |
@@ -148,6 +149,7 @@ Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/g
 | F9 | `new_session` with `parentSession` | Lineage for sessions spawned from a session (AiB tasks); **open** (P5) |
 | F10 | `get_available_models`, `set_model`, `get_available_thinking_levels`, `set_thinking_level` | Per-session model and thinking (D10) |
 | F12 | `export_html` | Export a session |
+| F13 | Delete a turn: file rewrite, child restart (D18) | `POST /api/pi/sessions/:id/turns/:entryId/delete` (host access, trusted request), `deletePiTurn` in `api/pi.ts`; the 409 reason is the `ApiError` message and `code`. The backend drops its thumbnails of the removed tool images (`pi_media.forget`), the only copy it keeps |
 
 ## UI behavior
 

@@ -48,3 +48,11 @@ def thumbnail_for(hash_: str, load: bytes | None = None) -> bytes | None:
     while _cache_bytes > CACHE_MAX_BYTES and len(_cache) > 1:
         _cache_bytes -= len(_cache.popitem(last=False)[1])
     return thumb
+
+
+def forget(hashes: list[str]) -> None:
+    """Drop the cached thumbnails of *hashes*: pi-host deleted their images with a turn."""
+    global _cache_bytes
+    for hash_ in hashes:
+        if (thumb := _cache.pop(hash_, None)) is not None:
+            _cache_bytes -= len(thumb)
