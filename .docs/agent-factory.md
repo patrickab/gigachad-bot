@@ -30,6 +30,25 @@ flowchart LR
   B[gigachad board] -. shows .-> F
 ```
 
+## Design rules
+
+The factory's own rules are in its `AGENTS.md` (`~/git/agent-factory`). What they mean for this repository:
+
+- **Two readers, two forms.** What the factory puts into an agent's context (tool results, notices, follow-ups) is
+  written for agents and is not changed here. What the user sees is rendered for reading from the event's structured
+  data, never by parsing that text
+- **The same in every surface.** A factory event has one view model and looks the same in a Pi tab here and in Pi's
+  TUI. Readable is the default; a switch shows exactly what the agent has in context
+- **Every factory event carries the factory icon**, a notice as much as a tool call
+- **The timeline is what happened, in order.** No regrouping. Detail (decisions, merges, rejections, questions and
+  the supervisor's answers) lives in the session timeline
+- **Above the composer** only what fits without pushing the conversation: the open waves and what waits for a ruling.
+  It adds observability, it never replaces a timeline entry
+- **Quiet and attention.** What needs a ruling stands out, information is quiet
+- **A supervisor run is autonomous.** It never stops for the user; its decisions are recorded and reported at the end
+- **Parallel by default.** Waves and tasks run in parallel, also on the same files; contracts settle shared
+  interfaces first. The factory, not the supervisor, keeps parallel work in step
+
 ## The repositories involved
 
 | Repository | What it is | What it brings |
