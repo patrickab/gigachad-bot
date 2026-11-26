@@ -104,6 +104,18 @@ describe("usePiSession held messages", () => {
     expect(prompts()).toHaveLength(2)
   })
 
+  it("sends a held message's images again on Retry", async () => {
+    const images = [{ type: "image" as const, data: "aGk=", mimeType: "image/png" }]
+    const { result } = renderHook(() => usePiSession("s1", vi.fn()))
+    attach()
+    await act(async () => { await result.current.send("look", images, "steer") })
+    await act(async () => socket.subscriber!.onStatus({ kind: "connecting" }))
+    attach()
+    act(() => result.current.retryHeld(result.current.held[0].id))
+    expect(prompts()).toHaveLength(2)
+    expect(prompts()[1]).toMatchObject({ message: "look", images })
+  })
+
   it("abort returns held and queued messages to the draft", async () => {
     const { result } = renderHook(() => usePiSession("s1", vi.fn()))
     attach()

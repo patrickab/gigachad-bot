@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript } from "../PiTranscript"
+// The chat's tool renderers register under names Pi sessions use too: they must not change what folds
+import "@/features/chat/toolRenderers"
 import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
 import type { Attachment } from "@/lib/domain/types"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"
@@ -71,6 +73,16 @@ describe("PiTranscript window", () => {
     const names = (group: string) => within(screen.getAllByRole("group", { name: group }).at(-1)!).getAllByRole("button").map((button) => button.getAttribute("aria-label"))
     expect(names("Question actions")).toEqual(["Copy message"])
     expect(names("Answer actions")).toEqual(["Copy message", "Branch session from this point"])
+  })
+
+  it("folds a web_search call into Process details with the chat's renderers loaded", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Search it", timestamp: 1 },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: { query: "pi" } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 },
+      { role: "assistant", content: [{ type: "text", text: "Found" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 3 },
+    ]
+    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
+    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
   })
 
   it("previews an older turn's answer under its question with activity folded, as when opened", () => {

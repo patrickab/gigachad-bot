@@ -21,7 +21,8 @@ const records = new WeakSet<object>()
 export function chatToolRun(record: ToolCallRecord): ChatToolRun {
   let built = adapted.get(record)
   if (!built) {
-    const text = record.status === "error" ? record.error || record.summary || "" : record.status === "done" ? record.summary ?? "" : ""
+    // A legacy saved record has no status: it keeps its summary
+    const text = record.status === "error" ? record.error || record.summary || "" : record.status === "running" ? "" : record.summary ?? ""
     records.add(record)
     built = {
       call: { type: "toolCall", id: record.id, name: record.name, arguments: record.arguments },

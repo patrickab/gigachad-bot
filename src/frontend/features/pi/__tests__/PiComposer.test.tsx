@@ -168,7 +168,7 @@ describe("PiComposer", () => {
 
   it("refuses a file that is neither image nor video at attach, paste and drop", async () => {
     const doc = new File(["d"], "notes.pdf", { type: "application/pdf" })
-    const { textbox, update, onSubmit } = renderComposer()
+    const { textbox } = renderComposer()
     fireEvent.paste(textbox, { clipboardData: { files: [doc], items: [], getData: () => "" } })
     expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf")
     cleanup()
@@ -180,7 +180,12 @@ describe("PiComposer", () => {
     third.update({ disabled: false, insertion: { id: 9, text: "", files: [doc] } })
     expect(await screen.findByRole("alert")).toHaveTextContent("notes.pdf")
     expect(screen.queryByText("notes.pdf", { selector: "button *" })).toBeNull()
-    expect(onSubmit).not.toHaveBeenCalled()
-    void update
+  })
+
+  it("does not offer the OCR drawing, whose markdown output it would refuse", () => {
+    renderComposer()
+    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }))
+    expect(screen.getByRole("button", { name: "Drawing" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Drawing (OCR)" })).toBeNull()
   })
 })

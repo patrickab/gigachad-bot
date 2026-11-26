@@ -29,6 +29,11 @@ describe("chatToolRun", () => {
     expect(chatRecordOf({ running: false, isError: false, result: { content: [], details: { ...record } } })).toBeUndefined()
   })
 
+  it("keeps the summary of a legacy saved record without a status", () => {
+    const legacy = { id: "t1", name: "web_search", arguments: {}, summary: "3 sources" } as unknown as ToolCallRecord
+    expect(chatToolRun(legacy).run).toMatchObject({ running: false, isError: false, result: { content: [{ type: "text", text: "3 sources" }] } })
+  })
+
   it("builds one run per record and status", () => {
     const record: ToolCallRecord = { id: "t1", name: "web_search", arguments: {}, status: "running" }
     expect(chatToolRun(record)).toBe(chatToolRun(record))

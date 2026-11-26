@@ -542,7 +542,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
           renderBody={renderBody}
           header={search && <PiSearchBar search={search} />}
           footer={<>
-            <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
+            <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} onOpenImage={setPreview} />
             <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
           </>}
           reveal={reveal}

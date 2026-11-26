@@ -118,9 +118,12 @@ const renderRich: ToolRenderer = (_call, run, next) => {
   </>
 }
 
-/** The tools whose results show on their own: visible under the row, never folded into "Process details". */
+/**
+ * The tools whose results show under their row. Registered inline: the chat has no fold, and a placement by tool name in
+ * the shared registry would change which of a Pi session's calls fold into "Process details".
+ */
 const RICH_TOOLS = ["web_search", "deep_research", "sandbox_plot", "diagram", "mindmap", "workspace_agent", "start_learn_session"]
-for (const name of RICH_TOOLS) registerToolRenderer(name, renderRich, { placement: "standalone" })
+for (const name of RICH_TOOLS) registerToolRenderer(name, renderRich)
 
 /** One chat tool call as Pi's tool row, through the registered renderers. Re-renders only when its record is replaced. */
 export const ChatToolCall = memo(function ChatToolCall({ record }: { record: ToolCallRecord }) {

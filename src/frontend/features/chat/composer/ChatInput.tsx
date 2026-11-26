@@ -228,7 +228,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
     ...attachMenuItems,
     { label: "Drawing", icon: Pencil, onClick: () => setDrawing("attach") },
-    { label: "Drawing (OCR)", icon: Pencil, onClick: () => setDrawing("ocr"), iconClassName: "text-ink" },
+    // Its output is a markdown file: offered only where the composer takes one
+    ...(!accept || accept(new File([], "drawing-ocr.md", { type: "text/markdown" })) ? [{ label: "Drawing (OCR)", icon: Pencil, onClick: () => setDrawing("ocr"), iconClassName: "text-ink" }] : []),
   ]
 
   return (

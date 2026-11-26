@@ -1,4 +1,5 @@
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
+import type { Attachment } from "@/lib/domain/types"
 import type { HeldMessage } from "./outbox"
 import { toolImageAttachments } from "./toolImages"
 
@@ -10,15 +11,20 @@ function statusOf(entry: HeldMessage): string {
   return "Sending"
 }
 
-/** Messages sent during a run that pi-host has not confirmed yet, below the transcript. Not sent ones offer Retry and Delete. */
-export function HeldMessages({ held, onRetry, onDelete }: { held: readonly HeldMessage[]; onRetry: (id: string) => void; onDelete: (id: string) => void }) {
+/** Messages sent during a run that pi-host has not confirmed yet, below the transcript. Not sent ones offer Retry and Delete; a click on an image opens it like a sent one. */
+export function HeldMessages({ held, onRetry, onDelete, onOpenImage }: {
+  held: readonly HeldMessage[]
+  onRetry: (id: string) => void
+  onDelete: (id: string) => void
+  onOpenImage: (attachment: Attachment) => void
+}) {
   if (held.length === 0) return null
   return (
     <ul aria-label="Held messages" className="flex flex-col items-end gap-2 px-4 pb-3">
       {held.map((entry) => (
         <li key={entry.id} className="max-w-[85%] rounded-xl bg-paper px-3 py-2 text-sm text-ink-muted">
           {entry.text && <p className="whitespace-pre-wrap break-words">{entry.text}</p>}
-          {entry.images.length > 0 && <MessageAttachments attachments={toolImageAttachments("image", entry.images)} onClick={() => {}} />}
+          {entry.images.length > 0 && <MessageAttachments attachments={toolImageAttachments("image", entry.images)} onClick={onOpenImage} />}
           <p className={`mt-1 flex items-center gap-2 text-xs ${entry.state === "failed" ? "text-danger" : "text-ink-faint"}`}>
             <span>{statusOf(entry)}</span>
             {entry.state === "failed" && (

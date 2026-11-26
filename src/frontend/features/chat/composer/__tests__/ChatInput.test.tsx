@@ -202,3 +202,13 @@ describe("ChatInput draft", () => {
     expect(draftOf().value).toBe("")
   })
 })
+
+describe("ChatInput attach menu", () => {
+  afterEach(cleanup)
+
+  it("offers the OCR drawing where any file is taken", () => {
+    render(<ChatInput chatId="c1" onSend={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }))
+    expect(screen.getByRole("button", { name: "Drawing (OCR)" })).toBeTruthy()
+  })
+})
