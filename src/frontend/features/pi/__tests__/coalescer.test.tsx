@@ -1,7 +1,7 @@
 import { act, render } from "@testing-library/react"
 import { useReducer, type Dispatch } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { createTranscriptCoalescer, useCoalescedDispatch, type FlushScheduler } from "../coalescer"
+import { createTranscriptCoalescer, scheduleAtDisplayRate, useCoalescedDispatch, type FlushScheduler } from "../coalescer"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type Transcript, type TranscriptAction } from "../transcript"
 import type { AssistantMessage } from "../types"
 
@@ -85,5 +85,25 @@ describe("message_update wire size", () => {
     expect(deltaFrame("word ")).toBe(deltaFrame("word "))
     expect(deltaFrame("word ")).toBeLessThan(120)
     expect(wholeFrame(words)).toBeGreaterThan(40 * deltaFrame("word "))
+  })
+})
+
+describe("scheduleAtDisplayRate", () => {
+  it("skips a frame that comes under 12 ms after the last flush, so a 144 Hz display flushes every other frame", () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback))
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const flush = vi.fn()
+    const frame = (now: number) => frames.shift()?.(now)
+
+    scheduleAtDisplayRate(flush)
+    frame(1000)
+    expect(flush).toHaveBeenCalledTimes(1)
+    scheduleAtDisplayRate(flush)
+    frame(1007)
+    expect(flush).toHaveBeenCalledTimes(1)
+    frame(1014)
+    expect(flush).toHaveBeenCalledTimes(2)
+    vi.unstubAllGlobals()
   })
 })

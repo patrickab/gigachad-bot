@@ -8,10 +8,25 @@ import type { TranscriptAction } from "./transcript"
 /** Schedules `flush` and returns a cancel function. */
 export type FlushScheduler = (flush: () => void) => () => void
 
-/** Next animation frame; a hidden tab stalls `requestAnimationFrame`, so it (and a non-browser) gets a trailing 50 ms timer. */
+/** Least time between two flushes of one coalescer: a 120 or 144 Hz display would else render a streamed reply twice as often as it reads any smoother. */
+const MIN_FLUSH_MS = 12
+const lastFlushes = new WeakMap<() => void, number>()
+
+/**
+ * Next animation frame, the one after when `flush` last ran under `MIN_FLUSH_MS` ago;
+ * a hidden tab stalls `requestAnimationFrame`, so it (and a non-browser) gets a trailing 50 ms timer.
+ */
 export function scheduleAtDisplayRate(flush: () => void): () => void {
   if (typeof document !== "undefined" && !document.hidden && typeof requestAnimationFrame === "function") {
-    const id = requestAnimationFrame(flush)
+    const tick = (now: number) => {
+      if (now - (lastFlushes.get(flush) ?? -Infinity) < MIN_FLUSH_MS) {
+        id = requestAnimationFrame(tick)
+        return
+      }
+      lastFlushes.set(flush, now)
+      flush()
+    }
+    let id = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(id)
   }
   const id = setTimeout(flush, 50)

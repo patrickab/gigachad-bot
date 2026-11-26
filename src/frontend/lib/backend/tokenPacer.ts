@@ -8,6 +8,8 @@ const FINISH_LAG_MS = 60
 const MIN_CHARS_PER_SECOND = 30
 const BACKLOG_SMOOTHING = 0.2
 const MAX_FRAME_MS = 100
+/** Least time between two emits: a 120 or 144 Hz display would else render the reply twice as often as it reads any smoother. */
+const MIN_FRAME_MS = 12
 
 export interface TokenPacer {
   push(text: string): void
@@ -75,6 +77,10 @@ export function createTokenPacer(emit: (text: string) => void, scheduler: Schedu
     handle = null
     // Not the rAF argument: its origin differs from `performance.now()` in some environments.
     const time = performance.now()
+    if (time - last < MIN_FRAME_MS && lag === LAG_MS) {
+      handle = scheduler.request(frame)
+      return
+    }
     const dt = Math.min(time - last, MAX_FRAME_MS)
     last = time
     smoothed += (queue.length - smoothed) * BACKLOG_SMOOTHING
