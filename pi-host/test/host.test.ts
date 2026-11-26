@@ -3,6 +3,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "bun";
 import type {
   DeleteResult,
+  DeleteTurnRequest,
+  DeleteTurnResult,
   ForkRequest,
   ForkResult,
   Host,
@@ -117,6 +119,16 @@ class FakeHost implements Host {
     this.sessions.delete(sessionPath);
     this.sessions.set(path, { ...meta, sessionPath: path, realPath: path, archived: toArchive });
     return { ok: true, path };
+  }
+
+  readonly deletedTurns: DeleteTurnRequest[] = [];
+
+  async deleteTurn(request: DeleteTurnRequest): Promise<DeleteTurnResult> {
+    if (!this.sessions.has(request.sessionPath)) return { ok: false, error: "not_found" };
+    if (request.dryRun) return { ok: true, removedEntries: 0, removedMedia: [] };
+    if ([...this.locks.values()].includes(request.sessionPath)) return { ok: false, error: "locked" };
+    this.deletedTurns.push(request);
+    return { ok: true, removedEntries: 2, removedMedia: [] };
   }
 
   async deleteSession(sessionPath: string): Promise<DeleteResult> {

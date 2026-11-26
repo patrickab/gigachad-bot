@@ -29,6 +29,11 @@ const FACTORY_REVIEW_MARK = '"customType":"factory-review"';
 const USAGE_PATTERN = /"usage":\{"input":(\d+),"output":(\d+),"cacheRead":(\d+),"cacheWrite":(\d+),[^{}]*"cost":\{[^{}]*"total":([0-9.eE+-]+)/;
 const summaryCache = new Map<string, { mtimeMs: number; size: number; summary: Summary }>();
 
+/** Drop a session file's cached summary (a rewrite must not leave its old first message in memory). */
+export function forgetSummary(sessionPath: string): void {
+  summaryCache.delete(sessionPath);
+}
+
 /** Text of a user message's content (string or text blocks). */
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;

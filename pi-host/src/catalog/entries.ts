@@ -20,6 +20,11 @@ export type EntriesQuery = { turns?: number; customType?: string; since?: string
 const CACHE_SIZE = 32;
 const cache = new Map<string, { modifiedAt: string; query: string; answer: SessionEntries }>();
 
+/** Drop a session file's cached answers (a rewrite must not leave removed entries in memory). */
+export function forgetEntries(sessionPath: string): void {
+  cache.delete(sessionPath);
+}
+
 type Entry = SessionEntries["entries"][number];
 
 /** `entry` without the images of a tool result, the rest as it is. */

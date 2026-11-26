@@ -7,6 +7,7 @@
  * - The hash is the sha256 of the decoded bytes. Only raster images that sniff as PNG, JPEG, GIF or WebP are stored,
  *   anything else stays inline so no image is ever dropped. Thumbnails are the backend's job (`lib/pi_media.py`)
  * - Files older than 30 days are swept daily, the next attach stores a session's images again
+ * - `forgetMedia` drops images of a deleted turn, from disk and from the map of recently stored ones
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -99,6 +100,18 @@ function store(base64: string): string | undefined {
     }
   }
   return hash;
+}
+
+/** Remove the stored images of `hashes` and forget their base64, so nothing of them stays on disk or in memory. */
+export function forgetMedia(hashes: readonly string[]): void {
+  const gone = new Set(hashes.filter((hash) => HASH_RE.test(hash)));
+  if (gone.size === 0) return;
+  for (const hash of gone) rmSync(join(mediaDir(), hash), { force: true });
+  for (const [base64, hash] of recent) {
+    if (!gone.has(hash)) continue;
+    recent.delete(base64);
+    recentChars -= base64.length;
+  }
 }
 
 type Json = Record<string, unknown>;

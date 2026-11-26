@@ -7,19 +7,22 @@
  *   arguments
  * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18). The
  *   HTTP rows: `POST /sessions`, `POST /sessions/:id/close`, `POST /sessions/:id/prompt` (a prompt without an attached
- *   client) and `DELETE /sessions/:id` (it must stop the child first, which only the supervisor can)
+ *   client), `DELETE /sessions/:id` (it must stop the child first, which only the supervisor can) and
+ *   `POST /sessions/:id/turns/:entryId/delete` (stop the child, rewrite the file, start it again)
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
+import { forgetEntries } from "../catalog/entries.ts";
 import { copyPrivateState, markCacheRetention, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
-import type { Host, Profile, SessionMeta } from "../host/index.ts";
+import type { DeleteTurnRequest, Host, Profile, SessionMeta } from "../host/index.ts";
+import { forgetMedia } from "../media.ts";
 import type { SupervisorConfig } from "./config.ts";
 import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
 import { childModels, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
-import { envelope, LiveSession, stamp, type LiveStatus } from "./session.ts";
+import { envelope, LiveSession, stamp, type FrameSink, type LiveStatus } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
 type Resume = null | "continue" | { sessionPath: string } | { sessionId: string } | { forkOf: ForkOf };
@@ -36,6 +39,17 @@ type StartOutcome = { session: LiveSession } | Failure;
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
 const SESSION_PROMPT = /^\/sessions\/([^/]+)\/prompt$/;
 const SESSION = /^\/sessions\/([^/]+)$/;
+const TURN_DELETE = /^\/sessions\/([^/]+)\/turns\/([^/]+)\/delete$/;
+/** HTTP answer of each `Host.deleteTurn` refusal. */
+const TURN_REFUSALS: Record<string, number> = {
+  not_found: 404,
+  unknown: 404,
+  not_prompt: 400,
+  off_branch: 400,
+  compacted: 409,
+  locked: 409,
+  changed: 409,
+};
 /** What happened to one interrupted session at start: `resumed`, or why not (`open`, `locked`, `not_found`, ...). */
 export type ResumeOutcome = { sessionId: string; outcome: string };
 const MAX_EVICTION_INTERVAL_MS = 60_000;
@@ -106,6 +120,8 @@ export class SupervisorHost implements Supervisor {
   private readonly byId = new Map<string, LiveSession>();
   private readonly byPath = new Map<string, LiveSession>();
   private readonly starting = new Map<string, Promise<StartOutcome>>();
+  /** Clients of sessions whose child restarts after a turn delete, by session id: they get a `resync` from the new child. */
+  private readonly carried = new Map<string, Set<FrameSink>>();
   private readonly evictionTimer: Timer;
   private readonly sockets = new Set<ServerWebSocket<SocketData>>();
   private readonly stopWatching: () => void;
@@ -118,6 +134,7 @@ export class SupervisorHost implements Supervisor {
     close: (ws) => {
       this.sockets.delete(ws);
       for (const session of this.byId.values()) session.disconnect(ws);
+      for (const clients of this.carried.values()) clients.delete(ws);
     },
     backpressureLimit: BACKPRESSURE_LIMIT_BYTES,
     // An overrun closes the socket instead of dropping frames silently; the client reconnects and resyncs.
@@ -199,6 +216,16 @@ export class SupervisorHost implements Supervisor {
       if (sessionId === undefined) return respond(fail(400, "invalid_session_id"));
       return this.prompt(sessionId, await request.json().catch(() => undefined));
     }
+    const turn = TURN_DELETE.exec(url.pathname);
+    if (turn && request.method === "POST") {
+      const sessionId = sessionIdOf(turn[1]!);
+      const entryId = sessionIdOf(turn[2]!);
+      if (sessionId === undefined || entryId === undefined) return respond(fail(400, "invalid_session_id"));
+      const body = await request.json().catch(() => undefined);
+      if (!isRecord(body) || (body.through !== "turn" && body.through !== "end")) return respond(fail(400, "invalid_body"));
+      const answer = await this.deleteTurn(sessionId, entryId, body.through);
+      return "status" in answer ? respond(answer) : Response.json(answer);
+    }
     const target = SESSION.exec(url.pathname);
     if (target && request.method === "DELETE") {
       const sessionId = sessionIdOf(target[1]!);
@@ -248,6 +275,79 @@ export class SupervisorHost implements Supervisor {
     const deleted = await this.host.deleteSession(meta.sessionPath);
     if (deleted.ok) return undefined;
     return deleted.error === "locked" ? fail(409, "live") : fail(404, "not_found");
+  }
+
+  /**
+   * `POST /sessions/:id/turns/:entryId/delete`: remove a turn from the session file (`Host.deleteTurn`). A live child
+   * is stopped first and started again on the same path afterwards, so its context is rebuilt from the new file. The
+   * rewrite and restart run as the path's start in flight, so a `POST /sessions` for it waits and gets the new child;
+   * the file's lock is held for the rewrite. Attached clients are carried over: they get no `exit`, the new child
+   * sends each a `resync` (`replace`, new `streamId`).
+   */
+  private async deleteTurn(
+    sessionId: string,
+    entryId: string,
+    through: DeleteTurnRequest["through"],
+  ): Promise<Failure | { ok: true; removedEntries: number; removedMedia: string[] }> {
+    const sessionPath = await this.host.findSession(sessionId);
+    const meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
+    if (!meta) return fail(404, "not_found");
+    // The factory plugin's runner owns a factory task's file
+    if (meta.factory) return fail(400, "factory");
+    const key = meta.realPath;
+    for (let inFlight = this.starting.get(key); inFlight; inFlight = this.starting.get(key)) await inFlight;
+    const request = { sessionPath: meta.sessionPath, entryId, through };
+    // Refusals before the child is stopped; the real run checks again under the lock
+    const check = await this.host.deleteTurn({ ...request, dryRun: true });
+    if (!check.ok) return fail(TURN_REFUSALS[check.error] ?? 409, check.error);
+    if (this.starting.has(key)) return fail(409, "locked");
+
+    const found = this.byPath.get(key) ?? this.byPath.get(meta.sessionPath);
+    const live = found && !found.closing ? found : undefined;
+    if (live) {
+      const { running, waiting } = live.liveStatus();
+      if (running || waiting) return fail(409, "running");
+    }
+    // Synchronously from the status check to the guard and the stop: no run or start gets in between
+    const clients = new Set(live?.takeClients() ?? []);
+    if (live) this.carried.set(sessionId, clients);
+    const stopped = live?.close();
+    let answer: Failure | { ok: true; removedEntries: number; removedMedia: string[] } = fail(409, "locked");
+    const rewrite = (async (): Promise<StartOutcome> => {
+      await (stopped ?? found?.exited);
+      try {
+        const result = await this.host.deleteTurn(request);
+        if (result.ok) {
+          for (const path of new Set([meta.sessionPath, key])) forgetEntries(path);
+          forgetMedia(result.removedMedia);
+          answer = result;
+        } else answer = fail(TURN_REFUSALS[result.error] ?? 409, result.error);
+      } catch (error) {
+        answer = fail(500, "rewrite_failed", { message: String(error) });
+      }
+      // A start waiting for this path without a child to restart gets what the file lock would have answered
+      if (!live) return fail(409, "locked");
+      return this.spawn({ cwd: live.cwd, spec: live.spec, resume: { sessionPath: key } }, live.cwd, key);
+    })();
+    this.starting.set(key, rewrite);
+    let outcome: StartOutcome;
+    try {
+      outcome = await rewrite;
+    } finally {
+      this.starting.delete(key);
+      this.carried.delete(sessionId);
+    }
+    if (live) this.handOver(sessionId, clients, outcome);
+    return answer;
+  }
+
+  /** Carried clients of a restarted session: a `resync` from the new child, or the `exit` they were spared. */
+  private handOver(sessionId: string, clients: Set<FrameSink>, outcome: StartOutcome): void {
+    for (const client of clients) {
+      if (!this.sockets.has(client as ServerWebSocket<SocketData>)) continue;
+      if ("session" in outcome) outcome.session.resync(client, null);
+      else client.send(stamp(envelope("exit", sessionId, { code: -1, stderrTail: String(outcome.body.message ?? outcome.body.error) }), null, 0));
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -493,12 +593,20 @@ export class SupervisorHost implements Supervisor {
     const type = isRecord(frame) ? frame.type : undefined;
     if (type === "detach") {
       session?.detach(ws);
+      this.carried.get(sessionId)?.delete(ws);
       return;
     }
     if (type !== "attach" && type !== "resync" && type !== "command") {
       const error = envelope("error", sessionId, { message: `unknown frame type ${JSON.stringify(type)}` });
       if (session) session.deliver(ws, error);
       else ws.send(stamp(error, null, 0));
+      return;
+    }
+    const carried = this.carried.get(sessionId);
+    if (!session && carried) {
+      // The child restarts after a turn delete: an attach or resync is answered by the new child's `resync`
+      if (type === "command") ws.send(stamp(envelope("error", sessionId, { message: "session is restarting" }), null, 0));
+      else carried.add(ws);
       return;
     }
     if (!session) {

@@ -55,6 +55,11 @@ type Transcript = { entries: { id: string; text: string }[]; fields: SearchField
 // when it changes; move to an on-disk index if installs outgrow that.
 const cache = new Map<string, { version: string; transcript: Promise<Transcript> }>();
 
+/** Drop a session file's cached transcript (a rewrite must not leave the old text in memory). */
+export function forgetTranscript(sessionPath: string): void {
+  cache.delete(sessionPath);
+}
+
 /** Texts of a message's content (string or text blocks; thinking and tool calls are skipped). */
 function textBlocks(content: unknown): string[] {
   if (typeof content === "string") return [content];

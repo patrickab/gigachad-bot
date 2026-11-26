@@ -22,6 +22,8 @@ import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-codin
 import { loadToken } from "../../auth.ts";
 import type {
   DeleteResult,
+  DeleteTurnRequest,
+  DeleteTurnResult,
   ForkRequest,
   ForkResult,
   Host,
@@ -35,6 +37,7 @@ import type {
   SessionMeta,
   SpawnRequest,
 } from "../index.ts";
+import { deleteTurn } from "./delete-turn.ts";
 import { childEnv, gatewayEnv } from "./env.ts";
 import { listFiles } from "./files.ts";
 import { forkSession } from "./fork.ts";
@@ -201,6 +204,10 @@ export class LocalHost implements Host {
 
   deleteSession(sessionPath: string): Promise<DeleteResult> {
     return deleteSession(sessionPath);
+  }
+
+  deleteTurn(request: DeleteTurnRequest): Promise<DeleteTurnResult> {
+    return deleteTurn(request);
   }
 
   forkSession(request: ForkRequest): Promise<ForkResult> {

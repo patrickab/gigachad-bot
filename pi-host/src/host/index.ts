@@ -14,6 +14,7 @@
  *   metadata, lookup by id. Factory task sessions have a root of their own, never listed, found by id
  * - `moveSession`: archive or restore a session file and its sidecar
  * - `deleteSession`: remove a session file and its sidecar
+ * - `deleteTurn`: rewrite a session file without one turn (or without it and everything after it), under its lock
  * - `forkSession`: write a new session file holding one branch of another (D11, Pi's fork and clone)
  * - `readState` / `writeState`: the private state sidecar (M19, M20)
  * - `listFiles`: `@` completion candidates of a cwd (M7)
@@ -105,6 +106,22 @@ export type MoveResult = { ok: true; path: string } | { ok: false; error: "locke
 
 export type DeleteResult = { ok: true } | { ok: false; error: "locked" | "not_found" };
 
+/**
+ * Remove the turn of the user prompt `entryId` (`turn`) or it and everything after it (`end`, an edit). `dryRun` answers
+ * the refusals without the lock and without writing.
+ */
+export type DeleteTurnRequest = { sessionPath: string; entryId: string; through: "turn" | "end"; dryRun?: boolean };
+
+/**
+ * `removedMedia`: content hashes of the range's tool images that neither a surviving entry nor another session file of
+ * the same cwd holds, for the media store and the backend's thumbnails to drop.
+ * Refusals: `not_found` no session file, `unknown` no such entry, `not_prompt` / `off_branch` / `compacted` as
+ * `removeTurn` (`local/turns.ts`), `locked` another holder has the file, `changed` it changed between read and rename.
+ */
+export type DeleteTurnResult =
+  | { ok: true; removedEntries: number; removedMedia: string[] }
+  | { ok: false; error: "not_found" | "unknown" | "not_prompt" | "off_branch" | "compacted" | "locked" | "changed" };
+
 /** The entry a fork ends at (inclusive) in a source session file; the source's leaf makes a clone. */
 export type ForkRequest = { sessionPath: string; entryId: string };
 
@@ -156,6 +173,12 @@ export interface Host {
   moveSession(sessionPath: string, toArchive: boolean): Promise<MoveResult>;
   /** Remove the session file and its sidecar under the session's lock. */
   deleteSession(sessionPath: string): Promise<DeleteResult>;
+  /**
+   * Rewrite the session file without a turn under the session's lock: a temp file in the same folder, then a rename,
+   * so a crash leaves the old or the new file. The caches derived from the file forget it, the range's `.pi/pastes`
+   * files no surviving entry and no other session file of the cwd mentions are removed. The caller stops the child first.
+   */
+  deleteTurn(request: DeleteTurnRequest): Promise<DeleteTurnResult>;
   /**
    * New session in the live root of the source's cwd: new id, `parentSession` = source path, the entries from the
    * root to `entryId`. The source file stays unchanged.

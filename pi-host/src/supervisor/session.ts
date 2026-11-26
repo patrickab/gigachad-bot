@@ -274,6 +274,18 @@ export class LiveSession {
     });
   }
 
+  /**
+   * Take every attached and attaching client off this child without telling them (no `exit` frame), so a restart on
+   * the same file can carry them over to the next child (a turn delete).
+   */
+  takeClients(): FrameSink[] {
+    const taken = [...new Set([...this.clients, ...this.pending.keys()])];
+    this.clients.clear();
+    this.pending.clear();
+    this.sequences.clear();
+    return taken;
+  }
+
   /** Stop sending to a client. */
   detach(client: FrameSink): void {
     const wasAttached = this.clients.delete(client) || this.pending.delete(client);
