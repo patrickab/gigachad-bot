@@ -2,18 +2,16 @@
 
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
-import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Sparkles, Square, TerminalSquare, Volume2 } from "lucide-react"
-import { CopyAction, ForkAction, PREVIEW_HEAD_CHARS, previewHead, TurnAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
+import { CopyAction, ForkAction, PREVIEW_HEAD_CHARS, previewHead, TurnAction, TurnPreview, TurnRegion, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
-import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useTabActive } from "@/contexts/TabContext"
-import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/components/ui/columnResize"
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
-import { WideModeToggle } from "@/features/chat/WideModeToggle"
+import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { PiSearchBar } from "./PiSearchBar"
@@ -34,12 +32,6 @@ import "./SubagentMessages"
 import "./VideoPreview"
 
 const MAX_LABEL_LENGTH = 80
-/** Turns mounted at first and added per "Show earlier turns": older ones create no elements (smooth streaming). */
-export const TURN_PAGE_SIZE = 20
-/** Distance from the end (px) that still counts as reading the end, which the view then follows. */
-const PINNED_SLACK_PX = 48
-/** Load the earlier page while the button is still this far below the top edge, so an upward scroll continues into it. */
-const LOAD_EARLIER_ROOT_MARGIN = "400px 0px 0px 0px"
 
 /** One rendered part of an answer, in the order Pi produced it. */
 type Piece =
@@ -311,21 +303,26 @@ function SkillFold({ skill, fileLinks }: { skill: SkillBlock; fileLinks: FileLin
 interface PiTurnProps {
   messages: AgentMessage[]
   turn: Turn
-  /** The streaming reply, for the newest turn only. */
-  streaming: AssistantMessage | null
   confirmed: Confirmed
   runs: Record<string, ToolRun>
-  live: boolean
-  expanded: boolean
-  onToggle: (start: number, expanded: boolean) => void
-  /** Branch keeping `entryId`; `prompt` goes into the branch's composer (Edit). */
-  onBranch?: (entryId: string, prompt?: string) => void
   fileLinks: FileLinks
-  onResizeStart?: ResizeStart
 }
 
-/** One turn; memoized so a streamed delta re-renders the newest turn only. */
-const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs, live, expanded, onToggle, onBranch, fileLinks, onResizeStart }: PiTurnProps) {
+/** A collapsed turn's preview: the answer with activity folded as when opened (omp-web's preview); memoized like the open turn. */
+const PiTurnPreview = memo(function PiTurnPreview({ messages, turn, confirmed, runs, fileLinks }: PiTurnProps) {
+  const pieces = answerPieces(messages, turn, null, confirmed, runs)
+  return <TurnPreview tools={[]}>{pieces.length > 0 ? <CollapsedAnswer pieces={pieces} runs={runs} fileLinks={fileLinks} /> : null}</TurnPreview>
+})
+
+/** One open turn's question and answer; memoized so a streamed delta re-renders the newest turn only. */
+const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirmed, runs, live, onCollapse, onBranch, fileLinks }: PiTurnProps & {
+  /** The streaming reply, for the newest turn only. */
+  streaming: AssistantMessage | null
+  live: boolean
+  onCollapse?: () => void
+  /** Branch keeping `entryId`; `prompt` goes into the branch's composer (Edit). */
+  onBranch?: (entryId: string, prompt?: string) => void
+}) {
   const prompt = messages[turn.start]
   const { text, compaction, skill } = promptOf(prompt)
   const promptImages = useMemo(() => userImageAttachments((prompt as { content?: unknown }).content), [prompt])
@@ -334,17 +331,6 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
   const promptEntryId = turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined
   const icon = compaction ? <FoldVertical size={14} aria-hidden="true" /> : undefined
   const answerText = pieces.flatMap((piece) => (piece.kind === "text" ? [piece.text] : [])).join("\n\n")
-  const toggle = () => onToggle(turn.start, expanded)
-
-  // Collapsed like a regular chat's pair: the header over a preview of the answer, activity folded as when expanded (omp-web's preview)
-  if (!expanded) {
-    return (
-      <TurnCard expanded={false}>
-        <TurnHeader label={compaction ? "Compaction" : clip(text) || (skill ? `/skill:${skill.name}` : "(empty)")} icon={icon} onExpand={toggle} />
-        <TurnPreview tools={[]}>{pieces.length > 0 ? <CollapsedAnswer pieces={pieces} runs={runs} fileLinks={fileLinks} /> : null}</TurnPreview>
-      </TurnCard>
-    )
-  }
   // Branch from the turn's last persisted entry; a turn with none yet (live, optimistic) has no branch point
   const lastConfirmed = Math.min(turn.end, confirmed.count) - 1
   const branchFrom = !live && onBranch && lastConfirmed >= turn.start ? confirmed.entryIds[lastConfirmed] : undefined
@@ -360,10 +346,8 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
     ...(branchFrom ? [<ForkAction key="branch" label="Branch session from this point" onFork={() => onBranch!(branchFrom)} />] : []),
   ]
   return (
-    <div className="relative">
-    <ResizeEdges onResizeStart={onResizeStart} />
-    <TurnCard expanded>
-      <TurnRegion role="question" icon={icon} onCollapse={live ? undefined : toggle} actions={questionActions.length > 0 ? questionActions : undefined}>
+    <>
+      <TurnRegion role="question" icon={icon} onCollapse={onCollapse} actions={questionActions.length > 0 ? questionActions : undefined}>
         {promptMarks && <MarksLine marks={promptMarks} />}
         {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
         {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
@@ -376,21 +360,23 @@ const PiTurn = memo(function PiTurn({ messages, turn, streaming, confirmed, runs
           </TurnRegion>
         </TurnSurface>
       )}
-    </TurnCard>
-    </div>
+    </>
   )
 })
 
+/** A turn in the column: its messages' range. */
+interface PiColumnTurn extends ConversationTurn {
+  turn: Turn
+}
+
 /**
- * Every turn as the regular chat's Q&A card: the question with Edit, the answer with activity folded into "Process details" and Read aloud.
- * The newest is expanded, older ones collapse to their question over a preview of the answer until opened, in the regular chat's column
- * (its width, wide mode from the top bar's toggle). File links open through `fileLinks`.
+ * Every turn as the regular chat's Q&A card in the shared `ConversationColumn` (paging, following the end, open state, width,
+ * wide mode): the question with Edit, the answer with activity folded into "Process details" and Read aloud. File links open
+ * through `fileLinks`.
  *
- * - Follows the end while the reader is there, `paddingBottom` keeps the last turn clear of the floating composer
- * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
- *   from the end the window's top stays put, so appended turns do not push the read ones out
- * - A search hit (`search`) widens the mounted window and opens its turn when needed, scrolls to the hit, centred, and holds the view
- *   there; Enter and Shift+Enter (outside text fields) step through the session's hits, Escape clears
+ * - A turn's key is its prompt's entry id, a pending prompt's its position until its entry arrives
+ * - A search hit (`search`) reveals its turn, scrolls to the hit, centred, and holds the view there; Enter and Shift+Enter
+ *   (outside text fields) step through the session's hits, Escape clears
  * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
  *   and Edit, with the entry before the prompt and the prompt
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
@@ -414,95 +400,46 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   const turns = useMemo(() => turnsOf(messages), [messages])
   const runs = useMemo(() => toolRunsOf({ messages: confirmedMessages, unconfirmed, optimistic, runs: liveRuns }), [confirmedMessages, unconfirmed, optimistic, liveRuns])
   const confirmed = useMemo<Confirmed>(() => ({ count: confirmedMessages.length, entryIds, marks }), [confirmedMessages.length, entryIds, marks])
-  const [toggled, setToggled] = useState<Record<number, boolean>>({})
-  const [pageCount, setPageCount] = useState(TURN_PAGE_SIZE)
-  /** First mounted turn while the reader is away from the end, null while following the end. */
-  const [anchor, setAnchor] = useState<number | null>(null)
-  const [wide, setWide] = useState(false)
-  const [preview, setPreview] = useState<Attachment | null>(null)
-  const { width: columnWidth, startResize } = useColumnWidth()
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const earlierRef = useRef<HTMLButtonElement>(null)
-  const pinnedRef = useRef(true)
-  /** Distance from the content's end to the viewport top before a page is prepended, restored after. */
-  const restoreRef = useRef<number | null>(null)
-
-  const endAnchored = Math.max(0, turns.length - pageCount)
-  const start = Math.min(anchor ?? endAnchored, Math.max(0, turns.length - 1))
-
-  useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (!element) return
-    if (restoreRef.current !== null) {
-      element.scrollTop = element.scrollHeight - restoreRef.current
-      restoreRef.current = null
-    } else if (pinnedRef.current) {
-      element.scrollTop = element.scrollHeight
+  const liveTail = running || streaming !== null || optimistic !== null
+  const columnTurns = useMemo(() => turns.map((turn, index): PiColumnTurn => {
+    const { text, compaction, skill } = promptOf(messages[turn.start])
+    return {
+      key: (turn.start < confirmed.count ? confirmed.entryIds[turn.start] : undefined) ?? `pending-${turn.start}`,
+      label: compaction ? "Compaction" : clip(text) || (skill ? `/skill:${skill.name}` : "(empty)"),
+      icon: compaction ? <FoldVertical size={14} aria-hidden="true" /> : undefined,
+      live: index === turns.length - 1 && liveTail,
+      turn,
     }
-  })
+  }), [turns, messages, confirmed, liveTail])
+  const [preview, setPreview] = useState<Attachment | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-  const showEarlier = useCallback(() => {
-    const element = scrollRef.current
-    if (element) restoreRef.current = element.scrollHeight - element.scrollTop
-    if (anchor === null) setPageCount((count) => count + TURN_PAGE_SIZE)
-    else setAnchor(Math.max(0, anchor - TURN_PAGE_SIZE))
-  }, [anchor])
-
-  useEffect(() => {
-    const button = earlierRef.current
-    const root = scrollRef.current
-    if (!button || !root || typeof IntersectionObserver === "undefined") return
-    const observer = new IntersectionObserver((entries) => {
-      // Only on a real upward scroll: at scrollTop 0 on open it would race the first scroll to the end
-      if (entries[0]?.isIntersecting && root.scrollTop > 0) showEarlier()
-    }, { root, rootMargin: LOAD_EARLIER_ROOT_MARGIN, threshold: 0 })
-    observer.observe(button)
-    return () => observer.disconnect()
-  }, [showEarlier, start])
-
-  const onScroll = () => {
-    const element = scrollRef.current
-    if (!element) return
-    const pinned = element.scrollHeight - element.scrollTop - element.clientHeight < PINNED_SLACK_PX
-    pinnedRef.current = pinned
-    if (pinned && anchor !== null) setAnchor(null)
-    if (!pinned && anchor === null) setAnchor(start)
-  }
-
-  // The jump to a search hit: its turn is mounted and opened while rendering, then the effect scrolls to its text
-  const jumped = useRef(0)
+  // The jump to a search hit: the column mounts and opens its turn, then scrolls to its text
   const tabActive = useTabActive()
   useSearchHighlights(scrollRef, search)
-  const hitTurn = (hit: PiSearchFocus["matches"][number]) => {
-    const message = entryIds.indexOf(hit.entryId)
-    return message < 0 || message >= confirmedMessages.length ? -1 : turns.findIndex((turn) => turn.start <= message && message < turn.end)
-  }
+  const hit = search?.matches[search.index]
+  const hitMessage = hit ? entryIds.indexOf(hit.entryId) : -1
+  const hitTurn = hitMessage < 0 || hitMessage >= confirmedMessages.length ? -1 : turns.findIndex((turn) => turn.start <= hitMessage && hitMessage < turn.end)
+  const hitKey = hitTurn >= 0 ? columnTurns[hitTurn].key : null
   // Waits for the session's entries: nothing is loaded yet when a pick opens it
-  useResetOnChange(search && confirmedMessages.length > 0 ? search.seq : null, () => {
-    const turnIndex = search ? hitTurn(search.matches[search.index]) : -1
-    if (turnIndex < 0) return
-    const turnStart = turns[turnIndex].start
-    if (turnIndex < start) setAnchor(turnIndex)
-    setToggled((current) => (current[turnStart] ? current : { ...current, [turnStart]: true }))
-  })
-  useEffect(() => {
-    const root = scrollRef.current
-    const hit = search?.matches[search.index]
-    if (!search || !hit || !root || jumped.current === search.seq || confirmedMessages.length === 0) return
-    jumped.current = search.seq
-    const range = currentRange(root, search)
-    // Else the entry's text, e.g. when a hit's ordinal is past what rendered (a message too large to render shows less)
-    const target = range?.startContainer.parentElement ?? root.querySelector(`${ENTRY_TEXT}[data-entry-id="${CSS.escape(hit.entryId)}"]`)
-    if (!target) return
-    pinnedRef.current = false
-    // Instant: a smooth scroll would race the sentinel that loads the earlier page
-    target.scrollIntoView({ block: "center", behavior: "instant" })
-    if (range) {
-      const rect = range.getBoundingClientRect()
-      const view = root.getBoundingClientRect()
-      root.scrollTo({ top: root.scrollTop + rect.top + rect.height / 2 - (view.top + view.height / 2), behavior: "instant" })
-    }
-  }, [search, confirmedMessages.length])
+  const reveal = useMemo<ConversationReveal | null>(() => (search && hit && hitKey !== null ? {
+    key: hitKey,
+    seq: search.seq,
+    scroll: (root) => {
+      const range = currentRange(root, search)
+      // Else the entry's text, e.g. when a hit's ordinal is past what rendered (a message too large to render shows less)
+      const target = range?.startContainer.parentElement ?? root.querySelector(`${ENTRY_TEXT}[data-entry-id="${CSS.escape(hit.entryId)}"]`)
+      if (!target) return false
+      // Instant: a smooth scroll would race the sentinel that loads the earlier page
+      target.scrollIntoView({ block: "center", behavior: "instant" })
+      if (range) {
+        const rect = range.getBoundingClientRect()
+        const view = root.getBoundingClientRect()
+        root.scrollTo({ top: root.scrollTop + rect.top + rect.height / 2 - (view.top + view.height / 2), behavior: "instant" })
+      }
+      return true
+    },
+  } : null), [search, hit, hitKey])
   // Enter and Shift+Enter step, Escape clears: from the page or the transcript, never from a text field or a button
   useEventListener("window", "keydown", (event) => {
     const target = event.target
@@ -513,44 +450,37 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
     event.preventDefault()
   }, { active: tabActive && search !== null })
 
-  const onToggle = useCallback((turnStart: number, expanded: boolean) => setToggled((current) => ({ ...current, [turnStart]: !expanded })), [])
-  const liveTail = running || streaming !== null || optimistic !== null
+  const renderPreview = (item: PiColumnTurn) => <PiTurnPreview messages={messages} turn={item.turn} confirmed={confirmed} runs={runs} fileLinks={fileLinks} />
+  const renderBody = (item: PiColumnTurn, index: number, collapse: (() => void) | undefined) => (
+    <PiTurnBody
+      messages={messages}
+      turn={item.turn}
+      streaming={index === turns.length - 1 ? streaming : null}
+      confirmed={confirmed}
+      runs={runs}
+      live={item.live}
+      onCollapse={collapse}
+      onBranch={onBranch}
+      fileLinks={fileLinks}
+    />
+  )
 
   return (
     <PreviewContext.Provider value={setPreview}>
-    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
-      {search && <PiSearchBar search={search} />}
-      <div ref={onColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
-        {start > 0 && (
-          <button ref={earlierRef} type="button" onClick={showEarlier} className="mx-auto mt-3 block rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">
-            Show earlier turns
-          </button>
-        )}
-        {turns.slice(start).map((turn, offset) => {
-          const newest = start + offset === turns.length - 1
-          const live = newest && liveTail
-          return (
-            <PiTurn
-              key={turn.start}
-              messages={messages}
-              turn={turn}
-              streaming={newest ? streaming : null}
-              confirmed={confirmed}
-              runs={runs}
-              live={live}
-              expanded={live || (toggled[turn.start] ?? newest)}
-              onToggle={onToggle}
-              onBranch={onBranch}
-              fileLinks={fileLinks}
-              onResizeStart={wide ? undefined : startResize}
-            />
-          )
-        })}
-        <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
-      </div>
-      <WideModeToggle wide={wide} onToggle={() => setWide((current) => !current)} />
-      <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
-    </div>
+      <ConversationColumn
+        turns={columnTurns}
+        renderPreview={renderPreview}
+        renderBody={renderBody}
+        header={search && <PiSearchBar search={search} />}
+        footer={<>
+          <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} />
+          <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
+        </>}
+        reveal={reveal}
+        paddingBottom={paddingBottom}
+        onColumnChange={onColumnChange}
+        scrollRef={scrollRef}
+      />
     </PreviewContext.Provider>
   )
 }

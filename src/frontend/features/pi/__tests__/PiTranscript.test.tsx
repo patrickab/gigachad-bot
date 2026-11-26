@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { PiTranscript, TURN_PAGE_SIZE } from "../PiTranscript"
+import { PiTranscript } from "../PiTranscript"
 import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
 import type { Attachment } from "@/lib/domain/types"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"
@@ -52,34 +52,11 @@ afterEach(() => {
 })
 
 describe("PiTranscript window", () => {
-  it("mounts the newest page of turns only and follows the end while streaming", () => {
-    const messages = history(45)
-    const { container, rerender } = render(<PiTranscript transcript={transcriptOf(messages, { running: true })} fileLinks={fileLinks} />)
-    const scroller = container.firstElementChild as HTMLElement
-    const firstMounted = 45 - TURN_PAGE_SIZE
-    expect(screen.queryByText(`Prompt ${firstMounted - 1}`)).toBeNull()
-    expect(screen.getByText(`Prompt ${firstMounted}`)).toBeTruthy()
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight)
-
-    rerender(<PiTranscript transcript={transcriptOf(messages, { running: true, streaming: streamingReply("Streaming a long answer") })} fileLinks={fileLinks} />)
-    const grown = scroller.scrollHeight
-    expect(scroller.textContent).toContain("Streaming a long answer")
-    expect(scroller.scrollTop).toBe(grown)
-  })
-
-  it("keeps the read window while the reader is away from the end, and loads earlier turns on request", () => {
-    const messages = history(45)
-    const { container, rerender } = render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    const scroller = container.firstElementChild as HTMLElement
-    scroller.scrollTop = 0
-    fireEvent.scroll(scroller)
-
-    rerender(<PiTranscript transcript={transcriptOf(history(60))} fileLinks={fileLinks} />)
-    expect(screen.getByText(`Prompt ${45 - TURN_PAGE_SIZE}`)).toBeTruthy()
-    expect(scroller.scrollTop).toBe(0)
-
-    fireEvent.click(screen.getByRole("button", { name: "Show earlier turns" }))
-    expect(screen.getByText(`Prompt ${45 - 2 * TURN_PAGE_SIZE}`)).toBeTruthy()
+  it("streams the reply into the newest turn, keyed by its prompt's entry", () => {
+    const messages = history(3)
+    const { container } = render(<PiTranscript transcript={transcriptOf(messages, { running: true, streaming: streamingReply("Streaming a long answer") })} fileLinks={fileLinks} />)
+    const newest = container.querySelector("[data-turn-key='e4']")
+    expect(newest?.textContent).toContain("Streaming a long answer")
   })
 
   it("offers branching from a settled turn's last persisted entry", () => {
