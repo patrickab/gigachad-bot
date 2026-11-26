@@ -70,6 +70,18 @@ it("loads the complete preview on keyboard focus before intersection", () => {
   expect(screen.getByTestId("markdown")).toHaveTextContent(props.assistant.content)
 })
 
+it("renders only the head of a long answer until the preview is scrolled", () => {
+  vi.stubGlobal("IntersectionObserver", undefined)
+  const content = Array.from({ length: 40 }, (_, index) => `Paragraph ${index} ${"word ".repeat(30)}`).join("\n\n")
+  render(<ChatPair {...props} assistant={{ ...props.assistant, content }} />)
+  const shown = screen.getByTestId("markdown").textContent ?? ""
+  expect(content.startsWith(shown.trimEnd())).toBe(true)
+  expect(shown.length).toBeLessThan(content.length / 2)
+
+  fireEvent.scroll(screen.getByRole("region", { name: "Answer preview" }))
+  expect(screen.getByTestId("markdown").textContent).toBe(content)
+})
+
 it("gives the collapsed preview the search result so citations resolve to links", () => {
   const search_result = { query: "banach", sources: [], images: [], videos: [], citationMap: {} }
   render(<ChatPair {...props} assistant={{ ...props.assistant, search_result }} />)

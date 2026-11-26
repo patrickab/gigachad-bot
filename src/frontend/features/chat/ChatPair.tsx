@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import { ResizeEdges, type ResizeStart } from "@/components/ui/columnResize"
 import type { Attachment, Message } from "@/lib/domain/types"
-import { TurnCard, TurnHeader, TurnPreview, TurnSurface } from "@gigachad/chat-ui"
+import { previewHead, TurnCard, TurnHeader, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
@@ -21,9 +21,11 @@ function abbreviate(text: string, msg: Message): string {
 
 /** Clipping collapsed answers does not avoid parsing their equations. Reserve the
  * preview's 15vh cap offscreen, then use its natural height near the viewport.
- * Short answers can shrink from this estimate, but never stay artificially tall. */
+ * Short answers can shrink from this estimate, but never stay artificially tall.
+ * Only the answer's head is rendered until the reader scrolls or focuses the preview: a collapsed card then holds a fraction of the answer's elements. */
 function CollapsedAnswerPreview({ content, search_result }: { content: string; search_result: Message["search_result"] }) {
   const [ready, setReady] = useState(false)
+  const { full, attach } = usePreviewInteraction()
 
   const attachPreview = useCallback((host: HTMLDivElement | null) => {
     if (!host) return
@@ -58,7 +60,7 @@ function CollapsedAnswerPreview({ content, search_result }: { content: string; s
   return (
     <div ref={attachPreview} style={ready ? undefined : { height: "15vh" }}>
       {ready
-        ? <AssistantMessageContent content={content} search_result={search_result} compact />
+        ? <div ref={attach} className="contents"><AssistantMessageContent content={full ? content : previewHead(content)} search_result={search_result} compact /></div>
         : <span className="sr-only">{content}</span>}
     </div>
   )
