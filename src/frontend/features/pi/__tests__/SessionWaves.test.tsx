@@ -175,13 +175,63 @@ describe("SessionWaves", () => {
   })
 
   it("reads again on a factory change", async () => {
-    api.callFactory.mockResolvedValueOnce({ waves: [] }).mockResolvedValueOnce({ waves: [wave("w1")] }).mockResolvedValue({ tasks: [] })
+    let lists = 0
+    api.callFactory.mockImplementation(async (action: string) => {
+      if (action === "waves.list") return { waves: lists++ === 0 ? [] : [wave("w1")] }
+      return action === "decisions.list" ? { decisions: [] } : { tasks: [] }
+    })
     renderPanel()
-    await waitFor(() => expect(api.callFactory).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(lists).toBe(1))
     act(() => {
       for (const observer of socket.observers) observer.onHostEvent?.({ type: "sessions_changed", sessionPaths: ["/agent/factory/waves/w1.jsonl"] })
     })
     expect(await screen.findByRole("button", { name: /p\/w1/ })).toBeTruthy()
+  })
+})
+
+describe("SessionWaves above the composer", () => {
+  it("caps its height and scrolls inside", () => {
+    render(<SessionWaves waves={[wave("w1")]} onOpenTask={vi.fn()} />)
+    const cls = screen.getByRole("region", { name: "Waves" }).className
+    expect(cls).toContain("max-h-[40vh]")
+    expect(cls).toContain("overflow-y-auto")
+  })
+
+  it("counts waves and tasks waiting for a ruling", () => {
+    render(<SessionWaves waves={[wave("w1", { stage: "rejected", running: false }), wave("w2", { tasks: [task("a", { state: "waiting_answer" })] })]} onOpenTask={vi.fn()} />)
+    expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("2 needs you")
+  })
+
+  it("lists the decisions from decisions.list and jumps to the card", async () => {
+    const target = document.createElement("div")
+    target.dataset.noticeKey = "k1"
+    target.scrollIntoView = vi.fn()
+    document.body.append(target)
+    api.callFactory.mockImplementation(async (action: string, params: unknown) => {
+      if (action === "decisions.list") {
+        expect(params).toEqual({ origin: "me" })
+        return { decisions: [{ at: "t", answers: "k1", card: { v: 1, kind: "decision", tone: "quiet", title: "answered the coder" } }] }
+      }
+      return action === "waves.list" ? { waves: [wave("w1")] } : { tasks: [] }
+    })
+    renderPanel()
+    fireEvent.click(await screen.findByRole("button", { name: /Decisions/ }))
+    fireEvent.click(screen.getByRole("button", { name: "answered the coder" }))
+    expect(target.scrollIntoView).toHaveBeenCalled()
+    target.remove()
+  })
+
+  it("has no Decisions entry and no error when the action is unknown", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    api.callFactory.mockImplementation(async (action: string) => {
+      if (action === "decisions.list") throw new Error("unknown action: decisions.list")
+      return action === "waves.list" ? { waves: [wave("w1")] } : { tasks: [] }
+    })
+    renderPanel()
+    await screen.findByRole("button", { name: /p\/w1/ })
+    expect(screen.queryByRole("button", { name: /Decisions/ })).toBeNull()
+    expect(error).not.toHaveBeenCalled()
+    error.mockRestore()
   })
 })
 

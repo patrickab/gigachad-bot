@@ -9,6 +9,10 @@ import { concernsFactory, isUnknownAction, waveNeedsUser, waveStageLabel, type F
 import { cn } from "@/lib/utils"
 import { observePiSocket } from "./piSocket"
 import { formatCost, formatTokens } from "./subagents"
+import type { FactoryCard } from "./factoryCard"
+
+/** A ruling the supervisor gave in this session, from `decisions.list`. */
+export interface FactoryDecision { at: string; key?: string; answers?: string; card: FactoryCard }
 
 const RESTING = new Set(["merged", "cancelled"])
 const FINISHED_TASK = new Set(["done", "cancelled"])
@@ -74,7 +78,8 @@ export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave
  * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
  * - `models`: the coder model of each task by task id, from `tasks.list` of each repository the session has waves in
  */
-export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; models: TaskModels } {
+export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; models: TaskModels; decisions: FactoryDecision[] | null } {
+  const [decisions, setDecisions] = useState<FactoryDecision[] | null>(null)
   const [answered, setAnswered] = useState<{ sessionId: string; waves: FactoryWave[] } | null>(null)
   const [models, setModels] = useState<TaskModels>({})
   useEffect(() => {
@@ -101,6 +106,14 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
           else console.error("waves.list failed", cause)
         },
       )
+      callFactory<{ decisions: FactoryDecision[] }>("decisions.list", { origin: sessionId }).then(
+        (answer) => { if (current()) setDecisions(answer.decisions ?? []) },
+        (cause: unknown) => {
+          if (!current()) return
+          if (isUnknownAction(cause)) setDecisions(null)
+          else console.error("decisions.list failed", cause)
+        },
+      )
     }
     read()
     const stop = observePiSocket({ onHostEvent: (event) => { if (concernsFactory(event)) read() }, onOpen: read }, { hold: true })
@@ -109,7 +122,7 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
       stop()
     }
   }, [sessionId])
-  return useMemo(() => ({ waves: answered?.sessionId === sessionId ? answered.waves : storedWaves(sessionId), models }), [answered, sessionId, models])
+  return useMemo(() => ({ waves: answered?.sessionId === sessionId ? answered.waves : storedWaves(sessionId), models, decisions }), [answered, sessionId, models, decisions])
 }
 
 function waveIcon(wave: FactoryWave): { icon: LucideIcon; className: string } {
@@ -170,6 +183,37 @@ function WaveSummary({ wave }: { wave: FactoryWave }) {
 const ROW = "h-auto py-0.5"
 const NO_MODELS: TaskModels = {}
 
+/** Scrolls the timeline to the card of notice `key`. */
+function jumpToCard(key: string) {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-notice-key]")) {
+    if (el.dataset.noticeKey === key) { el.scrollIntoView({ block: "center" }); return }
+  }
+}
+
+/** The session's decisions, each jumping to the card it answers. */
+function DecisionsEntry({ decisions }: { decisions: readonly FactoryDecision[] }) {
+  return (
+    <li>
+      <Disclosure summary={<span className="min-w-0 flex-1">Decisions · {decisions.length}</span>} summaryClassName={ROW}>
+        <ul aria-label="Decisions" className="ml-5 flex flex-col">
+          {decisions.map((decision, index) => {
+            const target = decision.answers ?? decision.key
+            return (
+              <li key={`${decision.at}-${index}`} className="flex items-center py-0.5">
+                {target ? (
+                  <button type="button" onClick={() => jumpToCard(target)} className="min-w-0 flex-1 truncate text-left text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink-faint">{decision.card.title}</button>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-ink-muted">{decision.card.title}</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </Disclosure>
+    </li>
+  )
+}
+
 /** A wave's row, opening to its tasks: the unfinished ones first, then the finished, each started one with its task view. */
 function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: TaskModels; onOpenTask: (repo: string, taskId: string) => void }) {
   const tasks = [...wave.tasks.filter((task) => !FINISHED_TASK.has(task.state)), ...wave.tasks.filter((task) => FINISHED_TASK.has(task.state))]
@@ -197,10 +241,10 @@ function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: Task
  *   (the coder's session, brief and handoff) through `onOpenTask`
  * - Renders nothing without waves
  */
-export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves: FactoryWave[]; models?: TaskModels; onOpenTask: (repo: string, taskId: string) => void }) {
+export function SessionWaves({ waves, models = NO_MODELS, decisions = null, onOpenTask }: { waves: FactoryWave[]; models?: TaskModels; decisions?: readonly FactoryDecision[] | null; onOpenTask: (repo: string, taskId: string) => void }) {
   const { active, finished } = useMemo(() => splitWaves(waves), [waves])
   if (waves.length === 0) return null
-  const needsUser = active.filter(waveNeedsUser).length
+  const needsUser = active.filter(waveNeedsUser).length + active.filter((wave) => !waveNeedsUser(wave)).reduce((n, wave) => n + wave.tasks.filter((task) => ATTENTION_TASK.has(task.state)).length, 0)
   const header = (
     <>
       <span className="shrink-0">
@@ -213,9 +257,10 @@ export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves:
     </>
   )
   return (
-    <section aria-label="Waves" className="mx-auto mb-2 flex w-full max-w-2xl flex-col rounded-xl bg-paper px-3 py-1.5 text-xs">
+    <section aria-label="Waves" className="mx-auto mb-2 flex max-h-[40vh] w-full max-w-2xl flex-col overflow-y-auto rounded-xl bg-paper px-3 py-1.5 text-xs">
       <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0}>
         <ul className="flex flex-col">
+          {decisions && decisions.length > 0 && <DecisionsEntry decisions={decisions} />}
           {active.map((wave) => <WaveRow key={wave.id} wave={wave} models={models} onOpenTask={onOpenTask} />)}
           {finished.length > 0 && (
             <li>
@@ -243,6 +288,6 @@ export function SessionWaves({ waves, models = NO_MODELS, onOpenTask }: { waves:
 
 /** The waves of session `sessionId`, read and shown. */
 export function SessionWavesPanel({ sessionId, onOpenTask }: { sessionId: string; onOpenTask: (repo: string, taskId: string) => void }) {
-  const { waves, models } = useSessionWaves(sessionId)
-  return <SessionWaves waves={waves} models={models} onOpenTask={onOpenTask} />
+  const { waves, models, decisions } = useSessionWaves(sessionId)
+  return <SessionWaves waves={waves} models={models} decisions={decisions} onOpenTask={onOpenTask} />
 }

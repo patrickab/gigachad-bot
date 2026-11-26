@@ -12,6 +12,7 @@ export type FactoryActionName =
   | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
   | "waves.start" | "waves.add" | "waves.get" | "waves.list" | "waves.timeline"
   | "waves.retry" | "waves.approve" | "waves.cancel" | "waves.remove"
+  | "decisions.list"
 
 /** Codes of the core's refusals, in the `detail.code` of a failed call. */
 export type FactoryErrorCode = "invalid" | "not_found" | "busy" | "refused" | "failed" | "factory_plugin_missing"
