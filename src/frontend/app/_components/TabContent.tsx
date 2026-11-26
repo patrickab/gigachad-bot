@@ -30,6 +30,7 @@ import { writeRootFile } from "@/lib/backend/api"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
+import "./toolRenderers"
 
 interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void

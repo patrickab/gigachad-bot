@@ -5,15 +5,12 @@
  * - `AgentMessage` values arrive in `message_end`, `get_messages` and `agent_end`
  */
 
-export interface TextContent { type: "text"; text: string }
-export interface ImageContent { type: "image"; data: string; mimeType: string }
-/** A tool-result image as pi-host sends it: stored under the sha256 of its bytes, fetched from `/api/pi/media/<hash>` (`piMediaUrl`). */
-export interface MediaImage { type: "image"; mimeType: string; hash: string }
-/** An image block of a tool result: a stored one, or inline base64 when pi-host could not store it. */
-export type ToolImage = ImageContent | MediaImage
+import type { ImageContent, TextContent, ToolCall, ToolImage } from "@/features/conversation/tools/types"
+
+// The tool call shapes are shared with the chat's tool rows
+export type { ImageContent, MediaImage, TextContent, ToolCall, ToolImage, ToolRun } from "@/features/conversation/tools/types"
 
 export interface ThinkingContent { type: "thinking"; thinking: string; redacted?: boolean }
-export interface ToolCall { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
 
 export type AssistantBlock = TextContent | ThinkingContent | ToolCall
 
@@ -62,15 +59,6 @@ export type AgentMessage =
   | CustomMessage
   | CompactionSummaryMessage
   | { role: "system" | "branchSummary"; timestamp: number }
-
-/** Live state of one tool call, keyed by `toolCallId`, from `tool_execution_*` events. */
-export interface ToolRun {
-  /** Latest partial result while running, the final result once ended. */
-  result?: { content: (TextContent | ToolImage)[]; details?: unknown }
-  isError: boolean
-  running: boolean
-  durationMs?: number
-}
 
 /** `get_commands` row: extension command, prompt template or skill (`skill:<name>`). */
 export interface PiCommand { name: string; description?: string; source: "extension" | "prompt" | "skill" }

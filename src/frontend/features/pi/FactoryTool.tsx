@@ -8,7 +8,7 @@ import { registerToolRenderer } from "./renderers"
 import { PairedResult } from "./tools/DiffView"
 import { formatDuration } from "./tools/format"
 import type { TextContent, ToolRun } from "./types"
-import "./tools/tools.css"
+import "@/features/conversation/tools/tools.css"
 
 /** The text blocks of a run's result joined, null before it has one. */
 export function resultText(run: ToolRun | undefined): string | null {

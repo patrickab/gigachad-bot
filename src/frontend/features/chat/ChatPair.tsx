@@ -5,8 +5,8 @@ import type { Attachment, Message } from "@/lib/domain/types"
 import { previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
-import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
-import { toolDisplay } from "@/features/chat/tools"
+import { toolDisplayOf } from "@/features/conversation/tools/renderers"
+import { CHAT_TOOL_SOURCE, ChatToolCall } from "@/features/chat/toolRenderers"
 
 const MAX_LABEL_LENGTH = 80
 
@@ -31,8 +31,9 @@ export function chatPairPreview(assistant: Message): ReactNode {
 
 export function ChatPairPreview({ assistant }: { assistant: Message }) {
   const tools = (assistant.tool_calls ?? []).map((call) => {
-    const { icon: Icon, label } = toolDisplay(call.name)
-    return { key: call.id, label, icon: <Icon size={14} aria-hidden="true" /> }
+    const display = toolDisplayOf(CHAT_TOOL_SOURCE, call.name)
+    const Icon = display?.icon
+    return { key: call.id, label: display?.label ?? call.name, icon: Icon ? <Icon size={14} aria-hidden="true" /> : null }
   })
   return (
     <TurnPreview tools={tools}>
@@ -78,11 +79,13 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         laterTurnsOf={laterTurnsOf}
         onCollapse={onCollapse}
       />
-      {assistant.tool_calls?.map((call) => (
-        <TurnSurface key={call.id}>
-          <ToolCallElement call={call} />
+      {assistant.tool_calls?.length ? (
+        <TurnSurface>
+          <div className="px-6 py-3">
+            {assistant.tool_calls.map((call) => <ChatToolCall key={call.id} record={call} />)}
+          </div>
         </TurnSurface>
-      ))}
+      ) : null}
       <TurnSurface>
         <ChatMessage
           role="assistant"

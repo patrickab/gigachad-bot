@@ -39,7 +39,8 @@ const learn = vi.hoisted(() => ({
 }))
 vi.mock("@/features/learn/LearnProvider", () => ({ useLearn: () => learn }))
 
-import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
+import { ChatToolCall } from "@/features/chat/toolRenderers"
+import { renderToolCall } from "@/features/conversation/tools/renderers"
 
 const sandboxPlotCall: ToolCallRecord = {
   id: "plot-1",
@@ -53,7 +54,7 @@ const sandboxPlotCall: ToolCallRecord = {
   },
 }
 
-describe("ToolCallElement sandbox plots", () => {
+describe("chat tool rows: sandbox plots", () => {
   beforeEach(() => {
     plotCalls.mockReset()
     codeBlockCalls.mockReset()
@@ -61,7 +62,7 @@ describe("ToolCallElement sandbox plots", () => {
   })
 
   it("keeps the chart visible while the briefing disclosure toggles", () => {
-    render(<ToolCallElement call={sandboxPlotCall} />)
+    render(<ChatToolCall record={sandboxPlotCall} />)
 
     expect(plotCalls).toHaveBeenCalledWith(sandboxPlotCall.detail!.figure)
     expect(screen.getByTestId("plot")).toBeInTheDocument()
@@ -77,7 +78,7 @@ describe("ToolCallElement sandbox plots", () => {
   })
 
   it("keeps the script hidden until the code disclosure toggles", () => {
-    render(<ToolCallElement call={sandboxPlotCall} />)
+    render(<ChatToolCall record={sandboxPlotCall} />)
 
     expect(codeBlockCalls).not.toHaveBeenCalled()
     expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
@@ -93,7 +94,7 @@ describe("ToolCallElement sandbox plots", () => {
 
 
   it("renders Mermaid source directly in a diagram tool call", () => {
-    render(<ToolCallElement call={{
+    render(<ChatToolCall record={{
       id: "diagram-1",
       name: "diagram",
       arguments: {},
@@ -102,38 +103,62 @@ describe("ToolCallElement sandbox plots", () => {
     }} />)
 
     expect(markdownCalls).toHaveBeenCalledWith("```mermaid\nflowchart LR\nA --> B\n```")
+    // Visible under its row without opening it
+    expect(screen.getByRole("button", { name: /diagram/i })).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByTestId("mermaid-diagram")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^diagram$/i })).not.toBeInTheDocument()
   })
   it("retains the argument disclosure for other tools", () => {
-    render(<ToolCallElement call={{ id: "search-1", name: "web_search", arguments: { query: "plotly docs" }, status: "done" }} />)
+    render(<ChatToolCall record={{ id: "search-1", name: "web_search", arguments: { query: "plotly docs" }, status: "done" }} />)
 
     const tool = screen.getByRole("button", { name: /web search/i })
+    expect(tool).toHaveTextContent("plotly docs")
     expect(tool).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(tool)
 
     expect(tool).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Show full input" }))
     expect(screen.getByText("query")).toBeInTheDocument()
   })
 
-  it("surfaces a failed plot's error without a disclosure to open", () => {
-    render(<ToolCallElement call={{ id: "plot-2", name: "sandbox_plot", arguments: { brief: "Plot it" }, status: "error", error: "Kernel died" }} />)
+  it("shows a search's sources and costs under its row", () => {
+    render(<ChatToolCall record={{
+      id: "search-2", name: "deep_research", arguments: { query: "banach" }, status: "done",
+      sources: [{ url: "https://example.org/b", title: "Banach spaces", label: "1" }], detail: { costs: 0.0123 },
+    }} />)
 
+    expect(screen.getByRole("link", { name: "Banach spaces" })).toHaveAttribute("href", "https://example.org/b")
+    expect(screen.getByText("cost $0.0123")).toBeInTheDocument()
+  })
+
+  it("surfaces a failed plot's error without opening its row", () => {
+    render(<ChatToolCall record={{ id: "plot-2", name: "sandbox_plot", arguments: { brief: "Plot it" }, status: "error", error: "Kernel died" }} />)
+
+    expect(screen.getByRole("button", { name: /interactive plot/i })).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByText("Kernel died")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /interactive plot/i })).not.toBeInTheDocument()
   })
 
   it("renders an unknown saved tool name as a generic call", () => {
-    render(<ToolCallElement call={{ id: "legacy-1", name: "legacy_tool", arguments: { topic: "archived" }, status: "done" }} />)
+    render(<ChatToolCall record={{ id: "legacy-1", name: "legacy_tool", arguments: { topic: "archived" }, status: "done" }} />)
 
     const tool = screen.getByRole("button", { name: /legacy_tool/i })
     fireEvent.click(tool)
+    fireEvent.click(screen.getByRole("button", { name: "Show full input" }))
 
     expect(screen.getByText("topic")).toBeInTheDocument()
   })
 
+  it("leaves a Pi session's call of a chat tool's name to the next renderer", () => {
+    render(<>{renderToolCall(
+      { type: "toolCall", id: "pi-1", name: "web_search", arguments: { query: "pi" } },
+      { running: false, isError: false, result: { content: [{ type: "text", text: "found" }] } },
+      () => <div>default row</div>,
+    )}</>)
+
+    expect(screen.getByText("default row")).toBeInTheDocument()
+  })
+
   it("shows each stage status and its decimal duration", () => {
-    render(<ToolCallElement call={{
+    render(<ChatToolCall record={{
       id: "search-stages",
       name: "web_search",
       arguments: { query: "stages" },
@@ -149,7 +174,7 @@ describe("ToolCallElement sandbox plots", () => {
   })
 })
 
-describe("ToolCallElement learn sessions", () => {
+describe("chat tool rows: learn sessions", () => {
   const learnCall: ToolCallRecord = {
     id: "learn-1",
     name: "start_learn_session",
@@ -167,7 +192,7 @@ describe("ToolCallElement learn sessions", () => {
   })
 
   it("links the started session, opening the learn view at it in a new tab of its project", () => {
-    render(<ToolCallElement call={learnCall} />)
+    render(<ChatToolCall record={learnCall} />)
 
     expect(screen.getByText("Learn session")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Understand Fourier series" }))
@@ -181,46 +206,22 @@ describe("ToolCallElement learn sessions", () => {
 
   it("looks up no session the sidebar already lists", () => {
     learn.sessions.sessions = [{ id: "chat_mvtsqwg2_5e0e6463", title: "Understand Fourier series", kind: null, busy: true, project_slug: "physics" }]
-    render(<ToolCallElement call={learnCall} />)
+    render(<ChatToolCall record={learnCall} />)
 
     expect(learn.sessions.lookUp).not.toHaveBeenCalled()
   })
 
   it("names a session LearnHarness no longer has instead of linking it", () => {
     learn.sessions.missing = new Set(["chat_mvtsqwg2_5e0e6463"])
-    render(<ToolCallElement call={learnCall} />)
+    render(<ChatToolCall record={learnCall} />)
 
     expect(screen.queryByRole("button", { name: "Understand Fourier series" })).not.toBeInTheDocument()
     expect(screen.getByText("Understand Fourier series (deleted)")).toBeInTheDocument()
   })
 
   it("shows no link while the session is being created", () => {
-    render(<ToolCallElement call={{ ...learnCall, status: "running", summary: undefined, detail: undefined }} />)
+    render(<ChatToolCall record={{ ...learnCall, status: "running", summary: undefined, detail: undefined }} />)
 
     expect(screen.queryByRole("button", { name: "Understand Fourier series" })).not.toBeInTheDocument()
-  })
-})
-
-describe("ToolCallElement memory calls", () => {
-  const opsCall: ToolCallRecord = {
-    id: "mem-1",
-    name: "apply_memory_ops",
-    arguments: { memory_store: "user", ops: [{ op: "add", path: "preferences/food", text: "likes oat milk" }, { op: "retire", path: "preferences/food", id: "k2p" }] },
-    status: "done",
-    summary: "2/2 applied",
-  }
-
-  it("summarises the ops collapsed and shows one line per op opened", () => {
-    render(<ToolCallElement call={opsCall} />)
-    expect(screen.getByText("2 changes · preferences/food")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { expanded: false }))
-    const lines = [...document.querySelectorAll("[data-memory-op]")].map((line) => line.textContent)
-    expect(lines).toEqual(["+likes oat milk", "−k2pretired"])
-    expect(screen.queryByText("ops")).toBeNull()
-  })
-
-  it("keeps the first argument for malformed memory arguments", () => {
-    render(<ToolCallElement call={{ ...opsCall, name: "read_memories", arguments: { memory_store: "user", paths: "x" } }} />)
-    expect(screen.getByText("user")).toBeTruthy()
   })
 })

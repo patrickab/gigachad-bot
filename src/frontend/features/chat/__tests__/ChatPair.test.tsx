@@ -9,7 +9,10 @@ vi.mock("@/features/chat/messages/ChatMessage", () => ({
   },
   ChatMessage: ({ content }: { content: string }) => <div data-testid="message">{content}</div>,
 }))
-vi.mock("@/features/chat/messages/ToolCallElement", () => ({ ToolCallElement: () => <div>Full tool output</div> }))
+vi.mock("@/features/chat/toolRenderers", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/features/chat/toolRenderers")>(),
+  ChatToolCall: () => <div>Full tool output</div>,
+}))
 
 import { ChatPairBody, ChatPairPreview, chatPairPreview, pairLabel } from "@/features/chat/ChatPair"
 
