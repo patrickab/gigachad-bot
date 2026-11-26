@@ -118,7 +118,7 @@ export function withLead(text: string, lead: string | undefined): string {
  * - `firstSubmit` runs once the session attaches, then reported through `onFirstSubmitted`
  * - `insertion` goes into the composer once it is enabled (a quote, a canvas screenshot), `onInserted` follows
  * - `lead` leads the next prompt once (a PDF chat's `Text: <path>`, a renamed file's new path), `onLeadSent` follows. Commands never carry it
- * - Each settled turn branches through `onBranch` (D11), Edit with its prompt for the branch's composer; a failed branch shows as a notice
+ * - Each settled turn branches through `onBranch` (D11); a failed branch shows as a notice
  * - A closed session's reason shows with the composer's notices
  * - `docked` keeps the composer at the bottom of an empty session, without the greeting (a side panel)
  * - `composerLeading` renders the composer's controls after its "+" menu from the header
@@ -132,7 +132,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   composerLeading?: (header: PiSessionHeader) => ReactNode
   firstSubmit?: PiSubmit | null
   onFirstSubmitted?: () => void
-  onBranch?: (fork: PiFork, prompt?: string) => Promise<void>
+  onBranch?: (fork: PiFork) => Promise<void>
   insertion?: PiInsertion | null
   onInserted?: () => void
   lead?: string
@@ -201,8 +201,8 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const sessionFile = state?.sessionFile
   const branch = useMemo(() => {
     if (!onBranch || !sessionFile) return undefined
-    return (entryId: string, prompt?: string) => {
-      onBranch({ sessionPath: sessionFile, entryId }, prompt).catch((reason: unknown) => notify(piOpenError(reason), "error"))
+    return (entryId: string) => {
+      onBranch({ sessionPath: sessionFile, entryId }).catch((reason: unknown) => notify(piOpenError(reason), "error"))
     }
   }, [onBranch, sessionFile, notify])
 
@@ -260,7 +260,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
  * - The top bar picks the model from the user's catalog (`modelProps`, the chats' dropdown with Manage models) among those Pi offers, the thinking
  *   level from the model's ladder
  * - A tab with a session resumes it (spawns its Pi process when none runs), an archived one is restored first
- * - A turn's branch action forks the session into a new one that opens in this tab, Edit puts the turn's prompt into its composer
+ * - A turn's branch action forks the session into a new one that opens in this tab
  * - The repo and live dot sit in the composer's action row, where an empty chat picks its project
  * - `launch` (a chat's first message) starts the session like a send, then `onLaunched` clears it
  * - With `onOpenTask`, the factory waves the session declared sit above the composer, a wave's task opens through it (`repo`, task id).
@@ -277,7 +277,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
 }) {
   const [opened, setOpened] = useState<{ sessionId: string; cwd: string } | null>(null)
   const [firstSubmit, setFirstSubmit] = useState<PiSubmit | null>(null)
-  const [insertion, setInsertion] = useState<PiInsertion | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Bumped by Retry after a resume failed, so the resume runs again
@@ -320,10 +319,9 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
     }
   }, [repo, onViewChange, chosenModel, chosenThinking])
 
-  const branch = useCallback(async (forkOf: PiFork, prompt?: string) => {
+  const branch = useCallback(async (forkOf: PiFork) => {
     const session = await openPiSession(repo, { forkOf })
     setFirstSubmit(null)
-    setInsertion(prompt ? { id: Date.now(), text: prompt } : null)
     setOpened({ sessionId: session.sessionId, cwd: session.cwd })
     onViewChange({ repo, sessionId: session.sessionId })
   }, [repo, onViewChange])
@@ -342,7 +340,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
   }, [launch, sessionId, start, onLaunched, catalogSettled, catalogLevels, chosenThinking])
 
   const clearFirstSubmit = useCallback(() => setFirstSubmit(null), [])
-  const clearInsertion = useCallback(() => setInsertion(null), [])
   const shown = opened && opened.sessionId === sessionId ? opened : null
   useTabWorkingDirectory(shown?.cwd)
   const dock = useComposerDock(!sessionId)
@@ -362,8 +359,6 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
         onBranch={branch}
-        insertion={insertion}
-        onInserted={clearInsertion}
         waves={onOpenTask && <SessionWavesPanel sessionId={shown.sessionId} onOpenTask={onOpenTask} />}
       />
     )

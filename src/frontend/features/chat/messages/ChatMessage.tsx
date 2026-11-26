@@ -3,9 +3,9 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo } from "react"
-import { Brain, Loader2, RotateCcw, Trash2 } from "lucide-react"
+import { Brain, Loader2 } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { CopyAction, ForkAction, TurnAction, TurnRegion } from "@gigachad/chat-ui"
+import { TurnAnswer, TurnQuestion } from "@/features/conversation/TurnQuestion"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
 import type { Message, Attachment } from "@/lib/domain/types"
@@ -20,8 +20,13 @@ interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
   index: number
+  /** The question's delete, confirmed first. */
   onDelete?: (index: number) => void
-  onRegenerate?: (index: number) => void
+  /** The question's edit, confirmed first when `laterTurns` go with it. */
+  onEdit?: (index: number, text: string) => void
+  /** Pairs after this one, for the edit's confirmation. */
+  laterTurns?: number
+  /** The answer's branch. */
   onBranch?: (index: number) => void
   search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
@@ -110,23 +115,13 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurns, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const hasResearch = !isUser && !!research_steps?.length
   // Research steps stream into `content` as progress text until the final answer replaces them
   const isResearchRunning = hasResearch && isStreaming
-  const canCopy = !!content && !isResearchRunning
-  const canRegenerate = !isUser && onRegenerate && !isStreaming && !search_result && !hasResearch
-  const canBranch = !isUser && onBranch
-  const actions = [
-    canCopy && <CopyAction key="copy" text={content} label="Copy message" />,
-    canRegenerate && <TurnAction key="regenerate" label="Regenerate response" icon={<RotateCcw size={14} aria-hidden="true" />} onClick={() => onRegenerate(index)} />,
-    canBranch && <ForkAction key="branch" label="Branch conversation from this point" onFork={() => onBranch(index)} />,
-    onDelete && <TurnAction key="delete" tone="danger" label="Delete message pair" icon={<Trash2 size={14} aria-hidden="true" />} onClick={() => onDelete(index)} />,
-  ]
-
-  return (
-    <TurnRegion role={isUser ? "question" : "answer"} tail={hasResearch || search_result ? "activity" : "text"} actions={actions} onCollapse={isUser ? onCollapse : undefined}>
+  const body = (
+    <>
       {isUser ? (
         <>
           {content && <div><LaTeXMarkdown content={content} /></div>}
@@ -155,7 +150,32 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           isLive={isStreaming}
         />
       )}
-    </TurnRegion>
+    </>
+  )
+  if (isUser) {
+    return (
+      <TurnQuestion
+        text={content}
+        live={isStreaming}
+        onDelete={onDelete && (() => onDelete(index))}
+        onEdit={onEdit && ((text) => onEdit(index, text))}
+        laterTurns={laterTurns}
+        onCollapse={onCollapse}
+      >
+        {body}
+      </TurnQuestion>
+    )
+  }
+  return (
+    <TurnAnswer
+      text={isResearchRunning ? "" : content}
+      live={isStreaming}
+      onBranch={onBranch && (() => onBranch(index))}
+      branchLabel="Branch conversation from this point"
+      tail={hasResearch || search_result ? "activity" : "text"}
+    >
+      {body}
+    </TurnAnswer>
   )
 }
 

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript } from "../PiTranscript"
 import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
@@ -66,11 +66,11 @@ describe("PiTranscript window", () => {
     expect(onBranch).toHaveBeenCalledWith("e3")
   })
 
-  it("edits a turn by branching before its prompt with the prompt", () => {
-    const onBranch = vi.fn()
-    render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={onBranch} />)
-    fireEvent.click(screen.getByRole("button", { name: "Edit in a new branch" }))
-    expect(onBranch).toHaveBeenCalledWith("e1", "Prompt 1")
+  it("offers copy on a settled question and copy and branch on its answer, nothing else", () => {
+    render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={vi.fn()} />)
+    const names = (group: string) => within(screen.getAllByRole("group", { name: group }).at(-1)!).getAllByRole("button").map((button) => button.getAttribute("aria-label"))
+    expect(names("Question actions")).toEqual(["Copy message"])
+    expect(names("Answer actions")).toEqual(["Copy message", "Branch session from this point"])
   })
 
   it("previews an older turn's answer under its question with activity folded, as when opened", () => {

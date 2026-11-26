@@ -44,7 +44,6 @@ interface ChatContainerProps {
   onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
-  onRegenerate?: (index: number) => void
   onBranch?: (qaIndex: number) => void
   reveal?: ChatReveal
   branchMessageIdx?: number | null
@@ -98,7 +97,6 @@ export function ChatContainer({
   onSend,
   onCancel,
   onDeletePair,
-  onRegenerate,
   onBranch,
   reveal,
   branchMessageIdx,
@@ -177,11 +175,10 @@ export function ChatContainer({
       assistant={turn.pair.assistant}
       globalIndex={turn.pair.globalIndex}
       qaIndex={turn.pair.qaIndex}
-      isStreaming={isStreaming}
+      isStreaming={turn.live}
       onCollapse={collapse}
       onAttachmentClick={openPreview}
       onDelete={onDeletePair}
-      onRegenerate={onRegenerate}
       onBranch={onBranch}
     />
   )

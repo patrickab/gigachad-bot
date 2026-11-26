@@ -369,8 +369,8 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
     const surface = columnSurfaceOf(event.target)
     if (!own || (surface ? surface !== own : isTextField(event.target))) return
     const move = isModKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")
-    // Enter only from this surface or the page, never from a control elsewhere
-    const confirm = event.key === "Enter" && focusIndex >= 0 && (surface === own || event.target === document.body)
+    // Enter only from this surface or the page, never from a control elsewhere, nor from a question being edited
+    const confirm = event.key === "Enter" && focusIndex >= 0 && (surface === own || event.target === document.body) && !(isTextField(event.target) && scrollRef.current?.contains(event.target as Node))
     if (!move && !confirm) return
     claimedKeys.add(event)
     event.preventDefault()

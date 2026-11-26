@@ -10,9 +10,7 @@ import { attachReference } from "@/lib/backend/references"
 import {
   applyReferenceReads,
   buildAttachedSend,
-  buildHiddenContent,
   collectActiveImagePaths,
-  composeUserMessage,
   findAttachment,
   liveReferencePaths,
   readReferences,
@@ -49,7 +47,7 @@ function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record
   }
 }
 
-/** Send, regenerate and edit chat turns: attachment intake, tool artifacts, autosave, and undoable pair/attachment removal. */
+/** Send and edit chat turns: attachment intake, tool artifacts, autosave, and undoable pair/attachment removal. */
 export function useChatTurns({
   chat,
   chatId,
@@ -59,7 +57,7 @@ export function useChatTurns({
   prompts,
   autosave,
 }: {
-  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "removePair" | "setMessages" | "replaceMessages">
+  chat: Pick<UseChatStreamReturn, "messages" | "send" | "removePair" | "setMessages" | "replaceMessages">
   chatId: string
   projectSlug: string | null
   config: TabConfig
@@ -67,7 +65,7 @@ export function useChatTurns({
   prompts: Record<string, string>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
 }) {
-  const { messages, isStreaming, send, regenerateAt, removePair, setMessages, replaceMessages } = chat
+  const { messages, send, removePair, setMessages, replaceMessages } = chat
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
   const baseParams = useMemo(
@@ -78,14 +76,12 @@ export function useChatTurns({
   // Undo restores run up to six seconds later, they must not land in a different chat loaded into this tab meanwhile.
   const chatIdRef = useRef(chatId)
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
-  // Every handler reads the messages and the streaming flag here: created once per chat, they stay the same while a reply
-  // streams, so settled pairs skip its frames
+  // Every handler reads the messages here: created once per chat, they stay the same while a reply streams, so settled
+  // pairs skip its frames
   const messagesRef = useRef(messages)
-  const isStreamingRef = useRef(isStreaming)
   useLayoutEffect(() => {
     messagesRef.current = messages
-    isStreamingRef.current = isStreaming
-  }, [messages, isStreaming])
+  }, [messages])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -100,7 +96,7 @@ export function useChatTurns({
   }, [projectSlug, autosave])
 
   /**
-   * Re-read the chat's live references and those of `draft`, patched into the latest chat for the next `send` or `regenerateAt`.
+   * Re-read the chat's live references and those of `draft`, patched into the latest chat for the next `send`.
    *
    * - Each source is read once, the patch applies to whatever the chat holds once the reads finish
    */
@@ -155,27 +151,6 @@ export function useChatTurns({
     await finishTurn(await send(built.request, true))
   }, [refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
-  const handleRegenerate = useCallback(async (globalIndex: number) => {
-    if (isStreamingRef.current) return
-    const current = messagesRef.current
-    const assistantMsg = current[globalIndex + 1]
-    if (current[globalIndex]?.role !== "user" || assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
-    const { history } = await refreshForSend()
-    const userMsg = history[globalIndex]
-
-    const attachments = userMsg.attachments ?? []
-    const user_msg = attachments.length > 0
-      ? composeUserMessage(userMsg.content, userMsg.hiddenContent ?? buildHiddenContent(attachments))
-      : userMsg.content
-    await finishTurn(await regenerateAt(globalIndex, {
-      ...baseParams,
-      chat_id: chatId,
-      user_msg,
-      img_paths: collectActiveImagePaths(history, { userIndex: globalIndex }),
-      project_slug: projectSlug,
-    }))
-  }, [refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
-
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
     updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
   }, [setMessages])
@@ -229,7 +204,6 @@ export function useChatTurns({
 
   return {
     handleSend,
-    handleRegenerate,
     handleToggleAttachmentActive,
     handleRemoveAttachment,
     handleDeletePair,

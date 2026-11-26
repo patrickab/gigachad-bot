@@ -154,7 +154,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       extracting={extracting}
       onSend={handleSend}
       onCancel={chat.cancel}
-      onRegenerate={turns.handleRegenerate}
       onBranch={onBranch}
       reveal={reveal}
       branchMessageIdx={branchMessageIdx}

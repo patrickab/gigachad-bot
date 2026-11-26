@@ -2,9 +2,9 @@
 
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
-import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Brain, ChevronRight, CornerUpLeft, FoldVertical, Sparkles, Square, TerminalSquare, Volume2 } from "lucide-react"
-import { CopyAction, ForkAction, PREVIEW_HEAD_CHARS, previewHead, TurnAction, TurnPreview, TurnRegion, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
+import { createContext, Fragment, memo, useContext, useMemo, useRef, useState, type ReactNode } from "react"
+import { Brain, ChevronRight, FoldVertical, Sparkles, TerminalSquare } from "lucide-react"
+import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -12,6 +12,7 @@ import { useTabActive } from "@/contexts/TabContext"
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
+import { TurnAnswer, TurnQuestion } from "@/features/conversation/TurnQuestion"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
 import { PiSearchBar } from "./PiSearchBar"
@@ -249,24 +250,6 @@ function CollapsedAnswer({ pieces, runs, fileLinks }: { pieces: Piece[]; runs: R
   return <div ref={attach} className="contents"><Answer pieces={full ? pieces : headPieces(pieces)} runs={runs} live={false} fileLinks={fileLinks} /></div>
 }
 
-/** Speaks `text` with the browser's speech synthesis, a second press stops it. A Pi-only answer action, beside the chat's copy and branch. */
-function ReadAloudAction({ text }: { text: string }) {
-  const [speaking, setSpeaking] = useState(false)
-  useEffect(() => () => {
-    if (speaking) speechSynthesis.cancel()
-  }, [speaking])
-  const toggle = () => {
-    speechSynthesis.cancel()
-    if (speaking) return setSpeaking(false)
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.onend = () => setSpeaking(false)
-    utterance.onerror = () => setSpeaking(false)
-    speechSynthesis.speak(utterance)
-    setSpeaking(true)
-  }
-  return <TurnAction label={speaking ? "Stop reading" : "Read aloud"} onClick={toggle} icon={speaking ? <Square size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />} />
-}
-
 function clip(text: string): string {
   const firstLine = text.trim().split("\n")[0] ?? ""
   return firstLine.length <= MAX_LABEL_LENGTH ? firstLine : `${firstLine.slice(0, MAX_LABEL_LENGTH)}\u2026`
@@ -320,8 +303,8 @@ const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirm
   streaming: AssistantMessage | null
   live: boolean
   onCollapse?: () => void
-  /** Branch keeping `entryId`; `prompt` goes into the branch's composer (Edit). */
-  onBranch?: (entryId: string, prompt?: string) => void
+  /** Branch keeping `entryId`. */
+  onBranch?: (entryId: string) => void
 }) {
   const prompt = messages[turn.start]
   const { text, compaction, skill } = promptOf(prompt)
@@ -334,30 +317,25 @@ const PiTurnBody = memo(function PiTurnBody({ messages, turn, streaming, confirm
   // Branch from the turn's last persisted entry; a turn with none yet (live, optimistic) has no branch point
   const lastConfirmed = Math.min(turn.end, confirmed.count) - 1
   const branchFrom = !live && onBranch && lastConfirmed >= turn.start ? confirmed.entryIds[lastConfirmed] : undefined
-  // Edit branches from the entry before the prompt, with the prompt back in the composer
-  const editFrom = !live && !compaction && onBranch && turn.start > 0 && turn.start < confirmed.count ? confirmed.entryIds[turn.start - 1] : undefined
-  const questionActions = live ? [] : [
-    <CopyAction key="copy" text={text} label="Copy message" />,
-    ...(editFrom ? [<TurnAction key="edit" label="Edit in a new branch" icon={<CornerUpLeft size={14} aria-hidden="true" />} onClick={() => onBranch!(editFrom, text)} />] : []),
-  ]
-  const answerActions = live ? [] : [
-    ...(answerText ? [<CopyAction key="copy" text={answerText} label="Copy message" />] : []),
-    ...(answerText.trim() && typeof speechSynthesis !== "undefined" ? [<ReadAloudAction key="read" text={answerText} />] : []),
-    ...(branchFrom ? [<ForkAction key="branch" label="Branch session from this point" onFork={() => onBranch!(branchFrom)} />] : []),
-  ]
   return (
     <>
-      <TurnRegion role="question" icon={icon} onCollapse={onCollapse} actions={questionActions.length > 0 ? questionActions : undefined}>
+      <TurnQuestion text={text} live={live} icon={icon} onCollapse={onCollapse}>
         {promptMarks && <MarksLine marks={promptMarks} />}
         {skill && <SkillFold skill={skill} fileLinks={fileLinks} />}
         {text || !skill ? <div data-entry-id={promptEntryId}><LaTeXMarkdown content={text} fileLinks={fileLinks} /></div> : null}
         {promptImages.length > 0 && <ToolImages attachments={promptImages} />}
-      </TurnRegion>
+      </TurnQuestion>
       {pieces.length > 0 && (
         <TurnSurface>
-          <TurnRegion role="answer" tail={isActivity(pieces[pieces.length - 1]) ? "activity" : "text"} actions={answerActions.length > 0 ? answerActions : undefined}>
+          <TurnAnswer
+            text={answerText}
+            live={live}
+            onBranch={branchFrom ? () => onBranch!(branchFrom) : undefined}
+            branchLabel="Branch session from this point"
+            tail={isActivity(pieces[pieces.length - 1]) ? "activity" : "text"}
+          >
             <Answer pieces={pieces} runs={runs} live={live} fileLinks={fileLinks} />
-          </TurnRegion>
+          </TurnAnswer>
         </TurnSurface>
       )}
     </>
@@ -371,14 +349,13 @@ interface PiColumnTurn extends ConversationTurn {
 
 /**
  * Every turn as the regular chat's Q&A card in the shared `ConversationColumn` (paging, following the end, open state, width,
- * wide mode): the question with Edit, the answer with activity folded into "Process details" and Read aloud. File links open
- * through `fileLinks`.
+ * wide mode): the question and the answer with the shared turn actions (`TurnQuestion`, `TurnAnswer`), activity folded into
+ * "Process details". File links open through `fileLinks`.
  *
  * - A turn's key is its prompt's entry id, a pending prompt's its position until its entry arrives
  * - A search hit (`search`) reveals its turn, scrolls to the hit, centred, and holds the view there; Enter and Shift+Enter
  *   (outside text fields) step through the session's hits, Escape clears
- * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message,
- *   and Edit, with the entry before the prompt and the prompt
+ * - `onBranch` adds "Branch session from this point" to settled turns, with the entry id of the turn's last persisted message
  * - `onColumnChange` gets the turn column, for the top bar's model name to make way for it like a chat's
  * - `readOnly` (a session preview): keys never reach its column
  */
@@ -391,7 +368,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   fileLinks: FileLinks
   /** The session search hit to show: its turn is mounted and opened, the view scrolls to it and every hit is painted (CSS Custom Highlight API). */
   search?: PiSearchFocus | null
-  onBranch?: (entryId: string, prompt?: string) => void
+  onBranch?: (entryId: string) => void
   paddingBottom?: number
   onColumnChange?: (column: HTMLDivElement | null) => void
   readOnly?: boolean

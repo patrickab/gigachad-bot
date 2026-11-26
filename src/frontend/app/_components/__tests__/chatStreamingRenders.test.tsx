@@ -15,10 +15,10 @@ import { useTabChat } from "../useTabChat"
  *
  * Props covered, every one `TabContent` hands `ChatContainer` (add a new one here and to `TabChat` below):
  * chatId, historyFile, draftKey, onChatColumnChange, messages, historyLoading, isStreaming, onDeletePair, extracting,
- * onSend, onCancel, onRegenerate, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
+ * onSend, onCancel, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
  * (onToggleActive, onRemove, onContentChange, onPreviewOpen), attachMenuItems, composerLeading, composerNotice.
  * What `ChatContainer` hands a pair from them: the pair's messages and indexes, isStreaming, onCollapse,
- * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onRegenerate, onBranch, the branch separator.
+ * onAttachmentClick (from attachmentActions.onPreviewOpen), onDelete, onBranch, the branch separator.
  */
 
 const { renders, attachmentClicks, stream, history, branches, undoDelete, enabledTools } = vi.hoisted(() => ({
@@ -138,7 +138,6 @@ function TabChat({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabC
       extracting={extracting}
       onSend={(text, attachments) => turns.handleSend(text, attachments)}
       onCancel={chat.cancel}
-      onRegenerate={turns.handleRegenerate}
       onBranch={onBranch}
       reveal={reveal}
       branchMessageIdx={branchMessageIdx}

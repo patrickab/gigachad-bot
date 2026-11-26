@@ -48,18 +48,18 @@ interface ChatPairBodyProps {
   globalIndex: number
   /** Position among the pairs. */
   qaIndex: number
+  /** The pair is live: its answer streams and neither side has actions. */
   isStreaming: boolean
   /** Unset for a live pair. */
   onCollapse?: () => void
   onAttachmentClick?: (messageIndex: number, attachment: Attachment) => void
   /** Unset -> read-only pair without a delete action. */
   onDelete?: (index: number) => void
-  onRegenerate?: (index: number) => void
   onBranch?: (qaIndex: number) => void
 }
 
 /** An open pair's card content: the question, its tool calls and the answer. Props stay equal for a settled pair, so a streamed frame skips it. */
-export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onRegenerate, onBranch }: ChatPairBodyProps) {
+export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreaming, onCollapse, onAttachmentClick, onDelete, onBranch }: ChatPairBodyProps) {
   return (
     <>
       <ChatMessage
@@ -67,6 +67,7 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         content={user.content}
         attachments={user.attachments}
         index={globalIndex}
+        isStreaming={isStreaming}
         onAttachmentClick={onAttachmentClick && ((attachment) => onAttachmentClick(globalIndex, attachment))}
         onDelete={onDelete}
         onCollapse={onCollapse}
@@ -86,8 +87,6 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
           toolRunning={assistant.tool_calls?.some((c) => c.status === "running")}
           isStreaming={isStreaming}
           index={globalIndex}
-          onDelete={onDelete}
-          onRegenerate={onRegenerate}
           onBranch={onBranch && (() => onBranch(qaIndex))}
         />
       </TurnSurface>

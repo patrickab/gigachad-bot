@@ -24,12 +24,11 @@ export interface UseChatStreamReturn {
   isStreaming: boolean
   /** `skipAddMessages` streams into the existing trailing assistant message instead of appending a user/assistant pair. */
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
-  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
   /** Take the pair starting at `user` out of the chat; the returned restore puts it back before the message that followed it, or at its old index (clamped) once that is gone. Null when `user` heads no pair. */
   removePair: (user: Message) => (() => void) | null
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
-  /** Update the latest messages so a `send` or `regenerateAt` right after builds its history from them, without waiting for a render. Returns the result. */
+  /** Update the latest messages so a `send` right after builds its history from them, without waiting for a render. Returns the result. */
   replaceMessages: (update: (current: Message[]) => Message[]) => Message[]
   totalUsage: Usage
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
@@ -50,7 +49,7 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
     })
 }
 
-/** Own the message list and stream one assistant reply at a time. `send` and `regenerateAt` resolve to null when cancelled, failed, or not completed. */
+/** Own the message list and stream one assistant reply at a time. `send` resolves to null when cancelled, failed, or not completed. */
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [totalUsage, setTotalUsage] = useState<Usage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
@@ -172,24 +171,6 @@ export function useChatStream(): UseChatStreamReturn {
     [streamAssistantReply]
   )
 
-  const regenerateAt = useCallback(
-    async (userIndex: number, req: ChatRequest) => {
-      const current = messagesRef.current
-      const userMsg = current[userIndex]
-      if (!userMsg || userMsg.role !== "user") return null
-
-      const assistantMsg: Message = { role: "assistant", content: "" }
-      const truncated = current.slice(0, userIndex + 1)
-      const next = [...truncated, assistantMsg]
-      messagesRef.current = next
-      setMessages(next)
-
-      const history = buildHistory(truncated)
-      return streamAssistantReply(req, history, assistantMsg)
-    },
-    [streamAssistantReply]
-  )
-
   const cancel = useCallback(() => {
     abortRef.current?.()
     setIsStreaming(false)
@@ -220,5 +201,5 @@ export function useChatStream(): UseChatStreamReturn {
   }, [replaceMessages])
 
 
-  return { messages, isStreaming, send, regenerateAt, cancel, removePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
+  return { messages, isStreaming, send, cancel, removePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
 }
