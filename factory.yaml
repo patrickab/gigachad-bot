@@ -5,7 +5,11 @@
 # `node_modules` for `src/frontend` and `pi-host`. So `after_create` has nothing to install, and tests and previews of a
 # worktree run on the main checkout's packages.
 hooks:
-  after_create: []
+  # A worktree the factory adds itself (a wave's review worktree) does not come from `agent-worktree` and has no
+  # `node_modules`: copy the main checkout's, each under a name outside the tree until it is whole, so a gate never sees
+  # half a copy and the worktree never holds an untracked folder.
+  after_create:
+    - [bash, -c, 'main=$(git worktree list --porcelain | sed -n "1s/^worktree //p"); for d in src/frontend pi-host; do [ -d "$d/node_modules" ] && continue; stage="$PWD.$(basename "$d").node_modules"; rm -rf "$stage"; cp -a --reflink=auto "$main/$d/node_modules" "$stage" && mv "$stage" "$d/node_modules"; done']
   after_code: []
   # Run in the main checkout after a merge that changed a lockfile, so its packages (the ones every worktree shares or
   # copies) match the merged lockfiles. Never run `uv sync` in a worktree: it would rebuild the overlay as a full venv.
