@@ -311,7 +311,8 @@ turn there. No session has to poll.
 | `rebase_failed: …` | a rebase failed without a conflict (deleted branch, untracked file in the way) | fix, retry |
 | `review_<status>` | the reviewer gave no usable verdict | retry |
 | `pipeline_error: …` | an unexpected error | read it, retry |
-| wave `conflict` | the wave's branch does not rebase onto the target | rebase it by hand and `waves.retry`, or `waves.add` a task that resolves it |
+| wave `conflict` | the factory's own tries did not settle it (additions-only merge, then two conflict tasks) | rebase it by hand in a worktree of your own, run the gates, `waves.retry` |
+| "The factory is not installed (… Export named … not found …)" | pi-host imports the factory's core by path and keeps the modules it loaded; the factory was updated under it | restart the dev stack |
 | wave `dirty` | a gate or the rebase left changed or untracked files in the review worktree | `waves.add` a task that fixes the cause, `waves.retry` |
 
 ## Settings and models
