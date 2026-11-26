@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 import dataclasses
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import hashlib
 import io
 from pathlib import Path
@@ -43,6 +44,7 @@ class MemoryDataStore:
 
     def __init__(self) -> None:
         self._documents: dict[str, bytes] = {}
+        self._modified: dict[str, datetime] = {}
 
     def read_bytes(self, key: str) -> tuple[bytes, Revision]:
         try:
@@ -59,6 +61,7 @@ class MemoryDataStore:
     ) -> Revision:
         del expected, meta
         self._documents[key] = content
+        self._modified[key] = datetime.now(UTC)
         return Revision(hashlib.sha256(content).hexdigest())
 
     def apply(
@@ -73,7 +76,11 @@ class MemoryDataStore:
     def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
         del recursive
         scope = f"{prefix}/" if prefix else ""
-        return [Entry(key=key, is_dir=False, size=len(value)) for key, value in self._documents.items() if key.startswith(scope)]
+        return [
+            Entry(key=key, is_dir=False, size=len(value), modified=self._modified.get(key))
+            for key, value in self._documents.items()
+            if key.startswith(scope)
+        ]
 
     def exists(self, key: str) -> bool:
         return key in self._documents
@@ -88,6 +95,7 @@ class MemoryDataStore:
 
     def move(self, source: str, destination: str) -> None:
         self._documents[destination] = self._documents.pop(source)
+        self._modified[destination] = self._modified.pop(source, datetime.now(UTC))
 
 
 class MemoryRepositoryStore:

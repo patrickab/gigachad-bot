@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
@@ -44,6 +44,24 @@ def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str,
 # Registered before `/{filename:path}` so the literal path is not captured as a filename
 def get_branch_meta(dirs: str | None = None, store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
     return store.get_branch_meta(dirs)
+
+
+@router.get("/all")
+# Registered before `/{filename:path}`, like `/branch-meta`
+def list_all_chats(store: ChatStore = Depends(get_chat_store)) -> dict[str, list[dict[str, Any]]]:
+    """Every chat of the login, project chats included, newest first."""
+    return {"chats": store.list_all()}
+
+
+@router.get("/search")
+# Registered before `/{filename:path}`, like `/branch-meta`
+def search_chats(
+    q: str = "", limit: int = Query(20, ge=1, le=100), store: ChatStore = Depends(get_chat_store)
+) -> dict[str, list[dict[str, Any]]]:
+    """Chats whose question or answer text holds *q*, case-insensitive, at most *limit* of them, newest first."""
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Empty search query")
+    return {"hits": store.search(q, limit)}
 
 
 @router.get("/{filename:path}")

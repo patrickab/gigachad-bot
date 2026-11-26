@@ -19,6 +19,7 @@ from lib.data_store import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
+    from datetime import datetime
 
     from psycopg import Connection
 
@@ -29,8 +30,10 @@ class PostgresDataStore:
     def __init__(self, scope: UserScope) -> None:
         self._scope = scope
 
-    def _entry(self, key: str, is_dir: bool, size: int, version: int) -> Entry:
-        return Entry(key, is_dir=bool(is_dir), size=None if is_dir else size, revision=None if is_dir else self._revision(version))
+    def _entry(self, key: str, is_dir: bool, size: int, version: int, modified: datetime | None = None) -> Entry:
+        if is_dir:
+            return Entry(key, is_dir=True)
+        return Entry(key, is_dir=False, size=size, revision=self._revision(version), modified=modified)
 
     @staticmethod
     def _revision(version: int) -> Revision:
@@ -138,7 +141,7 @@ class PostgresDataStore:
         self._scope.record(connection, kind="document", key=key, operation="write", version=version)
         return self._revision(version)
 
-    def _delete(self, connection, key: str, recursive: bool) -> None:
+    def _delete(self, connection: Connection, key: str, recursive: bool) -> None:
         key = validate_key(key)
         if not recursive:
             child = connection.execute(
@@ -173,7 +176,7 @@ class PostgresDataStore:
         with self._scope.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT key, is_dir, octet_length(content), version
+                SELECT key, is_dir, octet_length(content), version, updated_at
                 FROM documents
                 WHERE user_id = %s AND key LIKE %s ESCAPE '\\'
                 ORDER BY key
@@ -183,17 +186,17 @@ class PostgresDataStore:
 
         # Directories can be implicit (only descendants stored), so synthesize missing ancestors.
         entries: dict[str, Entry] = {}
-        for key, is_dir, size, version in rows:
+        for key, is_dir, size, version, modified in rows:
             parts = PurePosixPath(key).relative_to(prefix).parts
             if recursive:
                 for index in range(1, len(parts)):
                     ancestor = PurePosixPath(prefix, *parts[:index]).as_posix()
                     entries.setdefault(ancestor, Entry(ancestor, is_dir=True))
-                entries[key] = self._entry(key, is_dir, size, version)
+                entries[key] = self._entry(key, is_dir, size, version, modified)
             else:
                 child = PurePosixPath(prefix, parts[0]).as_posix()
                 if len(parts) == 1:
-                    entries[child] = self._entry(child, is_dir, size, version)
+                    entries[child] = self._entry(child, is_dir, size, version, modified)
                 else:
                     entries.setdefault(child, Entry(child, is_dir=True))
         return list(entries.values())

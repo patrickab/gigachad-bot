@@ -73,3 +73,37 @@ export async function mergeBranch(childFile: string): Promise<{ status: string }
 export async function cascadeDelete(filename: string): Promise<{ status: string; deleted: string[] }> {
   return del(`/chat-histories/cascade/${encodePath(filename)}`)
 }
+
+/** A chat of the login, project chats included. `historyFile` is what `loadChatHistory` and `TabManager.showChat` take. */
+export interface ChatListing {
+  historyFile: string
+  projectSlug: string | null
+  title: string
+  updatedAt: string
+}
+
+/** One occurrence of the query: in the question or answer of the pair at `qaIndex`, the `ordinal`-th in that text. */
+export interface ChatSearchMatch {
+  qaIndex: number
+  role: "user" | "assistant"
+  ordinal: number
+  snippet: string
+}
+
+/** A chat holding the query, with its matches (capped per chat by the backend). */
+export interface ChatSearchHit extends ChatListing {
+  matches: ChatSearchMatch[]
+}
+
+/** Every chat of the login, newest first. */
+export async function listAllChats(signal?: AbortSignal): Promise<ChatListing[]> {
+  const { chats } = await request<{ chats: ChatListing[] }>("/chat-histories/all", { signal })
+  return chats
+}
+
+/** Chats whose question or answer text holds `query` (case-insensitive), newest first, at most `limit` (1..100) chats. */
+export async function searchChats(query: string, limit = 20, signal?: AbortSignal): Promise<ChatSearchHit[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) })
+  const { hits } = await request<{ hits: ChatSearchHit[] }>(`/chat-histories/search?${params}`, { signal })
+  return hits
+}

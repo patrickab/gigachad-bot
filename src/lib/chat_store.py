@@ -14,6 +14,7 @@ from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, library
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from datetime import datetime
 
     from lib.references import Released
 
@@ -374,13 +375,81 @@ class ChatStore:
             files.append(rel)
         return {"files": files}
 
+    def list_all(self) -> list[dict[str, Any]]:
+        """Every chat of the user, project chats included, newest first, without reading chat bodies."""
+        chats = self._listed_chats()
+        # Meta written before titles were stored is derived once from the chat body and kept.
+        metas = self._metas(CHAT, _is_chat_key, require="title")
+        tabs = self._project_tab_names({chat.slug for chat in chats if chat.slug})
+        return [chat.listing(_stored_title(metas.get(chat.key)), tabs) for chat in chats]
+
+    def search(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """Chats whose question or answer text holds *query* (case-insensitive), newest first, at most *limit* of them.
+
+        Nothing is indexed: chat bodies are read in batches, newest first, until *limit* chats matched.
+        """
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+        chats = self._listed_chats()
+        tabs = self._project_tab_names({chat.slug for chat in chats if chat.slug})
+        hits: list[dict[str, Any]] = []
+        for start in range(0, len(chats), _SEARCH_BATCH):
+            batch = chats[start : start + _SEARCH_BATCH]
+            bodies = self._docs.read_many(chat.key for chat in batch)
+            for chat in batch:
+                raw = bodies.get(chat.key)
+                if not isinstance(raw, (dict, list)):
+                    continue
+                stored = Chat.from_raw(raw)
+                matches = _search_messages(stored.messages, pattern)
+                if matches:
+                    title = stored.title if isinstance(stored.title, str) else None
+                    hits.append({**chat.listing(title, tabs), "matches": matches})
+                    if len(hits) >= limit:
+                        return hits
+        return hits
+
+    def _listed_chats(self) -> list[_ListedChat]:
+        """Every listed chat (hidden folders and `_` files left out), newest first, from one listing query."""
+        prefix = f"{CHAT}/"
+        entries = [e for e in self._docs.list(CHAT, recursive=True) if not e.is_dir]
+        marker = f"/{PROJECT_JSON}"
+        rels = [e.key.removeprefix(prefix) for e in entries]
+        project_dirs = {rel.removesuffix(marker) for rel in rels if rel.count("/") == 1 and rel.endswith(marker)}
+        chats: list[_ListedChat] = []
+        for entry in entries:
+            rel = entry.key.removeprefix(prefix)
+            *dirs, name = rel.split("/")
+            if not _is_chat_file(name) or name.startswith("_") or _in_hidden_dir(dirs):
+                continue
+            slug = dirs[0] if dirs and dirs[0] in project_dirs else None
+            chats.append(_ListedChat(entry.key, rel, slug, entry.modified))
+        # Newest first, a chat without a known date last, the path breaking ties so the order is stable.
+        chats.sort(key=lambda chat: chat.history_file)
+        chats.sort(key=lambda chat: chat.modified.timestamp() if chat.modified else float("-inf"), reverse=True)
+        return chats
+
+    def _project_tab_names(self, slugs: set[str]) -> dict[str, dict[str, str]]:
+        """Per project, the display name of each tab by its chat filename, as the sidebar labels project chats."""
+        projects = self._docs.read_many(project_json(slug) for slug in sorted(slugs))
+        names: dict[str, dict[str, str]] = {}
+        for slug in slugs:
+            data = projects.get(project_json(slug))
+            tabs = data.get("tabs") if isinstance(data, dict) else None
+            labels: dict[str, str] = {}
+            for tab in tabs if isinstance(tabs, list) else []:
+                label = (tab.get("name") or tab.get("title")) if isinstance(tab, dict) else None
+                if isinstance(label, str) and label and isinstance(tab.get("filename"), str):
+                    labels[tab["filename"]] = label
+            names[slug] = labels
+        return names
+
     def tree_metas(self) -> dict[str, Meta | None]:
         """Stored tree meta (chat ID and attachment references included) of every chat, without reading chat bodies."""
         return self._metas(CHAT, _is_chat_key)
 
-    def _metas(self, prefix: str, select: Callable[[str], bool]) -> dict[str, Meta | None]:
-        """Tree meta of the chats under *prefix* that *select* accepts. Meta stored before `refs` existed is derived again."""
-        return self._docs.list_meta(prefix, select, _tree_meta, require="refs")
+    def _metas(self, prefix: str, select: Callable[[str], bool], *, require: str = "refs") -> dict[str, Meta | None]:
+        """Tree meta of the chats under *prefix* that *select* accepts. Meta stored without the field *require* is derived again."""
+        return self._docs.list_meta(prefix, select, _tree_meta, require=require)
 
     def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
         """Tree metadata for each chat file. *dirs* is comma-separated project dirs (empty entry for root), None scans all."""
@@ -496,7 +565,7 @@ def _attachment_refs(messages: object) -> list[str]:
 
 
 def _tree_meta(raw: object) -> Meta | None:
-    """Tree fields and attachment references of a parsed chat, stored beside it. None when *raw* is not a chat."""
+    """Tree fields, title and attachment references of a parsed chat, stored beside it. None when *raw* is not a chat."""
     if not isinstance(raw, (dict, list)):
         return None
     chat = Chat.from_raw(raw)
@@ -511,8 +580,76 @@ def _tree_meta(raw: object) -> Meta | None:
         "branch_message_idx": chat.branch_message_idx,
         "children": chat.children,
         "qa_count": qa_count,
+        "title": chat.title if isinstance(chat.title, str) else None,
         "refs": _attachment_refs(chat.messages),
     }
+
+
+# Matches reported per chat, and the characters a snippet shows on each side of its match.
+SEARCH_MATCH_CAP = 20
+SNIPPET_CONTEXT = 60
+# Chat bodies read per query while searching, so a search that fills its limit early reads no more.
+_SEARCH_BATCH = 50
+
+
+@dataclass(frozen=True)
+class _ListedChat:
+    """A chat found by a listing: storage key, history file, project slug and last write."""
+
+    key: str
+    history_file: str
+    slug: str | None
+    modified: datetime | None
+
+    def listing(self, title: str | None, tab_names: dict[str, dict[str, str]]) -> dict[str, Any]:
+        """The chat as the list and search routes answer it. Titled like the sidebar: tab name, chat title, file stem."""
+        filename = self.history_file.removeprefix(f"{self.slug}/") if self.slug else self.history_file
+        tab_name = tab_names.get(self.slug, {}).get(filename) if self.slug else None
+        return {
+            "historyFile": self.history_file,
+            "projectSlug": self.slug,
+            "title": tab_name or title or PurePosixPath(filename).stem,
+            "updatedAt": self.modified.isoformat() if self.modified else "",
+        }
+
+
+def _stored_title(meta: Meta | None) -> str | None:
+    title = meta.get("title") if meta else None
+    return title if isinstance(title, str) and title else None
+
+
+def _search_messages(messages: object, pattern: re.Pattern[str]) -> list[dict[str, Any]]:
+    """Occurrences of *pattern* in each pair's question and answer, at most `SEARCH_MATCH_CAP`.
+
+    Pairs as the frontend's `pairMessages` builds them: a user message at an even index and the message after it,
+    so `qaIndex` is the pair's position and the one `ChatFocus` takes.
+    """
+    if not isinstance(messages, list):
+        return []
+    matches: list[dict[str, Any]] = []
+    qa_index = 0
+    for start in range(0, len(messages), 2):
+        question = messages[start]
+        if not isinstance(question, dict) or question.get("role") != "user":
+            continue
+        answer = messages[start + 1] if start + 1 < len(messages) else None
+        for role, message in (("user", question), ("assistant", answer)):
+            text = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(text, str):
+                continue
+            for ordinal, found in enumerate(pattern.finditer(text)):
+                matches.append({"qaIndex": qa_index, "role": role, "ordinal": ordinal, "snippet": _snippet(text, found)})
+                if len(matches) >= SEARCH_MATCH_CAP:
+                    return matches
+        qa_index += 1
+    return matches
+
+
+def _snippet(text: str, found: re.Match[str]) -> str:
+    """The match with up to `SNIPPET_CONTEXT` characters on each side, whitespace folded to one line."""
+    start, end = max(0, found.start() - SNIPPET_CONTEXT), min(len(text), found.end() + SNIPPET_CONTEXT)
+    snippet = " ".join(text[start:end].split())
+    return f"{'…' if start > 0 else ''}{snippet}{'…' if end < len(text) else ''}"
 
 
 def _build_payload(

@@ -43,7 +43,7 @@ class Revision:
 
 @dataclass(frozen=True)
 class Entry:
-    """Listing item. `size` and `revision` are None for directories, `modified` (last write) is set by `stat` only."""
+    """Listing item. `size` and `revision` are None for directories, `modified` (last write) is set for files where it is known."""
     key: str
     is_dir: bool
     size: int | None = None
