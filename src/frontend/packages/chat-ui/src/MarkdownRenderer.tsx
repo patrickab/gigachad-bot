@@ -3,7 +3,7 @@
 import { Streamdown, defaultRehypePlugins, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { memo, useCallback, useMemo, type ClipboardEvent as ReactClipboardEvent, type ComponentProps, type CSSProperties } from "react"
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, type ClipboardEvent as ReactClipboardEvent, type ComponentProps, type CSSProperties } from "react"
 import { proseComponents, type CodeRenderers } from "./components.tsx"
 import { escapeCurrencyDollars, normalizeMathDelimiters, remarkHtmlMath } from "./math.ts"
 import { selectionToMarkdown } from "./selectionToMarkdown.ts"
@@ -93,18 +93,21 @@ function MarkdownRendererInner({
 
   // Rendered checkboxes follow source order, so a checkbox's index among its root's checkboxes is its task index.
   // Read from the DOM at toggle time: Streamdown re-renders blocks independently, so render order can't number them.
+  // The latest source, read at toggle time: a handler that changed with every streamed character would rebuild `components`, and Streamdown then re-parses every block.
+  const latest = useRef({ content, checkboxLines })
+  useLayoutEffect(() => { latest.current = { content, checkboxLines } }, [content, checkboxLines])
   const handleToggle = useCallback((checkbox: HTMLInputElement, wasChecked: boolean) => {
     if (!onContentChange) return
     const root = checkbox.closest("[data-markdown-root]")
     const idx = root ? [...root.querySelectorAll("input[type=checkbox]")].indexOf(checkbox) : -1
-    const lineIdx = checkboxLines[idx]
+    const lineIdx = latest.current.checkboxLines[idx]
     if (lineIdx === undefined) return
-    const lines = content.split("\n")
+    const lines = latest.current.content.split("\n")
     lines[lineIdx] = wasChecked
       ? lines[lineIdx].replace("- [x]", "- [ ]")
       : lines[lineIdx].replace("- [ ]", "- [x]")
     onContentChange(lines.join("\n"))
-  }, [content, checkboxLines, onContentChange])
+  }, [onContentChange])
 
   const components = useMemo<Components>(() => {
     const base: Components = { ...proseComponents(codeRenderers), ...hostComponents }
