@@ -4,6 +4,8 @@ import { useId, useState, type ReactNode } from "react"
 import { Check, ChevronDown, CircleAlert, CircleSlash, Factory, LoaderCircle, type LucideIcon } from "lucide-react"
 import { Disclosure } from "@/components/ui/Disclosure"
 import { isRecord } from "@/lib/utils"
+import { factoryCard } from "./factoryCard"
+import { FactoryEvent } from "./factoryView"
 import { registerToolRenderer } from "./renderers"
 import { PairedResult } from "./tools/DiffView"
 import { formatDuration } from "./tools/format"
@@ -144,8 +146,11 @@ function WaveTaskLines({ tasks }: { tasks: WaveTask[] }) {
 /**
  * The `factory` tool's row: a verb for the action and what it names, the result's first line at the right; opened,
  * the parameters as a short list, a wave's tasks one line each, long text and the result behind disclosures.
+ * A settled result with a card (`details.card`) shows the card instead, its text being the result's.
  */
 registerToolRenderer("factory", (call, run, next) => {
+  const card = run?.result && !run.running && !run.isError ? factoryCard(run.result.details) : null
+  if (card) return <FactoryEvent card={card} text={resultText(run) ?? ""} />
   const { action, ...params } = isRecord(call.arguments) ? call.arguments : {}
   if (typeof action !== "string" || action === "") return next()
   if (params.tasks !== undefined && !(Array.isArray(params.tasks) && params.tasks.every(isWaveTask))) return next()

@@ -1,16 +1,26 @@
 "use client"
 
 import { Disclosure } from "@/components/ui/Disclosure"
+import { isRecord } from "@/lib/utils"
+import { factoryCard } from "./factoryCard"
+import { FactoryEvent } from "./factoryView"
 import { registerMessageRenderer } from "./renderers"
+import { textOf } from "./transcript"
 
 /** Stages of a notice's first line that need the user's eye. */
 const ATTENTION = /rejected|blocked|interrupted|asks|waits|never start/
 
 /**
- * The notice the agent factory sends into the session that declared a task or wave (`factory-notice`). Its text is
- * meant for the agent: the transcript shows its first line, the rest opens on demand as plain text.
+ * The notice the agent factory sends into the session that declared a task or wave (`factory-notice`). With a card
+ * (`details.card`) it shows the card, keyed by `details.key` for the decision that answers it. Without one its text,
+ * meant for the agent: the first line, the rest opens on demand as plain text.
  */
 registerMessageRenderer("factory-notice", (message, next) => {
+  const card = factoryCard(message.details)
+  if (card) {
+    const key = isRecord(message.details) && typeof message.details.key === "string" ? message.details.key : undefined
+    return <FactoryEvent card={card} text={textOf(message.content)} noticeKey={key} />
+  }
   if (typeof message.content !== "string" || !message.content.trim()) return next()
   const [first, ...rest] = message.content.trim().split("\n")
   const title = first.replace(/^factory:\s*/, "")

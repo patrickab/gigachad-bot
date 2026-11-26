@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { Factory } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { Disclosure } from "@/components/ui/Disclosure"
@@ -10,6 +11,8 @@ interface FactoryCardProps {
   card: Card
   /** Opens a finding's file, at its line when it names one. */
   onOpenFile?: (path: string, line?: number) => void
+  /** Controls at the title row's right (`Disclosure` actions): the view switch, a decision's link. */
+  actions?: ReactNode
   className?: string
 }
 
@@ -60,7 +63,7 @@ function FindingGroup({ severity, findings, onOpenFile }: { severity: FindingSev
  * warning ink, quiet muted), tag, state, progress and cost at the right; opened, its rows, its findings grouped by
  * severity and collapsed to counts, its text as markdown. An attention card starts open. Nothing is derived here.
  */
-export function FactoryCard({ card, onOpenFile, className = "my-1" }: FactoryCardProps) {
+export function FactoryCard({ card, onOpenFile, actions, className = "my-1" }: FactoryCardProps) {
   const facts = meta(card)
   const groups = SEVERITIES
     .map((severity) => ({ severity, findings: (card.findings ?? []).filter((finding) => finding.severity === severity) }))
@@ -75,9 +78,9 @@ export function FactoryCard({ card, onOpenFile, className = "my-1" }: FactoryCar
     </>
   )
   const ink = card.tone === "attention" ? "text-warning" : undefined
-  if (!hasBody) return <Disclosure className={className} icon={Factory} summary={summary} summaryClassName={ink} />
+  if (!hasBody) return <Disclosure className={className} icon={Factory} summary={summary} summaryClassName={ink} actions={actions} />
   return (
-    <Disclosure className={className} icon={Factory} summary={summary} summaryClassName={ink} defaultOpen={card.tone === "attention"}>
+    <Disclosure className={className} icon={Factory} summary={summary} summaryClassName={ink} actions={actions} defaultOpen={card.tone === "attention"}>
       <div className="flex flex-col gap-1 pb-1 pl-5 text-xs">
         {rows.length > 0 && (
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">

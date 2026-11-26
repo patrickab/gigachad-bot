@@ -8,7 +8,7 @@ import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewIn
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { useEventListener } from "@/hooks/useEventListener"
-import { useTabActive } from "@/contexts/TabContext"
+import { TabContext, useTabActive } from "@/contexts/TabContext"
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
@@ -16,6 +16,8 @@ import { TurnAnswer, TurnEditsPaused, TurnQuestion } from "@/features/conversati
 import { scrollToRange } from "@/features/conversation/useTextHighlights"
 import type { Attachment } from "@/lib/domain/types"
 import { resolveLocalFileHref } from "@/lib/fileLinks"
+import { isRecord } from "@/lib/utils"
+import { FactoryViewProvider, useTabAgentText, type FactoryView } from "./factoryView"
 import { PiSearchBar } from "./PiSearchBar"
 import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
 import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighlights"
@@ -506,6 +508,39 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
       return true
     },
   } : null), [search, hit, hitKey])
+
+  // Factory events: the tab's view switch (Alt+V), their files, and a decision's jump to the notice it answers
+  const tabId = useContext(TabContext)?.tab.id ?? null
+  const agentText = useTabAgentText(tabId, tabActive && !readOnly)
+  const navRef = useRef({ messages, turns, columnTurns, search })
+  useLayoutEffect(() => { navRef.current = { messages, turns, columnTurns, search } }, [messages, turns, columnTurns, search])
+  const jumpSeq = useRef(0)
+  const [jump, setJump] = useState<{ reveal: ConversationReveal; search: PiSearchFocus | null } | null>(null)
+  const revealNotice = useCallback((noticeKey: string) => {
+    const { messages, turns, columnTurns, search } = navRef.current
+    const index = messages.findIndex((message) => message.role === "custom" && (message as CustomMessage).customType === "factory-notice"
+      && isRecord((message as CustomMessage).details) && ((message as CustomMessage).details as Record<string, unknown>).key === noticeKey)
+    const turnIndex = index < 0 ? -1 : turns.findIndex((turn) => turn.start <= index && index < turn.end)
+    if (turnIndex < 0) return
+    // Negative: a search hit's seq counts up from 1, the column reveals once per seq
+    jumpSeq.current -= 1
+    setJump({
+      search,
+      reveal: {
+        key: columnTurns[turnIndex].key,
+        seq: jumpSeq.current,
+        scroll: (root) => {
+          const target = root.querySelector(`[data-factory-notice="${CSS.escape(noticeKey)}"]`)
+          if (!target) return false
+          target.scrollIntoView({ block: "center", behavior: "instant" })
+          return true
+        },
+      },
+    })
+  }, [])
+  const factoryView = useMemo<FactoryView>(() => ({ agentText, openFile: fileOpener(fileLinks), revealNotice: readOnly ? undefined : revealNotice }), [agentText, fileLinks, revealNotice, readOnly])
+  // The newer of the two: a jump holds until the next search hit
+  const shownReveal = jump && jump.search === search ? jump.reveal : reveal
   // Enter and Shift+Enter step, Escape clears: from the page or the transcript, never from a text field or a button
   useEventListener("window", "keydown", (event) => {
     const target = event.target
@@ -534,24 +569,26 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
 
   return (
     <PreviewContext.Provider value={setPreview}>
-      {/* While a run is live no turn is edited or deleted: the host refuses a running session */}
-      <TurnEditsPaused.Provider value={liveTail}>
-        <ConversationColumn
-          turns={columnTurns}
-          renderPreview={renderPreview}
-          renderBody={renderBody}
-          header={search && <PiSearchBar search={search} />}
-          footer={<>
-            <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} onOpenImage={setPreview} />
-            <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
-          </>}
-          reveal={reveal}
-          paddingBottom={paddingBottom}
-          onColumnChange={onColumnChange}
-          scrollRef={scrollRef}
-          readOnly={readOnly}
-        />
-      </TurnEditsPaused.Provider>
+      <FactoryViewProvider value={factoryView}>
+        {/* While a run is live no turn is edited or deleted: the host refuses a running session */}
+        <TurnEditsPaused.Provider value={liveTail}>
+          <ConversationColumn
+            turns={columnTurns}
+            renderPreview={renderPreview}
+            renderBody={renderBody}
+            header={search && <PiSearchBar search={search} />}
+            footer={<>
+              <HeldMessages held={held} onRetry={(id) => onRetryHeld?.(id)} onDelete={(id) => onDeleteHeld?.(id)} onOpenImage={setPreview} />
+              <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />
+            </>}
+            reveal={shownReveal}
+            paddingBottom={paddingBottom}
+            onColumnChange={onColumnChange}
+            scrollRef={scrollRef}
+            readOnly={readOnly}
+          />
+        </TurnEditsPaused.Provider>
+      </FactoryViewProvider>
     </PreviewContext.Provider>
   )
 }
