@@ -1,6 +1,6 @@
 /** Shiki with every grammar and theme the code blocks use: one chunk `syntaxHighlighting` loads on the first highlight, kept out of the page bundle. */
 import type { LanguageRegistration } from "shiki/core"
-export { createHighlighterCore } from "shiki/core"
+export { createHighlighterCore, hastToHtml } from "shiki/core"
 export { createJavaScriptRegexEngine } from "shiki/engine/javascript"
 import andromeeda from "shiki/themes/andromeeda.mjs"
 import snazzyLight from "shiki/themes/snazzy-light.mjs"
@@ -70,5 +70,6 @@ export const langs = [
   toml,
   ini,
   diff,
+  // SAFETY: a TextMate grammar as JSON, the shape Shiki registers; the JSON import types `patterns` too loosely for `LanguageRegistration`
   likec4 as unknown as LanguageRegistration,
 ]

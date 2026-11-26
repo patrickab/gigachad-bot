@@ -4,7 +4,7 @@ import { Fragment, type CSSProperties } from "react"
 import { Check, Copy } from "lucide-react"
 import type { CodeBlockProps } from "./components.tsx"
 import { useCopyFeedback } from "./useCopyFeedback.ts"
-import { useHighlightedHtml } from "./useHighlightedHtml.ts"
+import { useHighlightedLines } from "./useHighlightedHtml.ts"
 
 /** Color scheme of the code and diagram renderers. The host passes its own, the package reads no theme state. */
 export type ColorScheme = "light" | "dark"
@@ -20,7 +20,7 @@ export interface ThemedCodeBlockProps extends CodeBlockProps {
 export function CodeBlock({ codeString, language, plain = false, theme }: ThemedCodeBlockProps) {
   const { copied, copy } = useCopyFeedback(codeString)
   // Highlighting is async, so the plain `<pre>` shows until it resolves.
-  const html = useHighlightedHtml(codeString, language, !plain)
+  const highlighted = useHighlightedLines(codeString, language, !plain)
   const lines = codeString.split("\n")
   const gutter = { "--gc-code-gutter": `${String(lines.length).length}ch` } as CSSProperties
 
@@ -32,8 +32,17 @@ export function CodeBlock({ codeString, language, plain = false, theme }: Themed
           {copied ? <Check size={14} aria-hidden="true" className="gc-code-copied" /> : <Copy size={14} aria-hidden="true" />}
         </button>
       </div>
-      {html ? (
-        <div className="gc-code-highlighted" dangerouslySetInnerHTML={{ __html: html }} />
+      {highlighted ? (
+        // Settled lines and the last line are separate nodes: a streamed character replaces the last line's markup only.
+        // The markup is Shiki's own output (`hastToHtml`), which escapes the code's text: no markup of the code reaches the DOM
+        <div className="gc-code-highlighted">
+          <pre className={highlighted.preClass} style={highlighted.preStyle as CSSProperties} tabIndex={0}>
+            <code>
+              {highlighted.settled && <><span dangerouslySetInnerHTML={{ __html: highlighted.settled }} />{"\n"}</>}
+              <span dangerouslySetInnerHTML={{ __html: highlighted.tail }} />
+            </code>
+          </pre>
+        </div>
       ) : (
         // Same `.line` spans as Shiki's output, so line numbers show before highlighting and nothing shifts.
         <pre className="gc-code-fallback"><code>{lines.map((line, index) => (
