@@ -18,7 +18,6 @@ import { SidePanel, SidePanelScroll } from "@/components/ui/SidePanel"
 import { ArchiveSelector } from "./ArchiveSelector"
 import { useBranches } from "./BranchContext"
 import { ChatBranchPreview } from "./ChatBranchPreview"
-import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { FileMountPicker } from "./FileMountPicker"
 import { ProviderUsage } from "./ProviderUsage"
 import { useSidebar } from "./SidebarContext"
@@ -172,7 +171,5 @@ export function Sidebar(props: SidebarProps) {
     </SidePanel>
     <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)}
       onConfirm={(path) => code.mountThen(() => addFileRoot(path))} onClone={(url) => code.mountThen(() => cloneFileRoot(url))} />
-    <CreateDocumentPanel open={documents.createTarget != null} onClose={() => documents.setCreateTarget(null)}
-      onCreate={(name) => void documents.createDocument(name)} />
   </>
 }

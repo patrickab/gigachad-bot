@@ -49,21 +49,19 @@ interface WorkspaceDocumentsOptions {
   onDocumentSelect?: (path: string, scope: string) => void
   /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
   onWorkbenchSelect?: (path: string, scope: string) => void
-  onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
   onArchitectureSelect?: (slug: string) => void
 }
 
 /** Loose notes and project documents of the sidebar, with the actions that change them. Every tab shares the lists, `watchDocumentLists` keeps them current. */
 export function useWorkspaceDocuments({
-  projects, moveHistory, onDocumentSelect, onWorkbenchSelect, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
+  projects, moveHistory, onDocumentSelect, onWorkbenchSelect, onCanvasDeleted, onArchitectureSelect,
 }: WorkspaceDocumentsOptions) {
   const { schedule } = useUndoDelete()
   const isActive = useTabActive()
   const documents = useResourceFamily("Sidebar project documents", projectDocumentsResource, projects.map((project) => project.slug))
   const notes = useResource("Sidebar notes", notesResource) ?? NO_NOTES
   /** Project whose create-document panel is open. */
-  const [createTarget, setCreateTarget] = useState<string | null>(null)
   const [fileError, setFileError] = useState("")
 
   // The LaTeX templates come from the template sets on the server, none when they fail to load. The tab's next activation tries again.
@@ -177,27 +175,8 @@ export function useWorkspaceDocuments({
     onArchitectureSelect?.(slug)
   }
 
-  /** Create `name` in the create target and open it: architecture sources in the architecture window, canvases as canvas, the rest in the editor. */
-  const createDocument = async (name: string) => {
-    const slug = createTarget
-    if (!slug) return
-    try {
-      let open: () => void
-      if (name.endsWith(".c4")) {
-        await createArchitectureSource(slug, name)
-        open = () => onArchitectureSelect?.(slug)
-      } else {
-        const { path } = await writeDocument(slug, name)
-        open = path.endsWith(".canvas") ? () => onCanvasSelect?.(path, slug) : () => selectDocument(path, slug)
-      }
-      setCreateTarget(null)
-      await refreshProjectDocuments(slug)
-      open()
-    } catch { /* the panel stays open to retry */ }
-  }
-
   return {
     documents, notes, createAndOpen, selectDocument, createFile, newFileChoice, move, moveToFolder, promote, remove, importFiles,
-    uploadFiles, fileError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument,
+    uploadFiles, fileError, hasArchitecture, openArchitecture,
   }
 }

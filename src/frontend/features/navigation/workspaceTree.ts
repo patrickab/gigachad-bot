@@ -1,4 +1,4 @@
-import { Archive, FilePlus, FileText, FolderPlus, GitCompare, MessageSquare, Shapes, Upload } from "lucide-react"
+import { Archive, FileText, FolderPlus, GitCompare, MessageSquare, Shapes, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
@@ -32,7 +32,7 @@ type FolderRowContext =
 
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
-  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "newFileChoice" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
+  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "newFileChoice" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture">
   & Pick<ReturnType<typeof useProjectActions>, "renameProjectTo" | "removeProject" | "changeArchive">
   & FolderRowContext
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
@@ -98,7 +98,6 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
       rename: context.renameOf(`project:${project.slug}`, (name) => context.renameProjectTo(project, name)),
       onDelete: () => context.removeProject(project),
       actions: [
-        { label: `New document in ${project.name}`, menuLabel: "New document", icon: FilePlus, onClick: () => context.setCreateTarget(project.slug) },
         { label: `Archive ${project.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.changeArchive(project.slug, true) },
         { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`,
           menuLabel: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture`, icon: ArchitectureIcon,
