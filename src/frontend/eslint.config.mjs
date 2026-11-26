@@ -71,6 +71,7 @@ export default defineConfig([
           crossFeature("pi", "editor"),
           crossFeature("pi", "settings"),
           crossFeature("pi", "conversation"),
+          crossFeature("chat", "conversation"),
         ],
       }],
     },

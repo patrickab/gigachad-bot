@@ -1,27 +1,24 @@
 "use client"
 
-import { useColumnWidth, CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
-import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
+import { CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { GitFork } from "lucide-react"
-import { ChatPair } from "./ChatPair"
+import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
+import { ChatPairBody, ChatPairPreview, pairLabel } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
-import { usePairExpansion } from "@/features/chat/usePairExpansion"
-import { usePairFocus } from "@/features/chat/usePairFocus"
-import { useStickToBottom } from "@/features/chat/useStickToBottom"
-import { pairMessages } from "@/lib/domain/pairs"
+import { keyPairs, pairMessages, type Pair } from "@/lib/domain/pairs"
 import { ComposerDock, useComposerDock } from "./ComposerDock"
-import { WideModeToggle } from "./WideModeToggle"
 
 /** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
 export { CHAT_COLUMN_MAX_PX }
 
-/** Asks the chat to expand and scroll to one question; a new `key` re-fires the request for the same index. */
-export interface ChatFocus {
+/** Asks the chat to open and scroll to one question, the column's `reveal` by pair; a new `seq` re-fires it for the same index. */
+export interface ChatReveal {
   qaIndex: number | null
-  key: number
+  seq: number
 }
 
 /** What the chat does with its attachments: composer chips and the previews of message attachments. */
@@ -46,7 +43,7 @@ interface ChatContainerProps {
   onDeletePair: (index: number) => void
   onRegenerate?: (index: number) => void
   onBranch?: (qaIndex: number) => void
-  focus?: ChatFocus
+  reveal?: ChatReveal
   branchMessageIdx?: number | null
   slug?: string | null
   extracting?: boolean
@@ -63,6 +60,31 @@ interface ChatContainerProps {
   onChatColumnChange?: (element: HTMLDivElement | null) => void
 }
 
+/** A pair as the column's turn. */
+interface ChatTurn extends ConversationTurn {
+  pair: Pair
+}
+
+/** Keys of `pairs` that survive the delete of an earlier pair, see `keyPairs`. */
+function usePairKeys(pairs: Pair[]): string[] {
+  const [state, setState] = useState(() => ({ pairs, ...keyPairs(pairs) }))
+  if (state.pairs === pairs) return state.keys
+  const next = { pairs, ...keyPairs(pairs, state) }
+  setState(next)
+  return next.keys
+}
+
+/** Where a branched chat left its parent: after the pair it branched at. */
+function BranchSeparator({ at }: { at: number }) {
+  return (
+    <div role="separator" className="flex items-center gap-2 mx-3 my-3">
+      <GitFork className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
+      <span className="text-[10px] font-medium text-ink-muted tabular-nums">branched@{at}</span>
+      <div className="flex-1 h-px bg-divider-strong" />
+    </div>
+  )
+}
+
 export function ChatContainer({
   chatId,
   draftKey,
@@ -74,7 +96,7 @@ export function ChatContainer({
   onDeletePair,
   onRegenerate,
   onBranch,
-  focus,
+  reveal,
   branchMessageIdx,
   slug = null,
   extracting,
@@ -85,18 +107,26 @@ export function ChatContainer({
   composerNotice,
   onChatColumnChange,
 }: ChatContainerProps) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [isWideMode, setIsWideMode] = useState(false)
   // The chat whose first message was sent here: only that move to the bottom animates, a loading history jumps
   const [launchedChatId, setLaunchedChatId] = useState<string | null>(null)
   const [previewTarget, setPreviewTarget] = useState<{ messageIndex: number; name: string } | null>(null)
   const previewAttachment = previewTarget ? findAttachment(messages[previewTarget.messageIndex], previewTarget.name) ?? null : null
+  // Bumped on send: the column follows the end again
+  const [followSeq, setFollowSeq] = useState(0)
 
   const pairs = useMemo(() => pairMessages(messages), [messages])
-  const { pin } = useStickToBottom(scrollContainerRef, bottomRef, chatId, messages, focus)
-  const { isExpanded, toggle: togglePair } = usePairExpansion({ pairs, focus, messageCount: messages.length, scrollContainerRef })
-  const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
+  const keys = usePairKeys(pairs)
+  const turns = useMemo(() => pairs.map((pair, index): ChatTurn => ({
+    key: keys[index],
+    label: pairLabel(pair.user),
+    live: isStreaming && index === pairs.length - 1,
+    pair,
+  })), [pairs, keys, isStreaming])
+  const revealQa = reveal?.qaIndex ?? null
+  const revealKey = revealQa === null ? undefined : turns[revealQa]?.key
+  const revealSeq = reveal?.seq ?? 0
+  // Waits for the pair: a chat opened at a question loads its history first
+  const columnReveal = useMemo<ConversationReveal | null>(() => (revealKey === undefined ? null : { key: revealKey, seq: revealSeq }), [revealKey, revealSeq])
 
   // A chat known to be empty lifts the composer to just below the column's middle. A loading one keeps it at the bottom
   const dock = useComposerDock(messages.length === 0 && !historyLoading)
@@ -112,10 +142,10 @@ export function ChatContainer({
 
   // Sending re-pins to bottom so the new answer streams into view
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
-    pin()
+    setFollowSeq((seq) => seq + 1)
     if (messages.length === 0) setLaunchedChatId(chatId)
     onSend(text, attachments)
-  }, [pin, onSend, messages.length, chatId])
+  }, [onSend, messages.length, chatId])
 
   const context = useMemo<ChatContext | undefined>(
     () => attachmentActions && {
@@ -127,53 +157,39 @@ export function ChatContainer({
     [attachmentActions, messages, openPreview],
   )
 
-  const { width: columnWidth, startResize } = useColumnWidth()
-  const effectiveMaxWidth = isWideMode ? undefined : columnWidth
-  const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
+  // Settled pairs get equal props each streamed frame, so the column skips them
+  const renderPreview = (turn: ChatTurn) => <ChatPairPreview assistant={turn.pair.assistant} />
+  const renderBody = (turn: ChatTurn, _index: number, collapse: (() => void) | undefined) => (
+    <ChatPairBody
+      user={turn.pair.user}
+      assistant={turn.pair.assistant}
+      globalIndex={turn.pair.globalIndex}
+      qaIndex={turn.pair.qaIndex}
+      isStreaming={isStreaming}
+      onCollapse={collapse}
+      onAttachmentClick={openPreview}
+      onDelete={onDeletePair}
+      onRegenerate={onRegenerate}
+      onBranch={onBranch}
+    />
+  )
+  const renderAfter = (turn: ChatTurn) => (branchMessageIdx != null && turn.pair.qaIndex === branchMessageIdx ? <BranchSeparator at={branchMessageIdx} /> : null)
 
   return (
     <div className="absolute inset-0 flex">
       <div ref={mountColumn} className="flex-1 min-w-0 flex flex-col relative">
-        <div
-          ref={scrollContainerRef}
-          tabIndex={-1}
-          className="flex-1 overflow-y-auto text-ink outline-none"
-          style={{ paddingBottom: dock.paddingBottom }}
-        >
-          <div ref={onChatColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
-            {pairs.map(({ user, assistant, globalIndex, qaIndex }) => (
-              <Fragment key={globalIndex}>
-                <ChatPair
-                  user={user}
-                  assistant={assistant}
-                  globalIndex={globalIndex}
-                  expanded={isExpanded(globalIndex)}
-                  focused={focusedGlobalIndex === globalIndex}
-                  isStreaming={isStreaming}
-                  onExpand={() => {
-                    togglePair(globalIndex)
-                    clearKeyboardFocus()
-                  }}
-                  onCollapse={() => togglePair(globalIndex)}
-                  collapsedRef={collapsedRef(globalIndex)}
-                  onAttachmentClick={(att) => void openPreview(globalIndex, att)}
-                  onDelete={onDeletePair}
-                  onRegenerate={onRegenerate}
-                  onBranch={onBranch ? () => onBranch(qaIndex) : undefined}
-                  onResizeStart={isWideMode ? undefined : startResize}
-                />
-                {branchMessageIdx != null && qaIndex === branchMessageIdx && (
-                  <div role="separator" className="flex items-center gap-2 mx-3 my-3">
-                    <GitFork className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
-                    <span className="text-[10px] font-medium text-ink-muted tabular-nums">branched@{branchMessageIdx}</span>
-                    <div className="flex-1 h-px bg-divider-strong" />
-                  </div>
-                )}
-              </Fragment>
-            ))}
-          <div ref={bottomRef} />
-          </div>
-        </div>
+        {/* Another chat opens at its end again */}
+        <ConversationColumn
+          key={chatId}
+          turns={turns}
+          renderPreview={renderPreview}
+          renderBody={renderBody}
+          renderAfter={renderAfter}
+          reveal={columnReveal}
+          followSeq={followSeq}
+          paddingBottom={dock.paddingBottom}
+          onColumnChange={onChatColumnChange}
+        />
         <ComposerDock dock={dock} animate={launchedChatId === chatId}>
           <ChatInput
             ref={chatInputRef}
@@ -191,7 +207,6 @@ export function ChatContainer({
             hint={composerNotice ? () => composerNotice : undefined}
           />
         </ComposerDock>
-        <WideModeToggle wide={isWideMode} onToggle={toggleWideMode} />
       </div>
       <AttachmentPreview
         attachment={previewAttachment}

@@ -170,7 +170,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | Optional services | Report unavailability; never silently substitute a local service. |
 | Memory tool | Toggle `memory` (default on) adds `list_memories`, `read_memories`, `apply_memory_ops` (`lib/tools.py`, threaded, on `ToolContext.memory_root`). `memory_context.memory_prompt` creates `user` and the project's memory_store if missing and appends `# Memory` (`user` profile/preferences, indexes, rules). Project store name: `linked_root` folder name, else slug, `project-user` for `user`. Any failure drops the block, never the chat (`routes/chat.py` `_memory_block`). |
 
-- `features/chat/ChatPair.tsx` defers collapsed Markdown/equations until near the viewport or focused; `features/chat/useStickToBottom.ts` holds chats at their end until reader input.
+- `features/conversation/ConversationColumn.tsx` (chat and Pi) defers collapsed previews until near the viewport or focused, mounts the newest page of turns, and holds the column at its end until reader input.
 
 ### Sandbox checkpoints
 

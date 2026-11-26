@@ -44,7 +44,7 @@ describe("TabContent", () => {
   it("streams tokens into the chat without re-rendering the sidebar", () => {
     render(
       <TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: noop, updateConfig: noop, setAppMode: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop }}>
-        <TabContent onOpenChat={noop} onOpenProject={noop} onProjectRenamed={noop} onDocumentRenamed={noop} onNewChat={noop} onOpenItem={noop} focus={{ qaIndex: null, key: 0 }} />
+        <TabContent onOpenChat={noop} onOpenProject={noop} onProjectRenamed={noop} onDocumentRenamed={noop} onNewChat={noop} onOpenItem={noop} reveal={{ qaIndex: null, seq: 0 }} />
       </TabContext.Provider>,
     )
     const rendersBeforeStream = probe.sidebarRenders

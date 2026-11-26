@@ -199,7 +199,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       `-- DesktopBackendProvider.tsx
 |       |-- features/                 Domain-owned interactive surfaces
 |       |   |-- chat/                 Turns, attachments, persistence and streaming (`useChatStream` over `lib/backend/tokenPacer.ts`)
-|       |   |   |-- ChatContainer.tsx Message column; pair expansion and scroll pinning in usePairExpansion/useStickToBottom
+|       |   |   |-- ChatContainer.tsx Chat on the shared ConversationColumn (scrolling, paging, open state, keyboard focus)
 |       |   |   |-- attachments.ts
 |       |   |   |-- composer/         Input, completions, drawings and attachment chips (useDraftAttachments, dictation via hooks/useSpeechInput)
 |       |   |   |-- messages/         Tools, research and rich output rendering

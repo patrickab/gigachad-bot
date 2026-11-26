@@ -5,7 +5,7 @@ import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { useSidebar } from "@/features/navigation/SidebarContext"
-import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
+import { ChatContainer, type ChatReveal } from "@/features/chat/ChatContainer"
 import { newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
 import { PromptEditor } from "@/features/settings/PromptEditor"
@@ -37,7 +37,7 @@ interface TabContentProps {
   onDocumentRenamed: (oldPath: string, newPath: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
-  focus: ChatFocus
+  reveal: ChatReveal
 }
 
 /**
@@ -76,7 +76,7 @@ export function TabContent(props: TabContentProps) {
 }
 
 /** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
-function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentRenamed, onNewChat, onOpenItem, focus }: TabContentProps) {
+function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentRenamed, onNewChat, onOpenItem, reveal }: TabContentProps) {
   const { tab, isActive, setModeLabel } = useTab()
   const { projectSlug, config } = tab
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
@@ -109,7 +109,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
   const {
     chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onBranch,
-  } = useTabChat({ focus, onOpenChat, onOpenItem })
+  } = useTabChat({ reveal, onOpenChat, onOpenItem })
   const { models } = chat
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
@@ -155,7 +155,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       onCancel={chat.cancel}
       onRegenerate={turns.handleRegenerate}
       onBranch={onBranch}
-      focus={focus}
+      reveal={reveal}
       branchMessageIdx={branchMessageIdx}
       chatInputRef={chatInputRef}
       slug={projectSlug}

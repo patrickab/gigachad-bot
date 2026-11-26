@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { installClickHints } from "@gigachad/chat-ui/hints"
 import "@gigachad/chat-ui/hints.css"
-import type { ChatFocus } from "@/features/chat/ChatContainer"
+import type { ChatReveal } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
@@ -60,7 +60,7 @@ export function AppShell() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
   const lastProjectTabs = useRef(new Map<string, string>())
   const activeTabRef = useRef<Tab | null>(null)
-  const [focus, setFocus] = useState<ChatFocus>({ qaIndex: null, key: 0 })
+  const [reveal, setReveal] = useState<ChatReveal>({ qaIndex: null, seq: 0 })
   // Project whose dashboard is showing; set from the current tab and never read back as "the" project.
   const [dashboardSlug, setDashboardSlug] = useState<string | null>(null)
   // What the shells (one per tab) need: the frontmost tab and which tabs still exist
@@ -122,7 +122,7 @@ export function AppShell() {
   }, [handleNewChat])
 
   const handleOpenChat = useCallback((historyFile: string, qaIndex?: number) => {
-    setFocus((current) => ({ qaIndex: qaIndex ?? null, key: current.key + 1 }))
+    setReveal((current) => ({ qaIndex: qaIndex ?? null, seq: current.seq + 1 }))
     tabManagerRef.current?.showChat(historyFile)
   }, [])
 
@@ -186,7 +186,7 @@ export function AppShell() {
                 <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
                   <EnabledToolsProvider>
                     <FilePanelProvider>
-                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} reveal={reveal} />
                     </FilePanelProvider>
                   </EnabledToolsProvider>
                 </TabManager>

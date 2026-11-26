@@ -1,10 +1,14 @@
 "use client"
 
-import { Fragment, isValidElement, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { Fragment, isValidElement, memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { TurnCard, TurnHeader } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { ResizeEdges, useColumnWidth, type ResizeStart } from "@/components/ui/columnResize"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { isModKey, isTerminalKeyEvent } from "@/lib/utils"
 import { WideModeToggle } from "@/features/chat/WideModeToggle"
 
 /** Turns mounted at first and added per "Show earlier turns": older ones create no elements (smooth streaming). */
@@ -13,6 +17,10 @@ export const TURN_PAGE_SIZE = 20
 const PINNED_SLACK_PX = 48
 /** Load the earlier page while the button is still this far below the top edge, so an upward scroll continues into it. */
 const LOAD_EARLIER_ROOT_MARGIN = "400px 0px 0px 0px"
+/** A collapsed turn renders its preview once it comes this close (px) to the viewport. */
+const PREVIEW_MARGIN_PX = 400
+/** Turns kept above the keyboard-focused one, so it sits a few rows below the top. */
+const FOCUS_ROWS_ABOVE = 3
 
 /** One question and its answer as the column sees it. */
 export interface ConversationTurn {
@@ -47,6 +55,8 @@ export interface ConversationColumnProps<T extends ConversationTurn> {
   /** Below the last turn, inside the column (e.g. held messages). */
   footer?: ReactNode
   reveal?: ConversationReveal | null
+  /** Each new value scrolls to the end and follows it again, e.g. on send. */
+  followSeq?: number
   /** Keeps the last turn clear of a floating composer. */
   paddingBottom?: number
   /** The turn column (`[data-chat-column]`), e.g. for the top bar's label to make way for it. */
@@ -65,11 +75,38 @@ function sameNode(a: ReactNode, b: ReactNode): boolean {
   return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]))
 }
 
+/**
+ * A collapsed turn's preview, rendered once it nears the viewport (or `wake` is set): a long history then parses only what is read.
+ * Until then it reserves the preview's height cap. A card in a hidden tab (no size) waits for its intersection.
+ */
+function LazyPreview({ wake, children }: { wake: boolean; children: ReactNode }) {
+  const [near, setNear] = useState(false)
+  const attach = useCallback((host: HTMLDivElement | null) => {
+    if (!host) return
+    // Already visible: fill before paint rather than flash the placeholder
+    const rect = host.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0 && rect.bottom >= -PREVIEW_MARGIN_PX && rect.top <= window.innerHeight + PREVIEW_MARGIN_PX) {
+      setNear(true)
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setNear(true)
+    }, { rootMargin: `${PREVIEW_MARGIN_PX}px` })
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [])
+  if (children == null) return null
+  // Without an observer nothing would wake it
+  return near || wake || typeof IntersectionObserver === "undefined" ? children : <div ref={attach} data-preview-pending style={{ height: "15vh" }} />
+}
+
 interface ColumnTurnProps {
   turnKey: string
   label: string
   icon: ReactNode
   open: boolean
+  /** Keyboard focus is on this turn. */
+  focused: boolean
   /** The preview when collapsed, the card content when open. */
   content: ReactNode
   onExpand: () => void
@@ -77,13 +114,15 @@ interface ColumnTurnProps {
 }
 
 /** One turn's card; skipped while its props hold, so a streamed frame re-renders the live turn only. */
-const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, content, onExpand, onResizeStart }: ColumnTurnProps) {
+const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, focused, content, onExpand, onResizeStart }: ColumnTurnProps) {
+  // Focus inside the card (its header by Tab) loads the preview, so the next Tab reaches it
+  const [woken, setWoken] = useState(false)
   if (!open) {
     return (
-      <div data-turn-key={turnKey}>
-        <TurnCard expanded={false}>
+      <div data-turn-key={turnKey} onFocus={() => setWoken(true)}>
+        <TurnCard expanded={false} focused={focused}>
           <TurnHeader label={label} icon={icon} onExpand={onExpand} />
-          {content}
+          <LazyPreview wake={woken || focused}>{content}</LazyPreview>
         </TurnCard>
       </div>
     )
@@ -91,34 +130,51 @@ const ColumnTurn = memo(function ColumnTurn({ turnKey, label, icon, open, conten
   return (
     <div data-turn-key={turnKey} className="relative">
       <ResizeEdges onResizeStart={onResizeStart} />
-      <TurnCard expanded>{content}</TurnCard>
+      <TurnCard expanded focused={focused}>{content}</TurnCard>
     </div>
   )
-}, (prev, next) => prev.turnKey === next.turnKey && prev.label === next.label && prev.open === next.open && prev.onExpand === next.onExpand
-  && prev.onResizeStart === next.onResizeStart && sameNode(prev.icon, next.icon) && sameNode(prev.content, next.content))
+}, (prev, next) => prev.turnKey === next.turnKey && prev.label === next.label && prev.open === next.open && prev.focused === next.focused
+  && prev.onExpand === next.onExpand && prev.onResizeStart === next.onResizeStart && sameNode(prev.icon, next.icon) && sameNode(prev.content, next.content))
+
+/** The mounted card of the turn `key`. */
+function turnElement(root: HTMLElement, key: string): Element | undefined {
+  return [...root.querySelectorAll("[data-turn-key]")].find((candidate) => candidate.getAttribute("data-turn-key") === key)
+}
 
 /** Scrolls the turn `key` to the top of the view, true when it is mounted. */
 function scrollToTurn(root: HTMLElement, key: string): boolean {
-  const element = [...root.querySelectorAll("[data-turn-key]")].find((candidate) => candidate.getAttribute("data-turn-key") === key)
+  const element = turnElement(root, key)
   element?.scrollIntoView({ block: "start", behavior: "instant" })
   return element !== undefined
+}
+
+/** Scrolls to `top`, smoothly where the browser can. */
+function glideTo(element: HTMLElement, top: number) {
+  if (typeof element.scrollTo === "function") element.scrollTo({ top, behavior: "smooth" })
+  else element.scrollTop = top
 }
 
 /**
  * The column of a conversation's turns, shared by the chat and Pi: every turn a card, open or collapsed to its header over a preview.
  *
  * - The newest turn is open, a live one always; others open and collapse on click, kept by `turn.key`
- * - Follows the end while the reader is there, `paddingBottom` keeps the last turn clear of the floating composer
+ * - Opens at the end and follows it while the reader is there, `paddingBottom` keeps the last turn clear of the floating composer.
+ *   Until the reader first scrolls, clicks or types in it, late layout (diagrams, plots, the composer) keeps it at the end.
+ *   Only a new turn glides into view, a streamed frame or an opened history jumps
  * - Mounts the newest `TURN_PAGE_SIZE` turns, earlier pages on scrolling up (or "Show earlier turns"); while the reader is away
  *   from the end the window's top stays put, so appended turns do not push the read ones out
+ * - A collapsed turn renders its preview near the viewport only
+ * - Ctrl/Cmd+Up/Down from the column or its surface (e.g. the composer) moves a keyboard focus over the turns, Enter opens or
+ *   collapses the focused one, Escape drops the focus
  * - `reveal` mounts and opens its turn, then scrolls to it (or where its `scroll` says) and holds the view there
  * - Column width (drag a card edge, shared app-wide) and wide mode (the top bar's toggle)
  */
-export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, renderBody, renderAfter, header, footer, reveal = null, paddingBottom, onColumnChange, scrollRef: outerScrollRef }: ConversationColumnProps<T>) {
+export function ConversationColumn<T extends ConversationTurn>({ turns, renderPreview, renderBody, renderAfter, header, footer, reveal = null, followSeq = 0, paddingBottom, onColumnChange, scrollRef: outerScrollRef }: ConversationColumnProps<T>) {
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [pageCount, setPageCount] = useState(TURN_PAGE_SIZE)
   /** First mounted turn while the reader is away from the end, null while following the end. */
   const [anchor, setAnchor] = useState<number | null>(null)
+  const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const [wide, setWide] = useState(false)
   const { width: columnWidth, startResize } = useColumnWidth()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -127,24 +183,73 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
     scrollRef.current = element
     if (outerScrollRef) outerScrollRef.current = element
   }, [outerScrollRef])
+  const columnRef = useRef<HTMLDivElement>(null)
+  const attachColumn = useCallback((element: HTMLDivElement | null) => {
+    columnRef.current = element
+    onColumnChange?.(element)
+  }, [onColumnChange])
   const earlierRef = useRef<HTMLButtonElement>(null)
   const pinnedRef = useRef(true)
+  /** Late layout keeps the view at the end until the reader first interacts or a jump moves it. */
+  const settlingRef = useRef(true)
+  /** A new turn is gliding into view: the scroll events on its way do not count as the reader leaving the end. */
+  const glidingRef = useRef(false)
+  const turnCountRef = useRef(turns.length)
   /** Distance from the content's end to the viewport top before a page is prepended, restored after. */
   const restoreRef = useRef<number | null>(null)
 
   const endAnchored = Math.max(0, turns.length - pageCount)
   const start = Math.min(anchor ?? endAnchored, Math.max(0, turns.length - 1))
+  const isOpen = (turn: T, index: number) => turn.live || (toggled[turn.key] ?? index === turns.length - 1)
+
+  // Following again resets the window to the end; the ref is set before the scroll below reads it
+  useResetOnChange(followSeq, () => setAnchor(null))
+  useLayoutEffect(() => {
+    if (followSeq) pinnedRef.current = true
+  }, [followSeq])
 
   useLayoutEffect(() => {
     const element = scrollRef.current
+    const previous = turnCountRef.current
+    turnCountRef.current = turns.length
     if (!element) return
     if (restoreRef.current !== null) {
       element.scrollTop = element.scrollHeight - restoreRef.current
       restoreRef.current = null
     } else if (pinnedRef.current) {
-      element.scrollTop = element.scrollHeight
+      if (previous > 0 && turns.length > previous) {
+        glidingRef.current = true
+        glideTo(element, element.scrollHeight)
+      } else {
+        element.scrollTop = element.scrollHeight
+      }
     }
   })
+
+  // The reader's first touch ends settling and any glide
+  const interact = () => {
+    settlingRef.current = false
+    glidingRef.current = false
+  }
+  useEventListener(scrollRef, "wheel", interact, { passive: true })
+  useEventListener(scrollRef, "touchstart", interact, { passive: true })
+  useEventListener(scrollRef, "pointerdown", interact)
+  useEventListener(scrollRef, "keydown", interact)
+
+  useEffect(() => {
+    const element = scrollRef.current
+    const column = columnRef.current
+    if (!element || !column || typeof ResizeObserver === "undefined") return
+    // Not gated on `pinnedRef`: scroll anchoring shifts the view when content above grows, which is no reader scroll
+    const keepAtEnd = new ResizeObserver(() => {
+      if (!settlingRef.current) return
+      element.scrollTop = element.scrollHeight
+      pinnedRef.current = true
+    })
+    keepAtEnd.observe(element)
+    keepAtEnd.observe(column)
+    return () => keepAtEnd.disconnect()
+  }, [])
 
   const showEarlier = useCallback(() => {
     const element = scrollRef.current
@@ -169,26 +274,87 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
     const element = scrollRef.current
     if (!element) return
     const pinned = element.scrollHeight - element.scrollTop - element.clientHeight < PINNED_SLACK_PX
+    if (glidingRef.current) {
+      if (!pinned) return
+      glidingRef.current = false
+    }
     pinnedRef.current = pinned
     if (pinned && anchor !== null) setAnchor(null)
     if (!pinned && anchor === null) setAnchor(start)
   }
 
-  // A reveal mounts and opens its turn while rendering, then the effect scrolls to it, once per `seq`
-  useResetOnChange(reveal?.seq ?? null, () => {
-    const index = reveal ? turns.findIndex((turn) => turn.key === reveal.key) : -1
-    if (!reveal || index < 0) return
-    if (index < start) setAnchor(index)
-    setToggled((current) => (current[reveal.key] ? current : { ...current, [reveal.key]: true }))
-  })
-  const revealed = useRef<number | null>(null)
+  // A reveal mounts and opens its turn while rendering, once its turn is there, then the effect scrolls to it, once per `seq`
+  const [revealedSeq, setRevealedSeq] = useState<number | null>(null)
+  if (reveal && reveal.seq !== revealedSeq) {
+    const index = turns.findIndex((turn) => turn.key === reveal.key)
+    if (index >= 0) {
+      setRevealedSeq(reveal.seq)
+      if (index < start) setAnchor(index)
+      setToggled((current) => (current[reveal.key] ? current : { ...current, [reveal.key]: true }))
+    }
+  }
+  const scrolledSeq = useRef<number | null>(null)
   useEffect(() => {
     const root = scrollRef.current
-    if (!reveal || !root || revealed.current === reveal.seq) return
-    revealed.current = reveal.seq
+    if (!reveal || !root || revealedSeq !== reveal.seq || scrolledSeq.current === reveal.seq) return
+    scrolledSeq.current = reveal.seq
+    interact()
     // Held where it lands: a scroll to the end would undo the jump
     if (reveal.scroll ? reveal.scroll(root) : scrollToTurn(root, reveal.key)) pinnedRef.current = false
-  }, [reveal])
+  }, [reveal, revealedSeq])
+
+  // Keyboard focus, by key so it stays on its turn when an earlier one goes
+  const focusIndex = focusedKey === null ? -1 : turns.findIndex((turn) => turn.key === focusedKey)
+  const moveFocus = (step: 1 | -1) => {
+    if (turns.length === 0) return
+    const from = focusIndex >= 0 ? focusIndex : step > 0 ? -1 : turns.length
+    const next = Math.max(0, Math.min(from + step, turns.length - 1))
+    // The turns above it are mounted, so it can sit below them
+    const above = Math.max(0, next - FOCUS_ROWS_ABOVE)
+    if (above < start) setAnchor(above)
+    interact()
+    pinnedRef.current = false
+    setFocusedKey(turns[next].key)
+  }
+  const toggleFocused = () => {
+    const turn = turns[focusIndex]
+    if (turn && !turn.live) setToggled((current) => ({ ...current, [turn.key]: !isOpen(turn, focusIndex) }))
+    setFocusedKey(null)
+  }
+  const tabActive = useTabActive()
+  // Capture phase so these shortcuts win over editor and input handlers; only from this column's surface (its composer too)
+  useEventListener("window", "keydown", (event) => {
+    if (isTerminalKeyEvent(event)) return
+    const target = event.target
+    const surface = scrollRef.current?.parentElement
+    if (!(target === document.body || (target instanceof Node && surface?.contains(target)))) return
+    if (isModKey(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      event.preventDefault()
+      event.stopPropagation()
+      moveFocus(event.key === "ArrowDown" ? 1 : -1)
+      scrollRef.current?.focus({ preventScroll: true })
+    } else if (event.key === "Enter" && focusIndex >= 0) {
+      event.preventDefault()
+      event.stopPropagation()
+      toggleFocused()
+    }
+  }, { capture: true, active: tabActive })
+  useEscapeLayer(() => setFocusedKey(null), focusIndex >= 0)
+
+  // The focused turn sits FOCUS_ROWS_ABOVE turns below the top, or the first turn at the top
+  const scrollToFocus = useEffectEvent(() => {
+    const root = scrollRef.current
+    if (!root || focusIndex < 0) return
+    const atTop = focusIndex < FOCUS_ROWS_ABOVE
+    const above = turns[atTop ? 0 : focusIndex - FOCUS_ROWS_ABOVE]
+    const element = above && turnElement(root, above.key)
+    if (!element) return
+    const rect = element.getBoundingClientRect()
+    glideTo(root, root.scrollTop + (atTop ? rect.top : rect.bottom) - root.getBoundingClientRect().top)
+  })
+  useEffect(() => {
+    if (focusedKey !== null) scrollToFocus()
+  }, [focusedKey])
 
   /** One expand and one collapse per key, so a memoized turn keeps its props. */
   const [handlers] = useState(() => new Map<string, { expand: () => void; collapse: () => void }>())
@@ -196,7 +362,10 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
     let entry = handlers.get(key)
     if (!entry) {
       entry = {
-        expand: () => setToggled((current) => ({ ...current, [key]: true })),
+        expand: () => {
+          setToggled((current) => ({ ...current, [key]: true }))
+          setFocusedKey(null)
+        },
         collapse: () => setToggled((current) => ({ ...current, [key]: false })),
       }
       handlers.set(key, entry)
@@ -205,9 +374,9 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
   }
 
   return (
-    <div ref={attachScroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto" style={{ paddingBottom }}>
+    <div ref={attachScroller} onScroll={onScroll} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto text-ink outline-none" style={{ paddingBottom }}>
       {header}
-      <div ref={onColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
+      <div ref={attachColumn} data-chat-column className="mx-auto" style={{ maxWidth: wide ? undefined : columnWidth }}>
         {start > 0 && (
           <button ref={earlierRef} type="button" onClick={showEarlier} className="mx-auto mt-3 block rounded px-2 py-1 text-xs text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1">
             Show earlier turns
@@ -215,7 +384,7 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
         )}
         {turns.slice(start).map((turn, offset) => {
           const index = start + offset
-          const open = turn.live || (toggled[turn.key] ?? index === turns.length - 1)
+          const open = isOpen(turn, index)
           const { expand, collapse } = handlersOf(turn.key)
           const after = renderAfter?.(turn, index)
           return (
@@ -225,6 +394,7 @@ export function ConversationColumn<T extends ConversationTurn>({ turns, renderPr
                 label={turn.label}
                 icon={turn.icon}
                 open={open}
+                focused={turn.key === focusedKey}
                 content={open ? renderBody(turn, index, turn.live ? undefined : collapse) : renderPreview(turn, index)}
                 onExpand={expand}
                 onResizeStart={wide ? undefined : startResize}

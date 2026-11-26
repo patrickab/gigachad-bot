@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FolderOpen, Library } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
-import type { ChatFocus } from "@/features/chat/ChatContainer"
+import type { ChatReveal } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 import { useBranches } from "@/features/navigation/BranchContext"
@@ -19,7 +19,7 @@ import { useBusyCount } from "@/hooks/useBusyCount"
 import { useEventListener } from "@/hooks/useEventListener"
 
 /** Run one tab's chat (history, turns, attachments, shortcuts); called in every mode so the chat survives mode switches. */
-export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus; onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
+export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatReveal; onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
   const { tab, isActive, updateConfig, setHistoryFile, setTitle } = useTab()
   const { projectSlug, config, appMode } = tab
   const chat = useChat()
@@ -65,8 +65,8 @@ export function useTabChat({ focus, onOpenChat, onOpenItem }: { focus: ChatFocus
   }, [isActive, tab.historyFile, setActiveFile])
 
   useEffect(() => {
-    if (isActive) setActiveQaIndex(focus.qaIndex)
-  }, [isActive, focus.qaIndex, setActiveQaIndex])
+    if (isActive) setActiveQaIndex(reveal.qaIndex)
+  }, [isActive, reveal.qaIndex, setActiveQaIndex])
   useEffect(() => cancel, [cancel])
 
   useEffect(() => {
