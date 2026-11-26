@@ -33,6 +33,9 @@ const nextConfig = {
   // The notebook editor is client-only (`features/notebook`), these are the build seams `@datalayer/jupyter-react` needs
   // (see its `examples/next-js/next.config.mjs`). `options.webpack` is Next's own webpack: a second copy breaks every module.
   transpilePackages: ["@jupyterlab/settingregistry", "@jupyterlite/settings"],
+  // Turbopack's on-disk dev cache (default on) goes stale under the constant edits of agents: `next dev` then panics on
+  // every hot update ("Cell ... no longer exists", EcmascriptMergedChunkVersion) and the page reloads without end.
+  experimental: { turbopackFileSystemCacheForDev: false },
   // `next dev` runs Turbopack, a build runs webpack (`package.json`): both blocks below describe the same seams.
   turbopack: {
     root: frontendDir,
