@@ -18,6 +18,7 @@ import { usePiSearchFocus } from "./searchFocus"
 import { SessionWavesPanel } from "./SessionWaves"
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
+import { PiSessionDot } from "./usePiSidebar"
 import type { SubagentRow } from "./subagents"
 import type { PiCommand, PiModel } from "./types"
 import { usePiSession, type Notice } from "./usePiSession"
@@ -355,7 +356,9 @@ export function PiTab({ view, onViewChange, modelProps, slots = NO_SLOTS, launch
         cwd={shown.cwd}
         files={{ repo }}
         renderHeader={(header) => <PiTopBar slots={slots} header={header} modelProps={modelProps} />}
-        composerLeading={(header) => <PiRepoLabel repo={repo} tone={header.tone} />}
+        composerLeading={(header) => <PiRepoLabel repo={repo} tone={header.tone}
+          // Connected, the session's own state shows; connecting or closed, the connection's
+          mark={header.tone === "active" || header.tone === "ready" ? <PiSessionDot sessionId={shown.sessionId} /> : undefined} />}
         firstSubmit={firstSubmit}
         onFirstSubmitted={clearFirstSubmit}
         onBranch={branch}

@@ -15,7 +15,7 @@ vi.mock("@/features/pi/sessionStore", () => {
   return {
     usePiSessionStatus: (sessionId: string | null) => {
       const unread = useSyncExternalStore(subscribe, () => sessionId !== null && store.unread.has(sessionId))
-      return { running: false, waiting: false, unread }
+      return { running: false, waiting: false, unread, failed: false }
     },
   }
 })

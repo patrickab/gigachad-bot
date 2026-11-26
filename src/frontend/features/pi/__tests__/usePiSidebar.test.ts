@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
-import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piTokenText, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
+import { piGroupMark, piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piTokenText, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
 
 const store = vi.hoisted(() => ({ listFilters: [] as unknown[] }))
 vi.mock("@/contexts/TabContext", async (importOriginal) => ({
@@ -14,7 +14,7 @@ vi.mock("../sessionStore", () => ({
     return { sessions: [], loading: false, error: null }
   },
   usePiRepositories: () => [],
-  usePiSessionStatus: () => ({ running: false, waiting: false, unread: false }),
+  usePiSessionStatus: () => ({ running: false, waiting: false, unread: false, failed: false }),
   refreshPiSessions: () => {},
 }))
 
@@ -60,10 +60,18 @@ describe("Pi sidebar grouping", () => {
   it("titles a session by its first prompt line and marks its state", () => {
     expect(piSessionTitle({ firstMessage: "  fix the tabs\nmore" })).toBe("fix the tabs")
     expect(piSessionTitle({ firstMessage: "" })).toBe("Untitled session")
-    expect(piStatusMark({ running: true, waiting: true, unread: false })).toEqual({ tone: "attention", label: "Waiting" })
-    expect(piStatusMark({ running: true, waiting: false, unread: false })).toEqual({ tone: "active", label: "Running" })
-    expect(piStatusMark({ running: false, waiting: false, unread: true })).toEqual({ tone: "done", label: "Unread" })
-    expect(piStatusMark({ running: false, waiting: false, unread: false })).toBeNull()
+    const idle = { running: false, waiting: false, unread: false, failed: false }
+    expect(piStatusMark({ ...idle, running: true, waiting: true })).toEqual({ tone: "attention", hollow: false, label: "Waiting" })
+    expect(piStatusMark({ ...idle, running: true, cachedUntil: 2000 }, 1000)).toEqual({ tone: "active", hollow: false, label: "Running" })
+    expect(piStatusMark({ ...idle, failed: true })).toEqual({ tone: "error", hollow: false, label: "Failed" })
+    expect(piStatusMark({ ...idle, unread: true, cachedUntil: 2000 }, 1000)).toEqual({ tone: "done", hollow: false, label: "Unread, ready" })
+    expect(piStatusMark({ ...idle, unread: true, cachedUntil: 2000 }, 3000)).toEqual({ tone: "ready", hollow: false, label: "Unread" })
+    expect(piStatusMark({ ...idle, cachedUntil: 2000 }, 1000)).toEqual({ tone: "done", hollow: true, label: "Ready" })
+    expect(piStatusMark({ ...idle, cachedUntil: 2000 }, 2000)).toBeNull()
+    expect(piStatusMark(idle)).toBeNull()
+    expect(piGroupMark([{ ...idle, cachedUntil: 2000 }, { ...idle, unread: true }, { ...idle, running: true }], 1000)?.label).toBe("Running")
+    expect(piGroupMark([{ ...idle, cachedUntil: 2000 }, { ...idle, unread: true }], 1000)?.label).toBe("Unread")
+    expect(piGroupMark([idle], 1000)).toBeNull()
     expect(piUsageText({ contextPercent: 12.4, cost: 1.5 })).toBe("12% · $1.50")
     expect(piUsageText({})).toBe("")
   })

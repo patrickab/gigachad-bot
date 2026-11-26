@@ -11,7 +11,16 @@ const TONE_CLASS: Record<StatusTone, string> = {
   ready: "bg-ink-subtle",
 }
 
-/** Small state dot: faint when nothing runs, pulsing while something works, solid ink when it waits on the user, danger on failure. */
-export function StatusDot({ tone }: { tone: StatusTone }) {
-  return <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", TONE_CLASS[tone])} />
+const TONE_RING: Record<StatusTone, string> = {
+  idle: "ring-ink-faint",
+  active: "ring-ink-muted animate-pulse",
+  attention: "ring-ink",
+  error: "ring-danger",
+  done: "ring-diff-added",
+  ready: "ring-ink-subtle",
+}
+
+/** Small state dot: faint when nothing runs, pulsing while something works, solid ink when it waits on the user, danger on failure. `hollow` draws only its ring. */
+export function StatusDot({ tone, hollow = false }: { tone: StatusTone; hollow?: boolean }) {
+  return <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", hollow ? cn("ring-1 ring-inset", TONE_RING[tone]) : TONE_CLASS[tone])} />
 }

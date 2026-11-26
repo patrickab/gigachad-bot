@@ -157,6 +157,8 @@ class SessionInfo(ContractModel):
     factory: FactoryState | None = None
     # Set once a model answered.
     usage: SessionUsage | None = None
+    # Until when the prompt cache is likely warm (ISO), set when the last answer read or wrote one.
+    cached_until: str | None = None
 
 
 class SessionList(ContractModel):

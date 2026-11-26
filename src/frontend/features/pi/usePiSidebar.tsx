@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Bot, Pin, PinOff } from "lucide-react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { StatusDot, type StatusTone } from "@/components/ui/StatusDot"
 import { itemOf, newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ApiError, deletePiSession, pinPiSession, type PiRepository, type PiSessionInfo } from "@/lib/backend/api"
 import { PATH_COLLATOR, baseName, dirName, isInside, relativeIn, trimSlash } from "@/lib/paths"
-import { refreshPiSessions, usePiRepositories, usePiSessions, usePiSessionStatus } from "./sessionStore"
+import { refreshPiSessions, usePiRepositories, usePiSessions, usePiSessionsSummary, usePiSessionStatus, type PiSessionStatus } from "./sessionStore"
 
 /** Session rows a Sessions folder shows before "Show more". */
 const SESSION_LIMIT = 5
@@ -96,12 +96,53 @@ export function unmountedPiWorkspaces(sessions: readonly PiSessionInfo[], reposi
   return [...groups.values()].sort((left, right) => PATH_COLLATOR.compare(left.label, right.label))
 }
 
-/** Dot tone and accessible name of a session's state, null while idle and read. */
-export function piStatusMark(status: { running: boolean; waiting: boolean; unread: boolean }): { tone: StatusTone; label: string } | null {
-  if (status.waiting) return { tone: "attention", label: "Waiting" }
-  if (status.running) return { tone: "active", label: "Running" }
-  if (status.unread) return { tone: "done", label: "Unread" }
-  return null
+/** A session's dot: its tone, whether only its ring shows, and its accessible name. */
+export interface PiStatusMark {
+  tone: StatusTone
+  hollow: boolean
+  label: string
+}
+
+type MarkedStatus = Pick<PiSessionStatus, "running" | "waiting" | "unread"> & Partial<Pick<PiSessionStatus, "failed" | "cachedUntil">>
+
+/**
+ * The dot of a session's state at `now`, null while idle, read and cold.
+ *
+ * - Waiting, running (pulsing) and failed win
+ * - Otherwise filled means unread, hollow read; green means ready: the prompt cache is warm, so going on is cheap
+ */
+export function piStatusMark(status: MarkedStatus, now = Date.now()): PiStatusMark | null {
+  if (status.waiting) return { tone: "attention", hollow: false, label: "Waiting" }
+  if (status.running) return { tone: "active", hollow: false, label: "Running" }
+  if (status.failed) return { tone: "error", hollow: false, label: "Failed" }
+  const ready = status.cachedUntil !== undefined && status.cachedUntil > now
+  if (status.unread) return ready ? { tone: "done", hollow: false, label: "Unread, ready" } : { tone: "ready", hollow: false, label: "Unread" }
+  return ready ? { tone: "done", hollow: true, label: "Ready" } : null
+}
+
+/** Rank of a mark for the one a group of sessions shows: what needs the user first. */
+const MARK_RANK = ["Waiting", "Running", "Failed", "Unread, ready", "Unread", "Ready"]
+
+/** The most pressing mark of `statuses` at `now`, null when none has one. */
+export function piGroupMark(statuses: readonly MarkedStatus[], now = Date.now()): PiStatusMark | null {
+  const marks = statuses.map((status) => piStatusMark(status, now)).filter((mark) => mark !== null)
+  return marks.sort((left, right) => MARK_RANK.indexOf(left.label) - MARK_RANK.indexOf(right.label))[0] ?? null
+}
+
+/** The current time, moved on when the earliest of `untils` still ahead passes, so a warm cache turns cold on screen. */
+export function useNowUntil(untils: readonly (number | undefined)[]): number {
+  const [now, setNow] = useState(Date.now)
+  const next = Math.min(...untils.filter((until): until is number => until !== undefined && until > now))
+  useEffect(() => {
+    if (!Number.isFinite(next)) return
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(next - Date.now() + 50, 2 ** 31 - 1))
+    return () => window.clearTimeout(timer)
+  }, [next])
+  return now
+}
+
+function MarkDot({ mark }: { mark: PiStatusMark | null }) {
+  return mark ? <span role="img" aria-label={mark.label} className="flex items-center"><StatusDot tone={mark.tone} hollow={mark.hollow} /></span> : null
 }
 
 /** `30% · $0.45` once Pi reported them for an attached session. */
@@ -118,10 +159,18 @@ export function piTokenText(tokens: number): string {
   return tokens < 1000 ? "<1k" : `${Math.round(tokens / 1000)}k`
 }
 
-/** The live dot of a session: pulsing while running, solid while it waits on a dialog, green once a run settled unseen. */
+/** The live dot of a session (`piStatusMark`). */
 export function PiSessionDot({ sessionId }: { sessionId: string }) {
-  const mark = piStatusMark(usePiSessionStatus(sessionId))
-  return mark ? <span role="img" aria-label={mark.label} className="flex items-center"><StatusDot tone={mark.tone} /></span> : null
+  const status = usePiSessionStatus(sessionId)
+  return <MarkDot mark={piStatusMark(status, useNowUntil([status.cachedUntil]))} />
+}
+
+/** The most pressing dot of `sessionIds` (`piGroupMark`), e.g. on a Sessions section. */
+export function PiSessionsDot({ sessionIds }: { sessionIds: readonly string[] }) {
+  const summary = usePiSessionsSummary(sessionIds, (statuses) => JSON.stringify(statuses.map((status) => [status.running, status.waiting, status.unread, status.failed, status.cachedUntil])))
+  const statuses = useMemo(() => (JSON.parse(summary) as [boolean, boolean, boolean, boolean, number | null][])
+    .map(([running, waiting, unread, failed, cachedUntil]) => ({ running, waiting, unread, failed, cachedUntil: cachedUntil ?? undefined })), [summary])
+  return <MarkDot mark={piGroupMark(statuses, useNowUntil(statuses.map((status) => status.cachedUntil)))} />
 }
 
 /** Row end of a session: worktree branch, pin, context and cost, state dot. */
@@ -210,6 +259,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
       id: `${directory}/:code`,
       label: "Sessions",
       icon: Bot,
+      signal: <PiSessionsDot sessionIds={directorySessions.map((session) => session.sessionId)} />,
       type: "folder",
       create: { label: `New session in ${name}`, onClick: () => onOpen?.(newPiItem(directory, projectSlug), true) },
       childLimit: SESSION_LIMIT,

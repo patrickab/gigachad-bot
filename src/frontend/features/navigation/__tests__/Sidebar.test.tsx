@@ -115,8 +115,10 @@ const pi = vi.hoisted(() => ({
 vi.mock("@/features/pi/sessionStore", () => ({
   usePiSessions: ({ archived = false }: { archived?: boolean } = {}) => ({ sessions: archived ? pi.archived : pi.sessions, loading: false, error: null }),
   usePiRepositories: () => pi.repositories,
-  usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false },
+  usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false, failed: false },
   refreshPiSessions: vi.fn(),
+  usePiSessionsSummary: (sessionIds: readonly string[], summarize: (statuses: PiSessionStatus[]) => string) =>
+    summarize(sessionIds.map((sessionId) => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false, failed: false })),
 }))
 const learn = vi.hoisted(() => ({
   sessions: {
@@ -815,9 +817,9 @@ describe("Project navigation", () => {
       piSession("quiet", "/git/proj"),
     ]
     pi.statuses = {
-      fork: { running: true, waiting: false, unread: false, contextPercent: 41.6, cost: 0.123 },
-      asking: { running: true, waiting: true, unread: false },
-      done: { running: false, waiting: false, unread: true },
+      fork: { running: true, waiting: false, unread: false, failed: false, contextPercent: 41.6, cost: 0.123 },
+      asking: { running: true, waiting: true, unread: false, failed: false },
+      done: { running: false, waiting: false, unread: true, failed: false },
     }
     try {
       const view = render(<Sidebar appMode="chat" />)

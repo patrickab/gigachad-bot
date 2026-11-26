@@ -133,7 +133,8 @@ def test_sessions_pass_through_camel_case_with_the_repo_resolved(monkeypatch, re
     response = _client().get("/api/pi/sessions", params={"repo": "app", "archived": "true"})
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"sessions": [{**SESSION, "parentSession": None, "profile": "coding", "factory": None, "usage": None}]}
+    expected = {**SESSION, "parentSession": None, "profile": "coding", "factory": None, "usage": None, "cachedUntil": None}
+    assert response.json() == {"sessions": [expected]}
     assert dict(host.requests[0].url.params) == {"cwd": str(repositories / "app"), "archived": "1"}
 
 
@@ -166,7 +167,7 @@ def test_search_passes_hits_through_with_the_query_and_limit(monkeypatch):
     response = _client().get("/api/pi/search", params={"q": "fix tests"})
 
     assert response.status_code == 200, response.text
-    session = {**SESSION, "parentSession": None, "profile": "coding", "factory": None, "usage": None}
+    session = {**SESSION, "parentSession": None, "profile": "coding", "factory": None, "usage": None, "cachedUntil": None}
     assert response.json() == {"hits": [{**hit, "session": session}]}
     assert dict(host.requests[0].url.params) == {"q": "fix tests", "limit": "20"}
     assert _client().get("/api/pi/search").status_code == 422

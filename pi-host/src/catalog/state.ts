@@ -52,6 +52,16 @@ export async function profileOf(host: Host, sessionPath: string): Promise<Profil
   return (await host.readState(sessionPath)).profile ?? "coding";
 }
 
+/** Record the `PI_CACHE_RETENTION` a session's Pi started with; Pi's default (`short`, or unset) leaves no marker. */
+export async function markCacheRetention(host: Host, sessionPath: string, retention: string | undefined): Promise<void> {
+  const marked = retention && retention !== "short" ? retention : undefined;
+  await updateState(host, sessionPath, (state) => {
+    if (state.cacheRetention === marked) return { result: undefined };
+    const { cacheRetention: _previous, ...rest } = state;
+    return { next: marked ? { ...rest, cacheRetention: marked } : rest, result: undefined };
+  });
+}
+
 /** Record the profile a session runs with; no sidecar is written for an unmarked `coding` session. */
 export async function markProfile(host: Host, sessionPath: string, profile: Profile): Promise<void> {
   await updateState(host, sessionPath, (state) => ({

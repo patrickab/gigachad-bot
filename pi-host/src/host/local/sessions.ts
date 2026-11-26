@@ -8,14 +8,14 @@
  */
 import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { FACTORY_STATES, type DeleteResult, type FactoryState, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
+import { FACTORY_STATES, type DeleteResult, type FactoryState, type LastCache, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
 import { archiveRoot, cwdSessionDir, factorySessionsRoot, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar, removeSidecar } from "./state.ts";
 
 type Summary = Pick<
   SessionMeta,
-  "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession" | "factory" | "usage"
+  "sessionId" | "cwd" | "createdAt" | "firstMessage" | "messageCount" | "tokens" | "parentSession" | "factory" | "usage" | "lastCache"
 >;
 type Header = Pick<Summary, "sessionId" | "cwd" | "createdAt" | "parentSession">;
 
@@ -54,6 +54,16 @@ function userText(line: string): string {
 function lastTotalTokens(line: string): number | undefined {
   const found = [...line.matchAll(/"totalTokens":(\d+)/g)].pop();
   return found ? Number(found[1]) : undefined;
+}
+
+/** The cache use of an assistant message line, undefined when its answer neither read nor wrote a cache. */
+function answerCache(line: string): LastCache | undefined {
+  const found = USAGE_PATTERN.exec(line);
+  if (!found || Number(found[3]) + Number(found[4]) === 0) return undefined;
+  const at = /"timestamp":"([^"]+)"/.exec(line)?.[1];
+  if (!at || Number.isNaN(Date.parse(at))) return undefined;
+  const written = Number(found[4]) === 0 ? undefined : /"cacheWrite1h":[1-9]/.test(line) ? "long" : "short";
+  return { at, api: /"api":"([^"]+)"/.exec(line)?.[1] ?? "", ...(written ? { written } : {}) };
 }
 
 /** The usage of an assistant message line, undefined when it reports none. */
@@ -115,6 +125,9 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
   let firstMessage = "";
   let messageCount = 0;
   let tokens = 0;
+  let lastCache: LastCache | undefined;
+  /** The latest cache write's lifetime: later answers may only read that cache. */
+  let written: LastCache["written"];
   const usage: SessionUsage = { input: 0, output: 0, cost: 0 };
   const add = (more: SessionUsage | undefined) => {
     if (!more) return;
@@ -137,6 +150,9 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     if (line.includes('"role":"assistant"')) {
       tokens = lastTotalTokens(line) ?? tokens;
       add(answerUsage(line));
+      const cache = answerCache(line);
+      written = cache?.written ?? written;
+      lastCache = cache && { ...cache, ...(written ? { written } : {}) };
     }
     if (!firstMessage && line.includes('"role":"user"')) firstMessage = userText(line);
     return true;
@@ -157,6 +173,7 @@ async function scanSession(sessionPath: string): Promise<Summary | undefined> {
     tokens,
     ...(factory ? { factory } : {}),
     ...(usage.input + usage.output > 0 ? { usage } : {}),
+    ...(lastCache ? { lastCache } : {}),
   };
 }
 

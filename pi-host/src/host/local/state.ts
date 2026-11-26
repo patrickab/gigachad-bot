@@ -42,6 +42,7 @@ export async function readState(sessionPath: string): Promise<PrivateState> {
     pinned: record.pinned === true,
     data: isPlainObject(record.data) ? record.data : {},
     ...(PROFILES.includes(record.profile as Profile) ? { profile: record.profile as Profile } : {}),
+    ...(typeof record.cacheRetention === "string" ? { cacheRetention: record.cacheRetention } : {}),
   };
 }
 

@@ -14,7 +14,7 @@ import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 import { isPlainObject, updateState } from "./state.ts";
 
 export { listSessions, sessionInfo, type LiveStatus, type SessionInfo } from "./sessions.ts";
-export { copyPrivateState, isPinned, markProfile, profileOf } from "./state.ts";
+export { copyPrivateState, isPinned, markCacheRetention, markProfile, profileOf } from "./state.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;

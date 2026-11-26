@@ -46,6 +46,7 @@ const savedEnv = { agent: process.env.PI_CODING_AGENT_DIR, sessions: process.env
 const OLD_ID = "01a1f3fe-0000-7000-8000-000000000001";
 const NEW_ID = "01a1f3fe-0000-7000-8000-000000000002";
 const OTHER_CWD_ID = "01a1f3fe-0000-7000-8000-000000000003";
+const CACHELESS_ID = "01a1f3fe-0000-7000-8000-000000000006";
 
 /** JSONL session file content: header plus entries. */
 function sessionLines(id: string, cwd: string, timestamp: string, entries: object[], parentSession?: string): string {
@@ -197,6 +198,109 @@ describe("session listing", () => {
     const byId = new Map(json.sessions.map((session) => [session.sessionId, session]));
     expect(byId.get(OLD_ID)!.usage).toEqual({ input: 2 + 100 + 1 + 5 + 20 + 3 + 200 + 1, output: 30 + 7 + 40, cost: 0.875 });
     expect(byId.get(NEW_ID)!.usage).toBeUndefined();
+  });
+
+  test("cachedUntil is the last answer's time plus the cache lifetime, 1 h once a 1 h cache was written, absent when the last answer used none", async () => {
+    const answered = (id: string, timestamp: string, cacheRead: number, cacheWrite: number, cacheWrite1h = 0) => ({
+      type: "message",
+      id,
+      parentId: null,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        // Pi writes `cacheWrite1h` into the usage, after `cost`
+        usage: { input: 1, output: 1, cacheRead, cacheWrite, totalTokens: 2 + cacheRead + cacheWrite, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...(cacheWrite1h ? { cacheWrite1h } : {}) },
+      },
+    });
+    await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      message("u1", "user", "go"),
+      answered("a1", "2026-11-18T09:01:00.000Z", 0, 50),
+      answered("a2", "2026-11-18T09:02:00.000Z", 50, 0),
+    ]), new Date("2026-11-18T09:05:00.000Z"));
+    await writeSession(NEW_ID, sessionLines(NEW_ID, projectDir, "2026-11-19T08:00:00.000Z", [
+      message("u1", "user", "go"),
+      answered("a1", "2026-11-19T08:01:00.000Z", 0, 50, 50),
+      answered("a2", "2026-11-19T08:02:00.000Z", 50, 0),
+    ]), new Date("2026-11-19T08:05:00.000Z"));
+    await writeSession(CACHELESS_ID, sessionLines(CACHELESS_ID, projectDir, "2026-11-17T08:00:00.000Z", [
+      message("u1", "user", "go"),
+      answered("a1", "2026-11-17T08:01:00.000Z", 0, 50),
+      answered("a2", "2026-11-17T08:02:00.000Z", 0, 0),
+    ]), new Date("2026-11-17T08:05:00.000Z"));
+
+    const { json } = await call("GET", `/sessions?cwd=${encodeURIComponent(projectDir)}`);
+
+    const byId = new Map(json.sessions.map((session) => [session.sessionId, session]));
+    expect(byId.get(OLD_ID)!.cachedUntil).toBe("2026-11-18T09:07:00.000Z");
+    expect(byId.get(NEW_ID)!.cachedUntil).toBe("2026-11-19T09:02:00.000Z");
+    expect(byId.get(CACHELESS_ID)!.cachedUntil).toBeUndefined();
+  });
+
+  test("a long retention marked in the sidecar keeps its Pi API's long lifetime, any other API the short one", async () => {
+    const answered = (api: string) => ({
+      type: "message",
+      id: "a1",
+      parentId: null,
+      timestamp: "2026-11-18T09:01:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        api,
+        // Reads only: no write tells the lifetime, so the marker decides
+        usage: { input: 1, output: 1, cacheRead: 50, cacheWrite: 0, totalTokens: 52, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      },
+    });
+    const sessions = [[OLD_ID, "anthropic-messages"], [NEW_ID, "openai-responses"], [CACHELESS_ID, "openai-codex-responses"]] as const;
+    for (const [id, api] of sessions) {
+      const path = await writeSession(id, sessionLines(id, projectDir, "2026-11-18T09:00:00.000Z", [message("u1", "user", "go"), answered(api)]), new Date("2026-11-18T09:05:00.000Z"));
+      await writeFile(`${path}.gigachad.json`, JSON.stringify({ revision: 1, pinned: false, data: {}, cacheRetention: "long" }));
+    }
+
+    const { json } = await call("GET", `/sessions?cwd=${encodeURIComponent(projectDir)}`);
+
+    const byId = new Map(json.sessions.map((session) => [session.sessionId, session]));
+    expect(byId.get(OLD_ID)!.cachedUntil).toBe("2026-11-18T10:01:00.000Z");
+    expect(byId.get(NEW_ID)!.cachedUntil).toBe("2026-11-18T09:31:00.000Z");
+    expect(byId.get(CACHELESS_ID)!.cachedUntil).toBe("2026-11-18T09:06:00.000Z");
+  });
+
+  test("the latest cache write's recorded lifetime beats the marker, and an unmarked session takes pi-host's retention, a factory task short", async () => {
+    const answered = (id: string, timestamp: string, cacheWrite: number, cacheWrite1h: number) => ({
+      type: "message",
+      id,
+      parentId: null,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        api: "anthropic-messages",
+        usage: { input: 1, output: 1, cacheRead: 10, cacheWrite, totalTokens: 12 + cacheWrite, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...(cacheWrite1h ? { cacheWrite1h } : {}) },
+      },
+    });
+    // Resumed with a short retention: its latest write is a 5 min one, though the sidecar says long
+    const shortened = await writeSession(OLD_ID, sessionLines(OLD_ID, projectDir, "2026-11-18T09:00:00.000Z", [
+      message("u1", "user", "go"),
+      answered("a1", "2026-11-18T09:01:00.000Z", 50, 50),
+      answered("a2", "2026-11-18T09:02:00.000Z", 50, 0),
+      answered("a3", "2026-11-18T09:03:00.000Z", 0, 0),
+    ]), new Date("2026-11-18T09:05:00.000Z"));
+    await writeFile(`${shortened}.gigachad.json`, JSON.stringify({ revision: 1, pinned: false, data: {}, cacheRetention: "long" }));
+    const reads = (id: string) => sessionLines(id, projectDir, "2026-11-19T08:00:00.000Z", [message("u1", "user", "go"), answered("a1", "2026-11-19T08:01:00.000Z", 0, 0)]);
+    await writeSession(NEW_ID, reads(NEW_ID), new Date("2026-11-19T08:05:00.000Z"));
+    const factoryState = { type: "custom", id: "f1", parentId: null, timestamp: "2026-11-19T08:00:30.000Z", customType: "factory-state", data: { state: "running", round: 1, reason: "" } };
+    await writeSession(CACHELESS_ID, reads(CACHELESS_ID).replace("\n", `\n${JSON.stringify(factoryState)}\n`), new Date("2026-11-19T08:05:00.000Z"));
+
+    process.env.PI_CACHE_RETENTION = "long";
+    try {
+      const { json } = await call("GET", `/sessions?cwd=${encodeURIComponent(projectDir)}`);
+      const byId = new Map(json.sessions.map((session) => [session.sessionId, session]));
+      expect(byId.get(OLD_ID)!.cachedUntil).toBe("2026-11-18T09:08:00.000Z");
+      expect(byId.get(NEW_ID)!.cachedUntil).toBe("2026-11-19T09:01:00.000Z");
+      expect(byId.get(CACHELESS_ID)!.cachedUntil).toBe("2026-11-19T08:06:00.000Z");
+    } finally {
+      delete process.env.PI_CACHE_RETENTION;
+    }
   });
 
   test("honours a flat PI_CODING_AGENT_SESSION_DIR", async () => {

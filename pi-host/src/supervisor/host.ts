@@ -11,7 +11,7 @@
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
-import { copyPrivateState, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
+import { copyPrivateState, markCacheRetention, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
 import type { Host, Profile, SessionMeta } from "../host/index.ts";
 import type { SupervisorConfig } from "./config.ts";
@@ -459,6 +459,8 @@ export class SupervisorHost implements Supervisor {
     try {
       // G5: before the session is listed, so a `document` session never shows as `coding`.
       await markProfile(this.host, session.sessionPath, request.spec.profile);
+      // The retention its Pi got through `childEnv`, so the session list knows how long its cache lives
+      await markCacheRetention(this.host, session.sessionPath, process.env.PI_CACHE_RETENTION);
     } catch (error) {
       await session.close();
       return fail(502, "spawn_failed", { message: `profile marker: ${String(error)}` });

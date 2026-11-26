@@ -63,6 +63,8 @@ export interface FileTreeItem<T = unknown> {
   chevronOnly?: boolean
   /** Space below the row and its contents, separating it from the next sibling. */
   gapAfter?: boolean
+  /** A section's live mark on its strip icon, e.g. the most pressing state of its sessions. */
+  signal?: ReactNode
   /** Right-aligned row end, e.g. line change counts. The label truncates first. */
   meta?: ReactNode
   draggable?: boolean
@@ -406,10 +408,11 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
             }}
             onDragLeave={() => setDragOverId(null)}
             onDrop={(event) => { void handleDrop(event, section) }}
-            className={cn("shrink-0 rounded-md p-1 transition-colors duration-160 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted motion-reduce:transition-none",
+            className={cn("relative shrink-0 rounded-md p-1 transition-colors duration-160 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted motion-reduce:transition-none",
               isOpen ? "bg-surface-elevated text-ink" : section.children?.length === 0 ? "text-ink-faint/50 hover:text-ink" : "text-ink-faint hover:text-ink",
               dragOverId === section.id && "ring-1 ring-ink-muted bg-surface-elevated")}>
             <Icon aria-hidden className="h-3 w-3" />
+            {section.signal && <span className="absolute right-0 top-0">{section.signal}</span>}
           </button>
         })}
         {open && <span className="ml-1 min-w-0 truncate text-xs text-ink-subtle">{open.label}</span>}

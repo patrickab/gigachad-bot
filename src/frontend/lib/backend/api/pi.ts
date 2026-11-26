@@ -32,6 +32,8 @@ export interface PiSessionInfo {
   archived: boolean
   /** Session profile (G5): coding tabs, or a workbench `document` chat. Sessions written before profiles are `coding`. */
   profile?: PiProfile
+  /** Until when the provider likely keeps the prompt cached (ISO), absent when the last answer used no cache. */
+  cachedUntil?: string
 }
 
 /** What a session runs as: a coding agent in a repo, or a workbench chat about one document. */

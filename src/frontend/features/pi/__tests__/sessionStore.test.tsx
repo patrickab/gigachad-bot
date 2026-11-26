@@ -139,7 +139,7 @@ describe("usePiSessions", () => {
 
     api.sessions = [session("l1", "/home/u/git/alpha")]
     socket().emit({ type: "sessions_changed", sessionPaths: [] })
-    await waitFor(() => expect(result.current.status).toEqual({ running: false, waiting: false, unread: true }))
+    await waitFor(() => expect(result.current.status).toEqual({ running: false, waiting: false, unread: true, failed: false }))
   })
 })
 
@@ -151,14 +151,14 @@ describe("usePiSessionStatus", () => {
     const send = attach("s1")
 
     send({ type: "agent_start" })
-    expect(result.current).toEqual({ running: true, waiting: false, unread: false })
+    expect(result.current).toEqual({ running: true, waiting: false, unread: false, failed: false })
     send({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }], willRetry: false })
     expect(result.current.running).toBe(true)
     expect(events).toEqual([])
 
     send({ type: "agent_settled" })
     send({ type: "agent_settled" })
-    expect(result.current).toEqual({ running: false, waiting: false, unread: true })
+    expect(result.current).toEqual({ running: false, waiting: false, unread: true, failed: false })
     expect(events).toEqual([{ type: "settled", sessionId: "s1", aborted: false }])
     expect(JSON.parse(localStorage.getItem("pi-unread-sessions")!)).toContain("s1")
 

@@ -80,7 +80,16 @@ export type SessionMeta = {
   factory?: FactoryState;
   /** What the session's models used, present once one answered: see `SessionUsage`. */
   usage?: SessionUsage;
+  /** The session's last answer that read or wrote a prompt cache, see `LastCache`. */
+  lastCache?: LastCache;
 };
+
+/**
+ * When the last answer that used a prompt cache ended (ISO) and through which Pi API. `written`: the lifetime the latest
+ * cache write asked for, as far as Pi recorded it (`cacheWrite1h`, Anthropic and Bedrock): `long` for a 1 h write, `short`
+ * for a write without one; absent when no answer wrote a cache.
+ */
+export type LastCache = { at: string; api: string; written?: "long" | "short" };
 
 /**
  * Tokens and dollars of a session's assistant answers plus the reviews a factory task recorded (`factory-review`, run
@@ -89,7 +98,8 @@ export type SessionMeta = {
 export type SessionUsage = { input: number; output: number; cost: number };
 
 /** `profile` marks the profile a session was started with (G5); absent means `coding`. */
-export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile };
+/** `cacheRetention`: Pi's `PI_CACHE_RETENTION` when pi-host last started the session, absent for Pi's default (`short`). */
+export type PrivateState = { revision: number; pinned: boolean; data: Record<string, unknown>; profile?: Profile; cacheRetention?: string };
 
 export type MoveResult = { ok: true; path: string } | { ok: false; error: "locked" | "exists" | "not_in_root" | "not_found" | "factory" };
 

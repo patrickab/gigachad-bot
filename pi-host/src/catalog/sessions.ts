@@ -6,6 +6,7 @@
  */
 import type { FactoryState, Host, Profile, SessionMeta, SessionUsage } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
+import { cachedUntil } from "./cache.ts";
 
 export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
 
@@ -30,6 +31,8 @@ export type SessionInfo = {
   factory?: FactoryState;
   /** What its models used, present once one answered. */
   usage?: SessionUsage;
+  /** Until when the prompt cache is likely warm (ISO), present when the last answer read or wrote one. */
+  cachedUntil?: string;
 };
 
 /** Live status under either path form: a new session is keyed before its file exists, a resumed one by real path. */
@@ -37,10 +40,25 @@ function liveStatusOf(meta: SessionMeta, live: LiveSessions): LiveStatus | undef
   return live.liveStatus(meta.sessionPath) ?? (meta.realPath === meta.sessionPath ? undefined : live.liveStatus(meta.realPath));
 }
 
+/**
+ * The cache retention `meta`'s Pi ran with: the one pi-host marked when it started it, `short` for a factory task (agent-factory
+ * starts tasks so), else pi-host's own, which terminal sessions share through the same environment.
+ */
+function retentionOf(meta: SessionMeta, marked: string | undefined): string | undefined {
+  return marked ?? (meta.factory ? "short" : process.env.PI_CACHE_RETENTION);
+}
+
 async function infoOf(host: Host, meta: SessionMeta, live: LiveSessions): Promise<SessionInfo> {
-  const { pinned, profile } = await host.readState(meta.sessionPath);
-  const { realPath: _realPath, ...fields } = meta;
-  return { ...fields, machine: host.machine, live: liveStatusOf(meta, live) ?? null, pinned, profile: profile ?? "coding" };
+  const { pinned, profile, cacheRetention } = await host.readState(meta.sessionPath);
+  const { realPath: _realPath, lastCache, ...fields } = meta;
+  return {
+    ...fields,
+    machine: host.machine,
+    live: liveStatusOf(meta, live) ?? null,
+    pinned,
+    profile: profile ?? "coding",
+    ...(lastCache ? { cachedUntil: cachedUntil(lastCache, retentionOf(meta, cacheRetention)) } : {}),
+  };
 }
 
 /** `SessionInfo` of a session file, undefined when it is missing or not a Pi session. */

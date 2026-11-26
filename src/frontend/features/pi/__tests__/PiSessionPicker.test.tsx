@@ -24,7 +24,7 @@ vi.mock("../sessionStore", () => ({
     return { sessions: pi.sessions, loading: false, error: null }
   },
   usePiRepositories: () => pi.repositories,
-  usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false },
+  usePiSessionStatus: (sessionId: string): PiSessionStatus => pi.statuses[sessionId] ?? { running: false, waiting: false, unread: false, failed: false },
   refreshPiSessions: vi.fn(),
   searchPiSessions: (query: string, filter?: { profile?: string }) => pi.search(query, filter),
 }))
@@ -74,7 +74,7 @@ describe("PiSessionPicker", () => {
       piSession("busy", 2 * HOUR, { live, tokens: 84_300 }),
       piSession("fresh", HOUR, { cwd: "/git/worktrees/proj/feat" }),
     ]
-    pi.statuses = { busy: { running: true, waiting: false, unread: false }, fresh: { running: false, waiting: false, unread: true } }
+    pi.statuses = { busy: { running: true, waiting: false, unread: false, failed: false }, fresh: { running: false, waiting: false, unread: true, failed: false } }
     const onOpenItem = renderPicker()
 
     expect(screen.getAllByRole("option").map((option) => option.textContent?.split(/\dh/)[0])).toEqual(["fresh", "busy", "old"])

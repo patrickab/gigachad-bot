@@ -10,6 +10,8 @@
  *   (`agent_start`/`agent_settled`, dialog requests/`ui_closed`), which win. `contextPercent`/`cost` from Pi's
  *   `get_session_stats` (F3) while attached
  * - `unread`: a run settled since the user last viewed the session (`markPiSessionRead`), persisted in localStorage
+ * - `failed`: the last run of an attached session ended in an error. `cachedUntil`: the listed `cachedUntil` (pi-host
+ *   reads it from the session file), lists read again once a run settles so it follows each answer
  * - `piSessionEvents`: `settled` on `agent_settled` (never `agent_end`) once per run, `waiting` per dialog, `failed` once per run
  */
 import { createElement, Fragment, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react"
@@ -24,6 +26,10 @@ export interface PiSessionStatus {
   running: boolean
   waiting: boolean
   unread: boolean
+  /** The last run of an attached session ended in an error. */
+  failed: boolean
+  /** Until when the prompt cache is likely warm (epoch ms), absent when the last answer used none. */
+  cachedUntil?: number
   contextPercent?: number
   cost?: number
 }
@@ -75,7 +81,7 @@ const UNREAD_KEY = "pi-unread-sessions"
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
 /** Id prefix of this page's `get_session_stats` commands: responses reach every client attached to the session. */
 const STATS_PREFIX = `stats-${crypto.randomUUID().slice(0, 8)}-`
-const IDLE_STATUS: PiSessionStatus = { running: false, waiting: false, unread: false }
+const IDLE_STATUS: PiSessionStatus = { running: false, waiting: false, unread: false, failed: false }
 const NO_REPOSITORIES: PiRepository[] = []
 
 const eventListeners = new Set<PiSessionListener>()
@@ -87,6 +93,8 @@ let repositoriesRead: Promise<void> | null = null
 let stopLive: (() => void) | null = null
 const attached = new Map<string, AttachedSession>()
 let listedLive = new Map<string, PiLiveStatus | null>()
+/** The listed `cachedUntil` of each session that has one, epoch ms. */
+let listedCache = new Map<string, number>()
 /** The `live` of each unarchived list's sessions, merged into `listedLive`. */
 const listedLiveByList = new Map<SessionList, Map<string, PiLiveStatus | null>>()
 let unread = readUnread()
@@ -233,14 +241,17 @@ function computeStatus(sessionId: string): PiSessionStatus {
   const live = listedLive.get(sessionId)
   const running = session ? session.running : live?.running ?? false
   const waiting = session ? session.dialogs.size > 0 : live?.waiting ?? false
-  const status: PiSessionStatus = { running, waiting, unread: !running && unread.has(sessionId) }
+  const status: PiSessionStatus = { running, waiting, unread: !running && unread.has(sessionId), failed: !running && Boolean(session?.failed) }
+  const cachedUntil = listedCache.get(sessionId)
+  if (cachedUntil !== undefined) status.cachedUntil = cachedUntil
   if (session?.contextPercent !== undefined) status.contextPercent = session.contextPercent
   if (session?.cost !== undefined) status.cost = session.cost
   return status
 }
 
 function sameStatus(a: PiSessionStatus, b: PiSessionStatus): boolean {
-  return a.running === b.running && a.waiting === b.waiting && a.unread === b.unread && a.contextPercent === b.contextPercent && a.cost === b.cost
+  return a.running === b.running && a.waiting === b.waiting && a.unread === b.unread && a.failed === b.failed && a.cachedUntil === b.cachedUntil
+    && a.contextPercent === b.contextPercent && a.cost === b.cost
 }
 
 function statusOf(sessionId: string): PiSessionStatus {
@@ -266,6 +277,12 @@ function subscribeStatus(listener: () => void): () => void {
   return () => statusListeners.delete(listener)
 }
 
+/** `summarize` of the live statuses of `sessionIds`, re-read as any changes: a string, so unchanged summaries stay identical. */
+export function usePiSessionsSummary(sessionIds: readonly string[], summarize: (statuses: PiSessionStatus[]) => string): string {
+  const snapshot = () => summarize(sessionIds.map(statusOf))
+  return useSyncExternalStore(subscribeStatus, snapshot, snapshot)
+}
+
 /** Live status of `sessionId`, idle and read for null. */
 export function usePiSessionStatus(sessionId: string | null): PiSessionStatus {
   const snapshot = () => sessionId === null ? IDLE_STATUS : statusOf(sessionId)
@@ -280,6 +297,12 @@ function noteListed(list: SessionList, sessions: PiSessionInfo[]) {
   // The list just read is the freshest: its entries win over another list's older read of the same session
   const others = [...listedLiveByList].filter(([other]) => other !== list).flatMap(([, byId]) => [...byId])
   listedLive = new Map([...others, ...listed])
+  for (const session of sessions) {
+    const until = session.cachedUntil ? Date.parse(session.cachedUntil) : NaN
+    if (Number.isNaN(until)) listedCache.delete(session.sessionId)
+    else listedCache.set(session.sessionId, until)
+  }
+  listedCache = new Map(listedCache)
   for (const [sessionId, live] of listed) {
     if (previous.get(sessionId)?.running && !live?.running && !attached.has(sessionId)) markUnread(sessionId)
   }
@@ -348,6 +371,8 @@ function handleRecord(sessionId: string, session: AttachedSession, record: PiRec
     case "agent_settled": {
       session.running = false
       requestStats(sessionId)
+      // The answer is in the session file now: its listing carries the new cache time
+      refreshWatched()
       if (!session.settled) {
         session.settled = true
         markUnread(sessionId)

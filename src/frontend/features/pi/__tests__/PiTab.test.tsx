@@ -21,7 +21,10 @@ vi.mock("@/lib/backend/api", async (importOriginal) => ({
   restorePiSession: vi.fn(),
   callFactory: vi.fn(async () => ({ waves: [] })),
 }))
-vi.mock("../sessionStore", () => ({ refreshPiSessions: vi.fn() }))
+vi.mock("../sessionStore", () => ({
+  refreshPiSessions: vi.fn(),
+  usePiSessionStatus: () => ({ running: false, waiting: false, unread: false, failed: false }),
+}))
 vi.mock("../piSocket", async (importOriginal) => ({ ...await importOriginal<typeof import("../piSocket")>(), observePiSocket: () => () => {} }))
 vi.mock("../PiTranscript", () => ({
   PiTranscript: ({ onBranch }: { onBranch?: (entryId: string) => void }) => onBranch ? <button type="button" onClick={() => onBranch("entry-7")}>Branch</button> : null,

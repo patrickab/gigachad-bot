@@ -116,10 +116,11 @@ export function PiTopBar({ slots, header, controls, modelProps }: { slots: PiTop
 }
 
 /** The session's live dot and folder at the composer's left, where an empty chat shows the project it starts a session in. */
-export function PiRepoLabel({ repo, tone }: { repo: string; tone?: StatusTone }) {
+/** The mount a composer runs in, after its state: a `tone` dot, or `mark` (e.g. the session's live dot) when given. */
+export function PiRepoLabel({ repo, tone, mark }: { repo: string; tone?: StatusTone; mark?: ReactNode }) {
   return (
     <span className="flex h-8 min-w-0 items-center gap-1.5 px-2 text-xs text-ink">
-      {tone && <StatusDot tone={tone} />}
+      {mark ?? (tone && <StatusDot tone={tone} />)}
       <span className="truncate">{baseName(repo)}</span>
     </span>
   )

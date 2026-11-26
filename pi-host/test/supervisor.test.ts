@@ -921,6 +921,21 @@ describe("profiles (G1, G5, G6)", () => {
     ]);
   });
 
+  test("marks the cache retention a session's Pi started with, none for Pi's default", async () => {
+    const plain = (await (await startSession({ cwd })).json()).session;
+    await api(`/sessions/${plain.sessionId}/close`, { method: "POST" });
+    expect(existsSync(`${plain.sessionPath}.gigachad.json`)).toBe(false);
+
+    process.env.PI_CACHE_RETENTION = "long";
+    try {
+      const long = (await (await startSession({ cwd })).json()).session;
+      expect(JSON.parse(readFileSync(`${long.sessionPath}.gigachad.json`, "utf8"))).toMatchObject({ cacheRetention: "long" });
+      await api(`/sessions/${long.sessionId}/close`, { method: "POST" });
+    } finally {
+      delete process.env.PI_CACHE_RETENTION;
+    }
+  });
+
   test("continue and the profile filter keep coding and document sessions apart", async () => {
     const coding = (await (await startSession({ cwd })).json()).session;
     expect(coding.profile).toBe("coding");
