@@ -1,19 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { FloatingPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useProject } from "@/contexts/ProjectContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useNowMs } from "@/hooks/useNowMs"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import type { ChatListing, ChatSearchMatch } from "@/lib/backend/api"
 import type { ChatRevealHit } from "./ChatContainer"
 import type { ProjectListItem } from "@/lib/domain/projects"
 import { cn, compactElapsed, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
-import { useAllChats, useChatSearch } from "./useChatPicker"
+import { QUERY_MAX_LENGTH, useAllChats, useChatSearch } from "./useChatPicker"
 
-const TICK_MS = 60_000
 const GENERAL = "General"
 const ROW_TEXT_WIDTH = "max-w-[16rem]"
 
@@ -40,16 +40,6 @@ export function groupByProject(chats: readonly ChatListing[], projects: readonly
     group.items.push({ chat })
   }
   return [...groups.values()]
-}
-
-/** Current time in ms, renewed every minute so rows age without a refetch. */
-function useNowMs(): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS)
-    return () => clearInterval(timer)
-  }, [])
-  return now
 }
 
 /** `text` with the first occurrence of `query` (case-insensitive) bold. */
@@ -101,16 +91,19 @@ function ChatPickerPanel({ onOpenChat, onClose }: { onOpenChat: OpenChat; onClos
   const { chats, error: listError } = useAllChats()
   const search = useChatSearch(query)
 
-  const trimmed = query.trim()
-  const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
+  // Cut as `useChatSearch` cuts it before sending, so the reveal paints what was searched
+  const trimmed = query.trim().slice(0, QUERY_MAX_LENGTH)
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   let groups: PickerGroup<Entry>[]
   if (words.length > 0) {
     const named = (chats ?? []).filter((chat) => words.every((word) => chat.title.toLowerCase().includes(word))).sort(newestFirst)
+    const hitsOf = new Map((search.hits ?? []).map((hit) => [hit.historyFile, hit]))
+    // A chat whose title matches leads with its title row, its content hits follow as rows of their own
+    const namedItems = named.flatMap((chat): Entry[] => [{ chat }, ...(hitsOf.get(chat.historyFile)?.matches ?? []).map((match) => ({ chat, match, first: false }))])
     const shown = new Set(named.map((chat) => chat.historyFile))
-    const hits = (search.hits ?? []).filter((hit) => !shown.has(hit.historyFile))
     groups = [
-      { key: "named", label: "Chats", items: named.map((chat) => ({ chat })) },
-      { key: "content", label: "Content", items: hits.flatMap((hit): Entry[] => {
+      { key: "named", label: "Chats", items: namedItems },
+      { key: "content", label: "Content", items: (search.hits ?? []).filter((hit) => !shown.has(hit.historyFile)).flatMap((hit): Entry[] => {
         const chat: ChatListing = { historyFile: hit.historyFile, projectSlug: hit.projectSlug, title: hit.title, updatedAt: hit.updatedAt }
         return hit.matches.length > 0 ? hit.matches.map((match, index) => ({ chat, match, first: index === 0 })) : [{ chat }]
       }) },

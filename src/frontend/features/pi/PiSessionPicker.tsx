@@ -6,6 +6,7 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useNowMs } from "@/hooks/useNowMs"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { archivePiSession, type PiRepository, type PiSessionInfo, type PiSessionMatch } from "@/lib/backend/api"
 import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
@@ -15,7 +16,6 @@ import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, 
 import { PiSessionPreview, prefetchPiSessionPreviews } from "./PiSessionPreview"
 import { PiSessionDot, piTokenText, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
 
-const TICK_MS = 60_000
 /** Typing pauses this long before the transcripts are searched. */
 const SEARCH_DELAY_MS = 200
 /** Widest a row's title and its details line get, one value so both edges line up. */
@@ -29,16 +29,6 @@ const entryKey = ({ session, hit }: Entry) => (hit ? `${session.sessionId}:${hit
 /** Newest first by last use. */
 function newestFirst(sessions: readonly PiSessionInfo[]): PiSessionInfo[] {
   return [...sessions].sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))
-}
-
-/** Current time in ms, renewed every minute so rows age without a refetch. */
-function useNowMs(): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS)
-    return () => clearInterval(timer)
-  }, [])
-  return now
 }
 
 /** Full-text hits of `query` (M24), read once typing pauses, null while they are read. */

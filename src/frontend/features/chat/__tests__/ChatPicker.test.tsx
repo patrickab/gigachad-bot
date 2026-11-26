@@ -84,7 +84,7 @@ describe("ChatPicker", () => {
     fireEvent.change(search(), { target: { value: " refactor " } })
     const content = await screen.findByRole("group", { name: "Content" })
     expect(api.search).toHaveBeenCalledWith("refactor", 20, expect.any(AbortSignal))
-    expect(within(screen.getByRole("group", { name: "Chats" })).getAllByRole("option").map((row) => row.textContent)).toEqual(["Refactor tabs1h"])
+    expect(within(screen.getByRole("group", { name: "Chats" })).getAllByRole("option").map((row) => row.textContent)).toEqual(["Refactor tabs1h", "refactor me"])
     const rows = within(content).getAllByRole("option")
     expect(rows).toHaveLength(2)
     expect(rows[0]).toHaveTextContent("Unrelated…we should Refactor the store…")
@@ -95,6 +95,33 @@ describe("ChatPicker", () => {
 
     fireEvent.click(rows[1])
     expect(onOpenChat).toHaveBeenCalledWith("other.json", 3, { query: "refactor", role: "assistant", ordinal: 0 })
+  })
+
+  it("lists the hits of a chat whose title matches after its title row and cuts the revealed query to 200 characters", async () => {
+    api.chats = [chat("titled.json", "Refactor tabs", 1)]
+    api.search.mockResolvedValue([
+      { ...chat("titled.json", "Refactor tabs", 1), matches: [{ qaIndex: 2, role: "user", ordinal: 0, snippet: "refactor me" }] },
+    ])
+    const onOpenChat = renderPicker()
+    await screen.findByRole("option", { name: /Refactor tabs/ })
+
+    fireEvent.change(search(), { target: { value: "refactor" } })
+    await waitFor(() => expect(within(screen.getByRole("group", { name: "Chats" })).getAllByRole("option")).toHaveLength(2))
+    const rows = within(screen.getByRole("group", { name: "Chats" })).getAllByRole("option")
+    expect(rows[0]).toHaveTextContent("Refactor tabs")
+    fireEvent.click(rows[1])
+    expect(onOpenChat).toHaveBeenCalledWith("titled.json", 2, { query: "refactor", role: "user", ordinal: 0 })
+  })
+
+  it("hands a query longer than 200 characters to the reveal cut as it was searched", async () => {
+    api.chats = []
+    const long = "a".repeat(250)
+    api.search.mockResolvedValue([{ ...chat("x.json", "X", 1), matches: [{ qaIndex: 1, role: "user", ordinal: 0, snippet: long }] }])
+    const onOpenChat = renderPicker()
+    fireEvent.change(search(), { target: { value: long } })
+    fireEvent.click(await screen.findByRole("option", { name: /X/ }))
+    expect(api.search).toHaveBeenCalledWith("a".repeat(200), 20, expect.any(AbortSignal))
+    expect(onOpenChat).toHaveBeenCalledWith("x.json", 1, { query: "a".repeat(200), role: "user", ordinal: 0 })
   })
 
   it("aborts the request of a superseded query", async () => {

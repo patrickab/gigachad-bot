@@ -7,7 +7,7 @@ import { errorMessage } from "@/lib/utils"
 /** Typing pauses this long before the chats are searched. */
 export const SEARCH_DELAY_MS = 200
 /** Longest query the backend searches for. */
-const QUERY_MAX_LENGTH = 200
+export const QUERY_MAX_LENGTH = 200
 
 /** Every chat of the login, read on mount; null until the read answers. */
 export function useAllChats(): { chats: ChatListing[] | null; error: string } {
