@@ -133,6 +133,7 @@ flowchart LR
 
 - **`factory/gates.sh`** is the one pipeline: local runs, the factory's gates and the check before a redeploy
   (`AGENTS.md`, "Testing"). Call the same script from any CI added later, so both judge the same thing.
+  - Test steps run through `factory slot -- <command>` when the `factory` command has `slot` and `FACTORY_SLOT_HELD` is not set (the factory's own gate runs already hold a slot; the variable passes through `env -i`). `--dry-run` prints the commands without running them, and `lint` runs `factory/test_gates_slot.sh`
   - `--changed`: steps, TypeScript projects, eslint files and vitest tests by the paths changed since the merge base
     with the target. Docs alone run nothing. A path outside the known projects runs everything.
   - `--reuse`: a step that passed on the same tree and merge base is skipped.

@@ -65,7 +65,7 @@ function ChatRow({ entry: { chat, match, first = true }, query, now }: { entry: 
  * Panel over every chat of the login, opened by Alt+C in the active tab and docked under the top bar.
  *
  * - No query: the chats grouped by project, the group with the newest chat first, chats newest first
- * - A query: chats whose title holds every word, then every content hit of the other chats, one row each
+ * - A query: chats whose title holds every word, each followed by its own content hits, then every content hit of the other chats, one row each
  * - Picking a chat opens it in the active tab, picking a hit reveals its pair and paints its match (`onOpenChat`)
  */
 export function ChatPicker({ onOpenChat }: { onOpenChat: OpenChat }) {

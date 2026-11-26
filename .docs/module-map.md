@@ -399,7 +399,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |-- migrate_memory.py              One-time move of old Postgres memories into memory-store roots
 |   |-- check.sh                       Forwards to `factory/gates.sh` for tasks started before the move
 |   `-- build-tauri-linux.sh           Desktop sidecar/AppImage build (expects absent `src/frontend/src-tauri/`)
-|-- factory/gates.sh                  The one test pipeline (lint, types, python, frontend, pi-host; `--changed`, `--reuse`)
+|-- factory/gates.sh                  The one test pipeline (lint, types, python, frontend, pi-host; `--changed`, `--reuse`, `--dry-run`; test steps take a factory test slot)
 |-- redeploy.sh                       Production rebase/restart of pi-host, backend, learn mode and the preview gate
 |-- run.sh                            Development launcher composition
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
