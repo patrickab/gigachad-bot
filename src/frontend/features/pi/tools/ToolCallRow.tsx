@@ -1,8 +1,9 @@
 // Ported from kahme247/ompweb components/MessageView.tsx (MIT, Copyright (c) 2026 agegr).
 "use client"
 
-import { memo, useId, useState, type JSX, type MouseEvent } from "react"
+import { memo, useId, useState, type JSX, type MouseEvent, type ReactNode } from "react"
 import { Bot, Check, CheckSquare, ChevronDown, CircleAlert, CircleSlash, Code2, FileEdit, FileText, Globe, LoaderCircle, Search, Terminal, Wrench, type LucideIcon } from "lucide-react"
+import type { ToolDisplay } from "../renderers"
 import type { TextContent, ToolCall, ToolRun } from "../types"
 import { getResultDiff, PairedDiffResult, PairedResult } from "./DiffView"
 import {
@@ -25,6 +26,10 @@ interface ToolCallRowProps {
   streaming?: boolean
   defaultCollapsed?: boolean
   onOpenFile?: (path: string) => void
+  /** Label and icon in place of the raw tool name and category icon (`toolDisplayOf`); Pi's own tools have none. */
+  display?: ToolDisplay
+  /** Stage timeline beside the name, e.g. the chat's ticking stages. Compared by identity: keep it stable while the call's run is. */
+  stages?: ReactNode
 }
 
 const CATEGORY_ICONS: Record<ToolCategory, LucideIcon> = {
@@ -68,6 +73,9 @@ const MemoToolCallRow = memo(ToolCallRowView, (prev, next) => (
   && prev.streaming === next.streaming
   && prev.defaultCollapsed === next.defaultCollapsed
   && prev.onOpenFile === next.onOpenFile
+  && prev.display?.label === next.display?.label
+  && prev.display?.icon === next.display?.icon
+  && prev.stages === next.stages
 ))
 
 /** Whether two argument objects hold the same values by identity. */
@@ -77,7 +85,7 @@ function argumentsShallowEqual(a: Record<string, unknown>, b: Record<string, unk
   return keysA.length === Object.keys(b).length && keysA.every((key) => a[key] === b[key])
 }
 
-function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true, onOpenFile }: ToolCallRowProps) {
+function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true, onOpenFile, display, stages }: ToolCallRowProps) {
   const isRunning = run?.running === true
   const isError = run?.isError === true
   const isDone = run !== undefined && !isRunning
@@ -105,7 +113,7 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
   const resultDiff = isOpen && isDone && !isError ? getResultDiff(run.result?.details) : null
 
   const category = getToolCategory(call.name)
-  const CategoryIcon = CATEGORY_ICONS[category]
+  const ToolIcon = display?.icon ?? CATEGORY_ICONS[category]
   const todoSummary = category === "todo" ? getTodoSummary(call.arguments) : null
   const preview = getToolPreview(call)
   const previewTarget = getPreviewTarget(call, onOpenFile !== undefined)
@@ -141,9 +149,10 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
           </span>
           <span className="sr-only">{status}</span>
           <span className="pi-activity-tool-icon" data-category={category} aria-hidden>
-            <CategoryIcon size={12} strokeWidth={1.8} />
+            <ToolIcon size={12} strokeWidth={1.8} />
           </span>
-          <span className="pi-activity-row-tool" data-error={isError || undefined}>{call.name}</span>
+          <span className="pi-activity-row-tool" data-error={isError || undefined}>{display?.label ?? call.name}</span>
+          {stages != null && <span className="pi-activity-row-stages">{stages}</span>}
           {!previewTarget && <span className="pi-activity-row-preview">{preview}</span>}
         </button>
         {previewTarget && (

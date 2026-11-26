@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import { Globe } from "lucide-react"
 import { afterEach, describe, expect, it } from "vitest"
 import { PiTranscript } from "../PiTranscript"
-import { registerMessageRenderer, registerToolRenderer, renderCustomMessage, renderToolCall, toolPlacement } from "../renderers"
+import { registerMessageRenderer, registerToolDisplay, registerToolRenderer, renderCustomMessage, renderToolCall, toolDisplayOf, toolPlacement } from "../renderers"
 import { EMPTY_TRANSCRIPT, type Transcript } from "../transcript"
 import type { AssistantMessage, CustomMessage, ToolCall, UserMessage } from "../types"
 
@@ -34,6 +35,18 @@ describe("tool renderer registry", () => {
     remove()
     expect(toolPlacement("todo")).toBe("inline")
     expect(renderToolCall(todoCall, undefined, () => "default")).toBe("default")
+  })
+})
+
+describe("tool display registry", () => {
+  it("resolves a source's display, newest first, and none for other sources", () => {
+    unregister.push(registerToolDisplay("chat", (name) => ({ label: `old ${name}`, icon: Globe })))
+    const remove = registerToolDisplay("chat", (name) => (name === "web_search" ? { label: "Web search", icon: Globe } : undefined))
+    expect(toolDisplayOf("chat", "web_search")?.label).toBe("Web search")
+    expect(toolDisplayOf("chat", "bash")).toBeUndefined()
+    expect(toolDisplayOf("pi", "web_search")).toBeUndefined()
+    remove()
+    expect(toolDisplayOf("chat", "bash")?.label).toBe("old bash")
   })
 })
 
