@@ -230,7 +230,7 @@ PY
 # `slot` and the caller does not hold one (FACTORY_SLOT_HELD); else as it is. --dry-run prints the command.
 slot_run() {
     local prefix=()
-    if [[ -z ${FACTORY_SLOT_HELD:-} ]] && command -v factory >/dev/null 2>&1 && factory actions slot >/dev/null 2>&1; then
+    if [[ -z ${FACTORY_SLOT_HELD:-} ]] && command -v factory >/dev/null 2>&1 && factory --help 2>/dev/null | grep -q 'factory slot'; then
         prefix=(factory slot --)
     fi
     if [[ $dry_run -eq 1 ]]; then
@@ -248,6 +248,7 @@ step_lint() {
         [[ -f $file ]] && files+=("$file")
     done < <({ git diff --name-only "$base" -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } | sort -u)
     local status=0
+    factory/test_gates_slot.sh || status=1
     if [[ ${#files[@]} -gt 0 ]]; then
         "$python" -m ruff check "${files[@]}" || status=1
     fi
@@ -276,7 +277,7 @@ step_types() {
 step_python() {
     local url="${POSTGRES_TEST_DATABASE_URL:-}" status=0 cache workers
     workers=$(($(nproc) > 2 ? $(nproc) - 1 : 1))
-    if [[ -z $url ]]; then
+    if [[ -z $url && $dry_run -eq 0 ]]; then
         url="$(throwaway_database)"
         if [[ -n $url ]]; then
             check_database="$url"

@@ -97,7 +97,7 @@ describe("ChatPicker", () => {
     expect(onOpenChat).toHaveBeenCalledWith("other.json", 3, { query: "refactor", role: "assistant", ordinal: 0 })
   })
 
-  it("lists the hits of a chat whose title matches after its title row and cuts the revealed query to 200 characters", async () => {
+  it("lists the hits of a chat whose title matches after its title row and reveals the hit with its query", async () => {
     api.chats = [chat("titled.json", "Refactor tabs", 1)]
     api.search.mockResolvedValue([
       { ...chat("titled.json", "Refactor tabs", 1), matches: [{ qaIndex: 2, role: "user", ordinal: 0, snippet: "refactor me" }] },
