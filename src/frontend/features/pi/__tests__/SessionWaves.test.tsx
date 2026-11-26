@@ -19,6 +19,7 @@ import { SessionWaves, SessionWavesPanel, taskModels } from "../SessionWaves"
 afterEach(() => {
   cleanup()
   api.callFactory.mockReset()
+  vi.unstubAllGlobals()
 })
 
 function task(key: string, fields: Partial<FactoryWaveTask> = {}): FactoryWaveTask {
@@ -39,6 +40,23 @@ function renderPanel(onOpenTask = vi.fn()) {
 }
 
 describe("SessionWaves", () => {
+  it("shows the waves it last read at once, before the first read answers, then the fresh ones", async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value) }, removeItem: (key: string) => { stored.delete(key) } })
+    let answer: (value: { waves: FactoryWave[] }) => void = () => undefined
+    api.callFactory.mockResolvedValueOnce({ waves: [wave("w1")] }).mockResolvedValueOnce({ tasks: [] })
+    const first = render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
+    await screen.findByRole("button", { name: /p\/w1/ })
+    first.unmount()
+    api.callFactory.mockReset()
+    api.callFactory.mockReturnValueOnce(new Promise((resolve) => { answer = resolve })).mockResolvedValue({ tasks: [] })
+    renderPanel()
+    expect(screen.getByRole("button", { name: /p\/w1/ })).toBeTruthy()
+    answer({ waves: [wave("w2")] })
+    await screen.findByRole("button", { name: /p\/w2/ })
+    expect(screen.queryByRole("button", { name: /p\/w1/ })).toBeNull()
+  })
+
   it("shows only this session's waves, the active ones open", async () => {
     api.callFactory.mockResolvedValue({
       waves: [

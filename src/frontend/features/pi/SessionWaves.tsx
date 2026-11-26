@@ -17,6 +17,28 @@ const ATTENTION_TASK = new Set(["waiting_answer", "waiting_approve", "blocked"])
 const newestFirst = (a: FactoryWave, b: FactoryWave) => b.createdAt.localeCompare(a.createdAt)
 const totalCost = (waves: readonly FactoryWave[]) => waves.reduce((sum, wave) => sum + (wave.usage?.cost ?? 0), 0)
 
+const storeKey = (sessionId: string) => `gigachad:session-waves:${sessionId}`
+
+/** The session's waves as last read in this browser: shown until the first read answers (`waves.list` takes seconds). */
+function storedWaves(sessionId: string): FactoryWave[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(storeKey(sessionId)) ?? "[]")
+    return Array.isArray(stored) ? (stored as FactoryWave[]) : []
+  } catch {
+    // No store (server render, a blocked store) or a broken entry: nothing to show early.
+    return []
+  }
+}
+
+function storeWaves(sessionId: string, waves: readonly FactoryWave[]): void {
+  try {
+    if (waves.length === 0) localStorage.removeItem(storeKey(sessionId))
+    else localStorage.setItem(storeKey(sessionId), JSON.stringify(waves))
+  } catch {
+    // A full or unavailable store only costs the early display.
+  }
+}
+
 /** The coder model of a task by task id, without its provider. */
 export type TaskModels = Record<string, string>
 
@@ -48,11 +70,12 @@ export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave
  * The waves session `sessionId` declared, in whatever repository, from the core's `waves.list` without a repo.
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket, as the board does
+ * - Until the first read answers, the session's waves as this browser last read them (`localStorage`)
  * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
  * - `models`: the coder model of each task by task id, from `tasks.list` of each repository the session has waves in
  */
 export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; models: TaskModels } {
-  const [waves, setWaves] = useState<FactoryWave[]>([])
+  const [answered, setAnswered] = useState<{ sessionId: string; waves: FactoryWave[] } | null>(null)
   const [models, setModels] = useState<TaskModels>({})
   useEffect(() => {
     let cancelled = false
@@ -63,8 +86,10 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
       callFactory<{ waves: FactoryWave[] }>("waves.list", {}).then(
         (answer) => {
           if (!current()) return
-          setWaves(answer.waves)
-          const repos = [...new Set(sessionWaves(answer.waves, sessionId).map((wave) => wave.repo))]
+          const own = sessionWaves(answer.waves, sessionId)
+          setAnswered({ sessionId, waves: own })
+          storeWaves(sessionId, own)
+          const repos = [...new Set(own.map((wave) => wave.repo))]
           Promise.all(repos.map((repo) => callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }))).then(
             (listed) => { if (current()) setModels(taskModels(listed.flatMap((answer) => answer.tasks ?? []))) },
             (cause: unknown) => console.error("tasks.list failed", cause),
@@ -72,7 +97,7 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
         },
         (cause: unknown) => {
           if (!current()) return
-          if (isUnknownAction(cause)) setWaves([])
+          if (isUnknownAction(cause)) setAnswered({ sessionId, waves: [] })
           else console.error("waves.list failed", cause)
         },
       )
@@ -84,7 +109,7 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
       stop()
     }
   }, [sessionId])
-  return useMemo(() => ({ waves: sessionWaves(waves, sessionId), models }), [waves, sessionId, models])
+  return useMemo(() => ({ waves: answered?.sessionId === sessionId ? answered.waves : storedWaves(sessionId), models }), [answered, sessionId, models])
 }
 
 function waveIcon(wave: FactoryWave): { icon: LucideIcon; className: string } {
