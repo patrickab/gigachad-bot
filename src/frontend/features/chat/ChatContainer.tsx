@@ -2,7 +2,6 @@
 
 import { useColumnWidth, CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
 import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
-import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
@@ -142,7 +141,6 @@ export function ChatContainer({
           style={{ paddingBottom: dock.paddingBottom }}
         >
           <div ref={onChatColumnChange} data-chat-column className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
-            <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex, qaIndex }) => (
               <Fragment key={globalIndex}>
                 <ChatPair
@@ -173,7 +171,6 @@ export function ChatContainer({
                 )}
               </Fragment>
             ))}
-          </AnimatePresence>
           <div ref={bottomRef} />
           </div>
         </div>

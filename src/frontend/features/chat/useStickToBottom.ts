@@ -40,11 +40,12 @@ export function useStickToBottom(scrollRef: RefObject<HTMLDivElement | null>, bo
       pinnedRef.current = true
       settlingRef.current = true
     }
-    const wasEmpty = previousCount.current === 0
+    const previous = previousCount.current
     previousCount.current = messages.length
     if (!pinnedRef.current) return
-    // Restored histories jump straight to the end, avoiding work in every preview along a smooth scroll.
-    bottomRef.current?.scrollIntoView({ behavior: wasEmpty ? "instant" : "smooth" })
+    // Only a new message glides into view. A restored history jumps straight to the end, avoiding work in every preview along a smooth scroll,
+    // and so does a streamed reply: its text grows every frame, each a smooth scroll started over
+    bottomRef.current?.scrollIntoView({ behavior: previous > 0 && messages.length > previous ? "smooth" : "instant" })
   }, [chatId, messages, bottomRef])
 
   const focusQaIndex = focus?.qaIndex ?? null
