@@ -82,7 +82,7 @@ export function useChatStream(): UseChatStreamReturn {
         const next = typeof update === "function" ? update(prev) : update
         if (next !== prev) mine.add(next.at(-1))
         return next
-      }), assistantMsg)
+      }), assistantMsg, messagesRef.current.at(-1))
       // Answer text is paced, everything else lands as it arrives.
       const pacer = createTokenPacer((text) => {
         assistantMsg.content += text

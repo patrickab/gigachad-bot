@@ -19,14 +19,16 @@ export function updateMessageAt(
 }
 
 /** Returns a `publish` that copies the accumulator `msg` into the trailing assistant slot on every
- *  call: batching short fast responses would collapse streaming into one final render. */
+ *  call: batching short fast responses would collapse streaming into one final render.
+ *  `shown` is the list's answer slot when the stream starts (a placeholder, or `msg` itself). */
 export function createMessagePublisher(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   msg: Message,
+  shown: Message | undefined,
 ): () => void {
   // `msg` remains the mutable accumulator. `owned` tracks the copy React last
   // received so an abandoned stream cannot overwrite a newer assistant message.
-  let owned: Message = msg
+  let owned = shown
 
   return () => {
     const published = { ...msg }

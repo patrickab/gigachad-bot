@@ -14,7 +14,7 @@ import { useTabChat } from "../useTabChat"
 
 const { saveChat, streams, history, branches, undoDelete, enabledTools } = vi.hoisted(() => ({
   saveChat: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
-  streams: { requests: [] as unknown[], fail: false, gate: null as Promise<void> | null },
+  streams: { requests: [] as unknown[], fail: false, gate: null as Promise<void> | null, beforeDone: null as Promise<void> | null },
   history: { current: null as unknown },
   branches: {
     refreshAll: async () => {},
@@ -26,16 +26,18 @@ const { saveChat, streams, history, branches, undoDelete, enabledTools } = vi.ho
   enabledTools: { enabledTools: [], toggleTool: () => {} },
 }))
 
-/** Answers "edited answer" and completes, or fails before any event when `streams.fail`. */
+/** Answers "edited answer" and completes (after `streams.beforeDone`), or fails before any event when `streams.fail`. */
 function stubStream(req: unknown): SSEStreamResult {
   streams.requests.push(req)
-  const events: SSEEvent[] = [{ event: "token", data: "edited answer" }, { event: "done", data: "" }]
+  const token: SSEEvent = { event: "token", data: "edited answer" }
   return {
     abort: () => {},
     async *[Symbol.asyncIterator]() {
       if (streams.fail) throw new Error("model unavailable")
       if (streams.gate) await streams.gate
-      yield* events
+      yield token
+      if (streams.beforeDone) await streams.beforeDone
+      yield { event: "done", data: "" }
     },
   }
 }
@@ -113,6 +115,7 @@ afterEach(() => {
   streams.requests = []
   streams.fail = false
   streams.gate = null
+  streams.beforeDone = null
 })
 
 describe("deleting a pair", () => {
@@ -156,6 +159,18 @@ describe("sending a question", () => {
     expect(attached.user_msg).toContain("notes")
     expect(attached.user_msg).toContain("Attached question")
     expect(attached.messages.map((m) => m.content).slice(-3)).toEqual(["Answer 2", "Plain question", "edited answer"])
+  })
+
+  it("streams the reply to a question with attachments before it ends", async () => {
+    const { result } = await renderChat("c1.json")
+    let release = () => {}
+    streams.beforeDone = new Promise((resolve) => { release = resolve })
+    let sent: Promise<boolean> = Promise.resolve(false)
+    act(() => { sent = result.current.turns.handleSend("Attached question", [notes]) })
+
+    await waitFor(() => expect(result.current.chat.messages.at(-1)?.content).toBe("edited answer"))
+    await act(async () => { release(); await sent })
+    expect(contents(lastSaved()).slice(-2)).toEqual(["Attached question", "edited answer"])
   })
 
   it("leaves another chat opened in the tab before the reply ends alone", async () => {
