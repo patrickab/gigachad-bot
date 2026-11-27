@@ -155,6 +155,9 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
       // A file open in another tab switches there instead of showing twice.
       const open = tabShowingItem(tabs, item, activeTab)
       if (open) {
+        // The tab may hold the item hidden behind its chat ("Close file"): show it again, with the tab's own item (its chat session, editor session key)
+        const held = open.workspaceItem
+        if (held && showingItem(held).appMode !== open.appMode) updateTab(open.id, () => showingItem(held))
         setActiveTab(open.id)
         return
       }
