@@ -134,6 +134,22 @@ describe("deleting a pair", () => {
   })
 })
 
+describe("sending a question", () => {
+  it("sends the question once, as user_msg, after the earlier pairs", async () => {
+    const { result } = await renderChat("c1.json")
+
+    await act(async () => { await result.current.turns.handleSend("Plain question", []) })
+    await act(async () => { await result.current.turns.handleSend("Attached question", [notes]) })
+
+    const [plain, attached] = streams.requests as (ChatRequest & { messages: { content: string }[] })[]
+    expect(plain.user_msg).toBe("Plain question")
+    expect(plain.messages.map((m) => m.content).slice(-2)).toEqual(["Question 2", "Answer 2"])
+    expect(attached.user_msg).toContain("notes")
+    expect(attached.user_msg).toContain("Attached question")
+    expect(attached.messages.map((m) => m.content).slice(-3)).toEqual(["Answer 2", "Plain question", "edited answer"])
+  })
+})
+
 describe("editing a pair", () => {
   it("removes the later pairs and sends the edit once, with the pair's attachments", async () => {
     const { result } = await renderChat("c1.json")
@@ -148,8 +164,7 @@ describe("editing a pair", () => {
     const request = streams.requests[0] as ChatRequest & { messages: { content: string }[] }
     expect(request.user_msg).toContain("notes")
     expect(request.user_msg).toContain("Question 1, edited")
-    expect(request.messages.map((m) => m.content).slice(0, 2)).toEqual(["Question 0", "Answer 0"])
-    expect(request.messages).toHaveLength(3)
+    expect(request.messages.map((m) => m.content)).toEqual(["Question 0", "Answer 0"])
   })
 
   it("puts the edited text into the composer when the send fails", async () => {

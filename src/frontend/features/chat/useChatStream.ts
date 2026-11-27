@@ -174,7 +174,7 @@ export function useChatStream(): UseChatStreamReturn {
         setMessages(next)
       }
 
-      const history = buildHistory(messagesRef.current.slice(0, -1))
+      const history = buildHistory(messagesRef.current.slice(0, -2))
       return streamAssistantReply(req, history, assistantMsg)
     },
     [streamAssistantReply]

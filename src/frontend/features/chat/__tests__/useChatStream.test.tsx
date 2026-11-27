@@ -205,7 +205,6 @@ describe("useChatStream", () => {
     expect(createChatStream.mock.calls[1][0].messages).toEqual([
       { role: "user", content: "Create a mind map" },
       { role: "assistant", content: mindmap },
-      { role: "user", content: "Follow up" },
     ])
   })
 
@@ -260,7 +259,6 @@ describe("useChatStream", () => {
     expect(laterRequest.messages).toEqual([
       { role: "user", content: "Initial question" },
       { role: "assistant", content: "Visible answer" },
-      { role: "user", content: "Follow up" },
     ])
     expect(JSON.stringify(laterRequest.messages)).not.toContain(detailSentinel)
     expect(JSON.stringify(laterRequest.messages)).not.toContain(sourceSentinel)
