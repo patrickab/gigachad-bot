@@ -26,8 +26,8 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
   const ref = useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value)
   const close = () => setOpen(false)
-  useOutsidePress(ref, close)
-  useEventListener("document", "keydown", (e) => { if (e.key === "Escape") close() })
+  useOutsidePress(ref, close, { active: open })
+  useEventListener("document", "keydown", (e) => { if (e.key === "Escape") close() }, { active: open })
 
   const select = (next: string) => { onChange(next); setOpen(false) }
   const move = (direction: 1 | -1) => {

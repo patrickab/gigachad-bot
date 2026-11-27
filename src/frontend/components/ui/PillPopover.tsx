@@ -44,8 +44,8 @@ export function usePillPopover(onClose: () => void = closeNothing): PillPopoverS
   useEventListener("document", "mousedown", (event) => {
     const target = event.target as Node
     if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) close()
-  })
-  useEventListener("document", "keydown", (event) => { if (event.key === "Escape") close() })
+  }, { active: open })
+  useEventListener("document", "keydown", (event) => { if (event.key === "Escape") close() }, { active: open })
   return { open, show, close, rootRef, triggerRef, panelRef }
 }
 
