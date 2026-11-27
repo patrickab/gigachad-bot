@@ -159,7 +159,7 @@ Deeper behavior from here on.
 - **Core** (the package's `src/core.ts` and the `core-*.ts` modules it re-exports): every factory feature as an action
   over plain JSON: `repos.*`, `branches.list`, `settings.get|set`, `config.get|write`, `models.get|set`,
   `tasks.list|get|timeline|diff|start|wait|approve|retry|cancel|remove|message`,
-  `waves.start|add|get|list|timeline|retry|approve|cancel|remove`, host-only `tasks.import`.
+  `waves.start|add|get|list|retry|approve|cancel|remove`, `decisions.list`.
   State is plain files under `<agent dir>/factory/` (agent dir: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`): task
   records, wave logs (`waves/<id>.jsonl`, append-only, a wave's state is the fold of its events), per-repo settings
   files, task sessions, `notified.jsonl`. There is no daemon.
@@ -177,21 +177,20 @@ Deeper behavior from here on.
 - **pi-host**: `POST /factory/call {action, params}` and `GET /factory/actions` run the core in-process (its path
   asked once from `factory --core-path`; imported again when `core.ts`'s mtime changes, a change in another module of
   the package needs a pi-host restart). A runner it starts inherits pi-host's environment. It never opens or prompts a
-  factory session; a change of a task session, record or runner lock under `<agent dir>/factory/` sends
+  factory session, but finds one by id (task sessions, and a wave reviewer's under `waves/<id>.reviews/`) and refuses
+  to resume it or delete its turns; a change of a task session, record or runner lock under `<agent dir>/factory/` sends
   `sessions_changed`.
 - **Backend** (`routes/factory.py`, `lib/pi_host.py`): `POST /api/factory/call` and `GET /api/factory/actions`, a pass
   through (a refusal keeps the core's `detail`). It stores no factory state. Its own parts:
   - a `tasks.start` without `tag` gets the requesting login as its tag (the core would fall back to the host's system
     user), each character the core refuses in a tag replaced by `-`
-  - reverting a merged task's commit on `tasks.remove` (`lib/factory_revert.py`: a dry run refuses a conflicting
-    revert first, then, once the core removed the task, `git revert` in the repo's checkout; last, because the revert
-    reloads the dev server)
+  - reverting a done task's `merged` commit on `tasks.remove` (`lib/factory_revert.py`: a dry run first refuses a
+    conflicting revert, or a commit that is not on the checkout's branch: a task of a squash wave, whose code reached
+    the target only in the wave's squash commit; then, once the core removed the task, `git revert` in the repo's
+    checkout; last, because the revert reloads the dev server)
   - previews of a task's branch (ports 8100-8199, behind `preview_gate.py`, stopped after a successful `tasks.remove`)
   - images attached to a request or message: `POST /api/factory/images` (`lib/factory_images.py`, stored in
     `~/.cache/gigachad/factory-images/`), their absolute paths appended to the text for the coder to open
-  - the move of old Postgres rows into the core at backend start (`lib/factory_migration.py`: settings through
-    `settings.set` only when the core stores none, tasks through `tasks.import`; a row is marked once it moved or
-    never can, a failed one is retried at the next start)
 - **Frontend** (`src/frontend/features/factory/`): board, task view (timeline plus a message box), settings, all
   through `callFactory(action, params)`. `features/pi` shows a session's waves and notices and never imports
   `features/factory`; what both need lives in `lib/domain/factory.ts`.
@@ -244,6 +243,7 @@ stateDiagram-v2
   setting, else the source.
 - A task's worktree is rebased onto its target when a run opens and again at merge.
 - A wave's branch is rebased onto the target before its review, without squashing: every task's commit survives.
+  With the setting `squash` (off by default) the merged wave lands on the target as one commit instead.
 - Nothing reaches a live wave's branch except through that wave's tasks: `tasks.start` refuses it as a target.
 
 ## Merge queue
@@ -288,8 +288,8 @@ turn there. No session has to poll.
 - Delivered exactly once per event, also across restarts (`<agent dir>/factory/notified.jsonl`).
 - Work declared outside a Pi session (the CLI, the board) has no origin: watch the board, or block on
   `factory tasks.wait '{"wave": "<id>"}'`.
-- In a Pi tab a notice with a card (`details.card`, version 1; `details.key` names it) shows the card, one without its
-  first line that opens to its text (`features/pi/FactoryNotices.tsx`, custom message type `factory-notice`). A
+- In a Pi tab a notice with a card (`details.card`, version 1; `details.key` names it) shows the card; one without
+  (only in old transcripts) its first line that opens to its text (`features/pi/FactoryNotices.tsx`, custom message type `factory-notice`). A
   settled `factory` tool result with a card shows it the same way (`FactoryTool.tsx`), otherwise its row.
 - **Cards** (`factoryCard.ts` parses, `FactoryCard.tsx` draws, nothing derived): the factory icon, the title (warning
   ink when `tone` is `attention`, muted when `quiet`), tag, state, progress and cost at the right; opened, its rows,
@@ -318,19 +318,18 @@ turn there. No session has to poll.
 ## Settings and models
 
 Per repo in the core (`settings.get|set`, one file per repo, which also registers it), overridable per task or wave:
-`merge`, `maxRounds`, `review`, `branch`, `models`, `remote`; `settings.get` answers `{stored, resolved, defaults}`.
+`merge`, `maxRounds`, `review`, `branch`, `models`, `squash`; `settings.get` answers `{stored, resolved, defaults}`.
 `preview` (boolean) is stored there for gigachad only. A task keeps the settings it started with; a wave resolves its
 settings once at `waves.start`.
 
 - **Small and big model**: a wave's task declared `model: "small"` runs on the project's small model, everything else
-  and the reviewer on the big one. `coder` and `reviewer` are the stored names; `big` is an alias of `coder`.
+  and the reviewer on the big one. `small`, `big` and `reviewer` are the stored names.
   With nothing stored a task runs on Pi's session model. The package's `defaults.yaml` only says what `small` means
   where a project names none.
-- **The settings dialog** shows two pickers, Small model and Big model. It reads big as `big ?? coder` and saves
-  `models: {small, big, reviewer: <big>}`, an empty picker leaving its keys out.
+- **The settings dialog** shows two pickers, Small model and Big model. It reads `big` and saves
+  `models: {small, big, reviewer: <big>}`, an empty picker leaving its keys out. A save keeps every stored setting
+  the dialog does not show (`squash`).
 - **Factory models** (`models.get|set`): the list of `provider/model` ids tasks and settings may use.
-- **`remote`** (off by default): push a wave's branch, open its pull or merge request (`gh`, `glab`), comment each
-  verdict, push the target after the merge. A failure is recorded and never blocks the wave.
 
 ## Observability
 
@@ -345,10 +344,9 @@ settings once at `waves.start`.
   `reviewing`, `merging` in Merging; `rejected`, `blocked`, `waiting_approve` or interrupted in the Waiting block;
   `merged`, `cancelled` in Finished, closed by default. Inside: its done tasks, a link to the declaring session, the
   outcome (`WaveOutcome.tsx`: reviews newest first with findings and a link to the reviewer's session, failed gate
-  runs, the merged commit range, the remote request's link). Its description is the document `plan/<tag or prefix>.md`
+  runs, the merged commit range). Its description is the document `plan/<tag or prefix>.md`
   of the plan's memory_store, read when its toggle opens (`GET /api/memory/read`). Waves of one column sharing a tag
   prefix are wrapped in one container per prefix segment; a group holding a single wave has no container of its own.
-  A factory without `waves.list` (`unknown action`) shows no waves and no error.
 - **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the
   tab's session declared, in whatever repository (`waves.list` without a repo), at most 40% of the view high, scrolling
   beyond. Its header counts the active waves, the cards that need the user (warning colour) and the active waves' cost,

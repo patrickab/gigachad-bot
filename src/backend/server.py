@@ -48,13 +48,13 @@ from backend.routes import (
 from backend.routes.upstream import UPSTREAM_ERRORS
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
-from lib import factory_migration, jupyter_service, ollama_models, repository_index, upstream
+from lib import jupyter_service, ollama_models, repository_index, upstream
 from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
 from lib.c4_service import C4ServiceUnavailable
 from lib.data_store import StorageConflictError
 from lib.db_schema import database_url, upgrade
 from lib.mineru import kill_all_mineru_servers, reset_cancel
-from lib.postgres_pool import close_postgres_pool, get_postgres_pool
+from lib.postgres_pool import close_postgres_pool
 from lib.process_owner import reap_orphans, stop_owned
 
 log = logging.getLogger(__name__)
@@ -77,23 +77,6 @@ def widen_default_executor() -> None:
     )
 
 
-# pi-host may start after the backend: a move that failed is tried again a few times.
-FACTORY_MOVE_ATTEMPTS = 5
-FACTORY_MOVE_RETRY_SECONDS = 30.0
-
-
-async def _move_factory_rows() -> None:
-    for attempt in range(FACTORY_MOVE_ATTEMPTS):
-        if attempt:
-            await asyncio.sleep(FACTORY_MOVE_RETRY_SECONDS)
-        try:
-            if await factory_migration.migrate_factory_rows(get_postgres_pool()):
-                return
-        except Exception:
-            log.exception("The factory rows did not move into the factory core")
-    log.warning("The factory rows not moved yet stay until the next start")
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if reaped := reap_orphans():  # children an earlier backend left behind when it died without stopping them
@@ -102,8 +85,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Pi's provider `ollama` follows the installed models, so pi-host's gateway serves them (Ollama down: no-op).
     asyncio.get_running_loop().run_in_executor(None, ollama_models.sync_pi_provider)
     upgrade(database_url())
-    # The factory core owns factory repos and tasks now: the old rows move into it once each (needs pi-host, retried each start).
-    factory_move = asyncio.create_task(_move_factory_rows())
     # Pi's start folders: requests serve the stored list at once, this rescan of `~` brings it up to date.
     asyncio.get_running_loop().run_in_executor(None, repository_index.sweep_quietly)
     reset_cancel()
@@ -112,7 +93,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await extract_queue.start()
     await get_change_broker().start(database_url())
     yield
-    factory_move.cancel()
     kill_all_mineru_servers()
     await jupyter_service.aclose()
     await upstream.close_clients()

@@ -8,8 +8,8 @@ export type WaveColumn = "waiting" | "merging" | "finished"
 
 /**
  * The column of a wave's container, null while it has none: a building wave shows only once a task of it is done.
- * Interrupted and resting on the supervisor (`rejected`, `blocked`, `waiting_approve`) waits, being built, reviewed or
- * merged is the wave in Merging, `merged` and `cancelled` are finished.
+ * Interrupted and resting on the supervisor (`rejected`, `blocked`, `waiting_approve`) waits, being built, reviewed,
+ * merged or queued behind other waves is the wave in Merging, `merged` and `cancelled` are finished.
  */
 export function waveColumn(wave: Pick<FactoryWave, "stage" | "interrupted">, hasDone: boolean): WaveColumn | null {
   if (wave.interrupted) return "waiting"

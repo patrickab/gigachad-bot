@@ -5,7 +5,7 @@ export function factoryTask(id: string, fields: Partial<FactoryTask> = {}): Fact
   return {
     id, repo: "/git/repo", worktree: `/worktrees/${id}`, branch: `factory/${id}`, title: id, tag: "me", plan: null, wave: null, question: null, createdAt: "2026-01-01T00:00:00Z",
     sessionId: `s-${id}`, sessionPath: `/sessions/s-${id}.jsonl`, state: "running", round: 1, reason: "", at: "2026-01-01T00:00:00Z",
-    running: true, interrupted: false, actions: ["tasks.cancel", "tasks.message"], settings: null, usage: null, ...fields,
+    running: true, interrupted: false, actions: ["tasks.cancel", "tasks.message"], settings: null, usage: null, merged: null, ...fields,
   }
 }
 

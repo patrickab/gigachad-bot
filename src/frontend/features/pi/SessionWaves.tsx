@@ -5,7 +5,7 @@ import { Bot, Check, Circle, CircleAlert, LoaderCircle, X, type LucideIcon } fro
 import { Disclosure } from "@/components/ui/Disclosure"
 import { IconButton } from "@/components/ui/IconButton"
 import { callFactory } from "@/lib/backend/api"
-import { concernsFactory, isUnknownAction, waveNeedsUser, waveStageLabel, type FactoryTask, type FactoryWave, type FactoryWaveTask } from "@/lib/domain/factory"
+import { concernsFactory, waveNeedsUser, waveStageLabel, type FactoryTask, type FactoryWave, type FactoryWaveTask } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
 import { observePiSocket } from "./piSocket"
 import { formatCost, formatTokens } from "./subagents"
@@ -65,7 +65,7 @@ export type TaskModels = Record<string, string>
 export function taskModels(tasks: readonly FactoryTask[]): TaskModels {
   const models: TaskModels = {}
   for (const task of tasks) {
-    const model = task.settings?.models.coder ?? task.settings?.models.big
+    const model = task.settings?.models.big
     if (model) models[task.id] = model.slice(model.lastIndexOf("/") + 1)
   }
   return models
@@ -90,7 +90,7 @@ export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave
  *
  * - Read on mount, and again on pi-host's `sessions_changed` notice of a factory path and on a reopened socket, as the board does
  * - Until the first read answers, the session's waves as this browser last read them (`localStorage`)
- * - A factory without waves (`unknown action`) has none, another failed read keeps the last list and is reported with `console.error`
+ * - A failed read keeps the last list and is reported with `console.error`
  * - `models`: the coder model of each task by task id, from `tasks.list` of each repository the session has waves in
  */
 export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; models: TaskModels; decisions: FactoryDecision[] | null } {
@@ -115,19 +115,11 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
             (cause: unknown) => console.error("tasks.list failed", cause),
           )
         },
-        (cause: unknown) => {
-          if (!current()) return
-          if (isUnknownAction(cause)) setAnswered({ sessionId, waves: [] })
-          else console.error("waves.list failed", cause)
-        },
+        (cause: unknown) => { if (current()) console.error("waves.list failed", cause) },
       )
       callFactory<{ decisions?: unknown }>("decisions.list", { origin: sessionId }).then(
         (answer) => { if (current()) setDecisions(validDecisions(answer.decisions)) },
-        (cause: unknown) => {
-          if (!current()) return
-          if (isUnknownAction(cause)) setDecisions(null)
-          else console.error("decisions.list failed", cause)
-        },
+        (cause: unknown) => { if (current()) console.error("decisions.list failed", cause) },
       )
     }
     read()

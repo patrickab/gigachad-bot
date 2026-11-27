@@ -85,14 +85,14 @@ export function ResultDisclosure({ run, render }: { run: ToolRun | undefined; re
 
 const VERBS: Record<string, string> = {
   "waves.start": "start wave", "waves.add": "add tasks", "waves.get": "wave", "waves.list": "waves",
-  "waves.timeline": "wave timeline", "waves.retry": "retry wave", "waves.approve": "approve wave",
+  "waves.retry": "retry wave", "waves.approve": "approve wave",
   "waves.cancel": "cancel wave", "waves.remove": "remove wave",
   "tasks.start": "start task", "tasks.message": "message", "tasks.get": "task", "tasks.list": "tasks",
-  "tasks.wait": "wait", "tasks.timeline": "timeline", "tasks.diff": "diff", "tasks.import": "import task",
+  "tasks.wait": "wait", "tasks.timeline": "timeline", "tasks.diff": "diff",
   "tasks.retry": "retry task", "tasks.cancel": "cancel task", "tasks.approve": "approve task", "tasks.remove": "remove task",
   "settings.get": "settings", "settings.set": "set settings", "models.get": "models", "models.set": "set models",
   "config.get": "config", "config.write": "write config", "repos.list": "repos", "repos.add": "add repo",
-  "repos.remove": "remove repo", "branches.list": "branches",
+  "branches.list": "branches",
 }
 
 /** Long text fields shown behind a disclosure of their own, with their label per action. */

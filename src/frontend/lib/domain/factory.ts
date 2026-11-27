@@ -3,14 +3,14 @@
 
 /** Every action of the core, called as `callFactory(action, params)`. */
 export type FactoryActionName =
-  | "repos.list" | "repos.add" | "repos.remove"
+  | "repos.list" | "repos.add"
   | "branches.list"
   | "settings.get" | "settings.set"
   | "models.get" | "models.set"
   | "config.get" | "config.write"
   | "tasks.list" | "tasks.get" | "tasks.wait" | "tasks.timeline" | "tasks.diff" | "tasks.start"
   | "tasks.approve" | "tasks.retry" | "tasks.cancel" | "tasks.remove" | "tasks.message"
-  | "waves.start" | "waves.add" | "waves.get" | "waves.list" | "waves.timeline"
+  | "waves.start" | "waves.add" | "waves.get" | "waves.list"
   | "waves.retry" | "waves.approve" | "waves.cancel" | "waves.remove"
   | "decisions.list"
 
@@ -58,10 +58,9 @@ export interface FactoryModelList {
 
 /**
  * Model ids (`provider/model`), Pi's default where one is missing: per agent of a task, and the project's two sizes
- * (easy tasks of a wave run on `small`, everything else on `big`; `settings.get` answers `big` equal to `coder`).
+ * (easy tasks of a wave run on `small`, everything else on `big`).
  */
 export interface FactoryModels {
-  coder?: string
   reviewer?: string
   small?: string
   big?: string
@@ -80,7 +79,7 @@ export interface FactorySettings {
 export type FactoryResolvedSettings = FactorySettings & { preview: boolean }
 
 /** What a repo's settings file holds: only the keys set (the core's `StoredSettings`). */
-export type FactoryStoredSettings = Partial<Omit<FactorySettings, "models">> & { models?: FactoryModels; preview?: boolean }
+export type FactoryStoredSettings = Partial<Omit<FactorySettings, "models">> & { models?: FactoryModels; preview?: boolean; squash?: boolean }
 
 /** `settings.get` and `settings.set`. */
 export interface FactoryRepoSettings {
@@ -104,7 +103,8 @@ export interface FactoryConfig {
   source: string[]
 }
 
-export type FactoryTaskState = "running" | "waiting_approve" | "waiting_answer" | "blocked" | "merging" | "done" | "cancelled"
+/** The factory's task states (its `state.ts`); `reviewing`: gates passed, waiting for the wave's reviewer. */
+export type FactoryTaskState = "running" | "waiting_approve" | "waiting_answer" | "blocked" | "merging" | "done" | "cancelled" | "reviewing"
 
 /** Tokens and dollars of the coder and the reviews; `input` is uncached input tokens. */
 export interface FactoryUsage {
@@ -149,6 +149,8 @@ export interface FactoryTask {
   actions: FactoryTaskAction[]
   settings: FactorySettings | null
   usage: FactoryUsage | null
+  /** The commit the task's last merge landed, null before one: deleting the task reverts it. */
+  merged: string | null
 }
 
 /** Settings over the repo's stored ones for one new task. */
@@ -260,8 +262,8 @@ export interface FactoryTimeline {
   next: number
 }
 
-/** Where a wave is: building its tasks, in review, merging, or resting in one of the others. */
-export type FactoryWaveStage = "building" | "reviewing" | "rejected" | "merging" | "waiting_approve" | "merged" | "blocked" | "cancelled"
+/** Where a wave is (the factory's `waves.ts`): waiting for other waves, building its tasks, in review, merging, or resting in one of the others. */
+export type FactoryWaveStage = "queued" | "building" | "reviewing" | "rejected" | "merging" | "waiting_approve" | "merged" | "blocked" | "cancelled"
 
 /** One declared task of a wave and, once started, its task (`taskId`) and state ("pending" before the start). */
 export interface FactoryWaveTask {
@@ -326,6 +328,7 @@ export interface FactoryWave {
 }
 
 const WAVE_STAGE_LABELS: Record<FactoryWaveStage, string> = {
+  queued: "queued",
   building: "building",
   reviewing: "reviewing",
   rejected: "rejected",
@@ -345,11 +348,6 @@ export function waveStageLabel(wave: Pick<FactoryWave, "stage" | "reason" | "int
 /** Whether a wave cannot move without the user: `rejected`, `blocked`, `waiting_approve` or interrupted. */
 export function waveNeedsUser(wave: Pick<FactoryWave, "stage" | "interrupted">): boolean {
   return wave.interrupted || wave.stage === "rejected" || wave.stage === "blocked" || wave.stage === "waiting_approve"
-}
-
-/** Whether `cause` is the core refusing an action it does not have: a factory older than waves. */
-export function isUnknownAction(cause: unknown): boolean {
-  return cause instanceof Error && cause.message.includes("unknown action")
 }
 
 /**

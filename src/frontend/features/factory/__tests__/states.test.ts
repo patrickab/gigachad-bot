@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { BOARD_COLUMNS, STATE_LABELS, STATE_ORDER, shownState, statusTone, taskStatusLine, taskTone } from "@/features/factory/states"
+import { BOARD_COLUMNS, STATE_LABELS, shownState, statusTone, taskStatusLine, taskTone } from "@/features/factory/states"
 import type { FactoryTaskState } from "@/lib/domain/factory"
 
 function task(state: FactoryTaskState | null, { running = false, interrupted = false, round = 1 }: { running?: boolean; interrupted?: boolean; round?: number } = {}) {
@@ -17,20 +17,16 @@ describe("shownState", () => {
     expect(shownState(task(state, { running: true }))).toBe(state)
   })
 
-  it.each<FactoryTaskState>(["waiting_approve", "waiting_answer", "blocked", "done", "cancelled"])("shows a %s task as it is", (state) => {
+  it.each<FactoryTaskState>(["waiting_approve", "waiting_answer", "blocked", "reviewing", "done", "cancelled"])("shows a %s task as it is", (state) => {
     expect(shownState(task(state))).toBe(state)
   })
 })
 
-describe("board order", () => {
-  it("puts what waits on the user before what runs, and that before what is finished", () => {
-    expect(STATE_ORDER).toEqual(["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"])
-    expect(BOARD_COLUMNS.map((column) => column.title)).toEqual(["Working", "Merging", "Finished"])
-  })
-
-  it("gives every shown state a label and exactly one column, in the same order", () => {
-    expect(BOARD_COLUMNS.flatMap((column) => column.states)).toEqual(STATE_ORDER)
-    expect(Object.keys(STATE_LABELS).sort()).toEqual([...STATE_ORDER].sort())
+describe("board columns", () => {
+  it("gives every shown state a label and exactly one column", () => {
+    const inColumns = BOARD_COLUMNS.flatMap((column) => column.states)
+    expect(new Set(inColumns).size).toBe(inColumns.length)
+    expect([...inColumns].sort()).toEqual(Object.keys(STATE_LABELS).sort())
   })
 })
 

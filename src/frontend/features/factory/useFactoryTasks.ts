@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { observePiSocket, type HostEvent } from "@/features/pi/piSocket"
 import { callFactory } from "@/lib/backend/api"
-import { concernsFactory, isUnknownAction, type FactoryTask, type FactoryTaskStart, type FactoryWave } from "@/lib/domain/factory"
+import { concernsFactory, type FactoryTask, type FactoryTaskStart, type FactoryWave } from "@/lib/domain/factory"
 import { errorMessage } from "@/lib/utils"
 
 interface TaskList {
@@ -39,19 +39,12 @@ function setList(repo: string, list: TaskList) {
   for (const listener of listeners) listener()
 }
 
-/** The waves of `repo`, none from a factory without `waves.list`. */
-async function fetchWaves(repo: string): Promise<FactoryWave[]> {
-  try {
-    return (await callFactory<{ waves: FactoryWave[] }>("waves.list", { repo })).waves
-  } catch (cause) {
-    if (isUnknownAction(cause)) return []
-    throw cause
-  }
-}
-
 async function fetchList(repo: string): Promise<void> {
   try {
-    const [{ tasks }, waves] = await Promise.all([callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }), fetchWaves(repo)])
+    const [{ tasks }, { waves }] = await Promise.all([
+      callFactory<{ tasks: FactoryTask[] }>("tasks.list", { repo }),
+      callFactory<{ waves: FactoryWave[] }>("waves.list", { repo }),
+    ])
     setList(repo, { tasks: [...tasks].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), waves, error: null })
   } catch (cause) {
     const last = lists.get(repo) ?? EMPTY

@@ -158,14 +158,6 @@ describe("SessionWaves", () => {
     expect(container.innerHTML).toBe("")
   })
 
-  it("renders nothing when the factory has no waves.list", async () => {
-    api.callFactory.mockRejectedValue(new Error("unknown action: waves.list"))
-    const { container } = render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
-    await waitFor(() => expect(api.callFactory).toHaveBeenCalled())
-    await act(async () => {})
-    expect(container.innerHTML).toBe("")
-  })
-
   it("reports any other failed read", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const cause = new Error("invalid: repo must be an absolute path")
@@ -242,25 +234,12 @@ describe("SessionWaves above the composer", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Decisions · 1/ }))
     expect(screen.getByText("answered the coder")).toBeTruthy()
   })
-
-  it("has no Decisions entry and no error when the action is unknown", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {})
-    api.callFactory.mockImplementation(async (action: string) => {
-      if (action === "decisions.list") throw new Error("unknown action: decisions.list")
-      return action === "waves.list" ? { waves: [wave("w1")] } : { tasks: [] }
-    })
-    renderPanel()
-    await screen.findByRole("button", { name: /p\/w1/ })
-    expect(screen.queryByRole("button", { name: /Decisions/ })).toBeNull()
-    expect(error).not.toHaveBeenCalled()
-    error.mockRestore()
-  })
 })
 
 describe("taskModels", () => {
   it("names each task's coder model without its provider", () => {
     const listed = [
-      { id: "t-a", settings: { models: { coder: "anthropic/claude-opus-5-5" } } },
+      { id: "t-a", settings: { models: { big: "anthropic/claude-opus-5-5" } } },
       { id: "t-b", settings: { models: { big: "x/y/z" } } },
       { id: "t-c", settings: null },
     ] as unknown as FactoryTask[]

@@ -22,8 +22,8 @@ import { COMPACT_FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from ".
 /** The merge mode as pills: merge on its own, or wait for the user's approve. */
 export const MERGE_OPTIONS = [{ value: "auto", label: "Auto" }, { value: "review", label: "Approve" }] as const
 
-/** The two agents of a task, in pipeline order. */
-export const AGENTS = ["coder", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
+/** The two models a task override sets: the big model (the coder) and the reviewer. */
+export const AGENTS = ["big", "reviewer"] as const satisfies readonly (keyof FactoryModels)[]
 
 /** The project's two model sizes: easy tasks of a wave run on small, everything else and the reviewer on big. */
 export const MODEL_SIZES = [{ key: "small", label: "Small model" }, { key: "big", label: "Big model" }] as const
@@ -31,9 +31,9 @@ export const MODEL_SIZES = [{ key: "small", label: "Small model" }, { key: "big"
 /** The sizes the dialog edits, "" for none. */
 type SizeModels = Record<(typeof MODEL_SIZES)[number]["key"], string>
 
-/** The sizes of stored `models`: big falls back to the coder of settings saved before there were sizes. */
+/** The sizes of stored `models`. */
 export function sizeModelsOf(models: FactoryModels): SizeModels {
-  return { small: models.small ?? "", big: models.big ?? models.coder ?? "" }
+  return { small: models.small ?? "", big: models.big ?? "" }
 }
 
 /** The stored `models` of the sizes: the reviewer runs on big, an empty size is left out (Pi's default). */
@@ -146,7 +146,7 @@ function draftOf({ stored, resolved, defaults }: FactoryRepoSettings): SettingsD
 const RESOLVED_KEYS = ["merge", "maxRounds", "review", "preview"] as const
 
 /**
- * The settings file `draft` saves: a setting the file held or the user changed (one left at its default stays unset,
+ * The settings file `draft` saves: the stored settings the dialog does not show (`squash`) as they are, a setting the file held or the user changed (one left at its default stays unset,
  * so it follows the defaults), models the user filled in (an empty one runs Pi's default), a branch only when picked.
  */
 function storedOf(draft: SettingsDraft): FactoryStoredSettings {
@@ -154,6 +154,7 @@ function storedOf(draft: SettingsDraft): FactoryStoredSettings {
   const branch = branchOrDefault(draft.branch)
   const kept = RESOLVED_KEYS.filter((key) => stored[key] !== undefined || draft[key] !== resolved[key])
   return {
+    ...Object.fromEntries(Object.entries(stored).filter(([key]) => key !== "branch")),
     ...Object.fromEntries(kept.map((key) => [key, draft[key]])),
     models: storedModelsOf(draft.models),
     ...(branch ? { branch } : {}),

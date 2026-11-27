@@ -249,8 +249,8 @@ export class SupervisorHost implements Supervisor {
     const sessionPath = await this.host.findSession(sessionId);
     const meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
     if (!meta) return fail(404, "not_found");
-    // The factory plugin's runner owns a factory task's file
-    if (meta.factory) return fail(400, "factory");
+    // The factory owns a factory task's file and a wave reviewer's
+    if (meta.factory || meta.waveReviewer) return fail(400, "factory");
     const key = meta.realPath;
     for (let inFlight = this.starting.get(key); inFlight; inFlight = this.starting.get(key)) await inFlight;
     const request = { sessionPath: meta.sessionPath, entryId, through };
@@ -423,8 +423,8 @@ export class SupervisorHost implements Supervisor {
       meta = sessionPath === undefined ? undefined : await this.host.sessionMeta(sessionPath);
       if (!meta) return liveById && !liveById.closing ? fail(409, "profile_mismatch") : fail(404, "not_found");
       if (meta.archived) return fail(409, "archived");
-      // The factory plugin's runner holds every factory task.
-      if (meta.factory) return fail(409, "factory");
+      // The factory plugin's runner holds every factory task; the factory resumes a wave reviewer's session itself.
+      if (meta.factory || meta.waveReviewer) return fail(409, "factory");
       if ((await profileOf(this.host, meta.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
       cwd = meta.cwd;
     }

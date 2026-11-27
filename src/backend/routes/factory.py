@@ -5,9 +5,10 @@
 - Provides `POST /api/factory/call {action, params}` (the core's result as it is) and `GET /api/factory/actions` (`{actions}`)
 - `tasks.start` without a `tag` gets the requesting login as its tag: the core would fall back to the host's system
   user, which every login shares. Characters the core refuses in a tag segment become `-` (`login_tag`)
-- `tasks.remove` of a merged (`done`) task: a dry run (`git merge-tree`) first refuses a conflicting revert with 409
-  `refused`, then, after the core removed the task, `git revert` of its merge commit in the repo's checkout
-  (`lib.factory_revert`). Reverting last matters: it rewrites the checkout, which reloads a dev server mid-request
+- `tasks.remove` of a `done` task with a `merged` commit: a dry run (`git merge-tree`) first refuses a revert that
+  conflicts, or a commit not on the checkout's branch (a task of a squash wave), with 409 `refused`; then, after the
+  core removed the task, `git revert` of that commit in the repo's checkout (`lib.factory_revert`). Reverting last
+  matters: it rewrites the checkout, which reloads a dev server mid-request
 - Another behaviour of its own: after a successful `tasks.remove` it stops the removed task's preview
   (`lib.factory_preview`, keyed by the result's `removed`), so a refused removal keeps the preview
 - `POST /api/factory/images` stores an image for a task's request or message (`lib.factory_images`) and answers its
@@ -82,11 +83,8 @@ async def _commit_to_revert(params: dict[str, Any]) -> tuple[str, str] | None:
 
     A revert that would conflict refuses the delete here, before anything is removed."""
     task = await factory_result(pi_host.factory_call("tasks.get", {"id": params.get("id")}))
-    if task.get("state") != "done" or task.get("reason") == "no_changes":
-        return None
-    timeline = await factory_result(pi_host.factory_call("tasks.timeline", {"id": task["id"]}))
-    commit = factory_revert.merged_commit(timeline["entries"])
-    if commit is None:
+    commit = task.get("merged") if task.get("state") == "done" else None
+    if not commit:
         return None
     try:
         pending = await asyncio.to_thread(factory_revert.check_revert, task["repo"], commit)

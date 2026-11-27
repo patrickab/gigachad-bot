@@ -51,6 +51,11 @@ export function factorySessionsRoot(): string {
   return join(factoryRoot(), "sessions");
 }
 
+/** The factory's waves: a wave reviewer's sessions lie in `<wave id>.reviews/`, one level down. */
+export function factoryWavesRoot(): string {
+  return join(factoryRoot(), "waves");
+}
+
 /** Pi's per-cwd directory name: leading separator dropped, `/`, `\` and `:` replaced by `-`. */
 export function cwdDirName(cwd: string): string {
   return `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;

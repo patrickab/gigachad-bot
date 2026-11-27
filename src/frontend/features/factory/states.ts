@@ -4,7 +4,7 @@
 import type { StatusTone } from "@/components/ui/StatusDot"
 import type { FactoryTask, FactoryTaskState } from "@/lib/domain/factory"
 
-/** A task's state as shown: one of the seven the session records, or `starting` (none yet) or `interrupted`. */
+/** A task's state as shown: one of the factory's, or `starting` (none yet) or `interrupted`. */
 export type FactoryShownState = FactoryTaskState | "starting" | "interrupted"
 
 /**
@@ -23,15 +23,13 @@ export const STATE_LABELS: Record<FactoryShownState, string> = {
   running: "Working",
   waiting_approve: "Ready for review",
   waiting_answer: "Waiting for supervisor",
+  reviewing: "In wave review",
   blocked: "Blocked",
   interrupted: "Interrupted",
   merging: "Merging",
   done: "Done",
   cancelled: "Cancelled",
 }
-
-/** Board order: what waits (on the supervisor or the user) first, then what runs, then what is finished. */
-export const STATE_ORDER: readonly FactoryShownState[] = ["waiting_answer", "waiting_approve", "blocked", "interrupted", "starting", "running", "merging", "done", "cancelled"]
 
 interface BoardColumn {
   id: string
@@ -46,7 +44,7 @@ export const WAITING_STATES: readonly FactoryShownState[] = ["waiting_answer", "
 
 /** Board columns in display order, every shown state belongs to exactly one. Working holds the waiting states too, in its Waiting block. */
 export const BOARD_COLUMNS: readonly BoardColumn[] = [
-  { id: "working", title: "Working", states: [...WAITING_STATES, "starting", "running"], tone: "ready" },
+  { id: "working", title: "Working", states: [...WAITING_STATES, "starting", "running", "reviewing"], tone: "ready" },
   { id: "merging", title: "Merging", states: ["merging"], tone: "ready" },
   { id: "finished", title: "Finished", states: ["done", "cancelled"], tone: "done" },
 ]
@@ -63,7 +61,7 @@ export function taskStatusLine(task: Pick<FactoryTask, "state" | "interrupted" |
 
 /** Visual weight of a state: what is running, what waits on the user, what failed. */
 export function statusTone(state: FactoryShownState): StatusTone {
-  if (state === "starting" || state === "running" || state === "merging") return "active"
+  if (state === "starting" || state === "running" || state === "reviewing" || state === "merging") return "active"
   if (state === "waiting_approve" || state === "waiting_answer") return "attention"
   if (state === "blocked" || state === "interrupted") return "error"
   if (state === "done") return "done"

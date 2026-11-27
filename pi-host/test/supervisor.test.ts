@@ -973,6 +973,22 @@ describe("factory task sessions", () => {
     expect(paths.every((path) => path.endsWith(".jsonl") || path === record)).toBe(true);
   });
 
+  test("a wave reviewer's session is found by its id and never resumed or rewritten", async () => {
+    const REVIEWER_ID = "01a1f3fe-0000-7000-8000-0000000000fb";
+    const reviews = join(agentDir, "factory", "waves", "w1.reviews");
+    mkdirSync(reviews, { recursive: true });
+    const header = { type: "session", version: 3, id: REVIEWER_ID, timestamp: "2026-11-19T10:00:00.000Z", cwd: repo };
+    const sessionPath = join(reviews, `2026-11-19T10-00-00-000Z_${REVIEWER_ID}.jsonl`);
+    const message = { type: "message", id: "m1", parentId: null, timestamp: "2026-11-19T10:00:01.000Z", message: { role: "user", content: "review", timestamp: 0 } };
+    const content = `${JSON.stringify(header)}\n${JSON.stringify(message)}\n`;
+    writeFileSync(sessionPath, content);
+    expect((await api(`/sessions/${REVIEWER_ID}/entries`)).status).toBe(200);
+    // The factory resumes it in later rounds: no client resumes it or rewrites its turns.
+    for (const resume of [{ sessionId: REVIEWER_ID }, { sessionPath }]) expect((await startSession({ cwd: repo, resume })).status).toBe(409);
+    expect((await api(`/sessions/${REVIEWER_ID}/turns/m1/delete`, { method: "POST", body: "{}" })).status).toBe(400);
+    expect(readFileSync(sessionPath, "utf8")).toBe(content);
+  });
+
   test("a factory task is never resumed: the factory plugin's runner holds it", async () => {
     mkdirSync(factoryDir, { recursive: true });
     const sessionPath = join(factoryDir, `2026-11-19T10-00-00-000Z_${FACTORY_ID}.jsonl`);

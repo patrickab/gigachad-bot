@@ -8,9 +8,9 @@
  */
 import { mkdir, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { FACTORY_STATES, type DeleteResult, type FactoryState, type LastCache, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
+import { type DeleteResult, type FactoryState, type LastCache, type MoveResult, type SessionEntries, type SessionMeta, type SessionUsage } from "../index.ts";
 import { tryLockFile, type FileLock } from "./lock.ts";
-import { archiveRoot, cwdSessionDir, factorySessionsRoot, isInside, sessionsRoot } from "./paths.ts";
+import { archiveRoot, cwdSessionDir, factorySessionsRoot, factoryWavesRoot, isInside, sessionsRoot } from "./paths.ts";
 import { moveSidecar, removeSidecar } from "./state.ts";
 
 type Summary = Pick<
@@ -96,7 +96,7 @@ function factoryState(line: string): FactoryState | undefined {
     const entry = JSON.parse(line);
     const data = entry?.data;
     if (entry?.type !== "custom" || entry.customType !== "factory-state" || typeof entry.timestamp !== "string") return undefined;
-    if (!FACTORY_STATES.includes(data?.state) || typeof data.round !== "number" || typeof data.reason !== "string") return undefined;
+    if (typeof data?.state !== "string" || typeof data.round !== "number" || typeof data.reason !== "string") return undefined;
     return { state: data.state, round: data.round, reason: data.reason, at: entry.timestamp };
   } catch {
     return undefined;
@@ -212,6 +212,7 @@ export async function sessionMeta(sessionPath: string): Promise<SessionMeta | un
     realPath: await realpath(absolutePath).catch(() => absolutePath),
     modifiedAt: scanned.mtime.toISOString(),
     archived: isInside(archiveRoot(), absolutePath),
+    ...(isInside(factoryWavesRoot(), absolutePath) ? { waveReviewer: true as const } : {}),
   };
 }
 
@@ -271,11 +272,11 @@ async function sessionFiles(root: string, suffix: string): Promise<string[]> {
 
 /**
  * Path of the session file with Pi session id `sessionId` (`<timestamp>_<id>.jsonl`): live root first, then the factory
- * and archive roots.
+ * task sessions, the wave reviewers' sessions and the archive root.
  */
 export async function findSession(sessionId: string): Promise<string | undefined> {
   if (!sessionId || /[/\\]/.test(sessionId) || sessionId.includes("..")) return undefined;
-  for (const root of [sessionsRoot(), factorySessionsRoot(), archiveRoot()]) {
+  for (const root of [sessionsRoot(), factorySessionsRoot(), factoryWavesRoot(), archiveRoot()]) {
     for (const candidate of await sessionFiles(root, `_${sessionId}.jsonl`)) {
       const scanned = await summarize(candidate);
       if (scanned?.summary.sessionId === sessionId) return candidate;

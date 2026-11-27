@@ -135,7 +135,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
         <ImageChips images={pictures.images} onRemove={pictures.remove} />
         <div className="grid grid-cols-2 gap-3">
           {AGENTS.map((agent) => (
-            <Field key={agent} label={agent === "coder" ? "Coder" : "Reviewer"}>
+            <Field key={agent} label={agent === "big" ? "Big model" : "Reviewer"}>
               <StyledSelect
                 quiet
                 ariaLabel={`Model of ${agent}`}

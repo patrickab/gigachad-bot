@@ -288,6 +288,15 @@ describe("FactoryBoard", () => {
       expect(view.queryByRole("group", { name: "Board waves" })).toBeNull()
     })
 
+    it("shows a task waiting for its wave's reviewer in Working, a queued wave in Merging labelled queued", () => {
+      const reviewing = task("Task reviewing", "reviewing")
+      const { view, titles, card } = renderBoard([reviewing], { waves: [factoryWave("q", { tag: "q1", title: "Queued wave", stage: "queued", counts: { total: 1, done: 0 } })] })
+      expect(titles("Working")).toEqual(["Task reviewing"])
+      expect(card("Task reviewing")).toHaveTextContent("In wave review")
+      expect(containers(view, "Merging")).toEqual(["Queued wave"])
+      expect(within(view.getByRole("group", { name: "Queued wave" })).getByLabelText("Stage")).toHaveTextContent("queued")
+    })
+
     it("puts a rejected wave's container in Waiting, a merged one's in Finished closed", () => {
       const merged = task("Task merged", "done", { wave: "m" })
       const { view } = renderBoard([merged, task("Task rejected", "done", { wave: "r" })], { waves: [
@@ -352,7 +361,7 @@ describe("FactoryBoard", () => {
   })
 
   it("shows no model line on a card", () => {
-    const settings = { branch: "master", merge: "auto", maxRounds: 3, review: true, models: { coder: "anthropic/claude-opus-4" } } as const
+    const settings = { branch: "master", merge: "auto", maxRounds: 3, review: true, models: { big: "anthropic/claude-opus-4" } } as const
     const { card } = renderBoard([task("Task modelled", "running", { settings })])
     expect(card("Task modelled")).not.toHaveTextContent("anthropic/claude-opus-4")
   })
@@ -399,7 +408,7 @@ describe("FactoryBoard", () => {
   })
 
   it("deletes a task after a confirmation and reads the tasks again", async () => {
-    const tasks = [task("Task done", "done"), task("Task blocked", "blocked")]
+    const tasks = [task("Task done", "done", { merged: "c0ffee" }), task("Task blocked", "blocked")]
     const { view, refresh, onOpenTask } = renderBoard(tasks)
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
@@ -413,7 +422,7 @@ describe("FactoryBoard", () => {
   })
 
   it("keeps the task when the confirmation is declined", () => {
-    const { view, refresh } = renderBoard([task("Task done", "done")])
+    const { view, refresh } = renderBoard([task("Task done", "done", { merged: "c0ffee" })])
 
     fireEvent.click(view.getByRole("button", { name: "Delete Task done" }))
     fireEvent.click(view.getByRole("button", { name: "No" }))
@@ -425,7 +434,7 @@ describe("FactoryBoard", () => {
   })
 
   it("asks in place of the card's last row, so the card keeps its rows", () => {
-    const { view, card } = renderBoard([task("Task done", "done", { usage: { input: 1000, output: 500, cost: 0.1 } })])
+    const { view, card } = renderBoard([task("Task done", "done", { merged: "c0ffee", usage: { input: 1000, output: 500, cost: 0.1 } })])
     const marker = view.getByLabelText("Tokens and cost").parentElement!
     expect(marker).not.toHaveClass("invisible")
 

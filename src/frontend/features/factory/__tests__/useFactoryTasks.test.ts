@@ -74,16 +74,6 @@ describe("useFactoryTasks", () => {
     expect(core.listWaves).toHaveBeenCalledTimes(2)
   })
 
-  it("has no waves and no error with a factory that does not know waves.list", async () => {
-    core.listTasks.mockResolvedValue([task("task0010")])
-    core.listWaves.mockRejectedValue(Object.assign(new Error('unknown action "waves.list"'), { code: "invalid" }))
-    const { result } = renderHook(() => useFactoryTasks(repo))
-
-    await waitFor(() => expect(result.current.tasks).toHaveLength(1))
-    expect(result.current.waves).toEqual([])
-    expect(result.current.error).toBeNull()
-  })
-
   it("keeps the last waves and shows the error when waves.list fails otherwise", async () => {
     core.listWaves.mockResolvedValue([factoryWave("wave1")])
     const { result } = renderHook(() => useFactoryTasks(repo))

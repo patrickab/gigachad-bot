@@ -1,15 +1,11 @@
-"""The factory routes pass core actions through a fake pi-host, stop a preview before `tasks.remove`, and the old
-factory tables move into the core once.
+"""The factory routes pass core actions through a fake pi-host and stop a preview before `tasks.remove`.
 
-- pi-host is an `httpx.MockTransport` speaking `POST /factory/call` and `GET /factory/actions`; it keeps tasks,
-  settings and imported records like the core, and answers a refusal as the core does (`{error: code, message}`)
-- The table move needs the test database (`POSTGRES_TEST_DATABASE_URL`), without one those tests skip
+- pi-host is an `httpx.MockTransport` speaking `POST /factory/call` and `GET /factory/actions`; it keeps tasks like
+  the core, and answers a refusal as the core does (`{error: code, message}`)
 """
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,14 +15,12 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes.factory import router
-from lib import factory_migration, factory_preview, pi_host
+from lib import factory_preview, pi_host
 from tests.conftest import request_identity, route_client
 
 TASK_ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
 ACTIONS = {"tasks.get": {"summary": "One task", "params": {"type": "object", "required": ["id"], "properties": {}}, "mutates": False}}
 STATUS = {"invalid": 400, "not_found": 404, "busy": 409, "refused": 409, "failed": 500, "factory_plugin_missing": 503}
-SCHEMA_DIRECTORY = Path(__file__).resolve().parents[1] / "db" / "schema"
-SCHEMA_STEPS = [SCHEMA_DIRECTORY / name for name in ("0017_factory_tasks.sql", "0020_factory_rows_migrated.sql")]
 
 
 def _view(task_id: str = TASK_ID, state: str | None = "done", running: bool = False) -> dict[str, Any]:
@@ -38,13 +32,10 @@ class FakePiHost:
     """pi-host's factory routes over a tiny core. `calls` keeps `(action, params)` of every `/factory/call`."""
 
     tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
-    settings: dict[str, dict[str, Any]] = field(default_factory=dict)
-    imported: dict[str, dict[str, Any]] = field(default_factory=dict)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     # action -> (code, message) or (code, message, detail) the core answers it with.
     refusals: dict[str, tuple[str, str] | tuple[str, str, dict[str, Any]]] = field(default_factory=dict)
     down: bool = False
-    timeline: list[dict[str, Any]] = field(default_factory=list)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         if self.down:
@@ -67,24 +58,12 @@ class FakePiHost:
             case "tasks.get":
                 task = self._task(params["id"])
                 return httpx.Response(200, json={"result": task}) if task else self._unknown(params["id"])
-            case "tasks.timeline":
-                return httpx.Response(200, json={"result": {"entries": self.timeline, "next": 0}})
             case "tasks.remove":
                 task = self._task(params["id"])
                 if task is None:
                     return self._unknown(params["id"])
                 del self.tasks[task["id"]]
                 return httpx.Response(200, json={"result": {"removed": task["id"], "dropped": None}})
-            case "settings.get":
-                stored = self.settings.get(params["repo"], {})
-                return httpx.Response(200, json={"result": {"stored": stored, "resolved": {}, "defaults": {}}})
-            case "settings.set":
-                self.settings[params["repo"]] = params["settings"]
-                return httpx.Response(200, json={"result": {"stored": params["settings"], "resolved": {}, "defaults": {}}})
-            case "tasks.import":
-                record = params["record"]
-                self.imported.setdefault(record["id"], record)
-                return httpx.Response(200, json={"result": _view(record["id"])})
         return httpx.Response(200, json={"result": {"action": action, "params": params}})
 
     def _task(self, prefix: str) -> dict[str, Any] | None:
@@ -225,8 +204,7 @@ def _repo_with_merged_task(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _merged_host(host: FakePiHost, repo: Path, commit: str) -> None:
-    host.tasks[TASK_ID] = _view() | {"repo": str(repo)}
-    host.timeline = [{"at": "t", "kind": "merge", "data": {"ok": True, "commit": commit}}]
+    host.tasks[TASK_ID] = _view() | {"repo": str(repo), "merged": commit}
 
 
 def test_removing_a_merged_task_reverts_its_commit(client, host, stopped_previews, tmp_path):
@@ -255,11 +233,26 @@ def test_a_failed_revert_keeps_the_task(client, host, stopped_previews, tmp_path
 
 
 def test_a_task_that_merged_nothing_is_removed_without_a_revert(client, host, stopped_previews, tmp_path):
-    repo, commit = _repo_with_merged_task(tmp_path)
-    _merged_host(host, repo, commit)
-    host.tasks[TASK_ID]["reason"] = "no_changes"
+    repo, _commit = _repo_with_merged_task(tmp_path)
+    host.tasks[TASK_ID] = _view() | {"repo": str(repo), "merged": None, "reason": "no_changes"}
 
     assert client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}}).status_code == 200
+    assert (repo / "feature.txt").exists()
+
+
+def test_a_task_whose_commit_is_not_on_the_checkout_is_kept(client, host, stopped_previews, tmp_path):
+    """A task of a squash wave: its commit stayed on the wave's branch, only the squash commit reached the target."""
+    repo, commit = _repo_with_merged_task(tmp_path)
+    _git(repo, "reset", "-q", "--hard", "HEAD^")
+    (repo / "feature.txt").write_text("feature\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "wave (squash)")
+    _merged_host(host, repo, commit)
+
+    response = client.post("/api/factory/call", json={"action": "tasks.remove", "params": {"id": TASK_ID}})
+
+    assert (response.status_code, response.json()["detail"]["code"]) == (409, "refused")
+    assert TASK_ID in host.tasks
     assert (repo / "feature.txt").exists()
 
 
@@ -319,170 +312,3 @@ async def test_factory_call_errors_are_the_cores_codes(host):
         await pi_host.factory_call("tasks.get", {"id": "6f1c"})
 
     assert await pi_host.factory_actions() == ACTIONS
-
-
-OLD_DEFAULTS = {"merge": "review", "maxRounds": 3}
-
-
-def test_old_settings_become_the_cores_stored_settings_over_the_old_defaults():
-    stored = {"merge": "auto", "max_rounds": 5, "review": False, "preview": True, "models": {"coder": "a/b"}, "branch": None}
-    core = {"merge": "auto", "maxRounds": 5, "review": False, "preview": True, "models": {"coder": "a/b"}}
-    legacy = {"source_branch": "feature", "target_branch": "release", "worktree": False}
-
-    assert factory_migration.core_settings(stored) == core
-    assert factory_migration.core_settings(legacy) == OLD_DEFAULTS | {"branch": "release"}
-    assert factory_migration.core_settings({"branch": "main", "target_branch": "release"}) == OLD_DEFAULTS | {"branch": "main"}
-    # An old repo registered with `{}` was review-gated with 3 rounds; the core's own defaults would auto-merge.
-    assert factory_migration.core_settings({}) == OLD_DEFAULTS
-
-
-# The move of the old tables (Postgres).
-
-
-@pytest.fixture
-def old_tables(postgres_pool):
-    """The factory tables as `0017` and `0020` made them, empty; afterwards so again."""
-
-    def reset() -> None:
-        with postgres_pool.connection() as connection, connection.transaction():
-            for table in ("factory_tasks", "factory_repo_settings"):
-                connection.execute(f"DROP TABLE IF EXISTS {table}_migrated, {table} CASCADE")
-            for step in SCHEMA_STEPS:
-                connection.execute(step.read_text())
-
-    reset()
-    yield postgres_pool
-    reset()
-
-
-def _insert(pool, settings: dict[str, dict[str, Any]], tasks: list[tuple]) -> None:
-    with pool.connection() as connection, connection.transaction():
-        for repo, stored in settings.items():
-            connection.execute("INSERT INTO factory_repo_settings (repo, settings) VALUES (%s, %s)", (repo, json.dumps(stored)))
-        for row in tasks:
-            connection.execute(
-                "INSERT INTO factory_tasks (id, repo, session_id, session_path, worktree, branch, title, created_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                row,
-            )
-
-
-def _unmarked(pool) -> set[str]:
-    """The repos and task ids not marked as moved."""
-    with pool.connection() as connection:
-        repos = connection.execute("SELECT repo FROM factory_repo_settings WHERE migrated_at IS NULL").fetchall()
-        tasks = connection.execute("SELECT id FROM factory_tasks WHERE migrated_at IS NULL").fetchall()
-    return {name for (name,) in repos + tasks}
-
-
-CREATED = datetime(2026, 5, 1, 10, 0, tzinfo=UTC)
-HEX_ID = "6f1c2a3b4d5e4f608a7b9c0d1e2f3a4b"
-SESSION_FILE = "/pi/factory/sessions/--repo--/2026_s-1.jsonl"
-MOVED = (HEX_ID, "/repo", "s-1", SESSION_FILE, "/worktrees/rename", "rename-6f1c2a3b", "Rename", CREATED)
-OLD = ("0123456789abcdef0123456789abcdef", "/repo", "s-0", "/pi/sessions/--repo--/s-0.jsonl", None, None, "In the checkout", CREATED)
-SECOND_HEX_ID = "7a2b3c4d5e6f40718293a4b5c6d7e8f9"
-SECOND_FILE = "/pi/factory/sessions/--repo--/2026_s-2.jsonl"
-SECOND = (SECOND_HEX_ID, "/repo", "s-2", SECOND_FILE, "/worktrees/docs", "docs-7a2b3c4d", "Docs", CREATED)
-
-
-async def test_the_rows_move_into_the_core_once_each(old_tables, host, stopped_previews, caplog):
-    _insert(old_tables, {"/repo": {"merge": "auto", "max_rounds": 4, "preview": True, "models": {}, "branch": None}}, [MOVED, OLD])
-
-    with caplog.at_level(logging.WARNING, logger=factory_migration.__name__):
-        assert await factory_migration.migrate_factory_rows(old_tables) is True
-
-    assert host.settings == {"/repo": {"merge": "auto", "maxRounds": 4, "preview": True, "models": {}}}
-    assert host.imported == {
-        TASK_ID: {
-            "id": TASK_ID,
-            "repo": "/repo",
-            "worktree": "/worktrees/rename",
-            "branch": "rename-6f1c2a3b",
-            "title": "Rename",
-            "sessionId": "s-1",
-            "sessionDir": "/pi/factory/sessions/--repo--",
-            "createdAt": CREATED.isoformat(),
-        }
-    }
-    assert stopped_previews == [HEX_ID]
-    assert _unmarked(old_tables) == set()
-    assert [record.getMessage() for record in caplog.records] == [
-        f"The factory task {OLD[0]} (In the checkout) has no worktree of its own, not moved into the factory core"
-    ]
-
-    host.calls.clear()
-    assert await factory_migration.migrate_factory_rows(old_tables) is True
-    assert host.calls == []
-
-
-async def test_a_repo_registered_with_empty_settings_keeps_its_review_gate(old_tables, host, stopped_previews):
-    _insert(old_tables, {"/repo": {}}, [])
-
-    assert await factory_migration.migrate_factory_rows(old_tables) is True
-
-    assert host.settings == {"/repo": OLD_DEFAULTS}
-
-
-async def test_settings_the_core_already_stores_stay_and_the_skip_is_logged(old_tables, host, stopped_previews, caplog):
-    host.settings["/repo"] = {"merge": "review"}
-    _insert(old_tables, {"/repo": {"merge": "auto"}}, [])
-
-    with caplog.at_level(logging.WARNING, logger=factory_migration.__name__):
-        assert await factory_migration.migrate_factory_rows(old_tables) is True
-
-    assert host.settings == {"/repo": {"merge": "review"}}
-    assert [record.getMessage() for record in caplog.records] == [
-        "The factory core already stores settings for /repo, the old ones stay unmoved"
-    ]
-    assert _unmarked(old_tables) == set()
-
-
-async def test_a_failing_import_keeps_only_its_row_and_a_moved_task_is_never_imported_again(old_tables, host, stopped_previews):
-    _insert(old_tables, {"/repo": {}}, [MOVED, SECOND])
-
-    def fail_second(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content) if request.content else {}
-        if body.get("action") == "tasks.import" and body["params"]["record"]["sessionId"] == "s-2":
-            return httpx.Response(500, json={"error": "failed", "message": "the disk is full"})
-        return host.handle(request)
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(pi_host, "_transport", httpx.MockTransport(fail_second))
-        assert await factory_migration.migrate_factory_rows(old_tables) is False
-    assert list(host.imported) == [TASK_ID]
-    assert _unmarked(old_tables) == {SECOND_HEX_ID}
-
-    # The user removes the moved task in the core before the next start: it does not come back.
-    host.imported.clear()
-    host.calls.clear()
-    assert await factory_migration.migrate_factory_rows(old_tables) is True
-    assert [params["record"]["sessionId"] for action, params in host.calls if action == "tasks.import"] == ["s-2"]
-    assert _unmarked(old_tables) == set()
-
-
-async def test_a_repo_the_core_cannot_read_is_skipped_and_pi_host_down_keeps_the_rows(old_tables, host, stopped_previews):
-    _insert(old_tables, {"/gone": {"merge": "auto"}}, [])
-    host.down = True
-
-    assert await factory_migration.migrate_factory_rows(old_tables) is False
-    assert _unmarked(old_tables) == {"/gone"}
-
-    host.down = False
-    host.refusals["settings.get"] = ("not_found", "/gone is not inside a git repository")
-    assert await factory_migration.migrate_factory_rows(old_tables) is True
-    assert host.settings == {}
-    assert _unmarked(old_tables) == set()
-
-
-def test_tables_an_earlier_build_renamed_come_back_with_every_row_marked(old_tables):
-    with old_tables.connection() as connection, connection.transaction():
-        for table in ("factory_tasks", "factory_repo_settings"):
-            connection.execute(f"DROP TABLE {table} CASCADE")
-        connection.execute(SCHEMA_STEPS[0].read_text())
-    _insert(old_tables, {"/repo": {}}, [MOVED])
-    with old_tables.connection() as connection, connection.transaction():
-        for table in ("factory_tasks", "factory_repo_settings"):
-            connection.execute(f"ALTER TABLE {table} RENAME TO {table}_migrated")
-        connection.execute(SCHEMA_STEPS[1].read_text())
-
-    assert _unmarked(old_tables) == set()

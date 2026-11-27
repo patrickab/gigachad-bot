@@ -138,7 +138,6 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- ollama_models.py          Installed Ollama chat models, synced into Pi's `models.json` as provider `ollama`
 |   |   |-- pi_media.py               480px WebP thumbnails of Pi tool-result images (Pillow, in-memory cache)
 |   |   |-- completions.py            Every backend model call: `openai` SDK on pi-host's gateway, message and image helpers
-|   |   |-- factory_migration.py      One-time move of the old `factory_repo_settings`/`factory_tasks` rows into the factory core, per row (`migrated_at`)
 |   |   |-- factory_revert.py         Dry-run and `git revert` of a merged task's commit before its removal
 |   |   |-- factory_images.py         Images attached to task requests/messages, stored outside every repo
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
@@ -467,7 +466,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
 | Development/production launch | Root `run*.sh`, `deploy/`; load operations guidance through [AGENTS.md](../AGENTS.md#documentation) |
 | Runtime environment loading | `deploy/load-env.sh` -> root launchers / production runners; configuration consumers in `src/config.py` and individual adapters |
-| Factory integration | agent-factory package (`~/git/agent-factory`, `factory --core-path`), `pi-host/src/factory.ts`, `factory.yaml`, `.factory/agents/`, `factory/gates.sh`, `src/backend/routes/factory.py`, `src/lib/factory_revert.py`, `factory_images.py`, `factory_migration.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
+| Factory integration | agent-factory package (`~/git/agent-factory`, `factory --core-path`), `pi-host/src/factory.ts`, `factory.yaml`, `.factory/agents/`, `factory/gates.sh`, `src/backend/routes/factory.py`, `src/lib/factory_revert.py`, `factory_images.py`, `src/frontend/features/factory/`; previews: `src/lib/factory_preview.py`, `src/backend/routes/factory_preview.py`, `run-preview-gate.sh`, `src/backend/preview_gate.py`, `tests/test_preview_gate.py`, `appPath` in `src/frontend/lib/paths.ts` |
 
 ## Where to change
 
@@ -500,7 +499,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `templates/prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or Pi model gateway | `src/lib/provider_usage.py`, `pi_models.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `pi-host/`; `tests/test_provider_usage.py`, `tests/test_pi_models.py` |
 | Pi sessions, tabs or composer | `src/lib/pi_host.py`, `src/backend/routes/pi.py`, `src/frontend/features/pi/` | `pi-host/` (`src/media.ts`: tool-image store), `src/lib/pi_media.py`, `features/pi/toolImages.ts`, `.docs/pi-migration.md`; `tests/test_pi_host.py`, pi `__tests__/` |
-| Factory board, tasks, waves or preview UI | agent-factory package (core, runners, extension; its own tests), `pi-host/src/factory.ts`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `factory_revert.py`, `factory_images.py`, `factory_migration.py`, `factory.yaml`, `.docs/agent-factory.md`; `tests/test_factory*.py`, `pi-host/test/factory.test.ts`, factory `__tests__/` |
+| Factory board, tasks, waves or preview UI | agent-factory package (core, runners, extension; its own tests), `pi-host/src/factory.ts`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/lib/factory_preview.py`, `factory_revert.py`, `factory_images.py`, `factory.yaml`, `.docs/agent-factory.md`; `tests/test_factory*.py`, `pi-host/test/factory.test.ts`, factory `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `learnharness_gate.py`, `preview_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_learnharness_gate.py`, `tests/test_preview_gate.py` |
 | Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |

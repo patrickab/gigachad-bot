@@ -44,7 +44,7 @@ import { FactorySettingsDialog } from "@/features/factory/FactorySettingsDialog"
 
 const REPO = "/home/me/git/gigachad-bot"
 
-const STORED: FactoryStoredSettings = { merge: "review", maxRounds: 3, review: true, preview: true, models: { coder: "old-model" } }
+const STORED: FactoryStoredSettings = { merge: "review", maxRounds: 3, review: true, preview: true, models: { big: "old-model" } }
 
 function settings(stored: FactoryStoredSettings): FactoryRepoSettings {
   return {
@@ -158,17 +158,31 @@ describe("FactorySettingsDialog", () => {
     for (const label of ["Model of coder", "Model of reviewer"]) expect(view.queryByLabelText(label)).toBeNull()
   })
 
-  it("reads big from big, an old coder-only file's big from its coder", async () => {
-    core.getSettings.mockResolvedValue(settings({ models: { small: "openai-codex/fast", big: "openrouter/vendor/model", coder: "openrouter/vendor/model", reviewer: "other" } }))
+  it("keeps a stored setting the dialog does not show, squash, on save", async () => {
+    core.getSettings.mockResolvedValue(settings({ ...STORED, squash: true }))
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
+    fireEvent.change(await view.findByLabelText("Max rounds"), { target: { value: "5" } })
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(core.setSettings).toHaveBeenCalled())
+    expect(core.setSettings.mock.calls[0][1]).toMatchObject({ squash: true, maxRounds: 5 })
+  })
+
+  it("reads the sizes from small and big", async () => {
+    core.getSettings.mockResolvedValue(settings({ models: { small: "openai-codex/fast", big: "openrouter/vendor/model", reviewer: "other" } }))
     const view = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByLabelText("Big model")).toHaveTextContent("openrouter/vendor/model"))
     expect(view.getByLabelText("Small model")).toHaveTextContent("openai-codex/fast")
-    view.unmount()
+  })
 
-    core.getSettings.mockResolvedValue(settings(STORED))
-    const old = render(<FactorySettingsDialog repo={REPO} open onClose={vi.fn()} />)
-    await waitFor(() => expect(old.getByLabelText("Big model")).toHaveTextContent("old-model"))
-    expect(old.getByLabelText("Small model")).toHaveTextContent("Pi default")
+  it("sends a stored setting the dialog does not show, squash, back on save", async () => {
+    core.getSettings.mockResolvedValue(settings({ ...STORED, squash: true }))
+    const onClose = vi.fn()
+    const view = render(<FactorySettingsDialog repo={REPO} open onClose={onClose} />)
+    await view.findByLabelText("Max rounds")
+    fireEvent.click(view.getByRole("switch", { name: "Review" }))
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(core.setSettings).toHaveBeenCalledWith(REPO, expect.objectContaining({ squash: true, review: false }))
   })
 
   it("saves models as {small, big, reviewer: big}", async () => {

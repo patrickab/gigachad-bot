@@ -56,10 +56,11 @@ export type SessionEntries = { entries: Record<string, unknown>[]; leafId: strin
 /** A held lock is addressed by `lockId`; `busy` when another holder has the file. */
 export type LockResult = { ok: true; lockId: string } | { ok: false; error: "busy" | "missing" };
 
-export const FACTORY_STATES = ["running", "waiting_approve", "blocked", "merging", "done", "cancelled"] as const;
-
-/** A factory task's state as its session file last recorded it (a `factory-state` custom entry, `at` its timestamp). */
-export type FactoryState = { state: (typeof FACTORY_STATES)[number]; round: number; reason: string; at: string };
+/**
+ * A factory task's state as its session file last recorded it (a `factory-state` custom entry, `at` its timestamp).
+ * `state` is the factory's, unchecked: the factory owns the list of states.
+ */
+export type FactoryState = { state: string; round: number; reason: string; at: string };
 
 /** What a session file says about itself plus where it lives. */
 export type SessionMeta = {
@@ -79,6 +80,8 @@ export type SessionMeta = {
   archived: boolean;
   /** Present when the session is a factory task: its last `factory-state` entry in file order. */
   factory?: FactoryState;
+  /** Present when the session is a factory wave reviewer's (under `factory/waves/<id>.reviews/`): the factory owns it. */
+  waveReviewer?: true;
   /** What the session's models used, present once one answered: see `SessionUsage`. */
   usage?: SessionUsage;
   /** The session's last answer that read or wrote a prompt cache, see `LastCache`. */

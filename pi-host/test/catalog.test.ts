@@ -512,7 +512,7 @@ describe("factory state", () => {
     const session = await listed([
       JSON.stringify(state("s1", "2026-11-18T09:50:00.000Z", { state: "running", round: 1, reason: "" })),
       user,
-      JSON.stringify(state("s2", "2026-11-18T09:40:00.000Z", { state: "waiting_approve", round: 2, reason: "review ok" })),
+      JSON.stringify(state("s2", "2026-11-18T09:40:00.000Z", { state: "reviewing", round: 2, reason: "review ok" })),
       JSON.stringify(state("s3", "2026-11-18T09:30:00.000Z", { state: "done", round: 2, reason: "merged" })),
     ], 3);
     expect(session.factory).toEqual({ state: "done", round: 2, reason: "merged", at: "2026-11-18T09:30:00.000Z" });
@@ -521,7 +521,7 @@ describe("factory state", () => {
   test("a malformed entry is skipped: the last valid one stays, none leaves the field out", async () => {
     const valid = JSON.stringify(state("s1", "2026-11-18T09:30:00.000Z", { state: "merging", round: 4, reason: "" }));
     const malformed = [
-      JSON.stringify(state("s2", "2026-11-18T09:31:00.000Z", { state: "paused", round: 4, reason: "" })),
+      JSON.stringify(state("s2", "2026-11-18T09:31:00.000Z", { state: 4, round: 4, reason: "" })),
       JSON.stringify(state("s3", "2026-11-18T09:32:00.000Z", { state: "done", round: "4", reason: "" })),
       JSON.stringify(state("s4", "2026-11-18T09:33:00.000Z", { state: "done", round: 4 })),
       JSON.stringify(state("s5", "2026-11-18T09:34:00.000Z", { state: "done", round: 4, reason: "" })).slice(0, -9),

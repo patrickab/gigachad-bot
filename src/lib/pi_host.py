@@ -119,9 +119,10 @@ class LiveStatus(ContractModel):
 
 
 class FactoryState(ContractModel):
-    """A factory task's state as its session file last recorded it (a `factory-state` entry), `at` its timestamp."""
+    """A factory task's state as its session file last recorded it (a `factory-state` entry), `at` its timestamp. `state`
+    is the factory's own, unchecked: the factory owns the list of states."""
 
-    state: Literal["running", "waiting_approve", "blocked", "merging", "done", "cancelled"]
+    state: str
     round: int
     reason: str
     at: str

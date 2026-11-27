@@ -118,7 +118,7 @@ describe("NewTaskDialog", () => {
   })
 
   it("sends the model picked per role, the others stay the repo's; the reviewer's only matters with review on", async () => {
-    core.getSettings.mockResolvedValue({ ...SETTINGS, review: false, models: { coder: "anthropic/claude-sonnet-5-5" } })
+    core.getSettings.mockResolvedValue({ ...SETTINGS, review: false, models: { big: "anthropic/claude-sonnet-5-5" } })
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
     expect(view.getByLabelText("Model of reviewer")).toBeDisabled()
@@ -126,19 +126,19 @@ describe("NewTaskDialog", () => {
     expect(view.getByLabelText("Model of reviewer")).toBeEnabled()
 
     fill(view)
-    fireEvent.click(view.getByLabelText("Model of coder"))
+    fireEvent.click(view.getByLabelText("Model of big"))
     expect(view.getByRole("option", { name: "Repo default (anthropic/claude-sonnet-5-5)" })).toBeTruthy()
     fireEvent.click(await view.findByRole("option", { name: "anthropic/claude-opus-5-5" }))
     fireEvent.click(view.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(core.startTask).toHaveBeenCalled())
-    expect(core.startTask.mock.calls[0][0].overrides?.models).toEqual({ coder: "anthropic/claude-opus-5-5" })
+    expect(core.startTask.mock.calls[0][0].overrides?.models).toEqual({ big: "anthropic/claude-opus-5-5" })
   })
 
   it("offers exactly the factory models list per agent", async () => {
     const view = render(<NewTaskDialog repo={REPO} open onClose={vi.fn()} />)
     await waitFor(() => expect(view.getByRole("switch", { name: "Review" })).toBeEnabled())
-    fireEvent.click(view.getByLabelText("Model of coder"))
+    fireEvent.click(view.getByLabelText("Model of big"))
     await waitFor(() => expect(view.getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Repo default (Pi default)", "anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5",
     ]))
