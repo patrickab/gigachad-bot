@@ -13,10 +13,20 @@ from lib.changes import UserScope, latest_changes
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences
+from lib.project_rename import (
+    CONTENT_NAMESPACES,
+    JSON_SUFFIXES,
+    REWRITABLE_PARAMS,
+    REWRITABLE_SQL,
+    TEXT_SUFFIXES,
+    PostgresKeyRelocator,
+    PostgresProjectRenamer,
+    ProjectReferences,
+    rewritable,
+)
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_CHATS
-from tests.conftest import create_user
+from tests.conftest import CountingScope, create_user
 
 
 @pytest.fixture(autouse=True)
@@ -404,3 +414,114 @@ def test_rename_carries_folder_entries_and_the_sessions_keyed_by_them(stores, wo
         str(moved): {"active": "s1", "sessions": ["s1"], "moved": ["s1"]},
         str(moved / "refs.bib"): {"active": "s2", "sessions": ["s2"], "moved": ["s2"]},
     }
+
+
+BINARY = bytes(range(256)) * 4096  # 1 MiB
+
+
+def insert_mutations(pool, user, canvas, values):
+    with pool.connection() as conn, conn.transaction(), conn.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value)"
+            " VALUES (%s,%s,%s,1,%s,'upsert','attachment','a',%s)",
+            [(uuid4(), user, canvas, position, Jsonb(value)) for position, value in enumerate(values)],
+        )
+
+
+def test_relocate_reads_only_the_rows_it_can_rewrite(stores, postgres_pool):
+    docs, projects, _, user = stores
+    projects.create_project("P")
+    docs.write_bytes("project/p/document/scan.pdf", BINARY)
+    for index in range(20):
+        put(docs, f"chat/p/{index}.json", {"messages": [{"content": "nothing linked"}]})
+    docs.write_bytes("note/x.md", b"x")
+    docs.write_bytes("note/links.md", b"[x](note/x.md)")
+    canvas = "note/board.canvas"
+    put(docs, canvas, {"attachments": [{"id": "a", "path": "note/x.md"}]})
+    insert_mutations(postgres_pool, user, canvas, [{"id": "a", "path": "note/x.md"}] + [{"id": "a", "path": "note/other.md"}] * 199)
+    scope = CountingScope(postgres_pool, user)
+
+    PostgresKeyRelocator(scope).relocate("note/x.md", "note/y.md")
+
+    assert scope.counts["canvas_mutations rows"] == 1
+    assert scope.counts["documents bytes"] < len(BINARY)
+    assert docs.read_bytes("note/links.md")[0] == b"[x](note/y.md)"
+    assert get(docs, canvas)["attachments"][0]["path"] == "note/y.md"
+    with postgres_pool.connection() as conn:
+        values = [value for (value,) in conn.execute("SELECT value FROM canvas_mutations ORDER BY position LIMIT 2")]
+    assert values == [{"id": "a", "path": "note/y.md"}, {"id": "a", "path": "note/other.md"}]
+
+
+def test_project_rename_moves_binary_content_by_key_only(stores, postgres_pool):
+    docs, projects, _, user = stores
+    projects.create_project("Old")
+    docs.write_bytes("project/old/document/a.pdf", BINARY)
+    docs.write_bytes("project/old/document/a.md", b"[a](project/old/document/a.pdf)")
+    with postgres_pool.connection() as conn:
+        last_seq = conn.execute("SELECT max(seq) FROM changes WHERE user_id=%s", (user,)).fetchone()[0]
+        digest = conn.execute("SELECT sha256 FROM documents WHERE key = 'project/old/document/a.pdf'").fetchone()[0]
+    scope = CountingScope(postgres_pool, user)
+
+    PostgresProjectRenamer(scope).rename("old", "new", "New")
+
+    with postgres_pool.connection() as conn:
+        assert conn.execute("SELECT content, sha256 FROM documents WHERE key = 'project/new/document/a.pdf'").fetchone() == (
+            BINARY, digest)
+        changes = conn.execute(
+            "SELECT resource_key, operation FROM changes WHERE user_id=%s AND seq>%s ORDER BY seq", (user, last_seq),
+        ).fetchall()
+    assert changes == [
+        ("chat/old/project.json", "move"), ("chat/new/project.json", "move"), ("chat/projects-meta.json", "write"),
+        ("project/old/document/a.md", "move"), ("project/new/document/a.md", "move"),
+        ("project/old/document/a.pdf", "move"), ("project/new/document/a.pdf", "move"),
+    ]
+    assert scope.counts["documents bytes"] < len(BINARY)
+    assert docs.read_bytes("project/new/document/a.md")[0] == b"[a](project/new/document/a.pdf)"
+    assert get(docs, "chat/projects-meta.json")["projects"][0] | {"createdAt": None, "updatedAt": None} == {
+        "name": "New", "slug": "new", "createdAt": None, "updatedAt": None}
+    assert projects.get_project("new")["name"] == "New"
+
+
+def test_forgetting_a_display_name_reads_every_project_once_and_writes_only_where_one_is_set(stores, postgres_pool):
+    _, _, _, user = stores
+    scope = CountingScope(postgres_pool, user)
+    projects = project_store(PostgresDataStore(scope), scope)
+    for index in range(20):
+        projects.create_project(f"P{index}")
+    projects.add_file("p0", "note/a.md")
+    projects.set_file_name("p0", "note/a.md", "Shown")
+    projects.add_file("p1", "note/a.md")
+    scope.counts.clear()
+
+    projects.forget_file_names("note/b.md")
+
+    assert scope.counts["statements"] == 2
+    projects.forget_file_names("note/a.md")
+    assert projects.list_named_files("p0") == projects.list_named_files("p1") == [("note/a.md", "a.md")]
+
+
+def test_the_sql_predicate_selects_exactly_the_documents_rewrite_content_may_change(postgres_pool):
+    suffixes = (*JSON_SUFFIXES, *TEXT_SUFFIXES, ".pdf", ".yaml", ".json.pdf", "_md", "")
+    keys = [f"{namespace}/s/x{suffix}" for namespace in (*CONTENT_NAMESPACES, "model", "pdf-annotation") for suffix in suffixes]
+    keys += ["pdf-annotation/x.canvas", "model/x.yaml", "project/s/document/a.pdf", "chat/s/project.json", "chat.json", "note"]
+    with postgres_pool.connection() as conn:
+        selected = [key for (key,) in conn.execute(
+            f"SELECT key FROM unnest(%s::text[]) WITH ORDINALITY AS keys(key, n) WHERE {REWRITABLE_SQL} ORDER BY n",
+            (keys, *REWRITABLE_PARAMS),
+        )]
+    assert selected == [key for key in keys if rewritable(key)]
+    assert "chat/s/project.json" in selected and "project/s/document/a.pdf" not in selected
+
+
+@pytest.mark.parametrize("name", ['quote".md', "back\\slash.md", "tab\t.md", "ümlaut.md"])
+def test_relocating_rewrites_mutations_whose_json_text_escapes_the_path(stores, postgres_pool, name):
+    docs, _, _, user = stores
+    old, new = f"/mnt/docs/{name}", "/mnt/docs/renamed.md"
+    canvas = "note/board.canvas"
+    put(docs, canvas, {"attachments": []})
+    insert_mutations(postgres_pool, user, canvas, [{"id": "a", "path": old}])
+
+    PostgresKeyRelocator(UserScope(postgres_pool, user)).relocate(old, new)
+
+    with postgres_pool.connection() as conn:
+        assert conn.execute("SELECT value FROM canvas_mutations").fetchone()[0] == {"id": "a", "path": new}

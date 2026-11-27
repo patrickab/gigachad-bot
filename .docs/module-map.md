@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run).
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run).
 
 # Module map
 
@@ -356,7 +356,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- fileEvents.ts         File move and file change events: this device's announcements and other devices' change events
 |       |   |   |-- fileWatch.ts          One ref-counted WebSocket per tab to `/api/files/watch`, reconnect with catch-up, changes into `fileEvents`
 |       |   |   `-- syncStream.ts         Change feed: `subscribeToChanges(listener, { ownDevice })`, `syncCursorReady`
-|       |   |-- resource.ts           `createResource`, `resourceFamily`: one cached value and one request for every tab, `set`/`invalidate`/`refresh` restart a running read, `revalidateStale`
+|       |   |-- resource.ts           `createResource`, `resourceFamily`: one cached value and one request for every tab, `set`/`invalidate`/`refresh` during a read let it finish, drop its answer and read once more, `revalidateStale`
 |       |   |-- domain/               Browser domain types and pure document/graph logic
 |       |   |   |-- types.ts              Chat core, models, Pi
 |       |   |   |-- files.ts, projects.ts, histories.ts, memory.ts, factory.ts, pairs.ts    `files.ts` holds `isNewFileIn`, a folder entry of a project lists `children`
@@ -470,7 +470,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | --- | --- | --- |
 | Shell layout, deep links, surface selection | `src/frontend/app/_components/AppShell.tsx`, `TabContent.tsx`, `deepLink.ts` | `features/navigation/TabManager.tsx`, `contexts/TabContext.tsx`, `app/_components/__tests__/deepLink.test.ts` |
 | Chat generation, streaming or tool behavior | `src/backend/routes/chat.py`, `src/lib/toolcalling.py`, `src/lib/tools.py` | `src/frontend/features/chat/useChatStream.ts`, `useChat.ts`; `tests/test_toolcalling.py`, `tests/test_builtin_tools.py`, `tests/test_sandbox_plot.py`, `tests/test_chat_route.py`, chat `__tests__/useChatStream.test.tsx` |
-| Chat save, branches or merge | `src/lib/chat_store.py`, `src/backend/routes/histories.py` | `features/chat/useChatPersistence.ts`, `features/navigation/BranchContext.tsx`; `tests/test_chat_store_message_preservation.py` |
+| Chat save, branches or merge | `src/lib/chat_store.py`, `src/backend/routes/histories.py` | `features/chat/useChatPersistence.ts`, `features/navigation/BranchContext.tsx` (`BranchContext` for state, `BranchActionsContext` / `useBranchActions` for the stable actions); `tests/test_chat_store_message_preservation.py` |
 | Conversation column, turn card, turn edit or delete | `src/frontend/features/conversation/`, `features/chat/ChatContainer.tsx`, `ChatPair.tsx`, `useChatTurns.ts`, `features/pi/PiTranscript.tsx`, `PiTab.tsx` | `packages/chat-ui/src/Turn.tsx`, `turn.css`, `pi-host/src/host/local/turns.ts`, `delete-turn.ts`, `src/backend/routes/pi.py`; conversation `__tests__/`, `app/_components/__tests__/chatEditDelete.test.tsx`, `pi-host/test/turns.test.ts`, `delete-turn.test.ts` |
 | Chat list, search or picker | `src/lib/chat_store.py`, `src/backend/routes/histories.py`, `src/frontend/features/chat/ChatPicker.tsx`, `useChatPicker.ts` | `lib/backend/api/chat.ts`, `features/conversation/useTextHighlights.ts`, `app/_components/TabContent.tsx`; `tests/test_chat_search.py`, chat `__tests__/ChatPicker.test.tsx`, `ChatContainer.test.tsx` |
 | Chat tool rows | `src/frontend/features/conversation/tools/`, `features/chat/toolRun.tsx`, `toolRenderers.tsx` | `features/pi/MemoryTool.tsx` (imported by `app/_components/TabContent.tsx`); chat `__tests__/toolRenderers.test.tsx` |
@@ -503,6 +503,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 ## Regression navigation
 
 - Use `tests/` for Python route/service/store and access-policy coverage. `tests/conftest.py` and `pyproject.toml` own fixture/test setup: Postgres fixtures (`database_url`, `postgres_pool`, `clean_database`, `data_store`, `asset_store`) and the `route_client` app builder live only in `conftest.py`, in-memory fakes in `tests/fakes.py`. PostgreSQL integration behavior is represented by `test_postgres_mode_end_to_end.py` and store conformance tests.
+- Render-count guards: `app/_components/__tests__/chatStreamingRenders.test.tsx` and `tabSwitchRenders.test.tsx`, `features/pi/__tests__/PiStreamingRenders.test.tsx`.
 - Use colocated `src/frontend/**/__tests__/` for browser logic/components, including shared package tests. Configuration lives at `src/frontend/vitest.config.ts` and `vitest.setup.ts`.
 - Use `src/c4/operations.test.ts` for LikeC4 source-edit/layout regressions; this service has its own `package.json`, separate from the frontend package.
 - Use `factory.yaml` to locate the repository-wide factory hooks, gates and preview process configuration.

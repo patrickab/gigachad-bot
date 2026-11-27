@@ -120,6 +120,9 @@ async function readList(list: SessionList): Promise<void> {
     list.again = false
     try {
       const [sessions] = await Promise.all([fetchPiSessions(), readRepositories()])
+      const { state } = list
+      // An unchanged answer keeps the list's identity: nothing re-renders (compared as `ProjectProvider` does)
+      if (!state.loading && state.error === null && sessions.length === state.sessions.length && JSON.stringify(sessions) === JSON.stringify(state.sessions)) continue
       noteListed(sessions)
       list.state = { sessions, loading: false, error: null }
     } catch (error) {
@@ -134,11 +137,17 @@ function refreshWatched() {
   if (list.watchers > 0) void readList(list)
 }
 
+/** Every path is a factory task's file, which no list holds. No paths means an unknown change. */
+function onlyFactoryFiles(paths: unknown): boolean {
+  return Array.isArray(paths) && paths.length > 0
+    && paths.every((path) => typeof path === "string" && (path.includes("/factory/sessions/") || path.includes("/factory/tasks/")))
+}
+
 /** Keep the watched lists fresh: host `sessions_changed`, socket reopen, focus, visibility and a poll. */
 function startLive(): () => void {
   const stopObserving = observePiSocket({
     onHostEvent: (event: HostEvent) => {
-      if (event.type === "sessions_changed") refreshWatched()
+      if (event.type === "sessions_changed" && !onlyFactoryFiles(event.sessionPaths)) refreshWatched()
     },
     onOpen: refreshWatched,
   }, { hold: true })

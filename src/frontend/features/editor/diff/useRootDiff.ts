@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { fetchRootDiffFiles, fetchRootFileDiff } from "@/lib/backend/api"
 import type { RootDiffFiles } from "@/lib/domain/files"
 import { parsePatch, type PatchLine } from "@/lib/diff"
 import { usePolling } from "@/hooks/usePolling"
+import { TabContext, TabPeekContext } from "@/contexts/TabContext"
 
 export type FilePatch = { lines: PatchLine[] | null; failed: boolean; stamp: string }
 
@@ -15,6 +16,7 @@ const PATCH_WORKERS = 4
  * - `changes` is undefined while loading and null when the directory cannot be read
  * - `root` must stay constant for one mount: callers key the viewer by root
  * - A `revision` change restarts polling with an immediate run
+ * - Polls only while its tab is frontmost or the tab picker previews it (always outside a tab); showing again starts with a run
  */
 export function useRootDiff(root: string, revision: number): { changes: RootDiffFiles | null | undefined; patches: Record<string, FilePatch> } {
   const [changes, setChanges] = useState<RootDiffFiles | null | undefined>(undefined)
@@ -22,10 +24,14 @@ export function useRootDiff(root: string, revision: number): { changes: RootDiff
   const patchesRef = useRef(patches)
   useEffect(() => { patchesRef.current = patches }, [patches])
 
+  const tab = useContext(TabContext)
+  const peeked = useContext(TabPeekContext)
+  const shown = !tab || tab.isActive || peeked === tab.tab.id
+
   usePolling(() => fetchRootDiffFiles(root).then(
     (result) => setChanges((previous) => previous && JSON.stringify(previous) === JSON.stringify(result) ? previous : result),
     () => setChanges((previous) => previous ?? null),
-  ), { intervalMs: POLL_INTERVAL_MS, refreshOnFocus: true, restartKey: revision })
+  ), { intervalMs: POLL_INTERVAL_MS, active: shown, refreshOnFocus: true, restartKey: revision })
 
   useEffect(() => {
     if (!changes) return

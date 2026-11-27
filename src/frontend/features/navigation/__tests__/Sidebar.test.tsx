@@ -8,7 +8,7 @@ import { nextTab } from "@/features/navigation/tabs"
 import { TabContext, useTab } from "@/contexts/TabContext"
 import { onFileChange, onFileMove, type FileMove } from "@/lib/backend/fileEvents"
 import { removeDocument } from "@/lib/backend/api"
-import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
+import { BranchProvider, useBranchActions, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
 import type { PiRepository, PiSessionInfo } from "@/lib/backend/api"
 import type { PiSessionStatus } from "@/features/pi/sessionStore"
@@ -87,6 +87,7 @@ vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
   useBranches: vi.fn(() => ({
     branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}), moveHistory: vi.fn(),
   })),
+  useBranchActions: vi.fn(() => ({ refreshAll: vi.fn(async () => {}) })),
 }))
 vi.mock("@/contexts/ProjectContext", async (importOriginal) => {
   const { displayName } = await import("@/lib/domain/projects")
@@ -243,6 +244,31 @@ describe("Project navigation", () => {
     expect(view.getByRole("button", { name: "Proj" })).toBeInTheDocument()
   })
 
+  it("re-reads the mount tree and worktrees on tab activation only while the sidebar shows them", async () => {
+    const tab = nextTab()
+    const inTab = (isActive: boolean) => (
+      <TabContext.Provider value={{ tab, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+        <Sidebar appMode="chat" />
+      </TabContext.Provider>
+    )
+    const reads = () => api.fileRootTree.mock.calls.length + api.fetchWorktrees.mock.calls.length
+    const view = testingRender(inTab(true))
+    await waitFor(() => expect(api.fetchWorktrees).toHaveBeenCalled())
+    try {
+      for (const collapsed of [true, false]) {
+        sidebarFrame.collapsed = collapsed
+        view.rerender(inTab(false))
+        await act(async () => {})
+        const before = reads()
+        view.rerender(inTab(true))
+        await act(async () => {})
+        expect(reads() - before).toBe(collapsed ? 0 : 2)
+      }
+    } finally {
+      sidebarFrame.collapsed = false
+    }
+  })
+
   it("relocates the renamed project's tabs without replacing their mounted drafts", async () => {
     const manager = createRef<TabManagerHandle>()
     const view = testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
@@ -291,6 +317,25 @@ describe("Project navigation", () => {
     openSection(project, "Files")
     expect(await project.findByRole("button", { name: "ideas.md" })).toBeInTheDocument()
     expect(project.queryByRole("button", { name: "notes.md" })).not.toBeInTheDocument()
+  })
+
+  it("reads only the renamed file's project list again, however many projects are loaded", async () => {
+    fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: [] })
+    const projects = fixtures.projects
+    fixtures.projects = [...projects, ...Array.from({ length: 18 }, (_, index) => ({ slug: `other-${index}`, name: `Other ${index}`, tabs: [] }))]
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const file = await openedProject(view).findByRole("button", { name: "notes.md" })
+      await waitFor(() => expect(api.listProjectDocuments).toHaveBeenCalledTimes(20))
+      api.listProjectDocuments.mockClear()
+      fireEvent.doubleClick(file)
+      fireEvent.change(view.getByRole("textbox", { name: "Rename notes.md" }), { target: { value: "ideas" } })
+      fireEvent.keyDown(view.getByRole("textbox", { name: "Rename notes.md" }), { key: "Enter" })
+      await waitFor(() => expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument())
+      expect(api.listProjectDocuments.mock.calls).toEqual([["proj", expect.anything()]])
+    } finally {
+      fixtures.projects = projects
+    }
   })
 
   it("announces the files a rename rewrote to follow it", async () => {
@@ -439,6 +484,9 @@ describe("Project navigation", () => {
     expect(project.getByRole("button", { name: "New file in paper" })).toBeInTheDocument()
     fireEvent.click(project.getByRole("button", { name: "chapters" }))
     expect(project.queryByRole("button", { name: "New file in imgs" })).not.toBeInTheDocument()
+    expect(project.getByRole("button", { name: "one.TEX" })).toBeInTheDocument()
+    fireEvent.click(project.getByRole("button", { name: "imgs" }))
+    expect(within(project.getByLabelText("imgs contents")).getByText("Empty")).toBeInTheDocument()
     fireEvent.click(project.getByRole("button", { name: "New file in chapters" }))
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "two" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
@@ -993,6 +1041,8 @@ describe("Project navigation", () => {
     openSection(project, "Files")
     const shared = within(view.getByLabelText("Projects"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
+    fireEvent.click(shared.getByRole("button", { name: "docs" }))
+    expect(shared.getByRole("button", { name: "guide.md" })).toBeInTheDocument()
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })
     fireEvent.click(first, { ctrlKey: true })
@@ -1013,6 +1063,7 @@ describe("Project navigation", () => {
   it("moves an always-visible general history onto a collapsed project and relocates its open branches", async () => {
     const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
     vi.mocked(useBranches).mockImplementation(actual.useBranches)
+    vi.mocked(useBranchActions).mockImplementation(actual.useBranchActions)
     const root: BranchMeta = { chat_id: "root", parent_id: null, branch_message_idx: null, children: [{ chat_id: "child", branch_message_idx: 0 }], qa_count: 0 }
     const child: BranchMeta = { chat_id: "child", parent_id: "root", branch_message_idx: 0, children: [], qa_count: 0 }
     api.listChatHistories.mockResolvedValue({ files: ["loose.json", "child.json"] })
@@ -1060,6 +1111,7 @@ describe("Project navigation", () => {
   it("keeps a general history visible when dropping it into a project fails", async () => {
     const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
     vi.mocked(useBranches).mockImplementation(actual.useBranches)
+    vi.mocked(useBranchActions).mockImplementation(actual.useBranchActions)
     api.listChatHistories.mockResolvedValue({ files: ["loose.json"] })
     api.moveHistoryItem.mockRejectedValue(new Error("Storage unavailable"))
     const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar appMode="chat" /></BranchProvider>)

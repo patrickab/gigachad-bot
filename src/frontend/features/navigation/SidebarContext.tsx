@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useState, type ReactNode } from "react"
+import { createContext, useCallback, useMemo, useState, type ReactNode } from "react"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 
 interface SidebarContextValue {
@@ -18,10 +18,11 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
   const [width, setWidth] = useState(280)
 
-  const toggleCollapsed = () => setCollapsed((c) => !c)
+  const toggleCollapsed = useCallback(() => setCollapsed((c) => !c), [])
+  const value = useMemo(() => ({ collapsed, toggleCollapsed, width, setWidth }), [collapsed, toggleCollapsed, width])
 
   return (
-    <SidebarContext.Provider value={{ collapsed, toggleCollapsed, width, setWidth }}>
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   )

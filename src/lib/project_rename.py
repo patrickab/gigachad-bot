@@ -47,6 +47,13 @@ HISTORY_FIELDS = {"history_file", "historyFile", "parent_file", "filename"}
 CONTENT_NAMESPACES = {CHAT, PROJECT, NOTE, GRAPH, SANDBOX, PROMPT, WORKBENCH}
 JSON_SUFFIXES = (".json", ".canvas", ".snap")
 TEXT_SUFFIXES = (".md", ".txt", ".c4")
+# The documents `_rewrite_content` may change: in Python `rewritable`, in SQL over `key` `REWRITABLE_SQL` with `REWRITABLE_PARAMS`.
+REWRITABLE_SQL = "split_part(key, '/', 1) = ANY(%s) AND key LIKE ANY(%s)"
+REWRITABLE_PARAMS = (sorted(CONTENT_NAMESPACES), [f"%{suffix}" for suffix in JSON_SUFFIXES + TEXT_SUFFIXES])
+
+
+def rewritable(key: str) -> bool:
+    return key.split("/", 1)[0] in CONTENT_NAMESPACES and key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES)
 
 
 class ProjectReferences:
@@ -123,7 +130,7 @@ def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value
 
     - Sessions of a workbench file whose path changed owe it the new one (`lib.workbench.links.owe_new_paths`)
     """
-    if key.split("/", 1)[0] not in CONTENT_NAMESPACES or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
+    if not rewritable(key):
         return content
     try:
         decoded = content.decode()
@@ -138,10 +145,17 @@ def _rewrite_content(key: str, content: bytes, text: Callable[[str], str], value
     return content if updated == data else dump_json(updated).encode()
 
 
-def _rewrite_canvas_mutations(connection: Connection, user_id: UUID, value: Callable[[Any], Any]) -> None:
-    """Apply *value* to every stored canvas mutation value, so replaying a canvas log yields rewritten references."""
+def _rewrite_canvas_mutations(connection: Connection, user_id: UUID, value: Callable[[Any], Any], needle: str) -> None:
+    """Apply *value* to the stored canvas mutation values naming *needle*, so replaying a canvas log yields rewritten references.
+
+    - Every rewrite names *needle* (the old key or slug) literally, so only values whose jsonb text holds it are read.
+      jsonb text escapes `"`, `\\` and control characters: such a needle reads every value
+    """
+    escaped = any(char in '"\\' or char < " " for char in needle)
     mutations = connection.execute(
-        "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (user_id,),
+        "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL"
+        f"{'' if escaped else ' AND strpos(value::text, %s) > 0'} FOR UPDATE",
+        (user_id,) if escaped else (user_id, needle),
     ).fetchall()
     for mutation_id, stored in mutations:
         updated = value(stored)
@@ -150,18 +164,18 @@ def _rewrite_canvas_mutations(connection: Connection, user_id: UUID, value: Call
 
 
 def renamed_documents(
-    rows: Iterable[tuple[str, bytes, bool]], refs: ProjectReferences, name: str, linked_roots: Iterable[str],
-) -> Iterator[tuple[str, str, bytes]]:
+    rows: Iterable[tuple[str, bytes | None, bool]], refs: ProjectReferences, name: str, linked_roots: Iterable[str],
+) -> Iterator[tuple[str, str, bytes | None]]:
     """Yield `(source_key, target_key, content)` for each document row the rename changes.
 
-    - `rows` are `(key, content, is_dir)` of every document of the user
+    - `rows` are `(key, content, is_dir)` of every document of the user, content None where it cannot change (kept as is)
     - The catalog entry takes the new name
     - A disk folder linked by the old slug's folder name stays linked through `linked_root`
     """
     project_key = project_json(refs.old)
     for key, content, is_dir in rows:
         target = refs.key(key)
-        updated = content if is_dir else refs.content(key, content)
+        updated = content if is_dir or content is None else refs.content(key, content)
         if key == PROJECTS_META:
             meta = json.loads(updated)
             entry = next(project for project in meta["projects"] if project["slug"] == refs.new)
@@ -227,21 +241,25 @@ class PostgresProjectRenamer:
         try:
             with self._scope.connection() as connection, connection.transaction():
                 rows = connection.execute(
-                    "SELECT key, content, is_dir FROM documents WHERE user_id = %s ORDER BY key FOR UPDATE",
-                    (user_id,),
+                    f"SELECT key, CASE WHEN {REWRITABLE_SQL} THEN content END, is_dir FROM documents WHERE user_id = %s"
+                    " ORDER BY key FOR UPDATE",
+                    (*REWRITABLE_PARAMS, user_id),
+                    binary=True,
                 ).fetchall()
                 roots = [path for (path,) in connection.execute(
                     "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path", (user_id,),
                 ).fetchall()]
-                documents = [(key, bytes(content), is_dir) for key, content, is_dir in rows]
+                documents = [(key, None if content is None else bytes(content), is_dir) for key, content, is_dir in rows]
                 new_project_key = project_json(refs.new)
                 for source, target, content in renamed_documents(documents, refs, name, roots):
                     if target == new_project_key:
                         linked = bool(json.loads(content).get("linked_root"))
+                    # A row whose content cannot change moves by key only: its content is neither sent nor re-hashed.
+                    written = "" if content is None else ", content = %s"
                     version = connection.execute(
-                        "UPDATE documents SET key = %s, content = %s, version = version + 1, updated_at = now()"
+                        f"UPDATE documents SET key = %s{written}, version = version + 1, updated_at = now()"
                         " WHERE user_id = %s AND key = %s RETURNING version",
-                        (target, content, user_id, source),
+                        (target, *([] if content is None else [content]), user_id, source),
                     ).fetchone()[0]
                     # Canvas shares and log keys follow the document FK ON UPDATE CASCADE.
                     if source != target:
@@ -261,7 +279,7 @@ class PostgresProjectRenamer:
                     ).fetchone()[0]
                     self._scope.record(connection, kind="asset", key=source, operation="move")
                     self._scope.record(connection, kind="asset", key=target, operation="move", version=version)
-                _rewrite_canvas_mutations(connection, user_id, refs.value)
+                _rewrite_canvas_mutations(connection, user_id, refs.value, refs.old)
         except UniqueViolation as exc:
             raise StorageConflictError("Project rename destination already exists; reload before saving") from exc
         return linked
@@ -287,8 +305,10 @@ class PostgresKeyRelocator:
         try:
             with self._scope.connection() as connection, connection.transaction():
                 rows = connection.execute(
-                    "SELECT key, content FROM documents WHERE user_id = %s AND NOT is_dir AND key <> %s ORDER BY key FOR UPDATE",
-                    (user_id, old),
+                    "SELECT key, content FROM documents WHERE user_id = %s AND NOT is_dir AND key <> %s"
+                    f" AND {REWRITABLE_SQL} ORDER BY key FOR UPDATE",
+                    (user_id, old, *REWRITABLE_PARAMS),
+                    binary=True,
                 ).fetchall()
                 for key, stored in rows:
                     content = bytes(stored)
@@ -301,7 +321,7 @@ class PostgresKeyRelocator:
                         (updated, user_id, key),
                     ).fetchone()[0]
                     self._scope.record(connection, kind="document", key=key, operation="write", version=version)
-                _rewrite_canvas_mutations(connection, user_id, refs.value)
+                _rewrite_canvas_mutations(connection, user_id, refs.value, old)
                 if Path(old).is_absolute():
                     self._scope.record(connection, kind="document", key=old, operation="move", moved_to=new)
                     self._scope.record(connection, kind="document", key=new, operation="move")

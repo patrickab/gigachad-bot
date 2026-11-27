@@ -350,10 +350,9 @@ def catalog(monkeypatch):
 
     def sync():
         calls.append("sync")
-        return False
+        return list(OLLAMA_TAGS)
 
     monkeypatch.setattr(learnharness_config, "_host_catalog", lambda login: (PROVIDERS, DEFAULTS))
-    monkeypatch.setattr(ollama_models, "installed_chat_models", lambda: list(OLLAMA_TAGS))
     monkeypatch.setattr(ollama_models, "sync_pi_provider", sync)
     monkeypatch.setattr(pi_models, "catalog_entries", gateway)
     return calls
@@ -392,7 +391,7 @@ def test_a_pi_gateway_down_empty_or_serving_none_fails_instead_of_degrading(cata
 
 
 def test_ollama_down_leaves_only_its_models_out(catalog, monkeypatch):
-    monkeypatch.setattr(ollama_models, "installed_chat_models", list)
+    monkeypatch.setattr(ollama_models, "sync_pi_provider", lambda: None)
     models, _ = asyncio.run(learnharness_config.served_catalog("host"))
     assert "ollama/gemma3:4b" not in [model.id for model in models]
 
@@ -401,7 +400,7 @@ def test_an_empty_catalog_fails(catalog, monkeypatch):
     monkeypatch.setattr(
         learnharness_config, "_host_catalog", lambda login: ({"OpenRouter": {"provider_id": "openrouter", "models": []}}, DEFAULTS)
     )
-    monkeypatch.setattr(ollama_models, "installed_chat_models", list)
+    monkeypatch.setattr(ollama_models, "sync_pi_provider", list)
     with pytest.raises(learnharness_config.ConfigUnavailable, match="host's catalog has no model"):
         asyncio.run(learnharness_config.served_catalog("host"))
 

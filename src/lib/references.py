@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 from contextlib import suppress
 from dataclasses import dataclass, field
+from functools import cached_property
 import hashlib
 import logging
 from pathlib import Path, PurePosixPath
@@ -202,6 +203,48 @@ class _Usage:
         return key in self.reachable
 
 
+class _Holders:
+    """The stored holders of references, each read on first use and kept for one release or orphan scan.
+
+    Everything the release deletes goes into its `gone`, which `References._usage` filters by, so later rounds see
+    what a new read would.
+    """
+
+    def __init__(self, docs: DataStore, chats: ChatStore, assets: AssetStore) -> None:
+        self._docs, self._json, self._chats, self._assets = docs, JsonDocs(docs), chats, assets
+
+    @cached_property
+    def roots(self) -> set[str]:
+        """What chats and projects reference."""
+        projects = self._json.list_meta(CHAT, _is_project_json, _project_meta, require="refs")
+        return {ref for meta in (*self._chats.tree_metas().values(), *projects.values()) if meta for ref in meta["refs"]}
+
+    @cached_property
+    def canvases(self) -> dict[str, list[str]]:
+        """The references of every notes and project canvas."""
+        metas = [self._json.list_meta(prefix, _is_canvas, canvas_meta, require="refs") for prefix in (NOTE, PROJECT)]
+        return {key: meta["refs"] if meta else [] for found in metas for key, meta in found.items()}
+
+    @cached_property
+    def uploads(self) -> list[Asset]:
+        return self._assets.list(ATTACHMENT, kind="upload")
+
+    @cached_property
+    def library(self) -> list[Asset]:
+        return self._assets.list(PDFS)
+
+    @cached_property
+    def stored_pdfs(self) -> dict[str, str]:
+        """The SHA-256 of every PDF stored under notes and projects."""
+        entries = [entry for prefix in (NOTE, PROJECT) for entry in self._docs.list(prefix, recursive=True)]
+        return {entry.key: self._docs.sha256(entry.key) for entry in entries if not entry.is_dir and _is_pdf(entry.key)}
+
+    @cached_property
+    def hosts(self) -> dict[str, list[str]]:
+        """The host files recorded as opened with each annotation canvas."""
+        return {key: meta.get("hosts", []) for key, meta in self._docs.list_meta(PDF_ANNOTATION).items() if meta}
+
+
 class References:
     """One user's references, and the release of derived data nothing uses any more."""
 
@@ -220,6 +263,7 @@ class References:
         and the dry-run report lists what stayed behind.
         """
         gone: set[str] = set()
+        holders = _Holders(self._docs, self._chats, self._assets)
         pending = set(released.refs)
         for key in sorted(released.owned):
             pending |= self._derived(key)
@@ -229,16 +273,16 @@ class References:
                 for asset in self._assets.list(chat_upload_prefix(chat_id, slug)):
                     pending |= self._derived(asset.logical_path)
                     self._remove(asset.logical_path, gone, dry_run=False)
-            self._sweep(pending, gone, dry_run=False)
+            self._sweep(pending, gone, holders, dry_run=False)
         except Exception:
             log.exception("Releasing the data of a deleted item failed")
         try:
-            self._drop_workbench_folders(released.refs, gone)
+            self._drop_workbench_folders(released.refs, gone, holders)
         except Exception:
             log.exception("Deleting the workbench folder of a deleted document failed")
         return sorted(gone)
 
-    def _drop_workbench_folders(self, refs: Iterable[str], gone: set[str]) -> None:
+    def _drop_workbench_folders(self, refs: Iterable[str], gone: set[str], holders: _Holders) -> None:
         """Delete the workbench document folder of each released host path, with its chat link.
 
         A folder stays while a project references anything inside it.
@@ -246,7 +290,7 @@ class References:
         folders = {folder for ref in refs if _is_host(ref) and (folder := _workbench_folder(Path(ref))) is not None}
         if not folders:
             return
-        reachable = self._usage(gone).reachable
+        reachable = self._usage(holders, gone).reachable
         dropped = [folder for folder in sorted(folders) if not any(_inside(Path(key), folder) for key in reachable if _is_host(key))]
         for folder in dropped:
             if folder.is_symlink() or folder.is_file():
@@ -265,7 +309,7 @@ class References:
         candidates |= {entry.key for entry in self._docs.list(PDF_ANNOTATION, recursive=True) if not entry.is_dir}
         candidates |= {e.key for e in self._docs.list(PROJECT, recursive=True) if not e.is_dir and is_project_document(e.key)}
         gone: set[str] = set()
-        self._sweep(candidates, gone, dry_run=True)
+        self._sweep(candidates, gone, _Holders(self._docs, self._chats, self._assets), dry_run=True)
         return sorted(gone)
 
     def orphan_uploads(self) -> list[Asset]:
@@ -295,12 +339,12 @@ class References:
         entry = self._docs.stat(key)
         return (entry.size or 0) if entry is not None and not entry.is_dir else 0
 
-    def _sweep(self, pending: set[str], gone: set[str], *, dry_run: bool) -> None:
+    def _sweep(self, pending: set[str], gone: set[str], holders: _Holders, *, dry_run: bool) -> None:
         """Delete (or with *dry_run* only collect into *gone*) every pending key nothing uses, and what that releases in turn."""
         expanded: set[str] = set()
         # Each round sees the previous round's deletions: a deleted canvas releases what it held, a library PDF its extraction.
         while pending:
-            usage = self._usage(gone)
+            usage = self._usage(holders, gone)
             batch, pending = pending, set()
             for key in sorted(batch):
                 if key in gone or usage.uses(key):
@@ -313,19 +357,10 @@ class References:
                     expanded.add(key)
                     pending |= self._derived(key)
 
-    def _usage(self, gone: set[str]) -> _Usage:
+    def _usage(self, holders: _Holders, gone: set[str]) -> _Usage:
         """What chats, projects, reachable canvases and uploads use, ignoring the keys in *gone*."""
-        roots: set[str] = set()
-        for meta in self._chats.tree_metas().values():
-            roots.update(meta["refs"] if meta else ())
-        for meta in self._json.list_meta(CHAT, _is_project_json, _project_meta, require="refs").values():
-            roots.update(meta["refs"] if meta else ())
-        canvases: dict[str, list[str]] = {}
-        for prefix in (NOTE, PROJECT):
-            for key, meta in self._json.list_meta(prefix, _is_canvas, canvas_meta, require="refs").items():
-                if key not in gone:
-                    canvases[key] = meta["refs"] if meta else []
-        roots.update(ref for key, refs in canvases.items() if _under(key, NOTE) for ref in refs)
+        canvases = {key: refs for key, refs in holders.canvases.items() if key not in gone}
+        roots = holders.roots | {ref for key, refs in canvases.items() if _under(key, NOTE) for ref in refs}
         reachable: set[str] = set()
         queue = list(roots)
         while queue:
@@ -334,32 +369,25 @@ class References:
                 reachable.add(ref)
                 queue.extend(canvases.get(ref, ()))
 
-        uploads = [a for a in self._assets.list(ATTACHMENT, kind="upload") if a.logical_path not in gone]
-        library = [a for a in self._assets.list(PDFS) if a.logical_path not in gone]
+        uploads = [a for a in holders.uploads if a.logical_path not in gone]
+        library = [a for a in holders.library if a.logical_path not in gone]
         pdf_names = {_name(ref) for ref in reachable if (_under(ref, PDFS) or _is_host(ref)) and _is_pdf(ref)}
         pdf_names |= {_name(a.logical_path) for a in uploads if _is_pdf(a.logical_path) or a.mime == _PDF_MIME}
         hashes: set[str] | None = None
-        hosts: dict[str, list[str]] | None = None
 
         def pdf_hashes() -> set[str]:
             """Hashes of every remaining stored PDF and referenced host PDF, computed on first use."""
             nonlocal hashes
             if hashes is None:
                 hashes = {a.sha256 for a in (*uploads, *library)}
-                for prefix in (NOTE, PROJECT):
-                    for entry in self._docs.list(prefix, recursive=True):
-                        if not entry.is_dir and entry.key not in gone and _is_pdf(entry.key):
-                            hashes.add(self._docs.sha256(entry.key))
+                hashes |= {sha256 for key, sha256 in holders.stored_pdfs.items() if key not in gone}
                 hashes |= {h for ref in reachable if _is_host(ref) and _is_pdf(ref) and (h := self._host_hash(ref))}
             return hashes
 
         def hosted(key: str) -> bool:
             """Whether a host file recorded as opened with annotation canvas *key* still has its hash."""
-            nonlocal hosts
-            if hosts is None:
-                hosts = {k: meta.get("hosts", []) for k, meta in self._docs.list_meta(PDF_ANNOTATION).items() if meta}
             sha256 = _name(key).removesuffix(_CANVAS)
-            return any(self._host_hash(path) == sha256 for path in hosts.get(key, ()))
+            return any(self._host_hash(path) == sha256 for path in holders.hosts.get(key, ()))
 
         return _Usage(reachable, pdf_names, pdf_hashes, hosted)
 

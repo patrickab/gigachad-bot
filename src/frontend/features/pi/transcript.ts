@@ -324,17 +324,23 @@ function committedRun(result: ToolResultMessage): ToolRun {
   return run
 }
 
-/** Tool state by call id: committed `toolResult` messages, overridden by this connection's live runs (which carry durations). */
-export function toolRunsOf(transcript: Pick<Transcript, "messages" | "unconfirmed" | "optimistic" | "runs">): Record<string, ToolRun> {
+/** Tool state by call id of the committed `toolResult` messages among `messages` (the shown ones). Changes per message, not per tool-output frame. */
+export function committedRunsOf(messages: AgentMessage[]): Record<string, ToolRun> {
   const runs: Record<string, ToolRun> = {}
-  for (const message of shownMessages(transcript)) {
+  for (const message of messages) {
     if (message.role !== "toolResult") continue
     const result = message as ToolResultMessage
     runs[result.toolCallId] = committedRun(result)
   }
+  return runs
+}
+
+/** `committed` overridden by this connection's live runs (which carry durations); reads the live runs only besides one copy of `committed`. */
+export function withLiveRuns(committed: Record<string, ToolRun>, live: Record<string, ToolRun>): Record<string, ToolRun> {
+  const runs = { ...committed }
   // A live run still "running" next to its committed result is stale (resync after the end was missed): the committed result wins, keeping the duration
-  for (const [id, run] of Object.entries(transcript.runs)) {
-    runs[id] = run.running && runs[id] ? { ...runs[id], durationMs: run.durationMs } : run
+  for (const [id, run] of Object.entries(live)) {
+    runs[id] = run.running && committed[id] ? { ...committed[id], durationMs: run.durationMs } : run
   }
   return runs
 }

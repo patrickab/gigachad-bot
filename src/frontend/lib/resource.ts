@@ -12,14 +12,14 @@ export interface Resource<T> {
   load: (signal?: AbortSignal) => Promise<T>
   /**
    * Read a subscribed value again, drop an unsubscribed one so the next subscriber loads, and read nothing for a value never loaded.
-   * A read in progress starts over and its callers get the new answer. A re-read that fails is retried by `revalidateStale`.
+   * A read in progress is read once more after it answers and its callers get that answer. A re-read that fails is retried by `revalidateStale`.
    */
   invalidate: () => void
-  /** Store `value`, e.g. a mutation's response. A read in progress starts over, so only an answer read after `value` replaces it. */
+  /** Store `value`, e.g. a mutation's response. A read in progress is read once more, so only an answer read after `value` replaces it. */
   set: (value: T) => void
 }
 
-/** One read in progress, shared by every `load` caller that joined it, restarted by every `invalidate` and `set`. */
+/** One read in progress, shared by every `load` caller that joined it, outdated by every `invalidate` and `set`. */
 interface Flight<T> {
   /** Settles with the answer of the request current when one arrives. */
   promise: Promise<T>
@@ -29,6 +29,10 @@ interface Flight<T> {
   controller: AbortController
   /** The current request began in this task, so it already sees every change announced so far. */
   fresh: boolean
+  /** A change was announced after the current request began: its answer is dropped and one more request is sent. */
+  stale: boolean
+  /** When the current request was sent, in ms since the epoch. */
+  sentAt: number
   /** Callers still waiting, the request aborts once every one of them aborted. */
   waiting: number
   /** A re-read of a subscribed value, which runs to its end however many callers leave. */
@@ -39,6 +43,8 @@ const resets = new Set<() => void>()
 /** The retry of every resource whose latest invalidation has no successful read yet. */
 const staleRetries = new Set<() => void>()
 const ignore = () => {}
+/** The startup read's bound: an outdated request older than this is aborted, it may hang on a dead connection. */
+const HUNG_REQUEST_MS = 15_000
 
 /** Share `read`'s result between every caller and subscriber. */
 export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Resource<T> {
@@ -47,14 +53,23 @@ export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Re
   let flight: Flight<T> | null = null
   const listeners = new Set<() => void>()
 
-  /** Send `current`'s request, whose answer settles it unless a restart or the last caller's leaving replaced it. */
+  /** Send `current`'s request, whose answer settles it unless it is stale or a restart or the last caller's leaving replaced it. */
   const request = (current: Flight<T>) => {
     const { controller } = current
     current.fresh = true
+    current.stale = false
+    current.sentAt = Date.now()
     queueMicrotask(() => { current.fresh = false })
+    /** Whether this answer settles `current`. A stale one is dropped, success or failure, and the request is sent once more. */
+    const settles = () => {
+      if (flight !== current || current.controller !== controller) return false
+      if (!current.stale) return true
+      request(current)
+      return false
+    }
     read(controller.signal).then(
       (result) => {
-        if (flight !== current || current.controller !== controller) return
+        if (!settles()) return
         flight = null
         value = result
         staleRetries.delete(retry)
@@ -62,7 +77,7 @@ export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Re
         current.resolve(result)
       },
       (cause: unknown) => {
-        if (flight !== current || current.controller !== controller) return
+        if (!settles()) return
         flight = null
         current.reject(cause)
       },
@@ -73,15 +88,25 @@ export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Re
     const { promise, resolve, reject } = Promise.withResolvers<T>()
     // Every caller observes the outcome through its own promise, so a read all of them left rejects unobserved.
     promise.catch(ignore)
-    const current: Flight<T> = { promise, resolve, reject, controller: new AbortController(), fresh: false, waiting: 0, held: false }
+    const current: Flight<T> = {
+      promise, resolve, reject, controller: new AbortController(), fresh: false, stale: false, sentAt: 0, waiting: 0, held: false,
+    }
     flight = current
     request(current)
     return current
   }
 
-  /** Abort `current`'s request and send it again, unless it began in this task and so is not outdated. */
+  /**
+   * Outdate `current`'s request, unless it began in this task and so already sees the change. The backend's list and tree
+   * routes run to their end even when aborted, so the request is awaited and followed by one more: a burst of changes
+   * costs two reads, not one per change. A request older than `HUNG_REQUEST_MS` is aborted and sent again instead.
+   */
   const restart = (current: Flight<T>) => {
     if (current.fresh) return
+    if (Date.now() - current.sentAt < HUNG_REQUEST_MS) {
+      current.stale = true
+      return
+    }
     current.controller.abort()
     current.controller = new AbortController()
     request(current)

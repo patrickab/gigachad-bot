@@ -27,14 +27,16 @@ EMBEDDING = {"capabilities": ["embedding"], "model_info": {"general.architecture
 
 
 class FakeOllama:
-    """Ollama's `/api/tags` and `/api/show` over *installed* (tag -> details), counting `/api/show` calls."""
+    """Ollama's `/api/tags` and `/api/show` over *installed* (tag -> details), counting the calls of both."""
 
     def __init__(self, installed: dict[str, dict[str, Any]]) -> None:
         self.installed = installed
+        self.listed = 0
         self.shown: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/tags":
+            self.listed += 1
             return httpx.Response(200, json={"models": [{"name": tag, "digest": f"sha-{tag}"} for tag in self.installed]})
         tag = json.loads(request.content)["model"]
         self.shown.append(tag)
@@ -65,15 +67,14 @@ def models_json(agent_dir: Path) -> dict[str, Any]:
     return json.loads((agent_dir / "models.json").read_text())
 
 
-def test_lists_chat_models_without_embedding_models(serve) -> None:
+def test_lists_chat_models_without_embedding_models(serve, scratch_pi_agent_dir: Path) -> None:
     serve(FakeOllama({"qwen3:0.6b": QWEN, "nomic-embed-text:latest": EMBEDDING, "llava:7b": LLAVA}))
-    assert ollama_models.installed_chat_models() == ["qwen3:0.6b", "llava:7b"]
+    assert ollama_models.sync_pi_provider() == ["qwen3:0.6b", "llava:7b"]
 
 
 def test_ollama_down_lists_nothing_and_writes_nothing(serve, scratch_pi_agent_dir: Path) -> None:
     serve(_ollama_down)
-    assert ollama_models.installed_chat_models() == []
-    assert ollama_models.sync_pi_provider() is False
+    assert ollama_models.sync_pi_provider() is None
     assert not (scratch_pi_agent_dir / "models.json").exists()
 
 
@@ -84,7 +85,7 @@ def test_sync_writes_the_provider_and_keeps_the_rest(serve, scratch_pi_agent_dir
     )
     serve(FakeOllama({"qwen3:0.6b": QWEN, "llava:7b": LLAVA, "bge-m3:latest": EMBEDDING}))
 
-    assert ollama_models.sync_pi_provider() is True
+    ollama_models.sync_pi_provider()
 
     written = models_json(scratch_pi_agent_dir)
     assert written["$schema"] == "https://pi.dev/schemas/models.schema.json"
@@ -109,11 +110,11 @@ def test_sync_writes_the_provider_and_keeps_the_rest(serve, scratch_pi_agent_dir
 def test_unchanged_sync_neither_rewrites_nor_asks_ollama_again(serve, scratch_pi_agent_dir: Path) -> None:
     ollama = FakeOllama({"qwen3:0.6b": QWEN})
     serve(ollama)
-    assert ollama_models.sync_pi_provider() is True
+    ollama_models.sync_pi_provider()
     written = scratch_pi_agent_dir / "models.json"
     before = written.stat()
 
-    assert ollama_models.sync_pi_provider() is False
+    assert ollama_models.sync_pi_provider() == ["qwen3:0.6b"]
 
     after = written.stat()
     assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
@@ -126,20 +127,20 @@ def test_a_new_pull_and_a_removal_follow_the_installed_models(serve, scratch_pi_
     ollama_models.sync_pi_provider()
 
     ollama.installed["llava:7b"] = LLAVA
-    assert ollama_models.sync_pi_provider() is True
+    ollama_models.sync_pi_provider()
     assert [model["id"] for model in models_json(scratch_pi_agent_dir)["providers"]["ollama"]["models"]] == [
         "qwen3:0.6b",
         "llava:7b",
     ]
 
     ollama.installed.clear()
-    assert ollama_models.sync_pi_provider() is True
+    assert ollama_models.sync_pi_provider() == []
     assert models_json(scratch_pi_agent_dir)["providers"]["ollama"]["models"] == []
 
 
 def test_no_chat_models_and_no_provider_writes_nothing(serve, scratch_pi_agent_dir: Path) -> None:
     serve(FakeOllama({"nomic-embed-text:latest": EMBEDDING}))
-    assert ollama_models.sync_pi_provider() is False
+    assert ollama_models.sync_pi_provider() == []
     assert not (scratch_pi_agent_dir / "models.json").exists()
 
 
@@ -154,7 +155,7 @@ def test_user_keys_on_the_provider_survive(serve, scratch_pi_agent_dir: Path) ->
 def test_an_invalid_file_is_never_overwritten(serve, scratch_pi_agent_dir: Path) -> None:
     (scratch_pi_agent_dir / "models.json").write_text("{not json")
     serve(FakeOllama({"qwen3:0.6b": QWEN}))
-    assert ollama_models.sync_pi_provider() is False
+    assert ollama_models.sync_pi_provider() == ["qwen3:0.6b"]
     assert (scratch_pi_agent_dir / "models.json").read_text() == "{not json"
 
 
@@ -171,8 +172,9 @@ class StaticStore:
         return []
 
 
-def test_models_route_lists_selectors_and_syncs_pi(serve, scratch_pi_agent_dir: Path) -> None:
-    serve(FakeOllama({"qwen3:0.6b": QWEN, "nomic-embed-text:latest": EMBEDDING}))
+def test_models_route_lists_selectors_and_syncs_pi_from_one_listing(serve, scratch_pi_agent_dir: Path) -> None:
+    ollama = FakeOllama({"qwen3:0.6b": QWEN, "nomic-embed-text:latest": EMBEDDING})
+    serve(ollama)
     app = FastAPI()
     app.include_router(models_route.router)
     app.dependency_overrides[get_model_provider_store] = StaticStore
@@ -182,4 +184,5 @@ def test_models_route_lists_selectors_and_syncs_pi(serve, scratch_pi_agent_dir: 
 
     assert response.status_code == 200
     assert response.json()["ollama"] == ["ollama/qwen3:0.6b"]
+    assert ollama.listed == 1
     assert [model["id"] for model in models_json(scratch_pi_agent_dir)["providers"]["ollama"]["models"]] == ["qwen3:0.6b"]

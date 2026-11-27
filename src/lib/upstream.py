@@ -6,7 +6,9 @@
 
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from functools import cache
 import os
+import ssl
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -32,6 +34,12 @@ class UpstreamRequestFailed(Exception):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+@cache
+def tls_context() -> ssl.SSLContext:
+    """The one TLS context of the process: building one per client reloads the CA bundle each time."""
+    return httpx.create_ssl_context()
 
 
 def upstream_url(env: str, default: str) -> str:
@@ -98,6 +106,17 @@ class UpstreamClient:
         """Base URL, read from the environment on every access."""
         return upstream_url(self._env, self._default)
 
+    async def send(self, method: str, path: str, *, timeout: float | httpx.Timeout | None = None, **kwargs: object) -> httpx.Response:
+        """Send one request (*kwargs* of `httpx.AsyncClient.request`) and return the answer, raising a refusal."""
+        url = self.url
+        with unreachable(f"{self._label} at {url}"):
+            timeout = self._timeout if timeout is None else timeout
+            async with httpx.AsyncClient(base_url=url, timeout=timeout, transport=self.transport, verify=tls_context()) as client:
+                response = await client.request(method, path, **kwargs)
+        if response.is_error:
+            raise UpstreamRequestFailed(response.status_code, error_message(response))
+        return response
+
     async def request[Result](
         self,
         method: str,
@@ -109,11 +128,5 @@ class UpstreamClient:
         timeout: float | httpx.Timeout | None = None,
     ) -> Result:
         """Send one request and validate the JSON answer as *result*, *timeout* overriding the client's default."""
-        url = self.url
-        with unreachable(f"{self._label} at {url}"):
-            timeout = self._timeout if timeout is None else timeout
-            async with httpx.AsyncClient(base_url=url, timeout=timeout, transport=self.transport) as client:
-                response = await client.request(method, path, json=json, params=params)
-        if response.is_error:
-            raise UpstreamRequestFailed(response.status_code, error_message(response))
+        response = await self.send(method, path, json=json, params=params, timeout=timeout)
         return validate_answer(result, response.content, label=self._label, path=path)

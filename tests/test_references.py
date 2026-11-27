@@ -16,6 +16,7 @@ from lib.project_store import ProjectStore
 from lib.references import References, Released, annotation_canvas
 from lib.sandbox_store import RunRecord, SandboxStore
 from lib.storage_namespace import pdf_annotations
+from tests.conftest import CountingScope
 
 PDF = b"%PDF-1.7 paper"
 EMPTY_CANVAS = {"version": 1, "frames": [], "strokes": [], "attachments": [], "texts": []}
@@ -336,3 +337,21 @@ async def test_chat_meta_stored_before_refs_existed_is_derived_again(world: Worl
 
     assert world.library_left("paper.pdf")
     assert world.chats.tree_metas()["chat/two.json"]["refs"] == ["PDFs/paper.pdf"]
+
+
+def test_a_release_over_three_rounds_reads_the_holders_once(world: World) -> None:
+    paper_annotation = world.library_pdf("paper.pdf")
+    world.library_pdf("kept.pdf", b"%PDF kept")
+    scan = "project/p/document/scan.pdf"
+    world.docs.write_bytes(scan, b"%PDF scan")
+    scan_annotation = world.annotation(b"%PDF scan")
+    board = world.canvas("project/p/document/board.canvas", [{"id": "a", "kind": "pdf", "path": "PDFs/paper.pdf"}],
+                         [{"id": "f", "kind": "pdf", "path": scan}])
+    world.canvas("note/board.canvas", [{"id": "a", "kind": "pdf", "path": "PDFs/kept.pdf"}])
+    scope = CountingScope(world.docs._scope.pool, world.docs._scope.user_id)
+
+    gone = References(PostgresDataStore(scope), AssetStore(scope)).release(Released(refs={board}))
+
+    assert gone == sorted([board, "PDFs/paper.pdf", scan, paper_annotation, scan_annotation])
+    assert world.library_left("kept.pdf") and world.has(pdf_annotations(hashlib.sha256(b"%PDF kept").hexdigest()))
+    assert scope.counts["statements"] <= 47  # 59 while every round read the holders again

@@ -132,40 +132,38 @@ class SandboxStore:
             raise ValueError("native sandbox manifest ID does not match its storage path")
         return manifest
 
-    def _record_shas(self, kind: str, key: str) -> set[str]:
-        """Asset hashes a stored manifest or run record references, none when it is unreadable."""
-        data = self._docs.read(key)
-        if not isinstance(data, dict):
-            return set()
-        if kind == "runs":
-            outputs = (data.get("result") or {}).get("outputs", [])
-            return {ref["sha256"] for output in outputs for ref in output.get("mime_bundle", {}).values()}
-        try:
-            manifest = _decode_manifest(data)
-        except ValueError:
-            return set()
-        return manifest_asset_shas(manifest)
+    def _records_shas(self, kinds: dict[str, str]) -> set[str]:
+        """Asset hashes the manifests and run records at *kinds* (key -> kind) reference, read in one query."""
+        shas: set[str] = set()
+        for key, data in self._docs.read_many(kinds).items():
+            if not isinstance(data, dict):
+                continue
+            if kinds[key] == "runs":
+                outputs = (data.get("result") or {}).get("outputs", [])
+                shas |= {ref["sha256"] for output in outputs for ref in output.get("mime_bundle", {}).values()}
+                continue
+            with suppress(ValueError):
+                shas |= manifest_asset_shas(_decode_manifest(data))
+        return shas
 
     def referenced_chat_shas(self, chat_id: str) -> set[str]:
         """Collect asset hashes reachable from this chat in this store's scope."""
-        shas: set[str] = set()
+        kinds: dict[str, str] = {}
         for kind, prefix in (("manifests", sandbox_manifest_prefix), ("runs", sandbox_run_prefix)):
-            for entry in self._docs.list(prefix(chat_id, self._scope)):
-                if not entry.is_dir:
-                    shas |= self._record_shas(kind, entry.key)
-        return shas
+            kinds.update((entry.key, kind) for entry in self._docs.list(prefix(chat_id, self._scope)) if not entry.is_dir)
+        return self._records_shas(kinds)
 
     def referenced_shas(self, *, exclude_chat_id: str | None = None, exclude_scope: str | None = None) -> set[str]:
         """Collect asset hashes outside an optionally excluded chat scope in one scan."""
-        shas: set[str] = set()
+        kinds: dict[str, str] = {}
         for entry in self._docs.list(SANDBOX, recursive=True):
             key = parse_sandbox_key(entry.key)
             if entry.is_dir or key is None:
                 continue
             if key.chat_id == exclude_chat_id and (exclude_scope is None or key.scope == exclude_scope):
                 continue
-            shas |= self._record_shas(key.kind, entry.key)
-        return shas
+            kinds[entry.key] = key.kind
+        return self._records_shas(kinds)
 
     def delete_chat_state(self, chat_id: str) -> set[str]:
         """Delete this scope's chat metadata and return hashes for orphan cleanup."""

@@ -1,5 +1,7 @@
 // Loopback-only JSON API for the FastAPI backend. Stateless: every request
-// carries the workspace sources; the backend owns storage and revisions.
+// carries the workspace sources and every answer is a pure function of it;
+// the backend owns storage and revisions.
+import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readPins, type Snapshots } from './layout.ts'
 import { applyOperations } from './ops/apply.ts'
@@ -11,7 +13,7 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
@@ -19,7 +21,11 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
     if (size > MAX_BODY_BYTES) throw new OperationError('Request too large')
     chunks.push(chunk as Buffer)
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+  return Buffer.concat(chunks)
+}
+
+function parseJson(raw: Buffer): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw.toString('utf8') || '{}')
   if (!isRecord(parsed)) throw new OperationError('Expected a JSON object')
   return parsed
 }
@@ -43,23 +49,40 @@ function snapshotsOf(body: Record<string, unknown>): Snapshots {
   return snapshots as Snapshots
 }
 
-function send(response: ServerResponse, status: number, payload: unknown) {
+function sendJson(response: ServerResponse, status: number, json: string) {
   response.writeHead(status, { 'content-type': 'application/json' })
-  response.end(JSON.stringify(payload))
+  response.end(json)
+}
+
+const send = (response: ServerResponse, status: number, payload: unknown) => sendJson(response, status, JSON.stringify(payload))
+
+/** The last 8 `/model` answers by SHA-256 of their request body (a parse and layout costs about a second). */
+const modelAnswers = new Map<string, string>()
+
+async function modelAnswer(raw: Buffer): Promise<string> {
+  const key = createHash('sha256').update(raw).digest('hex')
+  let answer = modelAnswers.get(key)
+  if (answer === undefined) {
+    const body = parseJson(raw)
+    const workspace = await Workspace.open(sourcesOf(body))
+    try {
+      answer = JSON.stringify(await renderModel(workspace, readPins(snapshotsOf(body))))
+    } finally {
+      await workspace.dispose()
+    }
+  }
+  modelAnswers.delete(key)
+  modelAnswers.set(key, answer)
+  if (modelAnswers.size > 8) modelAnswers.delete(modelAnswers.keys().next().value!)
+  return answer
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse) {
   if (request.method === 'GET' && request.url === '/health') return send(response, 200, { status: 'ok' })
   if (request.method !== 'POST') return send(response, 405, { error: 'Method not allowed' })
-  const body = await readJson(request)
-  if (request.url === '/model') {
-    const workspace = await Workspace.open(sourcesOf(body))
-    try {
-      return send(response, 200, await renderModel(workspace, readPins(snapshotsOf(body))))
-    } finally {
-      await workspace.dispose()
-    }
-  }
+  const raw = await readBody(request)
+  if (request.url === '/model') return sendJson(response, 200, await modelAnswer(raw))
+  const body = parseJson(raw)
   if (request.url === '/apply') {
     if (!Array.isArray(body.ops)) throw new OperationError('ops must be a list')
     const home = body.home ?? null
@@ -72,7 +95,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
 const port = Number(process.env.C4_SERVICE_PORT ?? 8011)
 const host = process.env.C4_SERVICE_HOST ?? '127.0.0.1'
 
-createServer((request, response) => {
+export const server = createServer((request, response) => {
   handle(request, response).catch((error: unknown) => {
     if (error instanceof OperationError || error instanceof SyntaxError) return send(response, 422, { error: error.message })
     console.error(error)

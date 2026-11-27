@@ -1,7 +1,7 @@
 /**
  * `POST /v1/chat/completions`: OpenAI chat completions over pi-ai, stream and non-stream.
  *
- * - Consumes: a pi-ai `Models` collection, the HTTP request (its `signal` aborts the upstream call)
+ * - Consumes: a pi-ai `Models` collection, the parsed request body and its `signal` (which aborts the upstream call)
  * - Provides: `chatCompletions`, which keeps the upstream HTTP status of early failures (400, 404, 429)
  */
 import type { AssistantMessage, Models } from "@earendil-works/pi-ai";
@@ -14,21 +14,12 @@ import { completionBody, sseStream } from "./response.ts";
 const upstreamError = (message: AssistantMessage) =>
   new HttpError(Number(/^(\d{3}) /.exec(message.errorMessage ?? "")?.[1] ?? 502), message.errorMessage ?? message.stopReason);
 
-async function readBody(request: Request): Promise<OpenAIRequest> {
-  try {
-    return (await request.json()) as OpenAIRequest;
-  } catch {
-    throw new HttpError(400, "request body is not JSON");
-  }
-}
-
 /** Run one chat completion; errors are thrown as `HttpError` for the router to render. */
-export async function chatCompletions(models: Models, request: Request): Promise<Response> {
-  const body = await readBody(request);
+export async function chatCompletions(models: Models, body: OpenAIRequest, requestSignal: AbortSignal): Promise<Response> {
   const model = await resolveModel(models, body.model);
   // Aborted by the client going away (request.signal) or by the SSE consumer cancelling.
   const abort = new AbortController();
-  const signal = AbortSignal.any([request.signal, abort.signal]);
+  const signal = AbortSignal.any([requestSignal, abort.signal]);
   const context = await toContext(body, model, signal);
   const options = streamOptions(body, model, signal);
   const id = `chatcmpl-${crypto.randomUUID()}`;

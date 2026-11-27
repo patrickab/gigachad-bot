@@ -1,5 +1,7 @@
 """The Pi model source: catalog from pi-host's gateway and effort ladders."""
 
+import ssl
+
 import httpx
 import pytest
 
@@ -40,7 +42,10 @@ def _serve(monkeypatch, handler) -> list[httpx.Request]:
     """Answer the gateway's HTTP calls with *handler*, recording each request."""
     requests: list[httpx.Request] = []
     transport = httpx.MockTransport(lambda request: requests.append(request) or handler(request))
-    monkeypatch.setattr(pi_models.httpx, "get", lambda url, **kwargs: httpx.Client(transport=transport).get(url, **kwargs))
+    def get(url: str, verify: ssl.SSLContext, **kwargs) -> httpx.Response:
+        return httpx.Client(transport=transport, verify=verify).get(url, **kwargs)
+
+    monkeypatch.setattr(pi_models.httpx, "get", get)
     return requests
 
 

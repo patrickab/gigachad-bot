@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_TRANSCRIPT, reduceTranscript, shownMessages, toolRunsOf, transcriptOfEntries, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
+import { committedRunsOf, EMPTY_TRANSCRIPT, reduceTranscript, shownMessages, transcriptOfEntries, transcriptReducer, withLiveRuns, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
 import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "../types"
 
 const prompt: UserMessage = { role: "user", content: "Fix the bug", timestamp: 1_000 }
@@ -251,9 +251,23 @@ describe("live tool output", () => {
     const toolResult: AgentMessage = { role: "toolResult", toolCallId: "c", toolName: "bash", content: [{ type: "text", text: "done" }], isError: false, timestamp: 2_500 }
     const live = events(EMPTY_TRANSCRIPT, [{ type: "tool_execution_start", toolCallId: "c" }, { type: "tool_execution_update", toolCallId: "c", partialResult: partial("part") }])
     const resynced = transcriptReducer(live, { kind: "resync", resync: { mode: "append", entries: [messageEntry("t", null, toolResult)], leafId: "t" } })
-    const runs = toolRunsOf(resynced)
+    const runs = withLiveRuns(committedRunsOf(shownMessages(resynced)), resynced.runs)
     expect(Object.keys(runs)).toEqual(["c"])
     expect(runs.c.running).toBe(false)
     expect(text(runs.c)).toBe("done")
+  })
+
+  it("lays live runs over the committed ones without touching them", () => {
+    const result = (id: string): AgentMessage => ({ role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text: `done ${id}` }], isError: false, timestamp: 1 })
+    const messages = [result("a"), result("b")]
+    const committed = committedRunsOf(messages)
+    expect(committedRunsOf(messages).a).toBe(committed.a)
+    const runs = withLiveRuns(committed, { a: { running: true, isError: false, durationMs: 5 }, b: { running: false, isError: true, durationMs: 7 }, c: { running: true, isError: false } })
+    expect(runs.a).toMatchObject({ running: false, durationMs: 5 })
+    expect(text(runs.a)).toBe("done a")
+    expect(runs.b).toMatchObject({ running: false, isError: true, durationMs: 7 })
+    expect(runs.c.running).toBe(true)
+    expect(Object.keys(committed)).toEqual(["a", "b"])
+    expect(committed.a.durationMs).toBeUndefined()
   })
 })

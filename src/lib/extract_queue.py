@@ -18,7 +18,7 @@ from lib import mineru
 
 log = logging.getLogger(__name__)
 
-# Persists a finished parse, given the PDF stem, the markdown file and the images directory.
+# Persists a finished parse, given the PDF stem, the markdown file and the images directory. Runs in a worker thread.
 StoreParse = Callable[[str, Path, Path], None]
 
 _queue: asyncio.Queue[tuple[str, bytes, StoreParse] | None] = asyncio.Queue()
@@ -45,9 +45,9 @@ async def _worker() -> None:
             log.info("Extracting %s via MinerU", name)
             with tempfile.TemporaryDirectory() as tmp:
                 pdf_path = Path(tmp) / name
-                pdf_path.write_bytes(content)
+                await asyncio.to_thread(pdf_path.write_bytes, content)
                 md_path, images_dir = await mineru.parse_pdf(pdf_path, Path(tmp) / "mineru")
-                store(pdf_path.stem, md_path, images_dir)
+                await asyncio.to_thread(store, pdf_path.stem, md_path, images_dir)
             log.info("Extraction complete: %s", name)
         except Exception:
             log.exception("Background MinerU extraction failed for %s", name)

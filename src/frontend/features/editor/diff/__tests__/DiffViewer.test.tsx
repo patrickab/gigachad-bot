@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
+import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 
 const api = vi.hoisted(() => ({
   fetchRootDiffFiles: vi.fn<typeof import("@/lib/backend/api").fetchRootDiffFiles>(),
@@ -66,6 +67,22 @@ afterEach(() => {
 })
 
 describe("DiffViewer", () => {
+  it("polls git only while its tab is frontmost", async () => {
+    vi.useFakeTimers()
+    try {
+      const inTab = (isActive: boolean) => <TabContext.Provider value={{ isActive, tab: { id: "diff" } } as TabContextValue}><DiffViewer root="/repo" /></TabContext.Provider>
+      const view = render(inTab(false))
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(api.fetchRootDiffFiles).toHaveBeenCalledTimes(0)
+
+      view.rerender(inTab(true))
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(api.fetchRootDiffFiles).toHaveBeenCalledTimes(6)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("renders every file together, including files without a text diff", async () => {
     const view = render(<DiffViewer root="/repo" />)
     const diff = within(view.getByLabelText("Diff"))

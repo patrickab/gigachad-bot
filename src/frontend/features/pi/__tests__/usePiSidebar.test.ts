@@ -1,14 +1,21 @@
+import { renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
-import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionWorktree, unmountedPiWorkspaces } from "../usePiSidebar"
+import { isInside } from "@/lib/paths"
+import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionWorktree, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
 
 vi.mock("@/contexts/TabContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/TabContext")>(),
   useTab: () => ({ tab: { workspaceItem: null } }),
 }))
+const store = vi.hoisted(() => ({ sessions: [] as PiSessionInfo[], repositories: [] as { name: string; path: string }[] }))
+vi.mock("@/lib/paths", async (importOriginal) => {
+  const paths = await importOriginal<typeof import("@/lib/paths")>()
+  return { ...paths, isInside: vi.fn(paths.isInside) }
+})
 vi.mock("../sessionStore", () => ({
-  usePiSessions: () => ({ sessions: [], loading: false, error: null }),
-  usePiRepositories: () => [],
+  usePiSessions: () => ({ sessions: store.sessions, loading: false, error: null }),
+  usePiRepositories: () => store.repositories,
   usePiSessionStatus: () => ({ running: false, waiting: false, unread: false, failed: false }),
   refreshPiSessions: () => {},
 }))
@@ -37,7 +44,7 @@ describe("Pi sidebar grouping", () => {
       piSession("tool", "/git/tool"), piSession("home", "/home/me"),
     ]
     expect(piSessionsInside(sessions, "/git/proj", repositories).map((session) => session.sessionId)).toEqual(["main", "tree"])
-    expect(unmountedPiWorkspaces(sessions, repositories, ["/git/proj"])).toEqual([
+    expect(unmountedPiWorkspaces(sessions, (session) => piSessionRepository(session, repositories), ["/git/proj"])).toEqual([
       { path: "/git/proj-two", label: "proj-two", sessions: [sessions[2]] },
       { path: "/git/tool", label: "tool", sessions: [sessions[3]] },
     ])
@@ -57,5 +64,17 @@ describe("Pi sidebar grouping", () => {
     expect(piSessionError(new ApiError("not_found", 404), "Could not archive this session")).toBe("Session no longer exists")
     expect(piSessionError(new ApiError("toString", 409), "Could not archive this session")).toBe("Could not archive this session")
     expect(piSessionError(new Error("live"), "Could not pin this session")).toBe("Could not pin this session")
+  })
+
+  it("resolves each session's checkout once per list refresh, not once per directory", () => {
+    store.repositories = repositories
+    const directories = ["/git/proj", "/git/proj/a", "/git/proj/b", "/git/proj/c", "/git/proj/d"]
+    const { result, rerender } = renderHook(() => usePiSidebar({}))
+    store.sessions = Array.from({ length: 50 }, (_, index) => piSession(`s${index}`, `/git/proj/${"abcd"[index % 4]}`))
+    vi.mocked(isInside).mockClear()
+    rerender()
+    for (const directory of directories) result.current.directoryCode(directory, "proj", null)
+    const resolutions = vi.mocked(isInside).mock.calls.filter(([path, root]) => path !== root && root === "/git/proj").length
+    expect(resolutions).toBe(50)
   })
 })

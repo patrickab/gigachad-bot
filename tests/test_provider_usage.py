@@ -1,6 +1,7 @@
 """pi-host's `/usage` becomes one row per login with its worst limit per window, the last good one outliving failures."""
 
 from datetime import UTC, datetime
+import ssl
 
 import httpx
 import pytest
@@ -61,7 +62,10 @@ def pi_host_usage(monkeypatch, tmp_path):
         return answers.pop(0)
 
     transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(usage.httpx, "get", lambda url, **kwargs: httpx.Client(transport=transport).get(url, **kwargs))
+    def get(url: str, verify: ssl.SSLContext, **kwargs) -> httpx.Response:
+        return httpx.Client(transport=transport, verify=verify).get(url, **kwargs)
+
+    monkeypatch.setattr(usage.httpx, "get", get)
     return answers, requests
 
 

@@ -19,15 +19,7 @@ import httpx
 from pydantic import AliasGenerator, BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from lib.upstream import (
-    TIMEOUT_SECONDS,
-    UpstreamClient,
-    UpstreamContractError,
-    UpstreamRequestFailed,
-    UpstreamUnavailable,
-    error_message,
-    upstream_url,
-)
+from lib.upstream import UpstreamClient, UpstreamContractError, UpstreamRequestFailed, upstream_url
 
 DEFAULT_URL = "http://127.0.0.1:30181"
 
@@ -163,13 +155,7 @@ async def export_markdown(session_id: str) -> SessionExport:
     An unknown session raises `UpstreamRequestFailed` (404), a body that is no Markdown attachment `UpstreamContractError`.
     """
     path = f"/api/chats/{session_id}/markdown"
-    try:
-        async with httpx.AsyncClient(base_url=client.url, timeout=TIMEOUT_SECONDS, transport=client.transport) as http:
-            response = await http.get(path)
-    except httpx.HTTPError as exc:
-        raise UpstreamUnavailable(f"LearnHarness at {client.url} does not answer: {exc}") from exc
-    if response.is_error:
-        raise UpstreamRequestFailed(response.status_code, error_message(response))
+    response = await client.send("GET", path)
     filename = _EXPORT_FILENAME.search(response.headers.get("content-disposition", ""))
     if not response.headers.get("content-type", "").startswith("text/markdown") or filename is None:
         raise UpstreamContractError(f"LearnHarness {path}: no Markdown attachment")

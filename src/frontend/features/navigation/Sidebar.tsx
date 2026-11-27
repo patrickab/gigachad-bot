@@ -13,7 +13,7 @@ import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
 import { addFileRoot, cloneFileRoot, createTexProjectFile } from "@/lib/backend/api"
-import { refreshDocumentLists, refreshRootTree } from "@/lib/backend/resources"
+import { refreshDocumentLists, refreshProjectDocuments, refreshRootTree } from "@/lib/backend/resources"
 import { SidePanel, SidePanelScroll } from "@/components/ui/SidePanel"
 import { ArchiveSelector } from "./ArchiveSelector"
 import { useBranches } from "./BranchContext"
@@ -84,11 +84,13 @@ export function Sidebar(props: SidebarProps) {
       const shown = documents.documents[scope] ?? []
       return shown.some((doc) => doc.path === path) ? path : shown.find((doc) => doc.name === name)?.path ?? path
     },
-    onRenamed: () => refreshDocumentLists(),
+    // Other projects listing the file follow through their change events.
+    onRenamed: refreshProjectDocuments,
   })
   const selectFile = (path: string) => props.onItemOpen?.({ ...fileItem(path, owningProject(path, documents.documents, projects, code.mounts), Boolean(props.workbench)), rootFile: true })
   const folderRows = {
     onFileSelect: selectFile,
+    isExpanded: controller.isExpanded,
     moveToFolder: async (path: string, folder: string) => {
       await documents.moveToFolder(path, folder)
       await refreshRootTree()

@@ -6,6 +6,7 @@ import pytest
 
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.json_docs import JsonDocs
+from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_store import RunRecord, SandboxStore
 from lib.storage_namespace import (
     DEFAULT_SANDBOX_SCOPE,
@@ -13,6 +14,7 @@ from lib.storage_namespace import (
     sandbox_manifest,
     sandbox_run,
 )
+from tests.conftest import CountingScope
 
 
 @pytest.fixture
@@ -157,6 +159,17 @@ def test_referenced_shas_excludes_only_the_named_scope(sandbox_store: SandboxSto
 
     assert sandbox_store.referenced_shas(exclude_chat_id=chat_id, exclude_scope="workspace") == {"b" * 64}
     assert sandbox_store.referenced_shas(exclude_chat_id=chat_id) == set()
+
+
+def test_referenced_shas_reads_every_record_in_one_query(data_store: PostgresDataStore):
+    for index in range(10):
+        _put_manifest(data_store, f"chat-{index}", _manifest(f"m{index}", f"{index:064x}"))
+    scope = CountingScope(data_store._scope.pool, data_store._scope.user_id)
+
+    shas = SandboxStore(PostgresDataStore(scope)).referenced_shas(exclude_chat_id="chat-0")
+
+    assert shas == {f"{index:064x}" for index in range(1, 10)}
+    assert scope.counts["statements"] == 2
 
 
 def test_delete_chat_state_removes_all_records_and_returns_shas(sandbox_store: SandboxStore):

@@ -26,7 +26,7 @@ import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "@/features/conversation/tools/ProcessDetails"
 import { ToolCallRow } from "@/features/conversation/tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
-import { shownMessages, splitSkill, textOf, toolRunsOf, turnsOf, type MessageMarks, type SkillBlock, type Transcript, type Turn } from "./transcript"
+import { committedRunsOf, shownMessages, splitSkill, textOf, turnsOf, withLiveRuns, type MessageMarks, type SkillBlock, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ImageContent, ToolCall, ToolRun } from "./types"
 import "./FactoryNotices"
 import "./FactoryTool"
@@ -327,14 +327,25 @@ function sameView(a: TurnView, b: TurnView): boolean {
     && sameRecord(a.confirmed.marks, b.confirmed.marks) && sameRecord(a.runs, b.runs)
 }
 
-/** Each turn's view by key, the previous object while its content is equal. */
+/**
+ * Each turn's view by key, the previous object while its content is equal.
+ *
+ * With the same `turns` object (no message, entry, mark or live-flag change) only `runs` changed, and live tool events belong
+ * to the running turn: a new turn starts with a user message, which Pi delivers only after the running tools ended. So every
+ * other turn keeps its stored view and a tool-output frame reads the live turn only.
+ */
 function useTurnViews(turns: readonly PiColumnTurn[], messages: AgentMessage[], confirmed: Confirmed, runs: Record<string, ToolRun>): Map<string, TurnView> {
   const [state, setState] = useState<{ turns: readonly PiColumnTurn[]; runs: Record<string, ToolRun>; views: Map<string, TurnView> }>({ turns: [], runs: {}, views: new Map() })
   if (state.turns === turns && state.runs === runs) return state.views
+  const sameTurns = state.turns === turns
   const views = new Map<string, TurnView>()
   for (const item of turns) {
-    const fresh = turnView(messages, item.turn, confirmed, runs, item.live)
     const kept = state.views.get(item.key)
+    if (sameTurns && kept && !item.live) {
+      views.set(item.key, kept)
+      continue
+    }
+    const fresh = turnView(messages, item.turn, confirmed, runs, item.live)
     views.set(item.key, kept && sameView(kept, fresh) ? kept : fresh)
   }
   setState({ turns, runs, views })
@@ -453,7 +464,9 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   // Derived from the fields that change per message, not per streamed delta, so settled turns keep their props
   const messages = useMemo(() => shownMessages({ messages: confirmedMessages, unconfirmed, optimistic }), [confirmedMessages, unconfirmed, optimistic])
   const turns = useMemo(() => turnsOf(messages), [messages])
-  const runs = useMemo(() => toolRunsOf({ messages: confirmedMessages, unconfirmed, optimistic, runs: liveRuns }), [confirmedMessages, unconfirmed, optimistic, liveRuns])
+  // Committed runs walk the messages once per message; a tool-output frame only lays the live runs over them
+  const committedRuns = useMemo(() => committedRunsOf(messages), [messages])
+  const runs = useMemo(() => withLiveRuns(committedRuns, liveRuns), [committedRuns, liveRuns])
   const confirmed = useMemo<Confirmed>(() => ({ count: confirmedMessages.length, entryIds, marks }), [confirmedMessages.length, entryIds, marks])
   const liveTail = running || streaming !== null || optimistic !== null
   const deleteTurn = readOnly ? undefined : onDeleteTurn

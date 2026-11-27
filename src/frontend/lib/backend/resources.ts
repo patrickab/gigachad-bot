@@ -3,7 +3,7 @@
 // tree, each mount's worktrees, the LaTeX template sets).
 // Consumes the backend client and the change feed with its file events. Provides one module-level `Resource` per value, so
 // a change made in one tab reaches every tab, the re-reads that this device's changes to documents and mounts call, the
-// forgetting of a deleted project's list, `revalidateOnActivation` for what changes without an event, and
+// forgetting of a deleted project's list, `revalidateOnActivation` and `revalidateMounts` for what changes without an event, and
 // `watchDocumentLists`, the one subscription that keeps the lists current through change events and file events.
 
 import { createResource, refresh, resourceFamily, revalidateStale, type Resource } from "@/lib/resource"
@@ -91,7 +91,7 @@ export async function refreshProjectDocuments(scope: string): Promise<void> {
 /** Every document list: the loose notes, each project's documents and all documents. */
 const documentLists = () => [notesResource, ...projectDocumentsResource.members(), allDocumentsResource]
 
-/** Read every document list again, after a change that can reach any project's list: a move, rename or deletion. */
+/** Read every document list again, after a change that can reach any project's list. */
 export async function refreshDocumentLists(): Promise<void> {
   await Promise.all(documentLists().map(refresh))
 }
@@ -110,14 +110,18 @@ export async function refreshRootTree(): Promise<void> {
 /**
  * Read again what changes without a change event, once a tab comes to the front. Tabs calling it in one task share one request per value.
  *
- * - Every loaded mount tree and every mount's loaded worktrees
  * - Every project list holding a folder entry, whose disk tree it embeds, or architecture sources, which a file mount keeps on disk
  * - Every value whose latest re-read failed
  */
 export function revalidateOnActivation(): void {
   const diskBacked = projectDocumentsResource.members().filter((list) => list.get()?.some((doc) => doc.children || isArchitecturePath(doc.path)))
-  for (const resource of [...rootTreeResource.members(), ...worktreesResource.members(), ...diskBacked]) resource.invalidate()
+  for (const resource of diskBacked) resource.invalidate()
   revalidateStale()
+}
+
+/** Read every loaded mount tree and every mount's loaded worktrees again, which change without a change event. */
+export function revalidateMounts(): void {
+  for (const resource of [...rootTreeResource.members(), ...worktreesResource.members()]) resource.invalidate()
 }
 
 /** Key of a project's directory or of its catalog entry, which lists its files; the groups are its slug and the catalog file. */

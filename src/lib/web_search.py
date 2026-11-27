@@ -12,6 +12,7 @@ import httpx
 from lib import completions
 from lib.llm_json import extract_json_from_llm
 from lib.toolcalling import Source
+from lib.upstream import tls_context
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 
@@ -135,7 +136,7 @@ async def brave_sources(query: str, profile: dict[str, int]) -> list[Source]:
     key = os.environ.get("BRAVE_API_KEY")
     if not key:
         raise RuntimeError("Web search is not configured. Set BRAVE_API_KEY on the backend.")
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), verify=tls_context()) as client:
         response = await client.post(
             BRAVE_CONTEXT_URL,
             headers={"X-Subscription-Token": key},

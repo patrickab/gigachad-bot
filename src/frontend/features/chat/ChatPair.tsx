@@ -72,7 +72,7 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         attachments={user.attachments}
         index={globalIndex}
         isStreaming={isStreaming}
-        onAttachmentClick={onAttachmentClick && ((attachment) => onAttachmentClick(globalIndex, attachment))}
+        onAttachmentClick={onAttachmentClick}
         onDelete={onDelete}
         onEdit={onEdit}
         laterTurnsOf={laterTurnsOf}

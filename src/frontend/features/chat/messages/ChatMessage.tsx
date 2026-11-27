@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { memo, useMemo } from "react"
+import { memo, useCallback, useMemo } from "react"
 import { Brain } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { TurnAnswer, TurnQuestion } from "@/features/conversation/TurnQuestion"
@@ -28,7 +28,8 @@ interface ChatMessageProps {
   toolRunning?: boolean
   isStreaming?: boolean
   attachments?: Attachment[]
-  onAttachmentClick?: (attachment: Attachment) => void
+  /** Opens an attachment of the message at `index`: a stable handler, this message binds its index (a closure per render would re-render the question on every streamed frame). */
+  onAttachmentClick?: (messageIndex: number, attachment: Attachment) => void
   /** Makes the question's avatar and top strip collapse the pair, alongside a keyboard-accessible chevron. */
   onCollapse?: () => void
 }
@@ -91,13 +92,14 @@ export function AssistantMessageContent({
 
 function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf, onBranch, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
+  const openAttachment = useCallback((attachment: Attachment) => onAttachmentClick?.(index, attachment), [onAttachmentClick, index])
   const body = (
     <>
       {isUser ? (
         <>
           {content && <div data-chat-text={`${index}:user`}><LaTeXMarkdown content={content} /></div>}
           {attachments && attachments.length > 0 && (
-            <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
+            <MessageAttachments attachments={attachments} onClick={openAttachment} />
           )}
         </>
       ) : content ? (

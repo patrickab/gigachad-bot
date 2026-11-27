@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import type { CanvasText } from "@/lib/domain/canvasDocument"
 import type { Point } from "@/lib/domain/edgeRouting"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
@@ -60,6 +60,7 @@ function NoteSourceEditor({ note: t, scale, autoFocus, onEdit, onFocusNote, onBl
 
 /** A text note: Markdown while unfocused, a source textarea once clicked. Rasterized as source text in canvas exports. */
 export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onStartEditing, onEdit, onFocusNote, onBlurNote, onDragStart }: CanvasTextNoteProps) {
+  const markdownStyle = useMemo(() => ({ fontSize: t.size * scale, color: inkColor(t.color) }), [t.size, scale, t.color])
   return (
     <div className="absolute group/text" style={{ left: t.x * scale + offset.x, top: t.y * scale + offset.y, width: t.width * scale, height: t.height * scale }}>
       {editing ? (
@@ -73,7 +74,7 @@ export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onS
             onStartEditing()
           }}
         >
-          <LaTeXMarkdown content={t.text} style={{ fontSize: t.size * scale, color: inkColor(t.color) }} />
+          <LaTeXMarkdown content={t.text} style={markdownStyle} />
         </div>
       )}
       {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}

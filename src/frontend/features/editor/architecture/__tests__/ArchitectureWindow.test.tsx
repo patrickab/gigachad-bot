@@ -13,7 +13,9 @@ vi.mock("@/features/editor/architecture/ArchitectureDiagramSurface", () => ({
   ),
 }))
 vi.mock("@/features/editor/TextDocumentEditor", () => ({
-  ArchitectureSourceEditor: ({ path, onSaved }: { path: string, onSaved?: () => void }) => <button type="button" data-testid="text-editor" onClick={() => onSaved?.()}>{path}</button>,
+  TextDocumentEditor: ({ path, persistOverride }: { path: string, persistOverride: (content: string) => Promise<void> }) => (
+    <button type="button" data-testid="text-editor" onClick={() => { persistOverride("model {}").catch(() => {}) }}>{path}</button>
+  ),
 }))
 
 const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
@@ -63,6 +65,7 @@ const api = vi.hoisted(() => ({
   readArchitecture: vi.fn(),
   applyArchitectureOperations: vi.fn(),
   deleteArchitectureSources: vi.fn(),
+  writeArchitectureSource: vi.fn(),
 }))
 vi.mock("@/lib/backend/api", () => api)
 
@@ -202,17 +205,28 @@ describe("ArchitectureWindow", () => {
   })
 
   it("shows a failed reread until a later one succeeds", async () => {
-    const { button, getByTestId, findByRole, queryByRole } = await open()
-    act(() => { button("Text").click() })
+    const { findByRole, queryByRole } = await open()
 
-    // Saving text rereads the model.
     api.readArchitecture.mockRejectedValueOnce(new Error("Storage unavailable"))
-    act(() => { getByTestId("text-editor").click() })
+    remoteChange()
     expect((await findByRole("alert")).textContent).toBe("Storage unavailable")
 
     api.readArchitecture.mockResolvedValueOnce(workspace)
     remoteChange()
     await waitFor(() => expect(queryByRole("alert")).toBeNull())
+  })
+
+  it("shows a text save's answer without reading the model again", async () => {
+    const { button, getByTestId, findByText } = await open()
+    act(() => { button("Text").click() })
+    api.writeArchitectureSource.mockResolvedValueOnce(retitled("Saved as text"))
+    act(() => { getByTestId("text-editor").click() })
+    await act(async () => {})
+    act(() => { button("Diagram").click() })
+
+    expect(api.writeArchitectureSource).toHaveBeenCalledWith("proj", "backend/backend.c4", "model {}")
+    await findByText("Saved as text")
+    expect(api.readArchitecture).toHaveBeenCalledTimes(1)
   })
 
   it("lists LikeC4's complaints with 1-based lines, even with no view to draw", async () => {

@@ -3,10 +3,10 @@ import { createResource, refresh, resetResources, resourceFamily, revalidateStal
 
 /** A read whose requests the test settles by hand. */
 function manualRead<T>() {
-  const requests: { signal: AbortSignal; resolve: (value: T) => void }[] = []
+  const requests: { signal: AbortSignal; resolve: (value: T) => void; reject: (cause: unknown) => void }[] = []
   const read = vi.fn((signal: AbortSignal) => {
-    const { promise, resolve } = Promise.withResolvers<T>()
-    requests.push({ signal, resolve })
+    const { promise, resolve, reject } = Promise.withResolvers<T>()
+    requests.push({ signal, resolve, reject })
     return promise
   })
   return { read, requests }
@@ -79,7 +79,8 @@ describe("createResource", () => {
     expect(resource.get()).toBe(5)
 
     requests[0].resolve(1)
-    await Promise.resolve()
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[0].signal.aborted).toBe(false)
     expect(resource.get()).toBe(5)
     requests[1].resolve(6)
     await expect(earlier).resolves.toBe(6)
@@ -92,27 +93,74 @@ describe("createResource", () => {
     const resource = createResource(read)
     const first = resource.load()
     const second = resource.load()
-    await Promise.resolve()
 
-    for (let count = 0; count < 5; count += 1) resource.invalidate()
-    expect(read).toHaveBeenCalledTimes(2)
-    expect(requests[0].signal.aborted).toBe(true)
+    // One invalidation per task, as file events arrive: before the read was aborted and sent again each time (6 reads).
+    for (let count = 0; count < 5; count += 1) {
+      await Promise.resolve()
+      resource.invalidate()
+    }
+    expect(read).toHaveBeenCalledOnce()
+    expect(requests[0].signal.aborted).toBe(false)
     requests[0].resolve(1)
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
     requests[1].resolve(2)
 
     await expect(Promise.all([first, second])).resolves.toEqual([2, 2])
     expect(resource.get()).toBe(2)
+    expect(read).toHaveBeenCalledTimes(2)
   })
 
-  it("rejects the callers of a superseded read when its replacement fails", async () => {
-    const read = vi.fn<(signal: AbortSignal) => Promise<number>>()
-      .mockReturnValueOnce(new Promise(() => {}))
-      .mockRejectedValueOnce(new Error("offline"))
+  it("lets only an answer read after the latest invalidate or set become the value", async () => {
+    const { requests, read } = manualRead<number>()
+    const resource = createResource(read)
+    const loaded = resource.load()
+    requests[0].resolve(1)
+    await loaded
+    resource.subscribe(() => {})
+    resource.invalidate()
+    await Promise.resolve()
+
+    resource.invalidate()
+    requests[1].resolve(2)
+    await vi.waitFor(() => expect(requests).toHaveLength(3))
+    expect(resource.get()).toBe(1)
+    await Promise.resolve()
+    resource.set(3)
+    requests[2].resolve(4)
+    await vi.waitFor(() => expect(requests).toHaveLength(4))
+    expect(resource.get()).toBe(3)
+    requests[3].resolve(5)
+    await vi.waitFor(() => expect(resource.get()).toBe(5))
+  })
+
+  it("aborts and sends again an outdated request older than 15 s, it may hang on a dead connection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      const { read, requests } = manualRead<number>()
+      const resource = createResource(read)
+      const first = resource.load()
+      await Promise.resolve()
+
+      vi.setSystemTime(Date.now() + 15_001)
+      resource.invalidate()
+      expect(requests[0].signal.aborted).toBe(true)
+      requests[1].resolve(2)
+      await expect(first).resolves.toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("rejects the callers of a superseded read when its follow-up fails, not when it fails itself", async () => {
+    const { read, requests } = manualRead<number>()
     const resource = createResource(read)
     const first = resource.load()
     await Promise.resolve()
 
     resource.invalidate()
+    requests[0].reject(new Error("dropped"))
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    requests[1].reject(new Error("offline"))
     await expect(first).rejects.toThrow("offline")
     expect(resource.get()).toBeUndefined()
   })
@@ -129,9 +177,12 @@ describe("createResource", () => {
 
     resource.set(["a"])
     expect(resource.get()).toEqual(["a"])
-    expect(requests[1].signal.aborted).toBe(true)
+    expect(requests).toHaveLength(2)
+    expect(requests[1].signal.aborted).toBe(false)
     const revalidated = resource.load()
     requests[1].resolve(["a", "b"])
+    await vi.waitFor(() => expect(requests).toHaveLength(3))
+    expect(resource.get()).toEqual(["a"])
     requests[2].resolve(["a", "c"])
     await expect(revalidated).resolves.toEqual(["a", "c"])
     expect(resource.get()).toEqual(["a", "c"])

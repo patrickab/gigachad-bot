@@ -45,7 +45,7 @@ export function useArchitectureView(slug: string, file: string) {
     return result
   }, [])
 
-  // The only way the model is read: on opening, when another device changes it, and after a text save.
+  // The only way the model is read: on opening and when another device changes it.
   // A read waits its turn behind queued writes, so it never replaces a newer write's answer. While it
   // waits, `queuedReadRef` holds its slug, and further requests for that slug share it.
   const queuedReadRef = useRef<string | null>(null)
@@ -127,5 +127,5 @@ export function useArchitectureView(slug: string, file: string) {
     run([{ op: "layout", view: view.id, nodes: {}, edges: {} }])
   }, [run, view])
 
-  return { workspace, entry, view, graph, error: error ?? loadError, onChange, run, mutate, refresh }
+  return { workspace, entry, view, graph, error: error ?? loadError, onChange, run, mutate }
 }

@@ -10,6 +10,7 @@ from backend.routes import file_git as file_git_route
 from backend.routes import file_roots as file_roots_route
 from backend.routes import fileviewer as fileviewer_route
 from backend.routes.deps import get_user_scope
+from lib import git_worktree
 from lib.attachment_materialize import sync_library_pdf
 from lib.chat_store import ChatStore
 from lib.data_store import write_text
@@ -413,3 +414,17 @@ def test_listings_hide_latex_build_output_but_keep_unrelated_aux_files(tmp_path)
     shown = ["imgs", "lonely.aux", "main.tex", "refs.bib"]
     assert [child["name"] for child in paper["children"]] == shown
     assert sorted(file["name"] for file in roots.list_files()) == sorted([*shown[1:], "plot.png"])
+
+
+def test_host_access_admits_a_home_file_without_listing_the_clones_worktrees(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    clones = [tmp_path / f"clone{index}" for index in range(3)]
+    for clone in clones:
+        clone.mkdir()
+        git(clone, "init", "-q")
+    listed = []
+    monkeypatch.setattr(git_worktree, "list_worktrees", lambda root: listed.append(root) or [])
+    (tmp_path / "notes.md").write_text("hi")
+
+    assert mounted_roots(*clones, host_access=True).contains(tmp_path / "notes.md")
+    assert listed == []

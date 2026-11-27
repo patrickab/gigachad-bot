@@ -3,6 +3,7 @@
 PDFs also go into the shared library (``attachment_materialize``), which caches their MinerU markdown.
 """
 
+import asyncio
 import logging
 from pathlib import Path, PurePosixPath
 import tempfile
@@ -178,31 +179,46 @@ class ChatUploads:
         return results
 
     async def _parse_one(self, filename: str, work: Path) -> AttachResult:
-        """One upload with its markdown: a PDF's (cached or freshly extracted, stored as sidecar), a text file's content."""
-        mime = mime_for(filename)
-        key = self._key(filename)
+        """One upload with its markdown: a PDF's (cached or freshly extracted, stored as sidecar), a text file's content.
+
+        Store and file work runs in a worker thread, before and after the MinerU await.
+        """
+        read = await asyncio.to_thread(self._read_parsed, filename, work)
+        if isinstance(read, AttachResult):
+            return read
         try:
-            asset = self._assets.read(key)
+            md_path, images_dir = await parse_pdf(read, work / "mineru")
+        except Exception:
+            log.exception("MinerU parse failed for %s", filename)
+            return AttachResult(name=filename, mime=mime_for(filename))
+        return await asyncio.to_thread(self._store_parsed, filename, read, md_path, images_dir)
+
+    def _read_parsed(self, filename: str, work: Path) -> AttachResult | Path:
+        """The upload's result when it needs no MinerU parse (missing, no PDF, markdown cached), else its PDF spooled into *work*."""
+        mime = mime_for(filename)
+        try:
+            asset = self._assets.read(self._key(filename))
         except StorageNotFoundError:
             return AttachResult(name=filename, mime=mime)
         content = asset.content or b""
         kind = kind_of(filename)
         if kind != "pdf":
             return AttachResult(name=filename, mime=mime, parsedMd=decode_text(content) if kind == "text" else None)
-
         parsed_md = materialize(filename, content, self._assets, enqueue_on_miss=False)
-        if parsed_md is None:
-            pdf_path = work / Path(filename).name
-            pdf_path.write_bytes(content)
-            try:
-                md_path, images_dir = await parse_pdf(pdf_path, work / "mineru")
-            except Exception:
-                log.exception("MinerU parse failed for %s", filename)
-                return AttachResult(name=filename, mime=mime)
-            store_library_output(self._assets, pdf_path.stem, md_path, images_dir)
-            parsed_md = md_path.read_text(encoding="utf-8")
-        self._assets.write("upload", _sidecar_key(key), parsed_md.encode("utf-8"), mime="text/markdown")
-        return AttachResult(name=filename, mime=mime, parsedMd=parsed_md)
+        if parsed_md is not None:
+            return self._with_sidecar(filename, parsed_md)
+        pdf_path = work / Path(filename).name
+        pdf_path.write_bytes(content)
+        return pdf_path
+
+    def _store_parsed(self, filename: str, pdf_path: Path, md_path: Path, images_dir: Path) -> AttachResult:
+        store_library_output(self._assets, pdf_path.stem, md_path, images_dir)
+        return self._with_sidecar(filename, md_path.read_text(encoding="utf-8"))
+
+    def _with_sidecar(self, filename: str, parsed_md: str) -> AttachResult:
+        """*filename* with its *parsed_md*, stored as the upload's markdown sidecar."""
+        self._assets.write("upload", _sidecar_key(self._key(filename)), parsed_md.encode("utf-8"), mime="text/markdown")
+        return AttachResult(name=filename, mime=mime_for(filename), parsedMd=parsed_md)
 
     def stored_keys(self, filename: str) -> list[str]:
         """Keys of an upload and its markdown sidecar, which deleting the upload removes. Empty when there is no such upload."""

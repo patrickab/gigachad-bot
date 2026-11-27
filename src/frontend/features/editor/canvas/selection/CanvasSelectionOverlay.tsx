@@ -1,10 +1,10 @@
 "use client"
 
 import { Copy, Trash2 } from "lucide-react"
-import { inkColor, strokePath } from "@/features/editor/canvas/ink/canvasInk"
+import { inkColor } from "@/features/editor/canvas/ink/canvasInk"
 import type { Poly, SelBox } from "@/features/editor/canvas/selection/canvasSelection"
 import type { Point } from "@/lib/domain/edgeRouting"
-import type { StrokeData } from "@/lib/drawing"
+import { strokePath, type StrokeData } from "@/lib/drawing"
 
 interface CanvasSelectionOutlineProps {
   lasso: Poly

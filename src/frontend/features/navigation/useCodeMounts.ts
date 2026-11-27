@@ -11,11 +11,12 @@ import { usePiRepositories } from "@/features/pi/sessionStore"
 import { usePiSidebar } from "@/features/pi/usePiSidebar"
 import { useResource } from "@/hooks/useResource"
 import { addFileRoot, removeFileRoot } from "@/lib/backend/api"
-import { fileRootsEnabledResource, refreshRootTree, revalidateOnActivation, rootTreeResource } from "@/lib/backend/resources"
+import { fileRootsEnabledResource, refreshRootTree, revalidateMounts, revalidateOnActivation, rootTreeResource } from "@/lib/backend/resources"
 import { mountOf, type FileTreeNode } from "@/lib/domain/files"
 import { isInside, trimSlash } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 import { useArchivedDirectories } from "./useArchivedDirectories"
+import { useSidebar } from "./SidebarContext"
 import { useWorktrees } from "./useWorktrees"
 
 /** The tree before its first read. */
@@ -29,6 +30,7 @@ interface CodeMountsOptions {
 export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const hostAccess = useHostAccess()
   const isActive = useTabActive()
+  const { collapsed } = useSidebar()
   const { schedule } = useUndoDelete()
   const { archived, setArchived } = useArchivedDirectories()
   // The tree read for other worktrees replaces the shown one once it arrives, so picking a worktree never empties the section.
@@ -59,11 +61,14 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const loadedTree = useResource("Sidebar file mounts", rootTree)
   if (loadedTree !== undefined && loadedTree !== shownTree) setShownTree(loadedTree)
 
-  // Nothing announces changes on disk or to a worktree's status: the tab coming to the front reads them again for every tab,
-  // and so does showing other worktrees, whose tree may be one read long before.
+  // Nothing announces changes on disk or to a worktree's status: the tab coming to the front reads them again for every tab.
+  // The tree and worktrees only while the sidebar shows them: opening it, or showing other worktrees, reads them again.
   useEffect(() => {
     if (isActive) revalidateOnActivation()
-  }, [isActive, rootTree])
+  }, [isActive])
+  useEffect(() => {
+    if (isActive && !collapsed) revalidateMounts()
+  }, [isActive, collapsed, rootTree])
 
   /** Run `add`, then read the tree again; the file picker's availability may change with it. */
   const mountThen = async (add: () => Promise<unknown>) => {

@@ -100,11 +100,11 @@ export function EnabledToolsProvider({ children }: { children: ReactNode }) {
     })
   }, [saved])
 
-  const value: EnabledToolsState = {
+  const value = useMemo<EnabledToolsState>(() => ({
     enabledTools,
     toggleTool,
     researchEnabled: enabledTools.includes("deep_research"),
-  }
+  }), [enabledTools, toggleTool])
 
   return (
     <EnabledToolsContext.Provider value={value}>

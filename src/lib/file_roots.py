@@ -94,7 +94,8 @@ class FileRoots:
     def _root_for(self, path: str) -> Path:
         """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
-        if self._accessible_roots(target) or (self._host_access and host_readable(target)):
+        in_root = any(target.is_relative_to(root) for root in self._roots)
+        if in_root or (self._host_access and host_readable(target)) or self._accessible_roots(target):
             return target
         raise ValueError(f"Path outside file roots: {path}")
 

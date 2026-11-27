@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, type RefCallback } from "react"
+import { memo, useCallback, useEffect, useState, type RefCallback } from "react"
 import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
@@ -60,10 +60,13 @@ function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
   return () => observer.disconnect()
 }
 
-/** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
-export function TabContent(props: TabContentProps) {
+/**
+ * One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts.
+ * Memoized on this hook-free wrapper (see `TabSidebar`), so a tab switch or a history refresh re-renders only the tabs whose context changed.
+ */
+export const TabContent = memo(function TabContent(props: TabContentProps) {
   return <ErrorBoundary><TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider></ErrorBoundary>
-}
+})
 
 /** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
 function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, reveal }: TabContentProps) {

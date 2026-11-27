@@ -28,6 +28,8 @@ type FolderRowContext =
     moveToFolder: (path: string, folder: string) => Promise<void>
     /** Create `name` in the LaTeX project folder `folder` and open it. */
     createLatexFile: (folder: string, name: string) => Promise<void>
+    /** Whether the folder `id` is open: the rows of a closed folder are not built. */
+    isExpanded: (id: string) => boolean
   }
 
 /** Everything the Projects tree shows and does. */
@@ -93,6 +95,8 @@ export function owningProject(path: string, documents: Record<string, ProjectDoc
 /** Project roots followed by the shared "general" root. */
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
   const { projects, pending, hasArchitecture, move, importFiles } = context
+  // Chats by their project's slug, the first segment of their path
+  const chats = Map.groupBy(Object.entries(context.branchMeta), ([path]) => path.split("/", 1)[0])
   return [
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: context.activeProjectSlug === project.slug,
@@ -108,7 +112,7 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
       onMoveHere: (path) => move(path, project.slug),
       accepts: [DEFAULT_DRAG_KIND, PROJECT_FILE_DRAG_KIND],
       onDropFiles: (paths) => importFiles(project.slug, paths),
-      sections: categoryItems(context, project),
+      sections: categoryItems(context, project, chats.get(project.slug) ?? []),
       children: [],
     })),
     {
@@ -121,7 +125,7 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
 }
 
 /** The chats, canvases and (for a project) files folders of `project`, or of the general scope when null. */
-function categoryItems(context: ProjectTreeContext, project: ProjectListItem | null): FileTreeItem<string>[] {
+function categoryItems(context: ProjectTreeContext, project: ProjectListItem | null, projectMeta: [string, BranchMeta][] = []): FileTreeItem<string>[] {
   const { branchMeta, pending, appMode, move, createAndOpen, remove } = context
   const scope = project?.slug ?? ""
   const openCanvas = (path: string) => context.onItemOpen?.({ kind: "canvas", path, projectSlug: scope || null })
@@ -137,7 +141,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
   const withExtraction = (doc: ProjectDocument, row: FileTreeItem<string>, extraction?: ProjectDocument): FileTreeItem<string> => extraction
     ? { ...row, onDelete: () => remove(doc, scope, [extraction]) }
     : row
-  const chats = project ? projectChats(project, branchMeta) : context.visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
+  const chats = project ? projectChats(project, projectMeta) : context.visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
   return [
     {
       id: `${prefix}:chats`, label: "Chats", icon: MessageSquare, type: "folder",
@@ -216,12 +220,12 @@ function extractionsOf(files: ProjectDocument[], scope: string): Map<string, Pro
   return new Map(pairs)
 }
 
-/** Root chats of `project` from the branch metadata, labelled by their project tab. */
-function projectChats(project: ProjectListItem, branchMeta: Record<string, BranchMeta>): { path: string; label: string }[] {
+/** Root chats of `project` from its branch metadata, labelled by their project tab. */
+function projectChats(project: ProjectListItem, projectMeta: [string, BranchMeta][]): { path: string; label: string }[] {
   const prefix = `${project.slug}/`
   const tabs = new Map((project.tabs ?? []).map((tab) => [tab.filename, tab]))
-  return Object.entries(branchMeta).flatMap(([path, metadata]) => {
-    if (!path.startsWith(prefix) || metadata.parent_id) return []
+  return projectMeta.flatMap(([path, metadata]) => {
+    if (metadata.parent_id) return []
     const filename = path.slice(prefix.length)
     if (filename === "project.json" || filename.startsWith("memory/")) return []
     const tab = tabs.get(filename)
@@ -292,6 +296,9 @@ function createFileAction(context: FolderRowContext, folder: string, name: strin
   return { label: `New file in ${name}`, placeholder: "File name", onSubmit: (file) => context.createLatexFile(folder, file) }
 }
 
+/** The children of a closed folder: FileTree renders them only once it opens, which builds them. */
+const NO_ROWS: FileTreeItem<string>[] = []
+
 /** Rows of the files and folders of a folder on disk. */
 function rootFileItems(context: FolderRowContext, nodes: FileTreeNode[]): FileTreeItem<string>[] {
   return nodes.map((node) => ({
@@ -307,7 +314,7 @@ function rootFileItems(context: FolderRowContext, nodes: FileTreeNode[]): FileTr
     rename: node.type === "file"
       ? context.renameOf(`code:${node.path}`, (name) => context.renameFile({ path: node.path, name: node.name, scope: "" }, name), true)
       : undefined,
-    children: node.children ? rootFileItems(context, node.children) : undefined,
+    children: node.children ? (context.isExpanded(node.path) ? rootFileItems(context, node.children) : NO_ROWS) : undefined,
   }))
 }
 

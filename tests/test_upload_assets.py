@@ -17,10 +17,10 @@ def upload(content: bytes, filename: str, mime: str) -> UploadFile:
     return UploadFile(file=io.BytesIO(content), filename=filename, headers=Headers({"content-type": mime}))
 
 
-async def test_upload_stores_asset_at_database_native_path(asset_store):
+def test_upload_stores_asset_at_database_native_path(asset_store):
     chat_id = "chat-1"
 
-    result = await files.upload_file(
+    result = files.upload_file(
         file=upload(b"id,name\n1,a\n", "table.csv", "text/csv"),
         chat_id=chat_id,
         slug=None,
@@ -34,8 +34,8 @@ async def test_upload_stores_asset_at_database_native_path(asset_store):
     assert result.content == "id,name\n1,a\n"
 
 
-async def test_project_upload_lands_under_the_project_slug(asset_store):
-    await files.upload_file(
+def test_project_upload_lands_under_the_project_slug(asset_store):
+    files.upload_file(
         file=upload(b"%PDF-1.7", "paper.pdf", "application/pdf"),
         chat_id="chat-2",
         slug="my-project",
@@ -46,9 +46,9 @@ async def test_project_upload_lands_under_the_project_slug(asset_store):
     assert asset_store.read("attachment/project/my-project/chat/chat-2/paper.pdf").content == b"%PDF-1.7"
 
 
-async def test_duplicate_filename_is_deduped_not_overwritten(asset_store):
+def test_duplicate_filename_is_deduped_not_overwritten(asset_store):
     for body in (b"first", b"second"):
-        result = await files.upload_file(
+        result = files.upload_file(
             file=upload(body, "notes.txt", "text/plain"),
             chat_id="chat-3",
             slug=None,
@@ -61,9 +61,9 @@ async def test_duplicate_filename_is_deduped_not_overwritten(asset_store):
     assert asset_store.read("attachment/chat/chat-3/notes (1).txt").content == b"second"
 
 
-async def test_overwrite_reuses_the_same_logical_path(asset_store):
+def test_overwrite_reuses_the_same_logical_path(asset_store):
     for body in (b"first", b"second"):
-        result = await files.upload_file(
+        result = files.upload_file(
             file=upload(body, "notes.txt", "text/plain"),
             chat_id="chat-4",
             slug=None,
@@ -139,11 +139,11 @@ def test_asset_route_rejects_traversal(asset_store):
     assert raised.value.status_code == 404
 
 
-async def test_pdf_chat_upload_mirrors_to_nextcloud_immediately(asset_store, documents_root):
+def test_pdf_chat_upload_mirrors_to_nextcloud_immediately(asset_store, documents_root):
     """A PDF must reach Nextcloud on upload, whether or not it is ever sent/parsed
     afterward — deferring the mirror to a successful ``/files/parse`` left an
     uploaded-but-unsent (or unparseable) PDF without any Nextcloud copy."""
-    await files.upload_file(
+    files.upload_file(
         file=upload(b"%PDF-1.7 body", "paper.pdf", "application/pdf"),
         chat_id="chat-9",
         slug=None,

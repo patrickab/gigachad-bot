@@ -1,4 +1,4 @@
-import { inkOutlinePath, pointsBounds, type StrokeData } from "@/lib/drawing"
+import { pointsBounds, strokePath, type StrokeData } from "@/lib/drawing"
 
 const HIGHLIGHT_OPACITY = 0.4
 
@@ -156,13 +156,17 @@ async function drawCanvas(
   return canvas
 }
 
+/** Fills the strokes' cached outlines, shifted by the export origin. */
 function fillStrokes(ctx: CanvasRenderingContext2D, strokes: StrokeData[], offsetX: number, offsetY: number) {
+  ctx.save()
+  ctx.translate(-offsetX, -offsetY)
   for (const stroke of strokes) {
-    const d = inkOutlinePath(stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]), stroke.width, !!stroke.highlight)
+    const d = strokePath(stroke)
     if (!d) continue
     ctx.fillStyle = stroke.color
     ctx.fill(new Path2D(d))
   }
+  ctx.restore()
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {

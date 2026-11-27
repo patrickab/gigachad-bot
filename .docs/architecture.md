@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (no `/repomix` run).
+Generated from bd63559a on 2026-11-25. Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run).
 Reduced by hand on 2026-11-25. Conversations section, the Pi tool rows and the backlog edited by hand from 78140998 on 2026-11-26 (no `/repomix` run).
 
 # Architecture
@@ -21,9 +21,9 @@ change log + SSE        LikeC4   pi-host
 | Component | Authority / lifecycle |
 | --- | --- |
 | Frontend | Workspace tabs, feature state, API clients. Uses server-issued paths, never browser filesystem authority. |
-| FastAPI | Identity, per-user storage, filesystem access, integrations. Routes stay at the HTTP/WebSocket boundary and reuse domain services. Store and file IO blocks: a handler calling it is a plain `def` or uses `asyncio.to_thread`; a blocking call in `async def` stalls every request and SSE stream (`tests/test_route_concurrency.py`). |
+| FastAPI | Identity, per-user storage, filesystem access, integrations. Routes stay at the HTTP/WebSocket boundary and reuse domain services. Store and file IO blocks: a handler calling it is a plain `def` or uses `asyncio.to_thread`; a blocking call in `async def` stalls every request and SSE stream (`tests/test_route_concurrency.py`). Upload handlers are plain `def`; upload extraction and the extraction queue's file and store writes run in worker threads (`asyncio.to_thread`). |
 | Startup | Reap orphaned host processes, sync Pi's `ollama` provider in an executor thread, apply migrations, start extraction and change brokers. `openai` and GPT-Researcher load lazily on first use; a module-level import moves their cost into startup (`python -X importtime -c "import backend.server"` shows it). Shutdown closes clients/pool, stops workers, MinerU children, the Jupyter Server and owned host processes. |
-| LikeC4 | Stateless model parsing and syntax-tree operations. The launcher starts it and waits for health before FastAPI; failed startup health fails the launch, a LikeC4 exit tears down/restarts both. Architecture routes return 503 while unavailable. |
+| LikeC4 | Stateless model parsing and syntax-tree operations; `/model` answers are memoized by the SHA-256 of the request body (last 8), so the answer stays a pure function of the sources. The launcher starts it and waits for health before FastAPI; failed startup health fails the launch, a LikeC4 exit tears down/restarts both. Architecture routes return 503 while unavailable. |
 
 | Listener | Development | Production |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Every long-lived child ends with the backend, also when it dies without shutdown
 ## Frontend reads and loading
 
 - `contexts/StartupReadContext.tsx` bounds startup reads (settings, models, prompts, projects, histories, sidebar listings, reasoning levels) to 15 s, reports failures in one banner and retries only failed reads, without remount or losing drafts. Timed-out/disposed requests abort, obsolete responses are ignored. No automatic retries here; streams, uploads, writes and post-mutation refreshes are not part of it.
-- Every tab stays mounted with its own sidebar and chat, so user-global values are shared resources: `lib/resource.ts` (one cached value, one request), instances in `lib/backend/resources.ts`, hooks in `hooks/useResource.ts`. Models, prompts, reasoning levels, roots-enabled, provider usage, notes, project documents, all documents, root tree, worktrees, template sets live there. A mutation `set`s its response or refreshes the resource, never a local copy.
+- Every tab stays mounted with its own sidebar and chat, so user-global values are shared resources: `lib/resource.ts` (one cached value, one request; a `set` or `invalidate` during a read lets it finish, drops its answer and reads once more, so the caller gets an answer read after the change), instances in `lib/backend/resources.ts`, hooks in `hooks/useResource.ts`. Models, prompts, reasoning levels, roots-enabled, provider usage, notes, project documents, all documents, root tree, worktrees, template sets live there. A mutation `set`s its response or refreshes the resource, never a local copy.
 - Freshness: lists with change rows (notes, project documents, all documents) are invalidated by `watchDocumentLists` (mounted once in `AppShell`) from the change feed, own device included, and file events. Values without change rows revalidate on tab activation (`revalidateOnActivation`). Provider usage polls once in `AppShell`.
 - `ProjectProvider` keeps the project list's identity when a refresh is unchanged. `TabSidebar` is memoized beside the chat state owner so streamed tokens never re-render navigation: keep its props referentially stable, and keep `memo` on the wrapper (React 19.2 kept stale `useEffectEvent` closures in a directly memoized `Sidebar`).
 - Startup reads only what the first view needs: `GET /api/fileroots/enabled` (no walk) at startup, `/fileroots/files` only when the picker opens.
@@ -154,7 +154,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 - `UserScope.record` deletes superseded rows (same user, kind, key; `FOR UPDATE SKIP LOCKED`) in the same statement, keeping about one row per resource.
 - Events carry metadata, never content. Subscriber queues are bounded; lagging streams close and recover through replay.
 - `syncStream.subscribeToChanges` drops this device's own changes unless `{ ownDevice: true }` (only `watchDocumentLists`).
-- Canvases: snapshots in documents, accepted mutation batches in `canvas_mutations`. Writers serialize on a document row lock; snapshot/log/change rows update in one transaction, mutation IDs deduplicate, batches replay by revision. Ink points are stored at 0.01 x/y and 0.001 pressure (`inkPoint`, `lib/drawing.ts`). Canvas undo is separate from resource deletion.
+- Canvases: snapshots in documents, accepted mutation batches in `canvas_mutations`. Writers serialize on a document row lock; snapshot/log/change rows update in one transaction, mutation IDs deduplicate, batches replay by revision. Ink points are stored at 0.01 x/y and 0.001 pressure (`inkPoint`, `lib/drawing.ts`); `strokePath` there caches a committed stroke's outline per stroke object. Canvas undo is separate from resource deletion.
 - Canvas chat (host access): an open canvas has a Pi chat (`FileChat`). `POST /api/workbench/prepare` returns a stored `.canvas` key unchanged (404 missing) and an absolute path in place; sessions run in `WORKBENCH/canvas` with the canvas prompt, linked under the canvas key in `chats.json`, and see the canvas only through screenshots (`useCanvasScreenshot`, attached via `CanvasCaptureContext`).
 
 ## Chat, models, and tools
@@ -219,7 +219,7 @@ Not done, carried over from the conversation unification plan:
 - **Explicit renderer registration**: one index listing every tool and message renderer instead of the side-effect imports in `PiTranscript.tsx`, heavy renderers (video preview, diff view) loaded lazily.
 - **`PiTab.tsx` as a state machine** (no session, starting, attached, closed) instead of the refs guarding effects (`firstSent`); roster, dock and header as components reading the state.
 - **Structured subagent data**: pi-host forwards the roster as a typed event instead of parsing the `PI_SUBAGENT_ASYNC_JSON:` widget text (`features/pi/subagents.ts`); touches the contract with the pi-subagents extension.
-- **Drop the session-list poll**: `sessionStore.ts` refreshes every 30 s (`POLL_MS`) besides `sessions_changed`, socket reopen, focus and visibility; drop it once pi-host tests prove every list change emits the event.
+- **Drop the session-list poll**: `sessionStore.ts` refreshes every 30 s (`POLL_MS`) besides `sessions_changed` (not when every changed path is a factory task's file), socket reopen, focus and visibility; an unchanged answer keeps the list's identity; drop it once pi-host tests prove every list change emits the event.
 - **Ambient pause** (`deepfocus-ambient`, own repository): a `paused` flag in `NightOceanFrame` so the shell can pause an unfocused window without the pop `still` causes.
 
 ## Architecture workspaces

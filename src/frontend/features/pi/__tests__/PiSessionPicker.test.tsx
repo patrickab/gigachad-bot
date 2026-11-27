@@ -12,6 +12,7 @@ const pi = vi.hoisted(() => ({
   search: vi.fn<(query: string, filter?: { profile?: string }) => Promise<PiSearchHit[]>>(),
   archive: vi.fn<(sessionId: string) => Promise<PiSessionInfo>>(),
   focus: vi.fn(),
+  entries: vi.fn(async () => ({ entries: [], leafId: null })),
 }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
@@ -28,6 +29,7 @@ vi.mock("../searchFocus", () => ({ focusPiSearchHit: (...args: unknown[]) => pi.
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
   archivePiSession: (sessionId: string) => pi.archive(sessionId),
+  fetchPiSessionEntries: pi.entries,
 }))
 
 const HOUR = 60 * 60 * 1000
@@ -59,6 +61,7 @@ afterEach(() => {
   pi.statuses = {}
   pi.search.mockReset()
   pi.archive.mockReset()
+  pi.entries.mockClear()
 })
 
 describe("PiSessionPicker", () => {
@@ -146,5 +149,22 @@ describe("PiSessionPicker", () => {
     expect(screen.getByText("Session is running")).toBeInTheDocument()
     expect(screen.queryByText("live")).not.toBeInTheDocument()
     expect(screen.getByRole("option", { name: /first/ })).toBeInTheDocument()
+  })
+
+  it("reads no preview ahead for a running session, however often the list refreshes", async () => {
+    const tab = { tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
+    const picker = () => <TabContext.Provider value={tab}><PiSessionPicker onOpenItem={vi.fn()} /></TabContext.Provider>
+    const idle = piSession("idle", 2 * HOUR)
+    pi.sessions = [idle, piSession("busy", HOUR, { live })]
+    const { rerender } = render(picker())
+    await waitFor(() => expect(pi.entries).toHaveBeenCalledWith("idle", { turns: 6 }))
+    pi.entries.mockClear()
+
+    for (let refresh = 1; refresh <= 5; refresh++) {
+      pi.sessions = [idle, piSession("busy", HOUR - refresh * 1000, { live })]
+      rerender(picker())
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    }
+    expect(pi.entries).toHaveBeenCalledTimes(0)
   })
 })

@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { Message } from "@/lib/domain/types"
 import { ChatContainer } from "../ChatContainer"
+import { ChatMessage } from "../messages/ChatMessage"
 
 /** A chat's question actions while a reply streams, the same as in Pi: copy only, on every pair. */
 
@@ -45,5 +46,13 @@ describe("a chat's question actions", () => {
 
     rerender(chat(false))
     expect(questionActions()).toEqual([settled, settled])
+  })
+
+  it("opens a question's attachment with the message's index", () => {
+    const notes = { name: "notes.md", mime: "text/markdown", url: "", content: "x", active: true }
+    const onAttachmentClick = vi.fn()
+    render(<ChatMessage role="user" content="Question 2" index={4} attachments={[notes]} onAttachmentClick={onAttachmentClick} />)
+    fireEvent.click(screen.getByRole("button", { name: /notes\.md/ }))
+    expect(onAttachmentClick).toHaveBeenCalledWith(4, notes)
   })
 })

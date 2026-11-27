@@ -7,7 +7,7 @@ import type { FileTreeCreateChoice } from "@/components/ui/file-tree/FileTree"
 import { useResource, useResourceFamily } from "@/hooks/useResource"
 import { addRootFilesToProject, createArchitectureSource, createWorkbenchDocument, moveDocument, moveDocumentToFolder, promoteToTexProject, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
 import { announceFileRemoval } from "@/lib/backend/fileEvents"
-import { notesResource, projectDocumentsResource, refreshDocumentLists, refreshProjectDocuments, templateSetsResource } from "@/lib/backend/resources"
+import { notesResource, projectDocumentsResource, refreshProjectDocuments, templateSetsResource } from "@/lib/backend/resources"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { errorMessage } from "@/lib/utils"
@@ -104,7 +104,7 @@ export function useWorkspaceDocuments({
       const from = Object.entries(documents).find(([, docs]) => docs.some((doc) => doc.path === path))?.[0] ?? ""
       if (from !== scope) {
         await moveDocument(path, from, scope)
-        await refreshDocumentLists()
+        await Promise.all([refreshProjectDocuments(from), refreshProjectDocuments(scope)])
         onCanvasDeleted?.(path)
       }
     } else {
@@ -115,7 +115,8 @@ export function useWorkspaceDocuments({
   /** Move the stored project file `path` into the mounted `folder`, where it then behaves as a mounted file. */
   const moveToFolder = async (path: string, folder: string) => {
     await moveDocumentToFolder(path, folder)
-    await refreshDocumentLists()
+    // The stored key `project/<slug>/document/…` names the project that listed it.
+    await refreshProjectDocuments(path.split("/")[1])
     onCanvasDeleted?.(path)
   }
 
@@ -127,7 +128,7 @@ export function useWorkspaceDocuments({
     } catch (cause) {
       setFileError(errorMessage(cause, "Could not make a LaTeX project"))
     }
-    await refreshDocumentLists()
+    await refreshProjectDocuments(scope)
   }
 
   /** Pick files from this device and store them as documents of project `scope`. */
@@ -149,7 +150,7 @@ export function useWorkspaceDocuments({
       for (const target of [path, ...alsoRemove.map((extra) => extra.path)]) {
         for (const removed of await removeDocument(scope, target)) announceFileRemoval(removed)
       }
-      await refreshDocumentLists()
+      await refreshProjectDocuments(scope)
       onCanvasDeleted?.(path)
     })
   }

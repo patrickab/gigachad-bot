@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { LayoutGrid, ListTree } from "lucide-react"
+import { writeArchitectureSource } from "@/lib/backend/api"
 import { architectureSlug, architectureSource } from "@/lib/domain/architecturePaths"
 import type { EdgeStyle } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
 import { SEPARATOR, ToolButton, toolButton } from "@/features/editor/canvas/CanvasToolbar"
 import { TopBarSlot, TopBarSlotProvider, useTopBarSlot } from "@/features/navigation/TopBarSlots"
-import { ArchitectureSourceEditor } from "@/features/editor/TextDocumentEditor"
+import { TextDocumentEditor } from "@/features/editor/TextDocumentEditor"
 import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { ArchitectureTree } from "./ArchitectureTree"
@@ -41,7 +42,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   const drawingSlot = useTopBarSlot("drawing")
   const viewSlot = useTopBarSlot("view")
   const inTopBar = drawingSlot !== null && viewSlot !== null
-  const { workspace, entry, view, graph, error, onChange, run, mutate, refresh } = useArchitectureView(slug, file)
+  const { workspace, entry, view, graph, error, onChange, run, mutate } = useArchitectureView(slug, file)
   const open = useCallback((next: string) => onNavigate(`graph/${slug}/${next}`), [onNavigate, slug])
   // A new window, or one whose file was just deleted, opens the first system.
   useEffect(() => {
@@ -64,8 +65,9 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   else if (!entry) body = notice(`${file} no longer exists.`)
   else if (mode === "text") body = (
     <div className="relative min-h-0 flex-1">
-      {/* Saved text is this device's own write, which the change feed skips, so reread explicitly. */}
-      <ArchitectureSourceEditor key={file} path={`graph/${slug}/${file}`} slug={slug} onClose={() => setMode("diagram")} onSaved={refresh} />
+      {/* The save answers with the whole workspace, which replaces the shown one; a refused save rejects with the reason. */}
+      <TextDocumentEditor key={file} path={`graph/${slug}/${file}`} slug={slug} onClose={() => setMode("diagram")}
+        persistOverride={(content) => mutate(() => writeArchitectureSource(slug, file, content)).then(() => undefined)} />
     </div>
   )
   else if (!view || !graph) body = notice(`${file} declares no view yet.`, (

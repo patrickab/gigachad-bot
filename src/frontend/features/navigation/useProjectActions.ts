@@ -4,12 +4,12 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import type { ProjectListItem } from "@/lib/domain/projects"
-import { useBranches } from "./BranchContext"
+import { useBranchActions } from "./BranchContext"
 
 /** Rename, archive and delete of sidebar projects. `renameProjectTo` rejects with the reason, e.g. a taken name. */
 export function useProjectActions(onProjectRenamed?: (oldSlug: string, newSlug: string) => void) {
   const { deleteProject, setProjectArchived, renameProject } = useProject()
-  const { refreshAll } = useBranches()
+  const { refreshAll } = useBranchActions()
   const { schedule } = useUndoDelete()
   const { run: archive, pending: archivePending, error: archiveError } = useAsyncAction(setProjectArchived, "Could not update project archive")
   const renameProjectTo = async (target: ProjectListItem, name: string) => {

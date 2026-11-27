@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from lib import pi_host
+from lib.upstream import tls_context
 
 _REQUEST_TIMEOUT_SECONDS = 30.0
 _STALE_REPORT_SECONDS = 60 * 60
@@ -47,6 +48,7 @@ def _fetch(refresh: bool) -> object:
             params={"refresh": 1} if refresh else None,
             headers={"Authorization": f"Bearer {pi_host.token()}"},
             timeout=_REQUEST_TIMEOUT_SECONDS,
+            verify=tls_context(),
         )
     except (pi_host.PiHostUnavailable, httpx.HTTPError) as exc:
         raise UsageUnavailable(f"pi-host does not answer ({exc})") from exc

@@ -95,7 +95,7 @@ afterEach(() => {
 })
 
 api.fetchPiRepositories.mockResolvedValue([{ name: "alpha", path: "/home/u/git/alpha" }, { name: "beta", path: "/home/u/git/beta" }])
-api.fetchPiSessions.mockImplementation(async () => api.sessions)
+api.fetchPiSessions.mockImplementation(async () => structuredClone(api.sessions))
 
 describe("usePiSessions", () => {
   it("lists every repo's sessions and refreshes on sessions_changed", async () => {
@@ -140,6 +140,59 @@ describe("usePiSessions", () => {
     api.sessions = [session("l1", "/home/u/git/alpha")]
     socket().emit({ type: "sessions_changed", sessionPaths: [] })
     await waitFor(() => expect(result.current.status).toEqual({ running: false, waiting: false, unread: true, failed: false }))
+  })
+})
+
+describe("list refresh cost", () => {
+  /** Let a notice's list read, if any, finish. */
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+  it("reads the list again only for a notice that can concern a listed session", async () => {
+    api.sessions = [session("f1", "/home/u/git/alpha")]
+    const { result, unmount } = renderHook(() => usePiSessions(), { wrapper })
+    cleanups.push(unmount)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await settle()
+    api.fetchPiSessions.mockClear()
+
+    for (let notice = 0; notice < 5; notice++) {
+      socket().emit({ type: "sessions_changed", sessionPaths: [`/home/u/.pi/agent/factory/sessions/--repo--/${notice}.jsonl`, "/home/u/.pi/agent/factory/tasks/t.lock"] })
+      await settle()
+    }
+    expect(api.fetchPiSessions).toHaveBeenCalledTimes(0)
+
+    for (const sessionPaths of [["/home/u/.pi/agent/factory/sessions/a.jsonl", "/home/u/factory/agent/sessions/b.jsonl"], [], undefined]) {
+      api.fetchPiSessions.mockClear()
+      socket().emit({ type: "sessions_changed", sessionPaths })
+      await settle()
+      expect(api.fetchPiSessions).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it("keeps an unchanged list and its listeners untouched, but publishes a failure and the recovery", async () => {
+    api.sessions = [session("u1", "/home/u/git/alpha"), session("u2", "/home/u/git/beta", true)]
+    let renders = 0
+    const { result, unmount } = renderHook(() => { renders += 1; return usePiSessions() }, { wrapper })
+    cleanups.push(unmount)
+    await waitFor(() => expect(result.current.sessions).toHaveLength(2))
+    await settle()
+    const shown = result.current.sessions
+    renders = 0
+
+    for (let read = 0; read < 5; read++) {
+      socket().emit({ type: "sessions_changed", sessionPaths: [] })
+      await settle()
+    }
+    expect(api.fetchPiSessions).toHaveBeenCalled()
+    expect(renders).toBe(0)
+    expect(result.current.sessions).toBe(shown)
+
+    api.fetchPiSessions.mockRejectedValueOnce(new Error("offline"))
+    socket().emit({ type: "sessions_changed", sessionPaths: [] })
+    await waitFor(() => expect(result.current.error).toBe("offline"))
+    socket().emit({ type: "sessions_changed", sessionPaths: [] })
+    await waitFor(() => expect(result.current.error).toBeNull())
+    expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["u1", "u2"])
   })
 })
 

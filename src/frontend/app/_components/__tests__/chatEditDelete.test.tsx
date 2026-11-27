@@ -54,7 +54,7 @@ vi.mock("@/hooks/useResource", () => ({
   useResourceState: () => ({ value: undefined, error: null }),
   useResourceFamily: () => ({}),
 }))
-vi.mock("@/features/navigation/BranchContext", () => ({ useBranches: () => branches }))
+vi.mock("@/features/navigation/BranchContext", () => ({ useBranchActions: () => branches }))
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => undoDelete }))
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => enabledTools }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({

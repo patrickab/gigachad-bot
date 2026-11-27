@@ -1,8 +1,8 @@
 "use client"
 
 import { memo } from "react"
-import { inkColor, splitHighlights, strokePath } from "@/features/editor/canvas/ink/canvasInk"
-import type { StrokeData } from "@/lib/drawing"
+import { inkColor, splitHighlights } from "@/features/editor/canvas/ink/canvasInk"
+import { strokePath, type StrokeData } from "@/lib/drawing"
 
 // The committed ink is by far the biggest thing on the canvas, and it does not change
 // when you pan, zoom, type in a note or drag a frame — memoizing it keeps those off an

@@ -72,9 +72,14 @@ export function piSessionForest(sessions: readonly PiSessionInfo[]): PiSessionNo
   return roots
 }
 
+/** Whether `session`, resolved to its checkout `repository`, belongs to `directory`: its checkout (else its cwd) lies inside it. */
+function belongsTo(session: PiSessionInfo, repository: PiRepository | undefined, directory: string): boolean {
+  return isInside(trimSlash(repository?.path ?? session.cwd), directory)
+}
+
 /** Sessions belonging to `directory`: those whose checkout (worktrees under their main checkout) lies inside it. */
 export function piSessionsInside(sessions: readonly PiSessionInfo[], directory: string, repositories: readonly PiRepository[]): PiSessionInfo[] {
-  return sessions.filter((session) => isInside(trimSlash(piSessionRepository(session, repositories)?.path ?? session.cwd), directory))
+  return sessions.filter((session) => belongsTo(session, piSessionRepository(session, repositories), directory))
 }
 
 export interface PiWorkspaceGroup {
@@ -84,10 +89,10 @@ export interface PiWorkspaceGroup {
 }
 
 /** Checkouts holding sessions outside every mount, by name. Sessions outside every checkout cannot reopen and are left out. */
-export function unmountedPiWorkspaces(sessions: readonly PiSessionInfo[], repositories: readonly PiRepository[], mounts: readonly string[]): PiWorkspaceGroup[] {
+export function unmountedPiWorkspaces(sessions: readonly PiSessionInfo[], repositoryOf: (session: PiSessionInfo) => PiRepository | undefined, mounts: readonly string[]): PiWorkspaceGroup[] {
   const groups = new Map<string, PiWorkspaceGroup>()
   for (const session of sessions) {
-    const repository = piSessionRepository(session, repositories)
+    const repository = repositoryOf(session)
     if (!repository || mounts.some((mount) => isInside(repository.path, mount))) continue
     const group = groups.get(repository.path) ?? { path: trimSlash(repository.path), label: repository.name, sessions: [] }
     group.sessions.push(session)
@@ -206,6 +211,9 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
   const [error, setError] = useState("")
   const shownSessionId = itemOf(tab, "pi")?.pi?.sessionId ?? null
   const sessions = listed.filter((session) => !deleted.has(session.sessionId))
+  /** Each session's checkout, resolved once per list. */
+  const checkouts = useMemo(() => new Map(listed.map((session) => [session.sessionId, piSessionRepository(session, repositories)])), [listed, repositories])
+  const repositoryOf = (session: PiSessionInfo) => checkouts.get(session.sessionId)
 
   /** Hide the row at once, bring it back when the delete fails. */
   const remove = async (session: PiSessionInfo) => {
@@ -236,7 +244,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
     const { session } = node
     const title = piSessionTitle(session)
     const pinned = pins.get(session.sessionId) ?? session.pinned
-    const repository = piSessionRepository(session, repositories)
+    const repository = repositoryOf(session)
     return {
       id: `pi:${session.sessionId}`,
       label: title,
@@ -253,7 +261,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
   }
 
   /** The "Sessions" folder of a directory row, from `directorySessions` or every session belonging to `directory`. */
-  const directoryCode = (directory: string, name: string, projectSlug: string | null, directorySessions: readonly PiSessionInfo[] = piSessionsInside(sessions, directory, repositories)): FileTreeItem<string> => {
+  const directoryCode = (directory: string, name: string, projectSlug: string | null, directorySessions: readonly PiSessionInfo[] = sessions.filter((session) => belongsTo(session, repositoryOf(session), directory))): FileTreeItem<string> => {
     const repo = newPiItem(directory, projectSlug).pi!.repo
     return {
       id: `${directory}/:code`,
@@ -271,7 +279,7 @@ export function usePiSidebar({ onOpen, workspaceActions }: {
   const directoryActions = (directory: string, name: string) => workspaceActions?.(directory, name, setError) ?? []
 
   /** Every checkout outside all `mounts` holding sessions, with them. */
-  const unmountedWorkspaces = (mounts: readonly string[]) => unmountedPiWorkspaces(sessions, repositories, mounts)
+  const unmountedWorkspaces = (mounts: readonly string[]) => unmountedPiWorkspaces(sessions, repositoryOf, mounts)
 
   return { error, directoryCode, directoryActions, unmountedWorkspaces }
 }

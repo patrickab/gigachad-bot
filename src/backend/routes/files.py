@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from backend.http_plumbing import http_errors
@@ -14,16 +16,16 @@ _INVALID_FILENAME = (InvalidStorageKey, 400, "Invalid filename")
 
 
 @router.post("/upload", response_model=AttachResult)
-async def upload_file(
-    file: UploadFile = File(...),
+def upload_file(
+    file: Annotated[UploadFile, File()],
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
     overwrite: bool = Query(default=False),
     assets: AssetStore = Depends(get_asset_store),
-):
+) -> AttachResult:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
-    content = await file.read()
+    content = file.file.read()
     uploads = ChatUploads(assets, chat_id, slug)
     with http_errors(_INVALID_FILENAME):
         return uploads.store(file.filename, content, file.content_type or "application/octet-stream", overwrite=overwrite)
@@ -31,11 +33,11 @@ async def upload_file(
 
 @router.post("/parse", response_model=list[AttachResult])
 async def parse_attachments(
-    filenames: list[str] = Query(...),
+    filenames: Annotated[list[str], Query()],
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
     assets: AssetStore = Depends(get_asset_store),
-):
+) -> list[AttachResult]:
     with http_errors(_INVALID_FILENAME):
         return await ChatUploads(assets, chat_id, slug).parse(filenames)
 
@@ -47,7 +49,7 @@ def delete_single_file(
     slug: str | None = Query(default=None),
     assets: AssetStore = Depends(get_asset_store),
     references: References = Depends(get_references),
-):
+) -> dict[str, str]:
     """Delete an upload with its sidecar, then its library PDF copy, extraction and annotations unless still used."""
     uploads = ChatUploads(assets, chat_id, slug)
     with http_errors(_INVALID_FILENAME):

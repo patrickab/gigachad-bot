@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { emptyCanvasDoc, type CanvasDocument, type NestedCanvasAttachment } from "@/lib/domain/canvasDocument"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { inkColor } from "@/features/editor/canvas/ink/canvasInk"
@@ -95,9 +95,11 @@ export function CanvasEditor({ doc, onChange, slug, docPath, depth = 0, hostScal
   }, tool !== "draw" || selection.selectedIds.size > 0 || !!inkTool)
 
   // A canvas window's body. Passed down rather than imported by the window, so editor and window stay out of an import cycle.
-  const renderNestedCanvas = (att: NestedCanvasAttachment, name: string) => (
-    <NestedCanvas attachment={att} name={name} slug={slug} depth={depth} hostScale={scale} onChange={(d) => attachments.patchAttachment(att.id, { canvas: d })} />
-  )
+  const { patchAttachment } = attachments
+  const renderNestedCanvas = useCallback((att: NestedCanvasAttachment, name: string, hostScale: number) => (
+    <NestedCanvas attachment={att} name={name} slug={slug} depth={depth} hostScale={hostScale} onChange={(d) => patchAttachment(att.id, { canvas: d })} />
+  ), [slug, depth, patchAttachment])
+  const pdfPen = useMemo(() => ({ color: inkStrokeColor, width: inkWidth, highlight: highlighting }), [inkStrokeColor, inkWidth, highlighting])
 
   const addMenu = (
     <CanvasAddMenu
@@ -202,10 +204,10 @@ export function CanvasEditor({ doc, onChange, slug, docPath, depth = 0, hostScal
               onDragStart={(mode, x, y) => startDrag("attachments", att.id, mode, x, y)}
               onToggleFullscreen={() => attachments.toggleFullscreen(att.id)}
               onRemove={() => attachments.removeAttachment(att.id)}
-              onPatch={(patch) => attachments.patchAttachment(att.id, patch)}
+              onPatch={patchAttachment}
               onRetitle={(title) => { void attachments.retitleAttachment(att.id, title) }}
-              onPdfAspect={(r) => attachments.setAspect(att.id, r)}
-              pdfPen={{ color: inkStrokeColor, width: inkWidth, highlight: highlighting }}
+              onPdfAspect={attachments.setAspect}
+              pdfPen={pdfPen}
               renderNestedCanvas={renderNestedCanvas}
             />
           ))}

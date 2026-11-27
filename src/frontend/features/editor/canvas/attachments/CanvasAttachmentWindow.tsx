@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
+import { memo, useState, type ReactNode } from "react"
 import { FileType, Maximize2, Minimize2, SquarePen, X } from "lucide-react"
 import { attachmentName, attachmentTraits } from "@/lib/domain/canvasAttachments"
 import { CANVAS_ASPECT, type AttachmentPatch, type CanvasAttachment, type NestedCanvasAttachment } from "@/lib/domain/canvasDocument"
@@ -34,13 +34,13 @@ interface CanvasAttachmentWindowProps {
   onDragStart: (mode: "move" | "resize", clientX: number, clientY: number) => void
   onToggleFullscreen: () => void
   onRemove: () => void
-  onPatch: (patch: AttachmentPatch) => void
+  onPatch: (id: string, patch: AttachmentPatch) => void
   onRetitle: (title: string) => void
-  onPdfAspect: (aspect: number) => void
+  onPdfAspect: (id: string, aspect: number) => void
   /** The canvas pen or highlighter, a stylus on a PDF window writes on the PDF with it. */
   pdfPen: { color: string; width: number; highlight: boolean }
-  /** Body of a canvas window. A prop, not an import, so editor and window stay out of an import cycle. */
-  renderNestedCanvas: (attachment: NestedCanvasAttachment, name: string) => ReactNode
+  /** Body of a canvas window, zoomed with the host. A prop, not an import, so editor and window stay out of an import cycle. */
+  renderNestedCanvas: (attachment: NestedCanvasAttachment, name: string, hostScale: number) => ReactNode
 }
 
 /**
@@ -73,36 +73,6 @@ export function CanvasAttachmentWindow({
   const screenW = att.width * scale
   const screenH = contentHeight * scale
   const layoutW = pdf ? Math.min(att.width * settledScale, PDF_LAYOUT_CAP) : screenW
-
-  // One body per kind; each sees its own fields.
-  const body = () => {
-    switch (att.kind) {
-      case "architecture-graph":
-        return <LazyArchitectureWindow path={att.path} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => onPatch({ edgeStyle })} onNavigate={(path) => onPatch({ path })} />
-      case "document":
-        return (
-          <CanvasDocumentAttachment
-            path={att.path}
-            hostScale={scale}
-            plotFrame={full ? null : { width: Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH), scale: screenW / Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH) }}
-            collapsed={!full && scale !== settledScale}
-          />
-        )
-      case "canvas":
-        return renderNestedCanvas(att, name)
-      case "pdf":
-        return (
-          <LazyAnnotatedPdfViewer
-            path={att.path}
-            pen={pdfPen}
-            clipToPages
-            onPageAspect={onPdfAspect}
-            initialPage={att.page}
-            onPageChange={(page) => onPatch({ page })}
-          />
-        )
-    }
-  }
 
   const commitTitle = (title: string) => {
     setEditingTitle(false)
@@ -169,9 +139,44 @@ export function CanvasAttachmentWindow({
         style={{ height: full ? undefined : fixedSize ? screenH - TITLE_BAR_PX : layoutW * aspect }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {body()}
+        <AttachmentBody attachment={att} name={name} full={full} scale={scale} settledScale={settledScale} pdfPen={pdfPen} onPatch={onPatch} onPdfAspect={onPdfAspect} renderNestedCanvas={renderNestedCanvas} />
       </div>
       {!full && <CanvasResizeHandle className="canvas-card-chrome w-4 h-4" onDragStart={startDrag} />}
     </div>
   )
 }
+
+type AttachmentBodyProps = Pick<CanvasAttachmentWindowProps, "attachment" | "full" | "scale" | "settledScale" | "pdfPen" | "onPatch" | "onPdfAspect" | "renderNestedCanvas"> & { name: string }
+
+/** One body per kind; each sees its own fields. Memoized without the pan offset, so panning moves only the window around it. */
+const AttachmentBody = memo(function AttachmentBody({ attachment: att, name, full, scale, settledScale, pdfPen, onPatch, onPdfAspect, renderNestedCanvas }: AttachmentBodyProps) {
+  const patch = (p: AttachmentPatch) => onPatch(att.id, p)
+  switch (att.kind) {
+    case "architecture-graph":
+      return <LazyArchitectureWindow path={att.path} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => patch({ edgeStyle })} onNavigate={(path) => patch({ path })} />
+    case "document": {
+      const plotWidth = Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH)
+      return (
+        <CanvasDocumentAttachment
+          path={att.path}
+          hostScale={scale}
+          plotFrame={full ? null : { width: plotWidth, scale: att.width * scale / plotWidth }}
+          collapsed={!full && scale !== settledScale}
+        />
+      )
+    }
+    case "canvas":
+      return renderNestedCanvas(att, name, scale)
+    case "pdf":
+      return (
+        <LazyAnnotatedPdfViewer
+          path={att.path}
+          pen={pdfPen}
+          clipToPages
+          onPageAspect={(aspect) => onPdfAspect(att.id, aspect)}
+          initialPage={att.page}
+          onPageChange={(page) => patch({ page })}
+        />
+      )
+  }
+})

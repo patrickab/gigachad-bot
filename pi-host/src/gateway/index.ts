@@ -9,20 +9,11 @@ import type { Models } from "@earendil-works/pi-ai";
 import { chatCompletions } from "./completions.ts";
 import { modelsBody } from "./models.ts";
 import { type OmpGateway, ompGateway } from "./omp.ts";
-import { errorResponse } from "./openai.ts";
+import { errorResponse, HttpError, type OpenAIRequest } from "./openai.ts";
 import { reloadingPiRuntime } from "./runtime.ts";
 import { createUsage, type FetchJson } from "./usage.ts";
 
 export type GatewayHandler = (request: Request, url: URL) => Promise<Response | undefined>;
-
-/** The `model` of a chat completion body, undefined when the body is not JSON (the Pi path answers 400). */
-function bodyModel(body: string): unknown {
-  try {
-    return JSON.parse(body)?.model;
-  } catch {
-    return undefined;
-  }
-}
 
 /** The gateway routes over `models`, resolved on first use; `omp` takes the chat completions it handles. */
 export function createGateway(models: () => Promise<Models>, fetchJson?: FetchJson, omp?: OmpGateway): GatewayHandler {
@@ -32,11 +23,15 @@ export function createGateway(models: () => Promise<Models>, fetchJson?: FetchJs
     try {
       if (route === "GET /v1/models") return Response.json(await modelsBody(await models()));
       if (route === "POST /v1/chat/completions") {
-        if (omp) {
-          const body = await request.clone().text();
-          if (omp.handles(bodyModel(body))) return await omp.forward(request, body);
+        const text = await request.text();
+        let body: OpenAIRequest;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          throw new HttpError(400, "request body is not JSON");
         }
-        return await chatCompletions(await models(), request);
+        if (omp?.handles(body?.model)) return await omp.forward(request, text);
+        return await chatCompletions(await models(), body, request.signal);
       }
       if (route === "GET /usage") return await usage(url.searchParams.get("refresh") === "1");
       return undefined;

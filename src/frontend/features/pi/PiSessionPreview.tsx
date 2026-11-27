@@ -27,9 +27,12 @@ function loadPreview({ sessionId, modifiedAt }: Pick<PiSessionInfo, "sessionId" 
   return transcript
 }
 
-/** Read the previews of the `PREFETCH_COUNT` most recently used of `sessions` (newest first) ahead, while the browser idles. */
+/**
+ * Read the previews of the `PREFETCH_COUNT` most recently used of `sessions` (newest first) ahead, while the browser idles.
+ * A running session's is left out: its file changes with every refresh, so its preview loads when shown.
+ */
 export function prefetchPiSessionPreviews(sessions: readonly PiSessionInfo[]): () => void {
-  const read = () => sessions.slice(0, PREFETCH_COUNT).forEach((session) => { void loadPreview(session).catch(() => {}) })
+  const read = () => sessions.slice(0, PREFETCH_COUNT).forEach((session) => { if (!session.live?.running) void loadPreview(session).catch(() => {}) })
   if (typeof requestIdleCallback === "undefined") {
     const timer = setTimeout(read, 0)
     return () => clearTimeout(timer)

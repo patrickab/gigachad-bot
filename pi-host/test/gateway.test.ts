@@ -280,4 +280,29 @@ describe("OMP gateway routing", () => {
     expect((await post("openai/none")).status).toBe(404);
     expect(forwarded).toHaveLength(1);
   });
+
+  test("a completion beside OMP parses its body once", async () => {
+    faux.setResponses([fauxAssistantMessage("ok")]);
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const handler = createGateway(async () => models, undefined, { handles: () => false, forward: async () => Response.json({}) });
+    const body = JSON.stringify({ model: "anthropic/claude-test", messages: [user("x".repeat(5_000_000))] });
+    let parses = 0;
+    const { parse } = JSON;
+    const { json } = Request.prototype;
+    JSON.parse = (text: string, reviver?: Parameters<typeof parse>[1]) => ((parses += Number(text === body)), parse(text, reviver));
+    Request.prototype.json = function (this: Request) {
+      parses++;
+      return json.call(this);
+    };
+    try {
+      const url = new URL("http://pi-host/v1/chat/completions");
+      const response = (await handler(new Request(url, { method: "POST", body }), url))!;
+      expect(response.status).toBe(200);
+      expect(parses).toBe(1);
+    } finally {
+      JSON.parse = parse;
+      Request.prototype.json = json;
+    }
+  });
 });

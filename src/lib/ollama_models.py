@@ -2,8 +2,8 @@
 
 - Consumes Ollama's API at `config.OLLAMA_BASE_URL`: `/api/tags` (installed models) and `/api/show` (capabilities,
   context window), never starts Ollama
-- Provides `installed_chat_models` (the tags of the installed chat models) and `sync_pi_provider`, which writes them
-  into Pi's `models.json` (`pi_models_json`) so pi-host's gateway serves `ollama/<tag>`
+- Provides `sync_pi_provider`, which writes the installed chat models into Pi's `models.json` (`pi_models_json`) so
+  pi-host's gateway serves `ollama/<tag>`, and returns their tags
 
 pi-host reloads `models.json` when it changes, so a newly pulled model is served after the next sync.
 """
@@ -17,6 +17,7 @@ import httpx
 
 from config import OLLAMA_BASE_URL
 from lib import pi_models_json
+from lib.upstream import tls_context
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def _show(client: httpx.Client, tag: str, digest: str) -> dict[str, Any] | None:
 def _installed_chat_details() -> dict[str, dict[str, Any]] | None:
     """`/api/show` details of each installed chat model by tag, None when Ollama is not running."""
     try:
-        with httpx.Client(base_url=OLLAMA_BASE_URL, timeout=_TIMEOUT_SECONDS) as client:
+        with httpx.Client(base_url=OLLAMA_BASE_URL, timeout=_TIMEOUT_SECONDS, verify=tls_context()) as client:
             response = client.get("/api/tags")
             response.raise_for_status()
             listed = response.json().get("models") or []
@@ -55,11 +56,6 @@ def _installed_chat_details() -> dict[str, dict[str, Any]] | None:
         return None
     # Embedding models (`nomic-embed-text`, `bge-m3`) lack the `completion` capability.
     return {tag: details for tag, details in shown.items() if details and "completion" in details.get("capabilities", [])}
-
-
-def installed_chat_models() -> list[str]:
-    """Tags of the installed Ollama chat models, [] when Ollama is not running."""
-    return list(_installed_chat_details() or {})
 
 
 def _context_window(details: dict[str, Any]) -> int | None:
@@ -85,12 +81,12 @@ def _pi_model(tag: str, details: dict[str, Any]) -> dict[str, Any]:
     return model
 
 
-def sync_pi_provider() -> bool:
-    """Merge the installed chat models into Pi's provider `ollama`, True when `models.json` was rewritten."""
+def sync_pi_provider() -> list[str] | None:
+    """Merge the installed chat models into Pi's provider `ollama` and return their tags, None when Ollama is not running."""
     # Other providers and keys stay. Ollama down, an unreadable file or an unchanged provider writes nothing.
     details = _installed_chat_details()
     if details is None:
-        return False
+        return None
 
     def with_installed(providers: dict[str, Any]) -> dict[str, Any] | None:
         if not details and PROVIDER_ID not in providers:
@@ -108,7 +104,7 @@ def sync_pi_provider() -> bool:
         written = pi_models_json.update(with_installed)
     except pi_models_json.ModelsJsonError:
         log.exception("Ollama models are not synced")
-        return False
+        return list(details)
     if written:
         log.info("Synced %d Ollama models into Pi's %s", len(details), pi_models_json.models_json_path())
-    return written
+    return list(details)

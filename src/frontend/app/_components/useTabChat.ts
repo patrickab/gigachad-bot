@@ -4,7 +4,7 @@ import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import type { ChatReveal } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
-import { useBranches } from "@/features/navigation/BranchContext"
+import { useBranchActions } from "@/features/navigation/BranchContext"
 import { useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
@@ -24,7 +24,7 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
   const { projectSlug, config, appMode } = tab
   const chat = useChat()
   const { messages, cancel, reset, models, prompts, setMessages, totalUsage, setTotalUsage } = chat
-  const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
+  const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranchActions()
   const reasoningLevels = useReasoningLevels(config.selectedModel)
   const reasoningEffort = effectiveReasoningEffort(reasoningLevels, config.reasoningEffort)
   const usage = totalUsage.total_tokens > 0 ? totalUsage : undefined

@@ -41,6 +41,7 @@ vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => ({ co
 vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/features/navigation/BranchContext")>(),
   useBranches: () => ({ branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: async () => {}, moveHistory: vi.fn() }),
+  useBranchActions: () => ({ refreshAll: async () => {} }),
 }))
 vi.mock("@/contexts/ProjectContext", async () => {
   const { displayName } = await import("@/lib/domain/projects")

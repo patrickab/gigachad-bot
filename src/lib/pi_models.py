@@ -17,6 +17,7 @@ import httpx
 
 from lib import pi_host
 from lib.ttl_cache import TtlCache
+from lib.upstream import tls_context
 
 # The provider prefix of a Pi model in stored selectors (a LiteLLM provider id until P7). Stored selectors carry it, so it
 # never changes.
@@ -68,6 +69,7 @@ def catalog_entries() -> list[dict[str, Any]]:
             f"{pi_host.gateway_url()}/models",
             headers={"Authorization": f"Bearer {pi_host.token()}"},
             timeout=_REQUEST_TIMEOUT_SECONDS,
+            verify=tls_context(),
         )
         response.raise_for_status()
         payload = response.json()

@@ -1,5 +1,5 @@
 import { canvasEntityId } from "@/lib/domain/canvasDocument"
-import { inkOutlinePath, inkPoint, penPressure, pointsBounds, type Bounds, type StrokeData } from "@/lib/drawing"
+import { inkPoint, penPressure, pointsBounds, type Bounds, type StrokeData } from "@/lib/drawing"
 
 export const PRESET_COLORS = [
   { name: "Black", value: "#000000" },
@@ -94,20 +94,9 @@ export function splitHighlights<Stroke extends StrokeData>(strokes: readonly Str
   return { highlights: strokes.filter((stroke) => stroke.highlight), pen: strokes.filter((stroke) => !stroke.highlight) }
 }
 
-// Committed strokes are immutable, so outline path and bounds are computed once per
-// object, not per render or eraser sample. Weak keys free the cache when an edit drops a stroke.
-const strokePathCache = new WeakMap<StrokeData, string>()
+// Committed strokes are immutable, so bounds are computed once per object, not per
+// eraser sample. Weak keys free the cache when an edit drops a stroke.
 const strokeBoundsCache = new WeakMap<StrokeData, Bounds | null>()
-
-/** Outline path of a committed stroke, cached per stroke object. */
-export function strokePath(stroke: StrokeData): string {
-  let d = strokePathCache.get(stroke)
-  if (d === undefined) {
-    d = inkOutlinePath(stroke.points, stroke.width, !!stroke.highlight)
-    strokePathCache.set(stroke, d)
-  }
-  return d
-}
 
 // The eraser tests every stroke on every pointermove, so reject cheaply with four
 // comparisons against a cached box instead of per-segment distances.

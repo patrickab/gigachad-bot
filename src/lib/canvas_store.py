@@ -237,6 +237,7 @@ class CanvasMutationStore:
             row = connection.execute(
                 "SELECT content FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir FOR UPDATE",
                 (user_id, key),
+                binary=True,
             ).fetchone()
             if row is None:
                 raise CanvasNotFound("Canvas not found")

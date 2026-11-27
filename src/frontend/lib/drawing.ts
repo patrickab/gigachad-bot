@@ -65,6 +65,20 @@ export function inkOutlinePath(points: number[][], size: number, highlight: bool
   return strokeOutlinePath(points, size, highlight ? HIGHLIGHT_STROKE_OPTIONS : STROKE_OPTIONS)
 }
 
+// Committed strokes are immutable, so the outline is computed once per object, not per render
+// or export. Weak keys free the cache when an edit drops a stroke.
+const strokePathCache = new WeakMap<StrokeData, string>()
+
+/** Outline path of a committed stroke, cached per stroke object. */
+export function strokePath(stroke: StrokeData): string {
+  let d = strokePathCache.get(stroke)
+  if (d === undefined) {
+    d = inkOutlinePath(stroke.points, stroke.width, !!stroke.highlight)
+    strokePathCache.set(stroke, d)
+  }
+  return d
+}
+
 /** Pen pressure of a pointer event, with a mid value for mice and pens that report none. */
 export function penPressure(e: { pressure: number }): number {
   return e.pressure > 0 ? e.pressure : 0.5

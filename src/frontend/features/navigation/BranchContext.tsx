@@ -16,16 +16,10 @@ import { useRequiredContext } from "@/hooks/useRequiredContext"
 /** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
 
-interface BranchContextValue {
-  branchMeta: Record<string, BranchMeta>
-  chatIdMap: ChatIdMap
-  visibleRootFiles: string[]
-  historiesLoading: boolean
-  activeFile: string | null
-  activeQaIndex: number | null
+/** The provider's actions, all stable: their own context, so a history refresh re-renders none of their consumers. */
+interface BranchActions {
   onFileClick: (file: string, qaIndex?: number) => void
   refreshAll: () => Promise<void>
-  moveHistory: (filename: string, targetDir: string) => Promise<void>
   createBranch: (parentFile: string, branchMessageIdx: number) => Promise<{ childFile: string; chatId: string }>
   mergeBranch: (childFile: string) => Promise<void>
   cascadeDelete: (filename: string) => Promise<string[]>
@@ -33,7 +27,18 @@ interface BranchContextValue {
   setActiveQaIndex: (idx: number | null) => void
 }
 
+interface BranchContextValue extends BranchActions {
+  branchMeta: Record<string, BranchMeta>
+  chatIdMap: ChatIdMap
+  visibleRootFiles: string[]
+  historiesLoading: boolean
+  activeFile: string | null
+  activeQaIndex: number | null
+  moveHistory: (filename: string, targetDir: string) => Promise<void>
+}
+
 const BranchContext = createContext<BranchContextValue | null>(null)
+const BranchActionsContext = createContext<BranchActions | null>(null)
 
 interface Histories {
   sortedFiles: string[]
@@ -118,30 +123,34 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
     return result.deleted
   }, [refreshAll])
 
+  const actions = useMemo<BranchActions>(() => ({
+    onFileClick,
+    refreshAll,
+    createBranch: doCreateBranch,
+    mergeBranch: doMergeBranch,
+    cascadeDelete: doCascadeDelete,
+    setActiveFile,
+    setActiveQaIndex,
+  }), [onFileClick, refreshAll, doCreateBranch, doMergeBranch, doCascadeDelete])
+  const value = useMemo<BranchContextValue>(() => ({
+    ...actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, activeFile, activeQaIndex, moveHistory,
+  }), [actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, activeFile, activeQaIndex, moveHistory])
+
   return (
-    <BranchContext.Provider value={{
-      branchMeta,
-      chatIdMap,
-      visibleRootFiles,
-      historiesLoading,
-      activeFile,
-      activeQaIndex,
-      onFileClick,
-      refreshAll,
-      moveHistory,
-      createBranch: doCreateBranch,
-      mergeBranch: doMergeBranch,
-      cascadeDelete: doCascadeDelete,
-      setActiveFile,
-      setActiveQaIndex,
-    }}>
-      {children}
-    </BranchContext.Provider>
+    <BranchActionsContext.Provider value={actions}>
+      <BranchContext.Provider value={value}>
+        {children}
+      </BranchContext.Provider>
+    </BranchActionsContext.Provider>
   )
 }
 
 export function useBranches() {
   return useRequiredContext(BranchContext, "useBranches must be inside BranchProvider")
+}
+
+export function useBranchActions() {
+  return useRequiredContext(BranchActionsContext, "useBranchActions must be inside BranchProvider")
 }
 
 /** Index branch metadata by `chat_id` to resolve `parent_id` links back to filenames. */

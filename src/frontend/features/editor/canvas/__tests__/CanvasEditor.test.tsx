@@ -11,7 +11,7 @@
  * already points at the post-change document, which would make undo a no-op.
  */
 import { useState } from "react"
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, act, fireEvent, waitFor } from "@testing-library/react"
 import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
@@ -36,12 +36,19 @@ function TabActiveProvider({ value, children }: { value: boolean; children: Reac
   return <TabContext.Provider value={tab}>{children}</TabContext.Provider>
 }
 
+const renders = vi.hoisted(() => ({ pdf: 0, markdown: 0 }))
 vi.mock("@/features/editor/pdf/LazyAnnotatedPdfViewer", () => ({
-  LazyAnnotatedPdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
-    <button type="button" data-testid="pdf-viewer" onClick={() => onPageChange?.(4)}>{initialPage}</button>,
+  LazyAnnotatedPdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) => {
+    renders.pdf++
+    return <button type="button" data-testid="pdf-viewer" onClick={() => onPageChange?.(4)}>{initialPage}</button>
+  },
 }))
-vi.mock("@/components/content/LaTeXMarkdown", () => ({
-  LaTeXMarkdown: ({ content }: { content: string }) => <div data-testid="document-markdown">{content}</div>,
+// Memoized like the real renderer, so a note re-renders its markdown only when its props change.
+vi.mock("@/components/content/LaTeXMarkdown", async () => ({
+  LaTeXMarkdown: (await import("react")).memo(function LaTeXMarkdown({ content }: { content: string }) {
+    renders.markdown++
+    return <div data-testid="document-markdown">{content}</div>
+  }),
 }))
 vi.mock("@/components/content/PlotElement", () => ({
   PlotElement: ({ figure }: { figure: unknown }) => <div data-testid="document-plot">{JSON.stringify(figure)}</div>,
@@ -489,6 +496,36 @@ describe("PDF attachments", () => {
     const restored = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
     const reopened = render(<Harness seen={[]} initialDoc={restored} />)
     expect(reopened.container.querySelector("[data-testid=\"pdf-viewer\"]")).toHaveTextContent("4")
+  })
+})
+
+describe("panning", () => {
+  // jsdom has no PointerEvent: without it the canvas never sees that a mouse pans
+  beforeEach(() => vi.stubGlobal("PointerEvent", class extends MouseEvent {
+    pointerType: string
+    constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerType = init.pointerType ?? "" }
+  }))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("moves attachment windows and notes without re-rendering their bodies", () => {
+    const doc: CanvasDocument = {
+      ...emptyCanvasDoc(),
+      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
+      texts: [{ id: "note-1", x: 0, y: 600, width: 200, height: 40, text: "note", color: "#000", size: 16 }],
+    }
+    const { container } = render(<Harness seen={[]} initialDoc={doc} />)
+    const surface = container.querySelector<HTMLElement>("[tabindex=\"0\"]")!
+    const note = container.querySelector<HTMLElement>("[data-testid=\"document-markdown\"]")!.parentElement!.parentElement!
+    const left = parseFloat(note.style.left)
+    surface.setPointerCapture = noop
+    fireEvent.pointerDown(surface, { button: 0, pointerType: "mouse", clientX: 0, clientY: 0 })
+    renders.pdf = 0
+    renders.markdown = 0
+    for (let i = 1; i <= 20; i++) fireEvent.pointerMove(surface, { pointerType: "mouse", clientX: i * 5, clientY: i * 3 })
+    fireEvent.pointerUp(surface, { pointerType: "mouse" })
+
+    expect(parseFloat(note.style.left)).toBe(left + 100)
+    expect(renders).toEqual({ pdf: 0, markdown: 0 })
   })
 })
 

@@ -1,10 +1,14 @@
 """Shared pytest fixtures."""
 
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -344,3 +348,36 @@ def template_sets(tmp_path, monkeypatch) -> Path:
         (base / "demo" / name).write_bytes(PREVIEW_PNG)
     monkeypatch.setattr(latex_templates, "TEMPLATE_SETS", base)
     return base
+
+
+class CountingConnection:
+    """A connection counting its statements, and the rows and bytes each table's reads return."""
+
+    def __init__(self, connection, counts):
+        self._connection, self._counts = connection, counts
+
+    def execute(self, query, params=None, **kwargs):
+        cursor = self._connection.execute(query, params, **kwargs)
+        self._counts["statements"] += 1
+        result = cursor.pgresult
+        if query.lstrip().startswith("SELECT") and result is not None and (table := re.search(r"\bFROM (\w+)", query)):
+            self._counts[f"{table[1]} rows"] += result.ntuples
+            self._counts[f"{table[1]} bytes"] += sum(
+                len(result.get_value(row, column) or b"") for row in range(result.ntuples) for column in range(result.nfields)
+            )
+        return cursor
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+@dataclass(frozen=True)
+class CountingScope(UserScope):
+    """A user scope counting the statements its connections run, in `counts["statements"]`."""
+
+    counts: Counter = field(default_factory=Counter)
+
+    @contextmanager
+    def connection(self):
+        with self.pool.connection() as connection:
+            yield CountingConnection(connection, self.counts)

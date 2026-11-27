@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 import json
+import ssl
 
 from fastapi.testclient import TestClient
 import httpx
@@ -10,7 +11,7 @@ import pytest
 from backend.identity import get_request_identity
 from backend.routes import learn as learn_route
 from backend.routes import projects as projects_route
-from lib import learnharness
+from lib import learnharness, upstream
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
@@ -186,6 +187,25 @@ async def test_export_markdown_keeps_refusals_and_names_a_changed_shape(monkeypa
         await learnharness.export_markdown("chat_page")
     with pytest.raises(UpstreamUnavailable):
         await learnharness.export_markdown("chat_unrouted")
+
+
+async def test_upstream_calls_load_the_ca_bundle_once(monkeypatch):
+    loads = []
+    real = ssl.create_default_context
+    monkeypatch.setattr(ssl, "create_default_context", lambda *args, **kwargs: loads.append(1) or real(*args, **kwargs))
+
+    async def answer(_transport, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=CHATS, request=request)
+
+    # The real transport up to the network, which answers here.
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", answer)
+    monkeypatch.setattr(learnharness.client, "transport", None)
+    upstream.tls_context.cache_clear()
+
+    for _ in range(3):
+        await learnharness.list_sessions()
+
+    assert len(loads) == 1
 
 
 async def test_a_404_of_a_moved_route_never_counts_as_deleted(monkeypatch):
