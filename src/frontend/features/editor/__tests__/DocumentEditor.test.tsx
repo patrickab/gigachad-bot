@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(),
   readFileRootRendered: vi.fn(() => new Promise<string>(() => {})),
   writeDocument: vi.fn(),
+  writeRootFile: vi.fn(),
   storeDrawing: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number
@@ -77,6 +78,25 @@ describe("DocumentEditor canvas collaboration", () => {
     unmount() // leaving flushes the pending autosave
     await waitFor(() => expect(persistOverride).toHaveBeenCalledWith(expect.stringContaining("\"strokes\":[]")))
     expect(api.writeDocument).not.toHaveBeenCalled()
+  })
+
+  it("opens a canvas on disk as a file and saves it there, also without persistOverride", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["disk"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
+    api.writeRootFile.mockResolvedValue(undefined)
+    collaboration.useCollaborativeCanvas.mockClear()
+    render(<DocumentEditor path="/repo/board.canvas" slug="proj" onClose={() => {}} />)
+
+    expect(await screen.findByTestId("canvas")).toHaveTextContent("disk")
+    expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalled()
+
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByTestId("canvas"))
+      await vi.advanceTimersByTimeAsync(1000)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(api.writeRootFile).toHaveBeenCalledWith("/repo/board.canvas", expect.stringContaining("\"strokes\":[]"))
   })
 
   it("keeps a loaded canvas mounted when sync is transiently unavailable", async () => {
