@@ -161,3 +161,18 @@ describe("api.ts — deletePiTurn", () => {
     expect(error).toMatchObject({ status: 409, code: "compacted" })
   })
 })
+
+describe("api.ts — pinPiSession", () => {
+  it("sends the pin as a JSON body", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+
+    await api.pinPiSession("s 1", true)
+
+    const { url, init } = lastCall(calls)
+    expect(url).toContain("/pi/sessions/s%201/pin")
+    expect(init.method).toBe("PUT")
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json")
+    expect(JSON.parse(init.body as string)).toEqual({ pinned: true })
+  })
+})

@@ -1,6 +1,6 @@
 // Pi agent routes: repositories and pi-host sessions (`backend/routes/pi.py`).
 import { toQuery } from "../urls"
-import { ApiError, fileForm, jsonInit, post, request, requestVoid } from "./http"
+import { ApiError, fileForm, jsonInit, post, put, request, requestVoid } from "./http"
 
 export interface PiRepository {
   name: string
@@ -161,7 +161,7 @@ export async function restorePiSession(sessionId: string): Promise<PiSessionInfo
 
 /** Pin or unpin a session: pinned ones are never evicted or archived automatically (M20). */
 export async function pinPiSession(sessionId: string, pinned: boolean): Promise<PiSessionInfo> {
-  const { session } = await request<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/pin`, { method: "PUT", body: JSON.stringify({ pinned }) })
+  const { session } = await put<{ session: PiSessionInfo }>(`/pi/sessions/${encodeURIComponent(sessionId)}/pin`, { pinned })
   return session
 }
 
