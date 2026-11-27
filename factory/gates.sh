@@ -24,7 +24,8 @@
 # - --reuse: a step that passed records the tree it passed on (working tree with untracked files), the step and the
 #   merge base in `<git common dir>/check-passed`. Run again on the same, it is skipped: a factory merge whose rebase
 #   moved nothing does not repeat the lint and types its last round passed
-# - pytest runs on a worker per core but one, each with a database of its own. Flaky tests: failed pytest tests run once more, alone
+# - pytest runs on a worker per core but one (inside a factory test slot: on the slot's FACTORY_TEST_JOBS, vitest
+#   too), each with a database of its own. Flaky tests: failed pytest tests run once more, alone
 #   (`--last-failed`), vitest retries a failed test once. A test that
 #   passes on the rerun passes the step, the output says it was flaky
 # - Postgres-backed tests run against a throwaway database (`gigachad_check_<random>`, dropped on exit) on the
@@ -47,6 +48,7 @@ if [[ -z ${GIGACHAD_CHECK_CLEAN:-} ]]; then
         GIGACHAD_CHECK_CLEAN=1 HOME="$HOME" USER="${USER:-$(id -un)}" LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" \
         TMPDIR="${TMPDIR:-/tmp}" PATH="$PATH" \
         ${FACTORY_SLOT_HELD:+FACTORY_SLOT_HELD="$FACTORY_SLOT_HELD"} \
+        ${FACTORY_TEST_JOBS:+FACTORY_TEST_JOBS="$FACTORY_TEST_JOBS"} \
         ${POSTGRES_TEST_DATABASE_URL:+POSTGRES_TEST_DATABASE_URL="$POSTGRES_TEST_DATABASE_URL"} \
         bash "${BASH_SOURCE[0]}" "$@"
 fi
@@ -276,7 +278,7 @@ step_types() {
 
 step_python() {
     local url="${POSTGRES_TEST_DATABASE_URL:-}" status=0 cache workers
-    workers=$(($(nproc) > 2 ? $(nproc) - 1 : 1))
+    workers="${FACTORY_TEST_JOBS:-$(($(nproc) > 2 ? $(nproc) - 1 : 1))}"
     if [[ -z $url && $dry_run -eq 0 ]]; then
         url="$(throwaway_database)"
         if [[ -n $url ]]; then
@@ -306,7 +308,7 @@ step_frontend() {
     need_node_modules src/frontend || return
     [[ $frontend_all -eq 0 ]] && args+=(--changed "$base" --passWithNoTests)
     # Beside other steps, vitest gets half the cores: oversubscribed, its tests hit their timeouts.
-    [[ ${#steps[@]} -gt 1 ]] && args+=(--maxWorkers=50%)
+    [[ ${#steps[@]} -gt 1 || -n ${FACTORY_TEST_JOBS:-} ]] && args+=(--maxWorkers="${FACTORY_TEST_JOBS:-50%}")
     # A test that is slow on a loaded machine is not failing: 15 s instead of vitest's 5 s.
     [[ ${#steps[@]} -gt 1 ]] && args+=(--testTimeout=15000)
     (cd src/frontend && slot_run node_modules/.bin/vitest "${args[@]}")
