@@ -56,7 +56,7 @@ def project_document_prefix(slug: str) -> str:
 
 
 def project_json(slug: str) -> str:
-    """Per-project state (name, kanban, tabs, files, linked root) in the chat namespace."""
+    """Per-project state (kanban, tabs, files, linked root) in the chat namespace."""
     return f"{CHAT}/{_part(slug, 'project slug')}/{PROJECT_JSON}"
 
 

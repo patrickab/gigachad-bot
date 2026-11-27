@@ -230,7 +230,7 @@ class ChatStore:
         project = txn.writes.get(key)
         if project is None:
             stored = self._docs.read(key)
-            project = stored if isinstance(stored, dict) else {"name": slug, "kanban": [], "tabs": []}
+            project = stored if isinstance(stored, dict) else {"kanban": [], "tabs": []}
         project["tabs"] = [t for t in project.get("tabs", []) if t.get("filename") != filename]
         txn.writes[key] = project
 

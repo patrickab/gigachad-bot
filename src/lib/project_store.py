@@ -105,16 +105,16 @@ class ProjectStore:
         return slug
 
     @staticmethod
-    def _default_project(slug: str) -> dict[str, Any]:
-        return {"name": slug, "kanban": [], "tabs": [], "files": []}
+    def _default_project() -> dict[str, Any]:
+        return {"kanban": [], "tabs": [], "files": []}
 
     def _read_project(self, slug: str) -> dict[str, Any]:
-        return self._read_json(project_json(slug), self._default_project(slug))
+        return self._read_json(project_json(slug), self._default_project())
 
     def _read_projects(self, slugs: list[str]) -> list[dict[str, Any]]:
         """The state of each project in *slugs*, read in one round trip, defaulted like `_read_project`."""
         stored = self._docs.read_many(project_json(slug) for slug in slugs)
-        return [data if isinstance(data := stored[project_json(slug)], dict) else self._default_project(slug) for slug in slugs]
+        return [data if isinstance(data := stored[project_json(slug)], dict) else self._default_project() for slug in slugs]
 
     def _write_project(self, slug: str, data: dict[str, Any]) -> None:
         self._write_json(project_json(slug), data)
@@ -151,7 +151,7 @@ class ProjectStore:
         entry = {"name": name, "slug": slug, "createdAt": now, "updatedAt": now}
         meta.setdefault("projects", []).append(entry)
         self._write_meta(meta)
-        self._write_project(slug, {"name": name, "kanban": [], "tabs": []})
+        self._write_project(slug, {"kanban": [], "tabs": []})
         return {"name": name, "slug": slug, "kanban": [], "tabs": []}
 
     def update_project(self, slug: str, name: str | None = None, *, archived: bool | None = None) -> dict[str, Any]:
@@ -162,11 +162,9 @@ class ProjectStore:
             if not name:
                 raise ValueError("Project name required")
             new_slug = slugify(name, fallback="project")
-            if new_slug == slug:
-                self._write_project(slug, {**self._read_project(slug), "name": name})
-            elif self._find_entry(meta, new_slug):
-                raise StorageConflictError(f"Project already exists: {new_slug}")
-            else:
+            if new_slug != slug:
+                if self._find_entry(meta, new_slug):
+                    raise StorageConflictError(f"Project already exists: {new_slug}")
                 self._rename(slug, new_slug, name)
                 self._chats.invalidate_index()
                 slug, meta = new_slug, self._read_meta()
@@ -254,7 +252,7 @@ class ProjectStore:
             except FileNotFoundError:
                 data, revision = None, None
             if not isinstance(data, dict):
-                data = self._default_project(slug)
+                data = self._default_project()
             changed = change(data)
             if changed is None:
                 return

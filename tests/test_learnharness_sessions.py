@@ -485,6 +485,30 @@ class _RacedDataStore(MemoryDataStore):
         return super().write_bytes(key, content, expected=expected, meta=meta)
 
 
+class _WriteLog(MemoryDataStore):
+    """Records the key of every write."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.written: list[str] = []
+
+    def write_bytes(self, key, content, *, expected=None, meta=None):
+        self.written.append(key)
+        return super().write_bytes(key, content, expected=expected, meta=meta)
+
+
+def test_renaming_a_project_within_its_slug_writes_the_catalog_only():
+    data = _WriteLog()
+    projects = ProjectStore(ChatStore(data_store=data), rename=lambda *_: None)
+    projects.create_project("Physics")
+    data.written.clear()
+
+    assert projects.update_project("physics", "PHYSICS")["name"] == "PHYSICS"
+
+    assert data.written == ["chat/projects-meta.json"]
+    assert projects.get_project("physics")["name"] == "PHYSICS"
+
+
 def test_a_concurrent_project_write_and_the_assignment_both_land():
     data = _RacedDataStore()
     projects = ProjectStore(ChatStore(data_store=data), rename=lambda *_: None)

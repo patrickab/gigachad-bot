@@ -155,7 +155,7 @@ def renamed_documents(
     """Yield `(source_key, target_key, content)` for each document row the rename changes.
 
     - `rows` are `(key, content, is_dir)` of every document of the user
-    - Catalog entry and `project.json` take the new name
+    - The catalog entry takes the new name
     - A disk folder linked by the old slug's folder name stays linked through `linked_root`
     """
     project_key = project_json(refs.old)
@@ -169,7 +169,6 @@ def renamed_documents(
             updated = dump_json(meta).encode()
         elif key == project_key:
             project = json.loads(updated)
-            project["name"] = name
             linked_root = project.get("linked_root") or next((root for root in linked_roots if Path(root).name == refs.old), None)
             if linked_root:
                 project["linked_root"] = linked_root
