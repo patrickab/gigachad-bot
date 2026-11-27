@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LiveStatus, SessionInfo } from "../src/catalog/index.ts";
-import type { RankedFile } from "../src/catalog/files.ts";
 import { tryLockFile } from "../src/host/local/lock.ts";
 import { cwdDirName } from "../src/host/local/paths.ts";
 import type { LiveSessions } from "../src/supervisor/index.ts";
@@ -15,14 +14,9 @@ import { copyPrivateState, handleCatalog, isPinned } from "./fixtures/local-cata
 type Body = {
   sessions: SessionInfo[];
   session: SessionInfo;
-  files: RankedFile[];
-  revision: number;
-  data: Record<string, unknown>;
+  files: { path: string; score: number }[];
   error: string;
 };
-
-/** Private state route body: `{revision, data}`, or `{revision}` after a write. */
-type StateBody = { revision: number; data?: Record<string, unknown> };
 
 let scratch: string;
 let projectDir: string;
@@ -346,7 +340,7 @@ describe("session listing", () => {
   });
 
   test("unknown session id is 404", async () => {
-    expect((await call("GET", "/sessions/does-not-exist/state")).status).toBe(404);
+    expect((await call("GET", "/sessions/does-not-exist/entries")).status).toBe(404);
   });
 });
 
@@ -582,7 +576,7 @@ describe("factory root", () => {
     await writeFixtures();
     await writeFactorySession();
     expect((await call("POST", `/sessions/${OLD_ID}/archive`)).status).toBe(200);
-    for (const id of [NEW_ID, FACTORY_ID, OLD_ID]) expect((await call("GET", `/sessions/${id}/state`)).status).toBe(200);
+    for (const id of [NEW_ID, FACTORY_ID, OLD_ID]) expect((await call("GET", `/sessions/${id}/entries`)).status).toBe(200);
   });
 
   test("a factory-root session is never archived and never a search hit", async () => {
@@ -681,33 +675,11 @@ test("a sidecar read error throws instead of reading as unpinned, missing or inv
 });
 
 describe("private state", () => {
-  test("revisioned writes reject a stale revision", async () => {
-    const { oldPath } = await writeFixtures();
-    expect((await call<StateBody>("GET", `/sessions/${OLD_ID}/state`)).json).toEqual({ revision: 0, data: {} });
-    expect((await call<StateBody>("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft: "a" } })).json).toEqual({ revision: 1 });
-    const stale = await call<StateBody>("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft: "b" } });
-    expect(stale.status).toBe(409);
-    expect(stale.json).toEqual({ revision: 1, data: { draft: "a" } });
-    expect((await call<StateBody>("PUT", `/sessions/${OLD_ID}/state`, { revision: 1, data: { draft: "c" } })).json).toEqual({ revision: 2 });
-    expect((await call<StateBody>("GET", `/sessions/${OLD_ID}/state`)).json).toEqual({ revision: 2, data: { draft: "c" } });
-    expect(JSON.parse(await readFile(`${oldPath}.gigachad.json`, "utf8"))).toEqual({ revision: 2, pinned: false, data: { draft: "c" } });
-    expect((await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 2, data: [] })).status).toBe(400);
-  });
-
-  test("concurrent writes at one revision let exactly one through", async () => {
-    await writeFixtures();
-    const results = await Promise.all(
-      ["a", "b", "c"].map((draft) => call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft } })),
-    );
-    expect(results.map((result) => result.status).sort()).toEqual([200, 409, 409]);
-  });
-
   test("copyPrivateState copies data and the profile marker to a fork, unpinned", async () => {
     const { oldPath, newPath } = await writeFixtures();
-    await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
-    await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { card: 1 } });
+    await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: true, data: { card: 1 } }));
     await copyPrivateState(oldPath, newPath);
-    expect((await call<StateBody>("GET", `/sessions/${NEW_ID}/state`)).json).toEqual({ revision: 0, data: { card: 1 } });
+    expect(JSON.parse(await readFile(`${newPath}.gigachad.json`, "utf8"))).toEqual({ revision: 0, pinned: false, data: { card: 1 } });
     expect(await isPinned(newPath)).toBe(false);
 
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
@@ -715,10 +687,9 @@ describe("private state", () => {
     expect(JSON.parse(await readFile(`${newPath}.gigachad.json`, "utf8"))).toEqual({ revision: 0, pinned: false, data: {}, profile: "document" });
   });
 
-  test("the profile marker shows in SessionInfo and survives state and pin writes", async () => {
+  test("the profile marker shows in SessionInfo and survives a pin write", async () => {
     const { oldPath } = await writeFixtures();
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
-    await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft: "a" } });
     await call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true });
     expect(JSON.parse(await readFile(`${oldPath}.gigachad.json`, "utf8"))).toMatchObject({ profile: "document", pinned: true });
 
@@ -732,7 +703,7 @@ describe("private state", () => {
 });
 
 describe("file completion", () => {
-  test("ranks git files by fuzzy match, basename first", async () => {
+  test("lists the files git tracks or leaves unignored", async () => {
     const repo = join(scratch, "repo");
     const files = [
       "src/lib/pi_host.py",
@@ -753,15 +724,6 @@ describe("file completion", () => {
     await run(repo, "git", "init", "-q");
     await run(repo, "git", "add", "src/lib/pi_host.py", "README.md");
 
-    const ranked = await call("GET", `/files?cwd=${encodeURIComponent(repo)}&q=pihost&limit=4`);
-    expect(ranked.status).toBe(200);
-    expect(ranked.json.files[0].path).toBe("src/lib/pi_host.py");
-    expect(ranked.json.files).toHaveLength(4);
-    expect(ranked.json.files.map((file) => file.path)).not.toContain("README.md");
-    for (const [index, file] of ranked.json.files.entries()) {
-      if (index > 0) expect(file.score).toBeLessThanOrEqual(ranked.json.files[index - 1].score);
-    }
-
     const all = await call("GET", `/files?cwd=${encodeURIComponent(repo)}&limit=500`);
     const paths = all.json.files.map((file) => file.path);
     expect(paths).toContain(".gitignore");
@@ -777,19 +739,19 @@ describe("file completion", () => {
     await writeFile(join(plain, "notes", "pi_host.md"), "");
     await writeFile(join(plain, "node_modules", "dep", "pi_host.js"), "");
     await writeFile(join(plain, ".cache", "pi_host.bin"), "");
-    const { json } = await call("GET", `/files?cwd=${encodeURIComponent(plain)}&q=pihost`);
+    const { json } = await call("GET", `/files?cwd=${encodeURIComponent(plain)}`);
     expect(json.files.map((file) => file.path)).toEqual(["notes/pi_host.md"]);
   });
 
   test("rejects an invalid cwd", async () => {
-    expect((await call("GET", "/files?cwd=relative&q=x")).status).toBe(400);
+    expect((await call("GET", "/files?cwd=relative")).status).toBe(400);
   });
 
-  test("without a query answers the cached list unranked, whole unless a limit is given (K6)", async () => {
+  test("answers the cached list unranked, whole unless a limit is given (K6)", async () => {
     const many = join(scratch, "many");
     await mkdir(many, { recursive: true });
     for (let index = 0; index < 60; index++) await writeFile(join(many, `file-${index}.txt`), "");
-    const { json } = await call("GET", `/files?cwd=${encodeURIComponent(many)}&q=`);
+    const { json } = await call("GET", `/files?cwd=${encodeURIComponent(many)}`);
     expect(json.files).toHaveLength(60);
     expect(json.files.every((file) => file.score === 0)).toBe(true);
     expect((await call("GET", `/files?cwd=${encodeURIComponent(many)}&limit=5`)).json.files).toHaveLength(5);

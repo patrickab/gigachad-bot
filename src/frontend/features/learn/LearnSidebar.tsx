@@ -7,7 +7,7 @@ import { usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { PillTabs } from "@/components/ui/PillTabs"
-import { useTab } from "@/contexts/TabContext"
+import { itemOf, useTab } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -176,7 +176,7 @@ export function useLearnSidebar({ open, projects, sidebar }: {
   const [actionError, setActionError] = useState<string | null>(null)
   const { renameOf, start: startRenaming } = useInlineRename()
 
-  const shown = tab.workspaceItem?.kind === "learn" ? tab.workspaceItem.learn : undefined
+  const shown = itemOf(tab, "learn")?.learn
   const activeSessionId = shown?.kind === "session" ? shown.sessionId : null
   const listed = sessions.sessions.filter((session) => !pending(`learn:${session.id}`))
   const activeSession = sessions.sessions.find((session) => session.id === activeSessionId) ?? null

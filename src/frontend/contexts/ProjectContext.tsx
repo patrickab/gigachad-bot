@@ -1,14 +1,13 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react"
 import { displayName, type ProjectListItem } from "@/lib/domain/projects"
-import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { useResource } from "@/hooks/useResource"
 import { announceFileChange, announceFileMove } from "@/lib/backend/fileEvents"
-import { forgetProjectDocuments } from "@/lib/backend/resources"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { forgetProjectDocuments, projectsResource } from "@/lib/backend/resources"
+import { refresh } from "@/lib/resource"
 import {
-  listProjects as apiListProjects,
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
   setProjectArchived as apiSetProjectArchived,
@@ -16,8 +15,6 @@ import {
   renameDocument as apiRenameDocument,
   type RenamedDocument,
 } from "@/lib/backend/api"
-
-const PROJECT_CATALOG_KEY = "chat/projects-meta.json"
 
 interface ProjectContextState {
   projects: ProjectListItem[]
@@ -56,29 +53,10 @@ export function useRenameDocument(): (slug: string, path: string, name: string) 
   }, [refreshProjects])
 }
 
-/** Whether two project lists hold the same entries, so a refresh that changed nothing keeps the list's identity. */
-function sameProjects(current: ProjectListItem[], next: ProjectListItem[]): boolean {
-  return current.length === next.length && JSON.stringify(current) === JSON.stringify(next)
-}
-
-/** Owns the project list. Which project a chat belongs to is the tab's `projectSlug`, never provider state. */
+/** Binds the project mutations to the shared project list. Which project a chat belongs to is the tab's `projectSlug`, never provider state. */
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [projects, setProjects] = useState<ProjectListItem[]>([])
-  // Startup refreshes (change-feed replay, the first branch metadata) usually return the list unchanged.
-  // Keeping its identity stops consumers keyed on it, e.g. the sidebar's per-project document reads, from reading again.
-  const applyProjects = useCallback((next: ProjectListItem[]) => {
-    setProjects((current) => sameProjects(current, next) ? current : next)
-  }, [])
-  const refreshProjects = useCallback(async () => {
-    applyProjects(await apiListProjects())
-  }, [applyProjects])
-
-  // Other devices' creates, renames and deletes all rewrite the catalog.
-  useEffect(() => subscribeToChanges((event) => {
-    if (event.resource_kind === "document" && event.resource_key === PROJECT_CATALOG_KEY) void refreshProjects().catch(() => {})
-  }), [refreshProjects])
-
-  useStartupRead("Projects", apiListProjects, applyProjects)
+  const projects = useResource("Projects", projectsResource) ?? NO_PROJECTS
+  const refreshProjects = useCallback(() => refresh(projectsResource), [])
 
   const thenRefresh = useCallback(async <T,>(call: Promise<T>) => {
     const result = await call

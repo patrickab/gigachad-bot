@@ -13,10 +13,11 @@
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { forgetEntries } from "../catalog/entries.ts";
-import { copyPrivateState, markCacheRetention, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
+import { sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import type { DeleteTurnRequest, DeleteTurnResult, Host, SessionMeta } from "../host/index.ts";
 import { forgetMedia } from "../media.ts";
 import { isRecord } from "../json.ts";
+import { copyPrivateState, markCacheRetention, markProfile, profileOf } from "../sidecar.ts";
 import type { SupervisorConfig } from "./config.ts";
 import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
 import type { Health, SocketData, Supervisor } from "./index.ts";

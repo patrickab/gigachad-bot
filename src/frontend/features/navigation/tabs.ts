@@ -1,6 +1,6 @@
 import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { itemOf, scratchItem, showingItem, shownItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { parseFactoryPath } from "@/features/factory/items"
 import { relocatedWorkbenchPath, workbenchKindOf } from "@/lib/domain/workbench"
 import { baseName, isInside, kindOf } from "@/lib/paths"
@@ -15,10 +15,10 @@ function itemName(item: WorkspaceItem, shownName: ShownName): string {
 
 /** A fresh chat tab with `config` over the default tab config. */
 export function nextTab(config?: Partial<TabConfig>): Tab {
-  return { id: `tab-${crypto.randomUUID()}`, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
+  return { id: `tab-${crypto.randomUUID()}`, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, projectSlug: null, workspaceItem: null, itemHidden: false }
 }
 
-/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. A file in the project's workbench folder moves with it. */
+/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. A file in the project's workbench folder moves with it. Reads the held item, shown or not. */
 export function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
   const relocate = (path: string, prefix: string) => path.startsWith(`${prefix}${oldSlug}/`) ? `${prefix}${newSlug}${path.slice(prefix.length + oldSlug.length)}` : path
   const historyFile = tab.historyFile && relocate(tab.historyFile, "")
@@ -43,7 +43,7 @@ export function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
 
 const FILE_ITEM_KINDS: readonly WorkspaceItem["kind"][] = ["canvas", "document", "workbench"]
 
-/** `tab` with its file item moved from `oldPath` to `newPath` after a rename, or `tab` itself. A workbench item keeps its editor session. */
+/** `tab` with its file item moved from `oldPath` to `newPath` after a rename, or `tab` itself. A workbench item keeps its editor session. Reads the held item, shown or not. */
 export function renamedTab(tab: Tab, oldPath: string, newPath: string): Tab {
   const item = tab.workspaceItem
   if (!item || item.path !== oldPath || !FILE_ITEM_KINDS.includes(item.kind)) return tab
@@ -51,7 +51,7 @@ export function renamedTab(tab: Tab, oldPath: string, newPath: string): Tab {
   return { ...tab, workspaceItem: { ...item, path: newPath, ...sessionKey } }
 }
 
-/** The tab to show LaTeX file `item` in as another buffer: a workbench tab whose project folder holds it, the active one first. */
+/** The tab to show LaTeX file `item` in as another buffer: a workbench tab whose project folder holds it, the active one first. Reads the held item, shown or not. */
 export function texProjectTab(tabs: Tab[], item: WorkspaceItem, activeId: string): Tab | undefined {
   if (item.kind !== "workbench" || workbenchKindOf(item.path) !== "latex") return undefined
   const holdsItem = ({ workspaceItem }: Tab) =>
@@ -68,11 +68,11 @@ export function texBufferShown(tab: Tab, path: string): Tab {
 
 /** Whether `item` opens in a new tab, not in `active`: an image from a LaTeX workbench tab, so its Neovim session and unsaved buffers survive. */
 export function opensBesideWorkbench(active: Tab | undefined, item: WorkspaceItem): boolean {
-  const shown = active?.appMode === "workbench" ? active.workspaceItem : null
+  const shown = active && shownItem(active)
   return item.kind === "document" && kindOf(item.path) === "image" && shown?.kind === "workbench" && workbenchKindOf(shown.path) === "latex"
 }
 
-/** The tab already showing file `item` or Pi session `item`, the active one first: opening it again switches there instead of duplicating it. */
+/** The tab already showing file `item` or Pi session `item`, the active one first: opening it again switches there instead of duplicating it. Reads the held item, shown or not. */
 export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: string): Tab | undefined {
   const sessionId = item.kind === "pi" ? item.pi?.sessionId : null
   if (!sessionId && !FILE_ITEM_KINDS.includes(item.kind)) return undefined
@@ -91,8 +91,13 @@ export function parseSavedTabs(raw: string | null): SavedTabs | null {
     const saved = JSON.parse(raw) as Partial<SavedTabs>
     if (!Array.isArray(saved.tabs)) return null
     // An older build's omp tab: omp-web is gone, nothing shows it any more
-    const kept = saved.tabs.filter((tab) => (tab.appMode as string) !== "omp" && (tab.workspaceItem?.kind as string | undefined) !== "omp")
-    const tabs = kept.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: tab.workspaceItem }))
+    const kept = (saved.tabs as (Tab & { appMode?: string })[]).filter((tab) => tab.appMode !== "omp" && (tab.workspaceItem?.kind as string | undefined) !== "omp")
+    const tabs = kept.map(({ appMode, ...tab }): Tab => {
+      // An older build's tab: `appMode` named its surface, "chat" over an item hid it, "canvas" without one was the scratch canvas
+      const workspaceItem = appMode === "canvas" && !tab.workspaceItem ? scratchItem(tab.projectSlug) : tab.workspaceItem
+      const itemHidden = tab.itemHidden ?? (appMode === "chat" && workspaceItem !== null)
+      return { ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem, itemHidden }
+    })
     if (tabs.length === 0) return null
     return { tabs, activeId: tabs.some((tab) => tab.id === saved.activeId) ? saved.activeId! : tabs[0].id }
   } catch {
@@ -100,7 +105,7 @@ export function parseSavedTabs(raw: string | null): SavedTabs | null {
   }
 }
 
-/** The paths of the files `tabs` hold: a tab holds its file item's file whether or not its editor is open, until the tab closes or takes another item. */
+/** The paths of the files `tabs` hold: a tab holds its file item's file whether or not its editor is open, until the tab closes or takes another item. Reads the held item, shown or not. */
 export function filesOfTabs(tabs: readonly Tab[]): Set<string> {
   const files = new Set<string>()
   for (const { workspaceItem } of tabs) {
@@ -118,19 +123,20 @@ export function showsRemoved(tab: Tab, path: string): boolean {
 
 /**
  * `tabs` without the ones showing the deleted `path`, and the tab to show: `activeId` while it stays, else the nearest remaining tab before it, else the first.
- * Every tab gone leaves `fresh` alone.
+ * A tab holding it hidden behind its chat stays and lets go of it. Every tab gone leaves `fresh` alone.
  */
 export function tabsAfterRemoval(tabs: Tab[], path: string, activeId: string, fresh: () => Tab): { tabs: Tab[]; activeId: string } {
   // An empty or root path names no file, every tab would close
   if (path.replace(/\/+$/, "") === "") return { tabs, activeId }
-  const remaining = tabs.filter((tab) => !showsRemoved(tab, path))
-  if (remaining.length === tabs.length) return { tabs, activeId }
+  if (!tabs.some((tab) => showsRemoved(tab, path))) return { tabs, activeId }
+  const kept = tabs.map((tab) => tab.itemHidden && showsRemoved(tab, path) ? { ...tab, workspaceItem: null, itemHidden: false } : tab)
+  const remaining = kept.filter((tab) => !showsRemoved(tab, path))
   if (remaining.length === 0) {
     const replacement = fresh()
     return { tabs: [replacement], activeId: replacement.id }
   }
   if (remaining.some((tab) => tab.id === activeId)) return { tabs: remaining, activeId }
-  const before = tabs.slice(0, tabs.findIndex((tab) => tab.id === activeId)).findLast((tab) => remaining.includes(tab))
+  const before = kept.slice(0, kept.findIndex((tab) => tab.id === activeId)).findLast((tab) => remaining.includes(tab))
   return { tabs: remaining, activeId: (before ?? remaining[0]).id }
 }
 
@@ -142,49 +148,41 @@ export function tabAfterClosing(tabs: Tab[], id: string): string {
 
 /** The Pi session `tab` shows, null for other tabs and a Pi tab before its first message. */
 export function piSessionOf(tab: Tab): string | null {
-  return tab.appMode === "pi" ? tab.workspaceItem?.pi?.sessionId ?? null : null
+  return itemOf(tab, "pi")?.pi?.sessionId ?? null
 }
 
 /** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */
 export function tabLocation(tab: Tab, shownName: ShownName) {
-  if (tab.appMode === "pi") {
-    return { category: "code", file: tab.title ?? (tab.workspaceItem?.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi") }
+  const item = shownItem(tab)
+  switch (item?.kind) {
+    case "pi": return { category: "code", file: tab.title ?? (item.pi ? baseName(item.pi.repo) : "Pi") }
+    case "workbench": return { category: workbenchKindOf(item.path) ?? "files", file: baseName(item.path) }
+    case "factory": {
+      const { repo, taskId } = parseFactoryPath(item.path)
+      return { category: "factory", file: taskId ? "task" : baseName(repo) }
+    }
+    case "learn": return { category: "learn", file: tab.title ?? "Learn" }
+    case "architecture": return { category: "architecture", file: "System overview" }
+    case "canvas": return { category: "canvases", file: itemName(item, shownName) }
+    case "scratch": return { category: "canvases", file: "new.canvas" }
+    case "diff": return { category: "diff", file: baseName(item.path) }
+    case "document": return { category: "files", file: itemName(item, shownName) }
+    default: return { category: "chats", file: tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
   }
-  if (tab.appMode === "workbench") {
-    const kind = tab.workspaceItem ? workbenchKindOf(tab.workspaceItem.path) : null
-    return { category: kind ?? "files", file: tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File" }
-  }
-  if (tab.appMode === "factory") {
-    const factory = tab.workspaceItem ? parseFactoryPath(tab.workspaceItem.path) : null
-    return { category: "factory", file: factory ? factory.taskId ? "task" : baseName(factory.repo) : "board" }
-  }
-  if (tab.appMode === "learn") {
-    return { category: "learn", file: tab.title ?? "Learn" }
-  }
-  if (tab.appMode === "canvas") {
-    return tab.workspaceItem?.kind === "architecture"
-      ? { category: "architecture", file: "System overview" }
-      : { category: "canvases", file: tab.workspaceItem?.kind === "canvas" ? itemName(tab.workspaceItem, shownName) : "new.canvas" }
-  }
-  if (tab.appMode === "document" && tab.workspaceItem?.kind === "diff") {
-    return { category: "diff", file: baseName(tab.workspaceItem.path) }
-  }
-  if (tab.appMode === "document") {
-    return { category: "files", file: tab.workspaceItem ? itemName(tab.workspaceItem, shownName) : "New file" }
-  }
-  return { category: "chats", file: tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
-/** Activity description of `tab` for screen readers; a chat shows its latest mode label. */
+/** Activity description of `tab` for screen readers; a chat and the scratch canvas show their latest mode label. */
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
-  if (tab.appMode !== "chat" && tab.workspaceItem) {
-    if (tab.appMode === "pi") return tab.title ?? (tab.workspaceItem.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi")
-    if (tab.appMode === "learn") return tab.title ?? "Learn"
-    if (tab.appMode === "workbench") return baseName(tab.workspaceItem.path)
-    if (tab.appMode === "factory") return "Factory"
-    return tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName)
+  const item = shownItem(tab)
+  switch (item?.kind) {
+    case "pi": return tab.title ?? (item.pi ? baseName(item.pi.repo) : "Pi")
+    case "learn": return tab.title ?? "Learn"
+    case "workbench": return baseName(item.path)
+    case "factory": return "Factory"
+    case "architecture": return "Architecture"
+    case "canvas": case "document": case "diff": return itemName(item, shownName)
+    default: return modeLabel || "Chat"
   }
-  return modeLabel || "Chat"
 }
 
 /** The tab the tab picker previews and the box in its card the tab is scaled into. */

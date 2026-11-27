@@ -13,23 +13,17 @@ from backend.routes import workbench as workbench_route
 from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 import config
 from lib import extract_queue, latex_templates, pi_host
-from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.git import run_git
 from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench import prompts
 from lib.workbench.links import SessionLinks
 from tests.conftest import mounted_roots, request_identity, route_client
-from tests.fakes import MemoryAssetStore, MemoryDataStore, StoredAsset
+from tests.fakes import MemoryAssetStore, MemoryDataStore, MirroringAssets, StoredAsset
 
 OMP_TOOL_WORDS = ("glob", "`cp`", "shell (", ".omp/", "sed", "perl")
 
 
-class Docs(MemoryDataStore):
-    def is_file(self, key: str) -> bool:
-        return self.exists(key)
-
-
-class RevisionedDocs(Docs):
+class RevisionedDocs(MemoryDataStore):
     """Refuses a stale `expected` revision like `PostgresDataStore` (None writes unguarded).
 
     - With *meet*, reads of the links meet in pairs: two concurrent requests both read before either writes (a lone
@@ -56,24 +50,7 @@ class RevisionedDocs(Docs):
             self._interloper = None
             stored = json.loads(super().read_bytes(key)[0])
             super().write_bytes(key, json.dumps({**stored, path: link}).encode())
-        if expected is not None:
-            try:
-                current = super().read_bytes(key)[1]
-            except StorageNotFoundError:
-                current = None
-            if current != expected:
-                raise StorageConflictError(f"{key} changed")
         return super().write_bytes(key, content, expected=expected, meta=meta)
-
-
-class MirroringAssets(MemoryAssetStore):
-    """Writes mirrors to disk like `AssetStore.mirror`."""
-
-    def mirror(self, asset, root):
-        path = root.joinpath(*asset.logical_path.split("/"))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(asset.content)
-        return path
 
 
 class FakePiHost:
@@ -146,7 +123,7 @@ def host(tmp_path, monkeypatch):
 
 @pytest.fixture
 def docs():
-    return Docs()
+    return MemoryDataStore()
 
 
 @pytest.fixture

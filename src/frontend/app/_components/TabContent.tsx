@@ -26,7 +26,6 @@ import type { PiModel } from "@/features/pi/types"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
 import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { writeRootFile } from "@/lib/backend/api"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
@@ -195,7 +194,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
                 <DocumentEditor
                   path={standaloneFile.path}
                   slug=""
-                  persistOverride={(content) => writeRootFile(standaloneFile.path, content)}
                   onClose={() => filePicker.setStandaloneFile(null)}
                   onModeLabel={setModeLabel}
                   onNavigate={filePicker.openFile}

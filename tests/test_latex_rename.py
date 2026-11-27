@@ -23,13 +23,8 @@ from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope
 PAPER = "\\documentclass{article}\n\\begin{document}\n\\includegraphics{imgs/a}\n\\end{document}\n"
 
 
-class Docs(MemoryDataStore):
-    def is_file(self, key: str) -> bool:
-        return self.exists(key)
-
-
 def client_for(roots, scope):
-    docs = Docs()
+    docs = MemoryDataStore()
     assets = MemoryAssetStore()
     overrides = {
         get_file_roots: roots,

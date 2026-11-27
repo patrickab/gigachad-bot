@@ -156,11 +156,6 @@ def _failed_result(prior_manifest: SandboxManifest | None, error: str) -> Sandbo
     )
 
 
-def _scopes(scope: str | None) -> tuple[str, ...]:
-    """The one validated scope, or every known scope when none is named."""
-    return (sandbox_scope(scope),) if scope is not None else KNOWN_SANDBOX_SCOPES
-
-
 @dataclass(frozen=True)
 class _Slot:
     """One chat's sandbox state in one scope: its runtime key and its durable store."""
@@ -468,9 +463,9 @@ class SandboxService:
                     texts.append(self._assets.read(text_ref["asset_path"]).content.decode("utf-8"))
         return tuple(texts)
 
-    async def delete_chat_state(self, *, chat_id: str, scope: str | None = None) -> None:
+    async def delete_chat_state(self, *, chat_id: str) -> None:
         chat_id = _validate_chat_id(chat_id)
-        for scope_name in _scopes(scope):
+        for scope_name in KNOWN_SANDBOX_SCOPES:
             async with self._slot(chat_id, scope_name) as slot, self._runtime.assets_lock:
                 # Store IO blocks on Postgres, so it runs off the event loop.
                 shas, still_referenced = await asyncio.to_thread(self._delete_durable_state, chat_id, slot)

@@ -81,7 +81,7 @@ const fileLinks = { base: "/repo", open: vi.fn() }
 
 function inTab(transcript: Transcript, revealNoticeRef?: { current: ((key: string) => void) | null }) {
   return (
-    <TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+    <TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
       <PiTranscript transcript={transcript} fileLinks={fileLinks} revealNoticeRef={revealNoticeRef} />
     </TabContext.Provider>
   )

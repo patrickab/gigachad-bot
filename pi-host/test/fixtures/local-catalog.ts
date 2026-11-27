@@ -1,6 +1,7 @@
 /** Catalog entry points bound to a `LocalHost`, the shapes the catalog tests call. */
 import * as catalog from "../../src/catalog/index.ts";
 import { LocalHost } from "../../src/host/local/index.ts";
+import * as sidecar from "../../src/sidecar.ts";
 import { loadConfig } from "../../src/supervisor/config.ts";
 import type { LiveSessions } from "../../src/supervisor/index.ts";
 
@@ -11,9 +12,9 @@ export function handleCatalog(request: Request, url: URL, live: LiveSessions): P
 }
 
 export function isPinned(sessionPath: string): Promise<boolean> {
-  return catalog.isPinned(host, sessionPath);
+  return sidecar.isPinned(host, sessionPath);
 }
 
 export function copyPrivateState(fromPath: string, toPath: string): Promise<void> {
-  return catalog.copyPrivateState(host, fromPath, toPath);
+  return sidecar.copyPrivateState(host, fromPath, toPath);
 }

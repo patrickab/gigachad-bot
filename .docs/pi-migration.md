@@ -115,7 +115,7 @@ Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/g
 | M4 | No code-reload watcher on pi-host: a restart waits until no session runs, or asks. Distinct from the sessions-directory watcher (M25) |
 | M5 | Loopback is no boundary (any page can open a WebSocket to `127.0.0.1`): pi-host requires a shared secret from the backend and checks `Origin` |
 | M6 | Children get an allowlisted environment, backend secrets never reach an agent. Sandboxed children get a seeded, writable agent-dir copy (`settings.json`, `npm/`, no `auth.json`): Pi crashes on a read-only agent dir, and a root process in the container could read a mounted credential |
-| M7 | `@` file completion: pi-host endpoint per cwd, `git ls-files` plus untracked files, fuzzy ranked (`pi-host/src/catalog/files.ts`) |
+| M7 | `@` file completion: pi-host endpoint per cwd, `git ls-files` plus untracked files, listed unranked, the UI ranks (K6) |
 | M9 | Archive and restore: pi-host moves session files to an archive folder and back |
 | M13 | pi-host runs whatever Pi is installed (mise updates it), `redeploy.sh` restarts it when `pi --version` changes |
 | M14 | Production: own systemd unit, `redeploy.sh` restarts pi-host only when its code or the Pi version changed |
@@ -123,7 +123,7 @@ Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/g
 | M16 | pi-host forwards Pi's records unchanged plus a small envelope (attached, replay start and end, lock held, exit) carrying `{streamId, sequence}`. `streamId` changes when the child or the session identity changes, so the client drops its live state. The backend proxies without parsing |
 | M17 | Idle eviction asks extensions first. Pi has no liveness registry over RPC, so an extension with background work (subagents, background tasks) sets a non-empty `setStatus` under the key `session-liveness` and clears it when done. Eviction also skips pinned, attached, running, compacting and dialog-waiting sessions |
 | M18 | One browser WebSocket carries every open Pi session (session ids in the envelope). A socket per tab exhausts HTTP/1.1's six connections per host next to terminals, Neovim and file watches. omp-web's per-session and pooled sockets failed (`~/git/ompweb_original/docs/specs/2026-10-31-browser-transport-experiment-design.md`): command acks queued behind event frames, the ack timeout killed healthy sockets, every redial replayed full snapshots. So liveness never depends on command-ack latency: no ack timeouts on the shared socket |
-| M19 | Private session state: a small revisioned record per session next to its file (UI choices, draft, extension card state), copied on fork |
+| M19 | Private session state: a small revisioned record per session next to its file (UI choices, draft, extension card state), copied on fork (the HTTP route is gone, the sidecar keeps pin, profile and cache retention) |
 | M20 | Pin protects a session from idle eviction and automatic archiving, separate from archive (M9) |
 | M21 | Every attached client may steer and abort. A controlling-client lease is added only if two tabs fighting becomes a real problem |
 | M22 | One resync at a time: reconnect, `visibilitychange`, `online` and a settled run all request a resync, a guard collapses them into one request in flight plus at most one follow-up, so a late response never applies stale state (`~/git/ompweb_original/lib/reconcile-guard.ts`) |

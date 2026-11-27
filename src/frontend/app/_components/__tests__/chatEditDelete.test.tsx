@@ -84,10 +84,10 @@ async function renderChat(historyFile: string | null) {
   let tab: TabContextValue = {
     tab: {
       id: "t1", chatId: "c1", historyFile, title: null,
-      config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, appMode: "chat", projectSlug: null, workspaceItem: null,
+      config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, projectSlug: null, workspaceItem: null, itemHidden: false,
     },
     isActive: true,
-    setModeLabel: noop, updateConfig: noop, setAppMode: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop,
+    setModeLabel: noop, updateConfig: noop, hideItem: noop, dropItem: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop,
   }
   const wrapper = ({ children }: { children: ReactNode }) => <TabContext.Provider value={tab}>{children}</TabContext.Provider>
   const rendered = renderHook(() => useTabChat({ reveal, onOpenChat: noop, onOpenItem: noop }), { wrapper })
@@ -180,6 +180,22 @@ describe("sending a question", () => {
     let sent: Promise<boolean> = Promise.resolve(false)
     act(() => { sent = result.current.turns.handleSend("Late question", []) })
     await waitFor(() => expect(streams.requests).toHaveLength(1))
+
+    const other: Message[] = [{ role: "user", content: "Other question" }, { role: "assistant", content: "Other answer" }]
+    await openChat("c2.json", other)
+    await act(async () => { release(); await sent })
+
+    expect(contents(result.current.chat.messages)).toEqual(contents(other))
+    expect(saveChat).not.toHaveBeenCalled()
+  })
+
+  it("leaves another chat opened after the reply streamed and went idle alone", async () => {
+    const { result, openChat } = await renderChat("c1.json")
+    let release = () => {}
+    streams.beforeDone = new Promise((resolve) => { release = resolve })
+    let sent: Promise<boolean> = Promise.resolve(false)
+    act(() => { sent = result.current.turns.handleSend("Late question", []) })
+    await waitFor(() => expect(result.current.chat.messages.at(-1)?.content).toBe("edited answer"))
 
     const other: Message[] = [{ role: "user", content: "Other question" }, { role: "assistant", content: "Other answer" }]
     await openChat("c2.json", other)

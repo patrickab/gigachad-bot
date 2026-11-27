@@ -41,4 +41,3 @@ def storage_key(path: str | Path) -> str | None:
         return validate_key(text)
     except InvalidStorageKey:
         return None
-

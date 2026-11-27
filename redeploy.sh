@@ -208,13 +208,17 @@ learn_new="$( (source "$prod/deploy/load-env.sh" && "$prod/run-learnharness.sh" 
 learn_old="$(cat "$learn_home/served-commit" 2>/dev/null || true)"
 
 busy="$(busy_learn_sessions 2>/dev/null || echo 0)"
+# What the chat-ui tarball is made of: only these change what LearnHarness is built from.
+chat_ui=src/frontend/packages/chat-ui
+chat_ui_shipped=("$chat_ui/package.json" "$chat_ui/pack.mjs" "$chat_ui/tsconfig.build.json" "$chat_ui/src/learn-protocol.ts"
+    "$chat_ui/src/markdown.css" "$chat_ui/src/palette.css" "$chat_ui/src/fonts.css" "$chat_ui/src/fonts")
 if [[ $busy != 0 ]]; then
     # A restart ends a running turn.
     printf "Learn mode not restarted: %s learn session(s) busy, run systemctl --user restart %s when they are idle\n" \
         "$busy" "$learn_unit" >&2
 else
     if [[ -z $learn_new || $learn_old != "$learn_new" ]] \
-        || ! git diff --quiet "$old" "$new" -- learnharness-overlay src/frontend/packages/chat-ui run-learnharness.sh || ! learn_up; then
+        || ! git diff --quiet "$old" "$new" -- learnharness-overlay "${chat_ui_shipped[@]}" run-learnharness.sh || ! learn_up; then
         if [[ -n $learn_old && -n $learn_new && $learn_old != "$learn_new" ]]; then
             git -C "$learn_repo" --no-pager log --oneline "$learn_old..$learn_new" || true
             printf "LearnHarness moves to another commit: its data is snapshotted to %s/snapshots/ first\n" "$learn_home"

@@ -45,7 +45,7 @@ function Attach({ view }: { view: LearnView }) {
 
 /** The learn top bar's model controls over a fake frame at `version`. */
 function mountTopBar(view: LearnView, version = LEARN_PROTOCOL_VERSION, onProvidersChange = vi.fn()) {
-  const tab = { tab: { chatId: "c1", projectSlug: null } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
+  const tab = { tab: { chatId: "c1", projectSlug: null } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
   const rendered = render(
     <LearnProvider onOpenItem={vi.fn()}>
       <Attach view={view} />

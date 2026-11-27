@@ -242,14 +242,7 @@
   outline: 2px solid var(--divider-strong);
   outline-offset: 2px;
 }
-.gc-turn-spin {
-  animation: gc-turn-spin 1s linear infinite;
-}
-@keyframes gc-turn-spin {
-  to { transform: rotate(360deg); }
-}
 @media (prefers-reduced-motion: reduce) {
   .gc-turn,
   .gc-turn-actions { transition: none; }
-  .gc-turn-spin { animation: none; }
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { newPiItem, showingItem, type WorkspaceItem } from "@/contexts/TabContext"
+import { newPiItem, showingItem, tabSurface, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { factoryItem } from "@/features/factory/items"
 import { nextTab, parseSavedTabs, piSessionOf, relocatedTab, renamedTab, tabLabel, tabLocation, tabShowingItem, tabsAfterRemoval, texBufferShown, texProjectTab } from "../tabs"
 
-const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
+const tabWith = (item: WorkspaceItem) => ({ ...nextTab(), ...showingItem(item) })
 
 describe("relocatedTab", () => {
   it("moves an open workbench file with its project folder", () => {
@@ -14,7 +14,7 @@ describe("relocatedTab", () => {
   })
 
   it("moves a workbench file opened outside the project", () => {
-    const tab = tabWith({ kind: "workbench", path: "/data/workbench/markdown/old/plan/plan.md", projectSlug: null, rootFile: true })
+    const tab = tabWith({ kind: "workbench", path: "/data/workbench/markdown/old/plan/plan.md", projectSlug: null })
     expect(relocatedTab(tab, "old", "new").workspaceItem?.path).toBe("/data/workbench/markdown/new/plan/plan.md")
   })
 
@@ -26,7 +26,7 @@ describe("relocatedTab", () => {
   it("leaves other projects' files and look-alike paths alone", () => {
     const other = tabWith({ kind: "workbench", path: "/data/workbench/latex/other/thesis/thesis.tex", projectSlug: "other" })
     expect(relocatedTab(other, "old", "new")).toBe(other)
-    const lookAlike = tabWith({ kind: "workbench", path: "/home/me/notes/latex/old/thesis.tex", projectSlug: null, rootFile: true })
+    const lookAlike = tabWith({ kind: "workbench", path: "/home/me/notes/latex/old/thesis.tex", projectSlug: null })
     expect(relocatedTab(lookAlike, "old", "new")).toBe(lookAlike)
   })
 })
@@ -45,8 +45,8 @@ describe("renamedTab", () => {
   it("moves a stored document and a mounted file without a session key", () => {
     const stored = tabWith({ kind: "document", path: "project/proj/document/notes.md", projectSlug: "proj" })
     expect(renamedTab(stored, "project/proj/document/notes.md", "project/proj/document/ideas.md").workspaceItem).toEqual({ kind: "document", path: "project/proj/document/ideas.md", projectSlug: "proj" })
-    const mounted = tabWith({ kind: "document", path: "/src/a.md", projectSlug: null, rootFile: true })
-    expect(renamedTab(mounted, "/src/a.md", "/src/b.md").workspaceItem).toEqual({ kind: "document", path: "/src/b.md", projectSlug: null, rootFile: true })
+    const mounted = tabWith({ kind: "document", path: "/src/a.md", projectSlug: null })
+    expect(renamedTab(mounted, "/src/a.md", "/src/b.md").workspaceItem).toEqual({ kind: "document", path: "/src/b.md", projectSlug: null })
   })
 
   it("leaves tabs of other files and kinds alone", () => {
@@ -65,9 +65,9 @@ describe("renamedTab", () => {
 describe("tabsAfterRemoval", () => {
   const FOLDER = "/data/workbench/latex/proj/paper"
   const workbench = tabWith({ kind: "workbench", path: `${FOLDER}/paper.tex`, projectSlug: "proj", texFolder: FOLDER })
-  const image = tabWith({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj", rootFile: true })
+  const image = tabWith({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj" })
   const note = tabWith({ kind: "document", path: "project/proj/document/notes.md", projectSlug: "proj" })
-  const lookAlike = tabWith({ kind: "document", path: `${FOLDER}-copy/figure.png`, projectSlug: "proj", rootFile: true })
+  const lookAlike = tabWith({ kind: "document", path: `${FOLDER}-copy/figure.png`, projectSlug: "proj" })
   const fresh = () => nextTab()
 
   it("closes the tabs showing a deleted folder's files and its workbench, even one showing another buffer of it", () => {
@@ -91,7 +91,7 @@ describe("tabsAfterRemoval", () => {
   it("replaces the last tab with a fresh one and leaves untouched tabs identical", () => {
     const only = tabsAfterRemoval([workbench, image], FOLDER, workbench.id, fresh)
     expect(only.tabs).toHaveLength(1)
-    expect(only.tabs[0]).toMatchObject({ appMode: "chat", workspaceItem: null })
+    expect(only.tabs[0]).toMatchObject({ workspaceItem: null, itemHidden: false })
     expect(only.activeId).toBe(only.tabs[0].id)
 
     const tabs = [note, lookAlike, { ...nextTab() }]
@@ -131,9 +131,9 @@ describe("texProjectTab", () => {
 
 describe("texBufferShown", () => {
   it("moves the item to the file and keeps its session, chat and folder", () => {
-    const tab = { ...tabWith({ kind: "workbench", path: "/repo/paper/main.tex", projectSlug: "proj", texFolder: "/repo/paper", chat: { sessionId: "p1" } }), appMode: "chat" as const }
+    const tab = { ...tabWith({ kind: "workbench", path: "/repo/paper/main.tex", projectSlug: "proj", texFolder: "/repo/paper", chat: { sessionId: "p1" } }), itemHidden: true }
     const shown = texBufferShown(tab, "/repo/paper/refs.bib")
-    expect(shown.appMode).toBe("workbench")
+    expect(tabSurface(shown)).toBe("workbench")
     expect(shown.workspaceItem).toEqual({
       kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: "proj", texFolder: "/repo/paper", chat: { sessionId: "p1" }, sessionKey: "/repo/paper/main.tex",
     })
@@ -197,6 +197,17 @@ describe("parseSavedTabs", () => {
     expect(parseSavedTabs(JSON.stringify({ tabs: [omp], activeId: omp.id }))).toBeNull()
   })
 
+  it("reads an old build's chat over an item as hidden and its canvas without item as the scratch canvas", () => {
+    // An old build saved `appMode` and no `itemHidden`
+    const saved = (tab: Tab, appMode: string) => ({ ...tab, itemHidden: undefined, appMode })
+    const held = tabWith({ kind: "document", path: "notes.md", projectSlug: "proj" })
+    const scratch = { ...nextTab(), projectSlug: "proj" }
+    const { tabs } = parseSavedTabs(JSON.stringify({ tabs: [saved(held, "chat"), saved(scratch, "canvas")], activeId: held.id }))!
+    expect(tabs[0]).toEqual({ ...held, itemHidden: true })
+    expect(tabs[1]).toMatchObject({ workspaceItem: { kind: "scratch", path: "", projectSlug: "proj" }, itemHidden: false })
+    expect(tabs[1]).not.toHaveProperty("appMode")
+  })
+
 })
 
 describe("Pi tabs", () => {
@@ -204,7 +215,7 @@ describe("Pi tabs", () => {
     const item = newPiItem("/home/me/git/app/", "proj")
     expect(item).toEqual({ kind: "pi", path: "app", projectSlug: "proj", pi: { sessionId: null, repo: "/home/me/git/app" } })
     const tab = { ...nextTab(), ...showingItem(item) }
-    expect(tab.appMode).toBe("pi")
+    expect(tabSurface(tab)).toBe("pi")
     expect(tabLocation(tab, () => undefined)).toEqual({ category: "code", file: "app" })
     expect(tabLabel(tab, undefined, () => undefined)).toBe("app")
   })
@@ -213,7 +224,7 @@ describe("Pi tabs", () => {
 describe("factory tabs", () => {
   it("locates a board by its repo's folder and a task as a task, a renamed tab by its name", () => {
     const board = { ...nextTab(), ...showingItem(factoryItem("/home/me/git/app")) }
-    expect(board.appMode).toBe("factory")
+    expect(tabSurface(board)).toBe("factory")
     expect(tabLocation(board, () => undefined)).toEqual({ category: "factory", file: "app" })
     const task = { ...nextTab(), ...showingItem(factoryItem("/home/me/git/app", "0123456789abcdef0123456789abcdef")) }
     expect(tabLocation(task, () => undefined)).toEqual({ category: "factory", file: "task" })

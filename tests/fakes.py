@@ -19,7 +19,7 @@ from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, 
 from config import TEST_MODEL
 from lib import sandbox_plot, tools
 from lib.agent_sandbox_adapter import SandboxScriptError
-from lib.data_store import Entry, Revision, StorageNotFoundError
+from lib.data_store import Entry, Revision, StorageConflictError, StorageNotFoundError
 from lib.pi_host import Repository
 from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult, write_temp_tar
 from lib.tool_context import ToolContext, ToolOptions
@@ -40,7 +40,7 @@ class RecordingScope:
 
 
 class MemoryDataStore:
-    """Document store over a dict: no revisions are enforced and listing ignores depth."""
+    """Document store over a dict: revisions are content hashes and enforced, listing ignores depth."""
 
     def __init__(self) -> None:
         self._documents: dict[str, bytes] = {}
@@ -59,7 +59,9 @@ class MemoryDataStore:
     def write_bytes(
         self, key: str, content: bytes, *, expected: Revision | None = None, meta: dict[str, Any] | None = None
     ) -> Revision:
-        del expected, meta
+        del meta
+        if expected is not None and (key not in self._documents or self.read_bytes(key)[1] != expected):
+            raise StorageConflictError(key)
         self._documents[key] = content
         self._modified[key] = datetime.now(UTC)
         return Revision(hashlib.sha256(content).hexdigest())
@@ -68,6 +70,9 @@ class MemoryDataStore:
         self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str], *, meta: dict[str, dict[str, Any]] | None = None
     ) -> list[Revision]:
         del meta
+        for key, _content, expected in writes:
+            if expected is not None and (key not in self._documents or self.read_bytes(key)[1] != expected):
+                raise StorageConflictError(key)
         revisions = [self.write_bytes(key, content, expected=expected) for key, content, expected in writes]
         for key in deletes:
             self.delete(key)
@@ -83,6 +88,9 @@ class MemoryDataStore:
         ]
 
     def exists(self, key: str) -> bool:
+        return key in self._documents
+
+    def is_file(self, key: str) -> bool:
         return key in self._documents
 
     def mkdir(self, key: str) -> None:
@@ -153,6 +161,16 @@ class MemoryAssetStore:
 
     def mirror(self, asset: StoredAsset, root: Path) -> None:
         """Nextcloud mirroring is out of scope for in-memory tests."""
+
+
+class MirroringAssets(MemoryAssetStore):
+    """Writes mirrors to disk like `AssetStore.mirror`."""
+
+    def mirror(self, asset, root):
+        path = root.joinpath(*asset.logical_path.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(asset.content)
+        return path
 
 
 class SandboxServiceStub:

@@ -14,10 +14,6 @@ from lib.data_store import StorageConflictError
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
 
-class SaveRequest(ChatSnapshot):
-    expected_revision: str | None = None
-
-
 class MoveRequest(BaseModel):
     filename: str
     target_dir: str
@@ -74,14 +70,12 @@ def load_chat_history(filename: str, store: ChatStore = Depends(get_chat_store))
 @router.put("/{filename:path}")
 async def save_chat_history(
     filename: str,
-    data: SaveRequest | None = None,
+    data: ChatSnapshot | None = None,
     store: ChatStore = Depends(get_chat_store),
 ) -> dict[str, str]:
-    """Save a chat, 409 when `expected_revision` is stale."""
+    """Save a chat."""
     with http_errors(((StorageConflictError, ValueError), 409, None)):
-        payload = data.model_dump() if data else None
-        expected_revision = payload.pop("expected_revision", None) if payload else None
-        return await asyncio.to_thread(store.save, filename, payload, expected_revision=expected_revision)
+        return await asyncio.to_thread(store.save, filename, data.model_dump() if data else None)
 
 
 @router.delete("/cascade/{filename:path}")

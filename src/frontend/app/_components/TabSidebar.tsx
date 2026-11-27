@@ -9,7 +9,7 @@ import { Sidebar } from "@/features/navigation/Sidebar"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
-import { itemOf, useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { itemOf, scratchItem, tabSurface, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useResource } from "@/hooks/useResource"
 import { modelsResource, promptsResource } from "@/lib/backend/resources"
 
@@ -25,8 +25,8 @@ interface TabSidebarProps {
 
 /** One tab's sidebar, fed only by stable callbacks and stores the chat stream never touches. */
 export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRenamed, onNewChat, onOpenItem, onEditPrompts }: TabSidebarProps) {
-  const { tab, updateConfig, setWorkspaceItem } = useTab()
-  const { config, appMode } = tab
+  const { tab, updateConfig, setWorkspaceItem, dropItem } = useTab()
+  const { config, workspaceItem, itemHidden, projectSlug } = tab
   const { researchEnabled } = useEnabledTools()
   // The workbench needs Neovim for the source and host access for its Pi chats and the LaTeX build
   const neovimEnabled = useNeovimSetting().enabled
@@ -36,12 +36,14 @@ export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRen
   const canvasPath = itemOf(tab, "canvas")?.path ?? null
 
   const onCanvasDeleted = useCallback((path: string) => {
-    if (canvasPath === path) setWorkspaceItem(null)
-  }, [canvasPath, setWorkspaceItem])
+    if (workspaceItem?.kind !== "canvas" || workspaceItem.path !== path) return
+    if (itemHidden) dropItem()
+    else setWorkspaceItem(scratchItem(projectSlug))
+  }, [workspaceItem, itemHidden, projectSlug, dropItem, setWorkspaceItem])
   const renderSettings = useCallback(() => (
     <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={onEditPrompts} models={models} researchEnabled={researchEnabled} />
   ), [prompts, config, updateConfig, onEditPrompts, models, researchEnabled])
-  const activeDocumentPath = appMode === "document" ? itemOf(tab, "document")?.path : appMode === "workbench" ? itemOf(tab, "workbench")?.path : null
+  const activeDocumentPath = (itemOf(tab, "document") ?? itemOf(tab, "workbench"))?.path
 
   return (
     <Sidebar
@@ -54,7 +56,7 @@ export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRen
       workbench={neovimEnabled && hostAccess}
       onItemOpen={onOpenItem}
       renderSettings={renderSettings}
-      appMode={appMode}
+      appMode={tabSurface(tab)}
     />
   )
 })

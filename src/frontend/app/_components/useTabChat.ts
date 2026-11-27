@@ -5,7 +5,7 @@ import type { ChatReveal } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 import { useBranchActions } from "@/features/navigation/BranchContext"
-import { useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { shownItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
 import { useChatTurns } from "@/features/chat/useChatTurns"
@@ -21,7 +21,8 @@ import { useEventListener } from "@/hooks/useEventListener"
 /** Run one tab's chat (history, turns, attachments, shortcuts); called in every mode so the chat survives mode switches. */
 export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatReveal; onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
   const { tab, isActive, updateConfig, setHistoryFile, setTitle } = useTab()
-  const { projectSlug, config, appMode } = tab
+  const { projectSlug, config } = tab
+  const chatShown = shownItem(tab) === null
   const chat = useChat()
   const { messages, cancel, reset, models, prompts, setMessages, totalUsage, setTotalUsage } = chat
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranchActions()
@@ -41,7 +42,7 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
 
   const filePicker = useFilePicker({ hasMessages: messages.length > 0, chatInputRef, track, onOpenItem })
   const filesEnabled = filePicker.rootFiles.enabled
-  const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, track })
+  const docs = useProjectDocuments({ isActive, chatShown, projectSlug, chatId, chatInputRef, track })
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
   const turns = useChatTurns({
     chat,
@@ -108,7 +109,7 @@ export function useTabChat({ reveal, onOpenChat, onOpenItem }: { reveal: ChatRev
       e.preventDefault()
       if (filesEnabled) filePicker.openFilePicker()
     }
-  }, { active: isActive && appMode === "chat", capture: true })
+  }, { active: isActive && chatShown, capture: true })
 
   // One object per chat: its members read the latest messages through refs, so the settled pairs they reach skip streamed frames
   const attachmentActions = useMemo(() => ({

@@ -24,11 +24,11 @@ const noop = () => {}
 /** Provides a tab whose frontmost state is `value`. */
 function TabActiveProvider({ value, children }: { value: boolean; children: React.ReactNode }) {
   const tab: TabContextValue = {
-    tab: { id: "t1", chatId: "c1", historyFile: null, title: null, config: DEFAULT_TAB_CONFIG, appMode: "canvas", projectSlug: null, workspaceItem: null },
+    tab: { id: "t1", chatId: "c1", historyFile: null, title: null, config: DEFAULT_TAB_CONFIG, projectSlug: null, workspaceItem: { kind: "scratch", path: "", projectSlug: null }, itemHidden: false },
     isActive: value,
     setModeLabel: noop,
     updateConfig: noop,
-    setAppMode: noop,
+    hideItem: noop, dropItem: noop,
     setWorkspaceItem: noop,
     setHistoryFile: noop,
     setTitle: noop,
@@ -387,7 +387,7 @@ describe("Escape inside a canvas overlay", () => {
     const { container } = render(
       <UndoDeleteProvider>
         <TabActiveProvider value>
-          <FileCanvasEditor path="project/proj/document/overlay.canvas" slug="proj" onClose={onClose} persistOverride={async () => {}} />
+          <FileCanvasEditor path="project/proj/document/overlay.canvas" slug="proj" onClose={onClose} />
         </TabActiveProvider>
       </UndoDeleteProvider>,
     )

@@ -64,8 +64,5 @@ def test_a_segment_is_one_visible_name_without_separators_or_control_characters(
         segment(name)
 
 
-def test_a_segment_may_be_hidden_on_request():
+def test_a_segment_is_a_plain_name():
     assert segment("main.tex") == "main.tex"
-    assert segment(".gitignore", hidden=True) == ".gitignore"
-    with pytest.raises(ValueError, match="Invalid name"):
-        segment("..", hidden=True)

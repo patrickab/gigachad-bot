@@ -22,12 +22,7 @@ from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_CHATS
 from lib.workbench.links import Link, SessionLinks
 from tests.conftest import PRESENTATION_SOURCE, mounted_roots, request_identity, route_client
-from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope, StoredAsset
-
-
-class Docs(MemoryDataStore):
-    def is_file(self, key: str) -> bool:
-        return self.exists(key)
+from tests.fakes import MemoryAssetStore, MemoryDataStore, MirroringAssets, RecordingScope, StoredAsset
 
 
 @pytest.fixture
@@ -46,7 +41,7 @@ def vault(tmp_path):
 
 @pytest.fixture
 def docs():
-    return Docs()
+    return MemoryDataStore()
 
 
 @pytest.fixture
@@ -85,16 +80,6 @@ def workbench_client(projects, docs, roots, relocate=None, host_access=True, ass
 @pytest.fixture
 def client(root, vault, docs, projects, scope):
     return workbench_client(projects, docs, mounted_roots(vault, root), scope=scope)
-
-
-class MirroringAssets(MemoryAssetStore):
-    """Writes mirrors to disk like `AssetStore.mirror`."""
-
-    def mirror(self, asset, root):
-        path = root.joinpath(*asset.logical_path.split("/"))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(asset.content)
-        return path
 
 
 @pytest.fixture

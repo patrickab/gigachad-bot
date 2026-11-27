@@ -3,15 +3,15 @@ import { createRef, useContext } from "react"
 import { act, cleanup, render } from "@testing-library/react"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { TabStripContext, filesOfTabs, nextTab, type TabStripValue } from "@/features/navigation/tabs"
-import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
+import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { onFileClosed } from "@/lib/backend/fileEvents"
 
 vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: () => () => {} }))
 vi.mock("@/contexts/ProjectContext", () => ({ useDisplayName: () => () => undefined }))
 
 const NOTEBOOK = "/work/a.ipynb"
-const tabShowing = (item: WorkspaceItem): Tab => ({ ...nextTab(), appMode: "document", workspaceItem: item })
-const notebookTab = (path = NOTEBOOK) => tabShowing({ kind: "document", path, projectSlug: null, rootFile: true })
+const tabShowing = (item: WorkspaceItem): Tab => ({ ...nextTab(), ...showingItem(item) })
+const notebookTab = (path = NOTEBOOK) => tabShowing({ kind: "document", path, projectSlug: null })
 
 afterEach(cleanup)
 
@@ -47,7 +47,7 @@ describe("files closed by tabs", () => {
     const tab = notebookTab()
     act(() => manager.current!.openTab(tab))
     act(() => manager.current!.switchToTab(tab.id))
-    act(() => manager.current!.showItem({ kind: "document", path: "/work/b.ipynb", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "document", path: "/work/b.ipynb", projectSlug: null }))
     expect(closed).toEqual([NOTEBOOK])
     stop()
   })

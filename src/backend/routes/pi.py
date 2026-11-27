@@ -8,7 +8,7 @@
 - `POST /pastes` stores a video pasted into a Pi composer in the session folder's `.pi/pastes/` (`lib.pi_pastes`), the
   composer mentions it and the user's Pi extension `~/.pi/agent/extensions/video-paste.ts` (from `~/.os`) previews it
 - pi-host failures map to HTTP: unreachable 503, unknown shape 502, refusal keeps its status and answers
-  `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`, 409 stale state with the current `{revision, data}`)
+  `{"detail": <error text>, "body": <pi-host body>}` (409 `locked`)
 - `GET /media/{sha256}` and `/media/{sha256}/thumb`: tool-result images pi-host stored under their content hash, and a
   480px WebP of one (`lib.pi_media`). The hash is the whole identity, so both answer `ETag` + `immutable` and a repeat
   with `If-None-Match` is a 304 without asking pi-host
@@ -69,7 +69,6 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 
 # Pi session ids are UUIDs, the pattern keeps anything else out of pi-host's URL space.
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]+$")]
-
 
 
 class RepositoryOut(BaseModel):
@@ -156,11 +155,6 @@ async def post_session(body: OpenSessionBody) -> pi_host.SessionAnswer:
     return pi_host.SessionAnswer(session=session)
 
 
-@http_router.post("/sessions/{session_id}/close", status_code=204)
-async def post_close(session_id: SessionId) -> None:
-    await _call(pi_host.close_session(session_id))
-
-
 @http_router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: SessionId) -> None:
     await _call(pi_host.delete_session(session_id))
@@ -192,17 +186,6 @@ async def post_restore(session_id: SessionId) -> pi_host.SessionAnswer:
 @http_router.put("/sessions/{session_id}/pin")
 async def put_pin(session_id: SessionId, body: PinBody) -> pi_host.SessionAnswer:
     return pi_host.SessionAnswer(session=await _call(pi_host.pin_session(session_id, body.pinned)))
-
-
-@http_router.get("/sessions/{session_id}/state")
-async def get_state(session_id: SessionId) -> pi_host.SessionState:
-    return await _call(pi_host.session_state(session_id))
-
-
-@http_router.put("/sessions/{session_id}/state")
-async def put_state(session_id: SessionId, body: pi_host.SessionState) -> pi_host.StateRevision:
-    """Store the session's private state, *body.revision* being the one read. A stale one answers 409 with the current state."""
-    return pi_host.StateRevision(revision=await _call(pi_host.write_session_state(session_id, body)))
 
 
 @http_router.get("/sessions/{session_id}/entries")
@@ -253,15 +236,14 @@ async def get_files(
     roots: Annotated[FileRoots, Depends(get_file_roots)],
     repo: str | None = None,
     cwd: str | None = None,
-    q: str = "",
     limit: int | None = Query(default=None, ge=1, le=500),
 ) -> pi_host.FileList:
-    """Files of *repo*, or of the absolute folder *cwd* of a workbench chat, fuzzy-ranked against *q* (50 unless
-    *limit*), for `@` completion. Without *q* the whole list unranked unless *limit* is given (K6: the UI ranks it)."""
+    """Files of *repo*, or of the absolute folder *cwd* of a workbench chat, for `@` completion: the whole list unranked,
+    cut to *limit* when given (K6: the UI ranks it)."""
     if (repo is None) == (cwd is None):
         raise HTTPException(status_code=400, detail="Give either repo or cwd")
     folder = await asyncio.to_thread(_cwd, repo) if repo is not None else await asyncio.to_thread(_allowed_cwd, cwd, roots)
-    return pi_host.FileList(files=await _call(pi_host.find_files(folder, q, limit)))
+    return pi_host.FileList(files=await _call(pi_host.find_files(folder, "", limit)))
 
 
 @http_router.post("/pastes")

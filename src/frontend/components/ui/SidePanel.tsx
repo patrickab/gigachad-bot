@@ -82,23 +82,22 @@ function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: 
  *
  * - Opens and closes by easing its width, the gutter to the edge and its opacity follow, the content slides with the edge
  * - Stays mounted while closed (state, scroll position and Neovim survive), then inert and hidden from assistive tech
- * - `onWidthChange` makes the inner edge a drag handle between `minWidth` and `maxWidth`, the owner keeps the width
+ * - `onWidthChange` makes the inner edge a drag handle between `MIN_WIDTH` and `maxWidth`, the owner keeps the width
  * - Scrolling content goes in a `SidePanelScroll`
  */
-export function SidePanel({ side, open, width, onWidthChange, minWidth = MIN_WIDTH, maxWidth = MAX_WIDTH, label, className, children }: {
+export function SidePanel({ side, open, width, onWidthChange, maxWidth = MAX_WIDTH, label, className, children }: {
   side: Side
   open: boolean
   /** Open width in px. */
   width: number
   onWidthChange?: (width: number) => void
-  minWidth?: number
   maxWidth?: number
   /** Accessible name of the panel landmark. */
   label?: string
   className?: string
   children: ReactNode
 }) {
-  const { cardWidth, contentWidth, handlePointerDown } = usePanelWidth(side, open, width, onWidthChange, minWidth, maxWidth)
+  const { cardWidth, contentWidth, handlePointerDown } = usePanelWidth(side, open, width, onWidthChange, MIN_WIDTH, maxWidth)
   const gutter = useTransform(cardWidth, (px) => Math.min(GUTTER_PX, px))
   return (
     <motion.aside

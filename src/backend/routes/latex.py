@@ -63,9 +63,8 @@ class TemplateSetEntry(BaseModel):
 
 
 class SynctexPoint(BaseModel):
-    """A point of the PDF of the root document *path*: 1-based *page*, PDF points from its top-left corner, the clicked *word*.
-
-    The clicked character's 0-based *offset* in it and the word's 0-based *occurrence* among equal words of its rendered line.
+    """A point of the PDF of the root document *path*: 1-based *page*, PDF points from its top-left corner, the clicked *word*,
+    the clicked character's 0-based *offset* in it and the word's 0-based *occurrence* among equal words of its rendered line.
     """
 
     path: str

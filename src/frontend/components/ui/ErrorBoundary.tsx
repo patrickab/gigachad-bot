@@ -6,8 +6,6 @@ interface ErrorBoundaryProps {
   children: ReactNode
   /** Label of the reset button. */
   resetLabel?: string
-  /** Called on reset, before the children render again. */
-  onReset?: () => void
   /** Fill the viewport instead of the parent (the app root). */
   fullscreen?: boolean
 }
@@ -27,7 +25,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   private reset = () => {
-    this.props.onReset?.()
     this.setState({ error: null })
   }
 

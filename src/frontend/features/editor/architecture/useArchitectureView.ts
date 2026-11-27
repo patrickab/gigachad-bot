@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { applyArchitectureOperations, readArchitecture } from "@/lib/backend/api"
+import { applyArchitectureOperations } from "@/lib/backend/api"
 import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/architecture"
-import { subscribeToChanges, syncCursorReady } from "@/lib/backend/syncStream"
+import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { architectureResource } from "@/lib/backend/resources"
+import { useResource } from "@/hooks/useResource"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { errorMessage } from "@/lib/utils"
 import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode } from "./diagramGraph"
@@ -12,12 +14,12 @@ export type Mutate = (write: () => Promise<ArchitectureWorkspace>) => Promise<Ar
 /**
  * A `.c4` file of a project's architecture, drawn through the view it opens
  * in: a system's own `view x of x`, its system's view for a module, or a
- * saved view. Reads and writes of the model run one at a time in order; each
+ * saved view. Every window of a project shows its one shared workspace. Writes run one at a time in order; each
  * write is validated by the server against the model as it is then, so a
  * stale edit is refused with a reason instead of overwriting newer work.
  */
 export function useArchitectureView(slug: string, file: string) {
-  const [workspace, setWorkspace] = useState<ArchitectureWorkspace | null>(null)
+  const workspace = useResource(null, architectureResource(slug)) ?? null
   // A refused edit, cleared by the next one; and a failed read, cleared by the next successful read.
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -26,14 +28,14 @@ export function useArchitectureView(slug: string, file: string) {
   const queueRef = useRef<Promise<void>>(Promise.resolve())
   const inFlightRef = useRef(0)
 
-  // Queues a write or a read; its answer, the whole workspace, replaces the shown one.
+  // Queues a write; its answer, the whole workspace, replaces the one every window of the project shows.
   // A failure rejects with the server's reason, which the caller shows.
   const mutate: Mutate = useCallback((write) => {
     inFlightRef.current += 1
     const result = queueRef.current.then(async () => {
       try {
         const next = await write()
-        setWorkspace(next)
+        architectureResource(slug).set(next)
         return next
       } finally {
         inFlightRef.current -= 1
@@ -43,35 +45,26 @@ export function useArchitectureView(slug: string, file: string) {
     })
     queueRef.current = result.then(() => undefined, () => undefined)
     return result
-  }, [])
+  }, [slug])
 
-  // The only way the model is read: on opening and when another device changes it.
-  // A read waits its turn behind queued writes, so it never replaces a newer write's answer. While it
-  // waits, `queuedReadRef` holds its slug, and further requests for that slug share it.
-  const queuedReadRef = useRef<string | null>(null)
-  const refresh = useCallback(() => {
-    if (queuedReadRef.current === slug) return
-    queuedReadRef.current = slug
-    mutate(() => {
-      queuedReadRef.current = null
-      // After the change feed holds its head, so a change racing this read still arrives as an event.
-      return syncCursorReady().then(() => readArchitecture(slug))
-    }).then(() => setLoadError(null), (cause: unknown) => setLoadError(errorMessage(cause, "Could not load the architecture")))
-  }, [mutate, slug])
+  // Join the project's read, which windows reading in one task share; a write during it is never replaced by its answer.
+  const read = useCallback(() => {
+    architectureResource(slug).load()
+      .then(() => setLoadError(null), (cause: unknown) => setLoadError(errorMessage(cause, "Could not load the architecture")))
+  }, [slug])
 
-  // Another file's project starts from nothing: no stale model, refusal, or load failure.
+  // Another file's project starts with no refusal or load failure.
   useResetOnChange(slug, () => {
-    setWorkspace(null)
     setError(null)
     setLoadError(null)
   })
-  useEffect(() => { refresh() }, [refresh])
+  // A window opening on a project another window already shows reads nothing.
+  useEffect(() => { if (architectureResource(slug).get() === undefined) read() }, [slug, read])
 
-  // Writes from this device are already reflected locally; anyone else's reload the model.
+  // `watchDocumentLists` reads the model again on another device's change; the window joins that read to show its failure.
   useEffect(() => subscribeToChanges((event) => {
-    if (event.resource_kind !== "document" || !event.resource_key.startsWith(`graph/${slug}/`)) return
-    refresh()
-  }), [slug, refresh])
+    if (event.resource_kind === "document" && event.resource_key.startsWith(`graph/${slug}/`)) read()
+  }), [slug, read])
 
   // How the tree lists `file`, and the view it opens in (a module opens its system's).
   const entry = useMemo(() => workspace?.model.tree.find((candidate) => candidate.path === file) ?? null, [workspace, file])

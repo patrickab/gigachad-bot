@@ -490,7 +490,7 @@ def test_a_moved_delete_route_keeps_the_project(monkeypatch, store):
 
 
 class _RacedDataStore(MemoryDataStore):
-    """Enforces revisions. `race` runs once, right before the next guarded write: another writer of the same file."""
+    """`race` runs once, right before the next guarded write: another writer of the same file."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -500,8 +500,6 @@ class _RacedDataStore(MemoryDataStore):
         if expected is not None and (race := self.race) is not None:
             self.race = None
             race()
-        if expected is not None and key in self._documents and self.read_bytes(key)[1] != expected:
-            raise StorageConflictError(key)
         return super().write_bytes(key, content, expected=expected, meta=meta)
 
 

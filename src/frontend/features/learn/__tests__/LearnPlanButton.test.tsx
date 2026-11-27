@@ -25,7 +25,7 @@ function Attach({ view }: { view: LearnView }) {
 
 /** The learn top bar's Plan button on a tab showing `view`, over a fake frame. */
 function mountPlanButton(view: LearnView) {
-  const tab = { tab: { chatId: "c1", projectSlug: "p1" } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
+  const tab = { tab: { chatId: "c1", projectSlug: "p1" } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
   const onOpenItem = vi.fn()
   const rendered = render(
     <LearnProvider onOpenItem={onOpenItem}>

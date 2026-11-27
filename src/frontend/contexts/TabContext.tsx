@@ -10,11 +10,10 @@ import { opensInWorkbench } from "@/lib/domain/workbench"
 export type AppSurface = "chat" | "canvas" | "document" | "pi" | "workbench" | "factory" | "learn"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "pi" | "workbench" | "factory" | "learn"
-  /** A `diff` item holds the mounted directory it compares against HEAD, a `pi` item its repo name, a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
+  kind: "canvas" | "architecture" | "scratch" | "document" | "diff" | "pi" | "workbench" | "factory" | "learn"
+  /** A `scratch` item is the unsaved canvas, its path "". A `diff` item holds the mounted directory it compares against HEAD, a `pi` item its repo name, a `workbench` item its file, a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
   path: string
   projectSlug: string | null
-  rootFile?: boolean
   /** The path a `workbench` item was opened under, kept when the file is renamed so its editor session goes on. */
   sessionKey?: string
   /** The LaTeX project folder a `workbench` item shows: opening another file of it switches this tab's buffer. */
@@ -53,20 +52,37 @@ export interface Tab {
   historyFile: string | null
   title: string | null
   config: TabConfig
-  appMode: AppSurface
   projectSlug: string | null
   workspaceItem: WorkspaceItem | null
+  /** The chat covers the held item. */
+  itemHidden: boolean
 }
 
-/** The tab's workspace item when it is of `kind`, else null. */
+/** The item the tab shows; null when it shows its chat (no item, or the item is hidden behind the chat). */
+export function shownItem(tab: Tab): WorkspaceItem | null {
+  return tab.itemHidden ? null : tab.workspaceItem
+}
+
+/** The surface the tab shows: its shown item's, else "chat". */
+export function tabSurface(tab: Tab): AppSurface {
+  const item = shownItem(tab)
+  return item ? surfaceOf(item) : "chat"
+}
+
+/** A new unsaved canvas of `projectSlug`. */
+export function scratchItem(projectSlug: string | null): WorkspaceItem {
+  return { kind: "scratch", path: "", projectSlug }
+}
+
+/** The tab's shown item when it is of `kind`, else null. */
 export function itemOf<K extends WorkspaceItem["kind"]>(tab: Tab, kind: K): (WorkspaceItem & { kind: K }) | null {
-  const item = tab.workspaceItem
+  const item = shownItem(tab)
   return item?.kind === kind ? item as WorkspaceItem & { kind: K } : null
 }
 
 /** Tab fields that show `item` on its surface, in its project. */
-export function showingItem(item: WorkspaceItem): Pick<Tab, "workspaceItem" | "projectSlug" | "appMode"> {
-  return { workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) }
+export function showingItem(item: WorkspaceItem): Pick<Tab, "workspaceItem" | "projectSlug" | "itemHidden"> {
+  return { workspaceItem: item, projectSlug: item.projectSlug, itemHidden: false }
 }
 
 /** Actions bound to one tab; each is stable for the tab's lifetime. */
@@ -74,8 +90,11 @@ export interface TabActions {
   /** Describe tab activity and optionally show a loading spinner in the workspace switcher. */
   setModeLabel: (label: string, loading?: boolean) => void
   updateConfig: (config: Partial<TabConfig>) => void
-  setAppMode: (mode: AppSurface) => void
-  setWorkspaceItem: (item: WorkspaceItem | null) => void
+  setWorkspaceItem: (item: WorkspaceItem) => void
+  /** Cover the held item with the chat. */
+  hideItem: () => void
+  /** Let go of the held item, the chat shows. */
+  dropItem: () => void
   setHistoryFile: (historyFile: string | null) => void
   setTitle: (title: string | null) => void
 }

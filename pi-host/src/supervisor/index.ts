@@ -10,9 +10,9 @@
  * from idle eviction by setting a non-empty `setStatus` under key `session-liveness` and clearing it when done.
  */
 import type { WebSocketHandler } from "bun";
-import { isPinned } from "../catalog/index.ts";
 import type { Host } from "../host/index.ts";
 import { LocalHost } from "../host/local/index.ts";
+import { isPinned } from "../sidecar.ts";
 import { loadConfig, type SupervisorConfig } from "./config.ts";
 import { SupervisorHost, type ResumeOutcome } from "./host.ts";
 import type { ResumeState } from "./resume.ts";

@@ -96,7 +96,13 @@ export function owningProject(path: string, documents: Record<string, ProjectDoc
 export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[] {
   const { projects, pending, hasArchitecture, move, importFiles } = context
   // Chats by their project's slug, the first segment of their path
-  const chats = Map.groupBy(Object.entries(context.branchMeta), ([path]) => path.split("/", 1)[0])
+  const chats = new Map<string, [string, BranchMeta][]>()
+  for (const entry of Object.entries(context.branchMeta)) {
+    const slug = entry[0].split("/", 1)[0]
+    const list = chats.get(slug)
+    if (list) list.push(entry)
+    else chats.set(slug, [entry])
+  }
   return [
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: context.activeProjectSlug === project.slug,

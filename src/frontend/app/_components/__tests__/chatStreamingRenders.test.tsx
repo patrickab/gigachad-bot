@@ -167,10 +167,10 @@ const noop = () => {}
 const tab: TabContextValue = {
   tab: {
     id: "t1", chatId: "c1", historyFile: "c1.json", title: null,
-    config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, appMode: "chat", projectSlug: null, workspaceItem: null,
+    config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, projectSlug: null, workspaceItem: null, itemHidden: false,
   },
   isActive: true,
-  setModeLabel: noop, updateConfig: noop, setAppMode: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop,
+  setModeLabel: noop, updateConfig: noop, hideItem: noop, dropItem: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop,
 }
 const reveal: ChatReveal = { historyFile: null, qaIndex: null, seq: 0 }
 const onOpenChat = () => {}

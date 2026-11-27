@@ -66,21 +66,21 @@ describe("DocumentEditor canvas collaboration", () => {
     })
   })
 
-  it("keeps file root canvases on the file-viewer load and persistOverride save path", async () => {
+  it("saves a canvas on disk to its file when leaving it", async () => {
     api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["root"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
-    const persistOverride = vi.fn().mockResolvedValue(undefined)
-    const { unmount } = render(<DocumentEditor path="notes/sketch.canvas" slug="" persistOverride={persistOverride} onClose={vi.fn()} />)
+    api.writeRootFile.mockResolvedValue(undefined)
+    const { unmount } = render(<DocumentEditor path="/notes/sketch.canvas" slug="" onClose={vi.fn()} />)
 
     expect(await screen.findByTestId("canvas")).toHaveTextContent("root")
-    expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalledWith("notes/sketch.canvas")
+    expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalledWith("/notes/sketch.canvas")
 
     fireEvent.click(screen.getByTestId("canvas"))
     unmount() // leaving flushes the pending autosave
-    await waitFor(() => expect(persistOverride).toHaveBeenCalledWith(expect.stringContaining("\"strokes\":[]")))
+    await waitFor(() => expect(api.writeRootFile).toHaveBeenCalledWith("/notes/sketch.canvas", expect.stringContaining("\"strokes\":[]")))
     expect(api.writeDocument).not.toHaveBeenCalled()
   })
 
-  it("opens a canvas on disk as a file and saves it there, also without persistOverride", async () => {
+  it("opens a canvas on disk as a file and autosaves it there", async () => {
     api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["disk"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
     api.writeRootFile.mockResolvedValue(undefined)
     collaboration.useCollaborativeCanvas.mockClear()
@@ -157,6 +157,19 @@ describe("DocumentEditor tool artifacts", () => {
 
     expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("```mermaid")
     expect(screen.getByRole("button", { name: "Text" })).toHaveAttribute("aria-pressed", "false")
+  })
+})
+
+describe("DocumentEditor text files", () => {
+  it("saves a file on disk in place on Ctrl+S", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce("# Notes")
+    api.writeRootFile.mockClear().mockResolvedValue(undefined)
+    render(<DocumentEditor path="/repo/notes.md" slug="proj" onClose={vi.fn()} />)
+
+    await screen.findByRole("textbox", { name: "Document text" })
+    fireEvent.keyDown(document, { key: "s", ctrlKey: true })
+    await waitFor(() => expect(api.writeRootFile).toHaveBeenCalledWith("/repo/notes.md", "# Notes"))
+    expect(api.writeDocument).not.toHaveBeenCalled()
   })
 })
 

@@ -14,7 +14,7 @@ import type { PiRepository, PiSessionInfo } from "@/lib/backend/api"
 import type { PiSessionStatus } from "@/features/pi/sessionStore"
 
 const render = (element: ReactElement) => testingRender(
-  <TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+  <TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
     {element}
   </TabContext.Provider>,
 )
@@ -247,7 +247,7 @@ describe("Project navigation", () => {
   it("re-reads the mount tree and worktrees on tab activation only while the sidebar shows them", async () => {
     const tab = nextTab()
     const inTab = (isActive: boolean) => (
-      <TabContext.Provider value={{ tab, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+      <TabContext.Provider value={{ tab, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
         <Sidebar appMode="chat" />
       </TabContext.Provider>
     )
@@ -272,7 +272,7 @@ describe("Project navigation", () => {
   it("relocates the renamed project's tabs without replacing their mounted drafts", async () => {
     const manager = createRef<TabManagerHandle>()
     const view = testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
-    const tab = { ...nextTab(), projectSlug: "proj", historyFile: "proj/chat.json", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" }, appMode: "canvas" as const }
+    const tab = { ...nextTab(), projectSlug: "proj", historyFile: "proj/chat.json", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" } }
     const other = { ...nextTab(), projectSlug: "proj2", historyFile: "proj2/chat.json" }
     act(() => { manager.current!.openTab(other); manager.current!.openTab(tab) })
     const draft = view.getAllByRole("textbox", { hidden: true }).at(-1)!
@@ -397,9 +397,9 @@ describe("Project navigation", () => {
   it("moves a tab showing a renamed file and keeps its workbench session", () => {
     const manager = createRef<TabManagerHandle>()
     testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
-    const workbench = { ...nextTab(), appMode: "workbench" as const, workspaceItem: { kind: "workbench" as const, path: "/data/workbench/latex/proj/paper/paper.tex", projectSlug: "proj" } }
-    const document = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "project/proj/document/notes.md", projectSlug: "proj" } }
-    const other = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "project/proj/document/other.md", projectSlug: "proj" } }
+    const workbench = { ...nextTab(), workspaceItem: { kind: "workbench" as const, path: "/data/workbench/latex/proj/paper/paper.tex", projectSlug: "proj" } }
+    const document = { ...nextTab(), workspaceItem: { kind: "document" as const, path: "project/proj/document/notes.md", projectSlug: "proj" } }
+    const other = { ...nextTab(), workspaceItem: { kind: "document" as const, path: "project/proj/document/other.md", projectSlug: "proj" } }
     act(() => { manager.current!.openTab(workbench); manager.current!.openTab(document); manager.current!.openTab(other) })
 
     act(() => manager.current!.relocateDocument("/data/workbench/latex/proj/paper/paper.tex", "/data/workbench/latex/proj/paper/thesis.tex"))
@@ -417,19 +417,19 @@ describe("Project navigation", () => {
     const manager = createRef<TabManagerHandle>()
     render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const project = {
-      ...nextTab(), appMode: "workbench" as const,
-      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
+      ...nextTab(), 
+      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, texFolder: "/repo/paper" },
     }
     act(() => manager.current!.openTab(project))
     act(() => manager.current!.switchToTab(manager.current!.getTabs()[0].id))
     const count = manager.current!.getTabs().length
 
-    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/paper/refs.bib", projectSlug: null }))
     expect(manager.current!.getTabs()).toHaveLength(count)
     expect(manager.current!.getTabs().find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/refs.bib")
 
     act(() => manager.current!.switchToTab(manager.current!.getTabs()[0].id))
-    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/elsewhere/other.tex", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "workbench", path: "/repo/elsewhere/other.tex", projectSlug: null }))
     expect(manager.current!.getTabs()).toHaveLength(count)
     expect(manager.current!.getTabs().find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/refs.bib")
     expect(manager.current!.getTabs()[0].workspaceItem?.path).toBe("/repo/elsewhere/other.tex")
@@ -439,20 +439,20 @@ describe("Project navigation", () => {
     const manager = createRef<TabManagerHandle>()
     render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const project = {
-      ...nextTab(), appMode: "workbench" as const,
-      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, rootFile: true, texFolder: "/repo/paper" },
+      ...nextTab(), 
+      workspaceItem: { kind: "workbench" as const, path: "/repo/paper/main.tex", projectSlug: null, texFolder: "/repo/paper" },
     }
     act(() => manager.current!.openTab(project))
     const count = manager.current!.getTabs().length
 
-    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/imgs/plot.png", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/imgs/plot.png", projectSlug: null }))
     const tabs = manager.current!.getTabs()
     expect(tabs).toHaveLength(count + 1)
     expect(tabs.find((tab) => tab.id === project.id)?.workspaceItem?.path).toBe("/repo/paper/main.tex")
-    expect(tabs.at(-1)).toMatchObject({ appMode: "document", workspaceItem: { kind: "document", path: "/repo/paper/imgs/plot.png" } })
+    expect(tabs.at(-1)).toMatchObject({ itemHidden: false, workspaceItem: { kind: "document", path: "/repo/paper/imgs/plot.png" } })
     expect(tabs.at(-1)?.id).not.toBe(project.id)
 
-    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/notes.pdf", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "document", path: "/repo/paper/notes.pdf", projectSlug: null }))
     expect(manager.current!.getTabs()).toHaveLength(count + 1)
     expect(manager.current!.getTabs().at(-1)?.workspaceItem?.path).toBe("/repo/paper/notes.pdf")
   })
@@ -490,7 +490,7 @@ describe("Project navigation", () => {
     fireEvent.click(project.getByRole("button", { name: "New file in chapters" }))
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "two" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "document", path: `${folder}/chapters/two.tex`, projectSlug: "proj", rootFile: true }))
+    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "document", path: `${folder}/chapters/two.tex`, projectSlug: "proj" }))
     expect(api.createTexProjectFile).toHaveBeenCalledWith(`${folder}/chapters`, "two.tex")
   })
 
@@ -781,7 +781,7 @@ describe("Project navigation", () => {
       expect(onItemOpen).toHaveBeenCalledTimes(3)
 
       login.hostAccess = false
-      view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+      view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
         <Sidebar appMode="chat" onItemOpen={onItemOpen} />
       </TabContext.Provider>)
       expect(view.queryByRole("button", { name: /Open factory for/ })).not.toBeInTheDocument()
@@ -1240,7 +1240,7 @@ describe("Tab picker", () => {
     act(() => manager.current!.showChat("proj/first.json"))
     expect(view.getByRole("textbox")).toHaveValue("Session draft")
 
-    act(() => manager.current!.showItem({ kind: "document", path: "/source/notes.md", projectSlug: null, rootFile: true }))
+    act(() => manager.current!.showItem({ kind: "document", path: "/source/notes.md", projectSlug: null }))
     expect(activeRow(view)).toBe("general / files / notes.md")
     act(() => manager.current!.showChat("proj/second.json"))
     expect(activeRow(view)).toBe("Proj / chats / second.json")
@@ -1253,12 +1253,12 @@ describe("Tab picker", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     const tabs = [
-      { ...nextTab(), projectSlug: "proj", appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "alpha.md", projectSlug: "proj" } },
-      { ...nextTab(), projectSlug: "proj", appMode: "canvas" as const, workspaceItem: { kind: "canvas" as const, path: "board10.canvas", projectSlug: "proj" } },
+      { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "document" as const, path: "alpha.md", projectSlug: "proj" } },
+      { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "canvas" as const, path: "board10.canvas", projectSlug: "proj" } },
       { ...nextTab(), projectSlug: "proj", title: "Alpha" },
       { ...nextTab(), projectSlug: "empty", title: "Z last" },
-      { ...nextTab(), projectSlug: "proj", appMode: "canvas" as const, workspaceItem: { kind: "canvas" as const, path: "Board2.canvas", projectSlug: "proj" } },
-      { ...nextTab(), projectSlug: "proj", appMode: "canvas" as const, workspaceItem: { kind: "architecture" as const, path: "graph/proj/", projectSlug: "proj" } },
+      { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "canvas" as const, path: "Board2.canvas", projectSlug: "proj" } },
+      { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "architecture" as const, path: "graph/proj/", projectSlug: "proj" } },
     ]
     act(() => { for (const tab of tabs) manager.current!.openTab(tab) })
     const expected = [

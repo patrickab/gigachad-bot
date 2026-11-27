@@ -296,6 +296,7 @@ class PostgresDataStore:
         with self._scope.connection() as connection, connection.transaction():
             self._delete(connection, key, recursive)
 
+
 def _jsonb(meta: Meta | None) -> Jsonb | None:
     """*meta* as a jsonb parameter, None when absent or when jsonb would not hand its values back unchanged."""
     # Top-level key order is free (readers pick fields by name), nested values must survive exactly.

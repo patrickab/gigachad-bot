@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
 class StartKernel(BaseModel):
     path: str
     name: str

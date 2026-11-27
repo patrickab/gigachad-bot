@@ -46,8 +46,11 @@ const ignore = () => {}
 /** The startup read's bound: an outdated request older than this is aborted, it may hang on a dead connection. */
 const HUNG_REQUEST_MS = 15_000
 
-/** Share `read`'s result between every caller and subscriber. */
-export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Resource<T> {
+/** Share `read`'s result between every caller and subscriber. An answer `same` as the value keeps the value and notifies nobody. */
+export function createResource<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  options?: { same?: (current: T, next: T) => boolean },
+): Resource<T> {
   let value: T | undefined
   // The read whose answer becomes the value. Only its current request counts, an answer begun before a restart is dropped.
   let flight: Flight<T> | null = null
@@ -71,8 +74,12 @@ export function createResource<T>(read: (signal: AbortSignal) => Promise<T>): Re
       (result) => {
         if (!settles()) return
         flight = null
-        value = result
         staleRetries.delete(retry)
+        if (value !== undefined && options?.same?.(value, result)) {
+          current.resolve(value)
+          return
+        }
+        value = result
         listeners.forEach((listener) => listener())
         current.resolve(result)
       },
@@ -178,12 +185,15 @@ export interface ResourceFamily<T> {
 }
 
 /** One resource per key, created on first use, e.g. the reasoning levels of each model. */
-export function resourceFamily<T>(read: (key: string, signal: AbortSignal) => Promise<T>): ResourceFamily<T> {
+export function resourceFamily<T>(
+  read: (key: string, signal: AbortSignal) => Promise<T>,
+  options?: { same?: (current: T, next: T) => boolean },
+): ResourceFamily<T> {
   const members = new Map<string, Resource<T>>()
   const member = (key: string) => {
     let found = members.get(key)
     if (!found) {
-      found = createResource((signal) => read(key, signal))
+      found = createResource((signal) => read(key, signal), options)
       members.set(key, found)
     }
     return found

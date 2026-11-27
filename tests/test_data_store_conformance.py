@@ -11,56 +11,63 @@ from lib.data_store import (
 )
 from lib.postgres_data_store import PostgresDataStore
 from tests.conftest import create_user
+from tests.fakes import MemoryDataStore
 
 
 def entries_by_key(data_store: DataStore, prefix: str = "", *, recursive: bool = False):
     return {entry.key: entry for entry in data_store.list(prefix, recursive=recursive)}
 
 
-def test_missing_read_raises_storage_not_found(data_store: DataStore):
+@pytest.fixture(params=["postgres", "memory"])
+def any_store(request) -> DataStore:
+    """The contract both the database store and the tests' in-memory store honour."""
+    return MemoryDataStore() if request.param == "memory" else request.getfixturevalue("data_store")
+
+
+def test_missing_read_raises_storage_not_found(any_store: DataStore):
     with pytest.raises(StorageNotFoundError):
-        data_store.read_bytes("missing.json")
+        any_store.read_bytes("missing.json")
 
 
-def test_write_reads_back_and_enforces_revision(data_store: DataStore):
-    first = data_store.write_bytes("state.json", b"one")
-    content, read_revision = data_store.read_bytes("state.json")
+def test_write_reads_back_and_enforces_revision(any_store: DataStore):
+    first = any_store.write_bytes("state.json", b"one")
+    content, read_revision = any_store.read_bytes("state.json")
 
     assert content == b"one"
     assert read_revision == first
 
-    second = data_store.write_bytes("state.json", b"two", expected=first)
+    second = any_store.write_bytes("state.json", b"two", expected=first)
     assert second != first
 
     with pytest.raises(StorageConflictError):
-        data_store.write_bytes("state.json", b"three", expected=first)
+        any_store.write_bytes("state.json", b"three", expected=first)
 
 
-def test_stale_write_rejects_deleted_key(data_store: DataStore):
-    revision = data_store.write_bytes("state.json", b"one")
-    data_store.delete("state.json")
-
-    with pytest.raises(StorageConflictError):
-        data_store.write_bytes("state.json", b"two", expected=revision)
-
-
-def test_apply_is_all_or_nothing(data_store: DataStore):
-    first = data_store.write_bytes("ws/a.c4", b"a1")
-    second = data_store.write_bytes("ws/b.c4", b"b1")
-    data_store.write_bytes("ws/b.c4", b"b2", expected=second)
-    data_store.write_bytes("ws/gone.c4", b"g")
+def test_stale_write_rejects_deleted_key(any_store: DataStore):
+    revision = any_store.write_bytes("state.json", b"one")
+    any_store.delete("state.json")
 
     with pytest.raises(StorageConflictError):
-        data_store.apply([("ws/a.c4", b"a2", first), ("ws/new.json", b"{}", None), ("ws/b.c4", b"b3", second)], ["ws/gone.c4"])
+        any_store.write_bytes("state.json", b"two", expected=revision)
 
-    assert data_store.read_bytes("ws/a.c4")[0] == b"a1"
-    assert not data_store.exists("ws/new.json")
-    assert data_store.exists("ws/gone.c4")
 
-    current = data_store.read_bytes("ws/b.c4")[1]
-    data_store.apply([("ws/a.c4", b"a2", first), ("ws/b.c4", b"b3", current)], ["ws/gone.c4"])
-    assert [data_store.read_bytes(key)[0] for key in ("ws/a.c4", "ws/b.c4")] == [b"a2", b"b3"]
-    assert not data_store.exists("ws/gone.c4")
+def test_apply_is_all_or_nothing(any_store: DataStore):
+    first = any_store.write_bytes("ws/a.c4", b"a1")
+    second = any_store.write_bytes("ws/b.c4", b"b1")
+    any_store.write_bytes("ws/b.c4", b"b2", expected=second)
+    any_store.write_bytes("ws/gone.c4", b"g")
+
+    with pytest.raises(StorageConflictError):
+        any_store.apply([("ws/a.c4", b"a2", first), ("ws/new.json", b"{}", None), ("ws/b.c4", b"b3", second)], ["ws/gone.c4"])
+
+    assert any_store.read_bytes("ws/a.c4")[0] == b"a1"
+    assert not any_store.exists("ws/new.json")
+    assert any_store.exists("ws/gone.c4")
+
+    current = any_store.read_bytes("ws/b.c4")[1]
+    any_store.apply([("ws/a.c4", b"a2", first), ("ws/b.c4", b"b3", current)], ["ws/gone.c4"])
+    assert [any_store.read_bytes(key)[0] for key in ("ws/a.c4", "ws/b.c4")] == [b"a2", b"b3"]
+    assert not any_store.exists("ws/gone.c4")
 
 
 def test_list_reports_direct_children_and_recursive_descendants(data_store: DataStore):
@@ -212,4 +219,3 @@ def test_meta_follows_the_content_it_was_written_with(data_store: DataStore):
     revision = data_store.read_bytes("meta/a.json")[1]
     data_store.write_meta({"meta/a.json": ({"n": 5}, hashlib.sha256(b"one again").hexdigest())})
     assert data_store.read_bytes("meta/a.json")[1] == revision
-

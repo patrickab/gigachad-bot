@@ -1,10 +1,11 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { fetchBackendConfig, fetchPiSettings, savePiSettings, saveAnimatedBackground } from "@/lib/backend/api"
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { fetchPiSettings, savePiSettings, saveAnimatedBackground } from "@/lib/backend/api"
 import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
-import { useStartupRead } from "@/contexts/StartupReadContext"
+import { backendConfigResource } from "@/lib/backend/resources"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { useResource } from "@/hooks/useResource"
 import { readStorage, writeStorage } from "@/lib/storage"
 
 export interface TabConfig {
@@ -104,28 +105,20 @@ function readNeovimPreference(): boolean {
   return readStorage(STORAGE_KEY_NEOVIM) === "true"
 }
 
-/** Owns the defaults new tabs inherit. Seeded from backend config without overriding existing values. */
+/** Owns the defaults new tabs inherit, derived from the shared backend config. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [tabDefaults, setTabDefaults] = useState(DEFAULT_TAB_CONFIG)
-  const [ocrModel, setOCRModel] = useState("")
-  const [neovimAvailable, setNeovimAvailable] = useState(false)
+  const config = useResource("Settings", backendConfigResource)
+  const defaultModel = config?.default_model ?? ""
+  const tabDefaults = useMemo(() => ({ ...DEFAULT_TAB_CONFIG, selectedModel: defaultModel }), [defaultModel])
+  const ocrModel = config?.vision_model ?? ""
+  const neovimAvailable = config?.neovim_available ?? false
+  const learnharnessUrl = config?.learnharness_url ?? null
+  const hostAccess = config?.host_access ?? false
   const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
-  const [learnharnessUrl, setLearnharnessUrl] = useState<string | null>(null)
-  const [hostAccess, setHostAccess] = useState(false)
-  const [animatedBackground, setAnimatedBackgroundState] = useState<boolean | null>(null)
+  // The optimistic toggle, over the stored value until set.
+  const [animatedBackgroundChoice, setAnimatedBackgroundState] = useState<boolean | null>(null)
+  const animatedBackground = animatedBackgroundChoice ?? config?.animated_background ?? null
   const [piAutoResume, setPiAutoResumeState] = useState<boolean | null>(null)
-
-  useStartupRead("Settings", fetchBackendConfig, (cfg) => {
-    setTabDefaults((prev) => ({
-      ...prev,
-      selectedModel: prev.selectedModel || cfg.default_model,
-    }))
-    setOCRModel((prev) => prev || cfg.vision_model)
-    setNeovimAvailable(cfg.neovim_available)
-    setLearnharnessUrl(cfg.learnharness_url)
-    setHostAccess(cfg.host_access)
-    setAnimatedBackgroundState(cfg.animated_background)
-  })
 
   useEffect(() => {
     if (!hostAccess) return

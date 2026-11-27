@@ -30,7 +30,7 @@ Read only when working on learn mode. Why a sidecar and not a fork: [ADR 0001](a
 | Part | Where | Role |
 |---|---|---|
 | Shell | `src/frontend/features/learn/` | Model/thinking selectors in the learn top bar, Plan button, learn sessions in gigachad's sidebar (rows, chips, filter, rename, delete, export, panels, background agents), one persistent frame |
-| Protocol | `src/frontend/packages/chat-ui/src/learn-protocol.ts` | postMessage protocol shared by both sides |
+| Protocol | `src/frontend/packages/chat-ui/src/learn-protocol.ts`, `markdown.css`, `palette.css`, `fonts.css` | postMessage protocol and the prose, palette and font styles shared by both sides (the package's `exports`, all the tarball ships) |
 | Overlay | `learnharness-overlay/` → `custom/` | `root.tsx` (entry), `framing.ts` (frame-ancestors CSP), `next.config.ts` (`withCustom` module overrides), `embed/` (bridge, channel, drive mode, drivers `model.tsx`, `freeze.ts`, `chrome.tsx`), `overrides/components/` (model-picker, sidebar, top-bar, `ai-elements/` markdown wrapper), `theme/` (embed-only CSS, hides Providers UI), `seams.patch`, `*.test.mjs` |
 | Backend adapter | `src/lib/learnharness.py`, `src/backend/routes/learn.py` | `/api/learn` (host only): session list with row states, create + first turn, rename, delete (`preserve-graph` / `delete-nodes`), Markdown export, project mapping |
 | Model generator | `src/lib/learnharness_config.py` (`write-config`) | LH's `settings.json` custom provider and tiers |

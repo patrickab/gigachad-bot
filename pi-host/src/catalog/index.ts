@@ -1,22 +1,19 @@
 /**
- * Catalog HTTP routes: session listing, search, archive/restore, pin, private state, persisted entries, search hits of one session, and `@` file completion.
+ * Catalog HTTP routes: session listing, search, archive/restore, pin, persisted entries, search hits of one session, and `@` file completion.
  *
  * - Consumes: a `Host` for every session file, sidecar and file listing, `LiveSessions` from the supervisor
- * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo`, `isPinned`, `copyPrivateState`,
- *   `profileOf` and `markProfile` for the supervisor
+ * - Provides: the Catalog rows of the pi-host HTTP contract, plus `sessionInfo` for the supervisor
  */
 import { isAbsolute, resolve } from "node:path";
 import type { Host, SessionMatch } from "../host/index.ts";
 import { isRecord } from "../json.ts";
+import { updateState } from "../sidecar.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
-import { rankFiles } from "./files.ts";
 import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
-import { updateState } from "./state.ts";
 
 export { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 export type { LiveStatus } from "../supervisor/session.ts";
-export { copyPrivateState, isPinned, markCacheRetention, markProfile, profileOf } from "./state.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
@@ -29,7 +26,6 @@ const ACTION_METHODS = {
   archive: ["POST"],
   restore: ["POST"],
   pin: ["PUT"],
-  state: ["GET", "PUT"],
   entries: ["GET"],
   matches: ["GET"],
 } as const satisfies Record<string, readonly string[]>;
@@ -69,20 +65,13 @@ async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Res
   return Response.json({ sessions: await listSessions(host, cwd, archived, live) });
 }
 
-/**
- * `GET /files?cwd=&q=&limit=`: ranked against `q`, or without `q` the cached list unranked (K6: the UI ranks it),
- * cut to `limit` only when one is given.
- */
+/** `GET /files?cwd=&limit=`: the cached list of the cwd's files, cut to `limit` when one is given. The UI ranks it (K6). */
 async function handleFiles(url: URL, host: Host): Promise<Response> {
   const cwd = await validCwd(host, url.searchParams.get("cwd"));
   if (!cwd) return fail(400, "invalid_cwd");
-  const query = url.searchParams.get("q") ?? "";
   const candidates = await host.listFiles(cwd);
-  if (!query.trim()) {
-    const listed = url.searchParams.has("limit") ? candidates.slice(0, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) : candidates;
-    return Response.json({ files: listed.map((path) => ({ path, score: 0 })) });
-  }
-  return Response.json({ files: rankFiles(candidates, query, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) });
+  const listed = url.searchParams.has("limit") ? candidates.slice(0, limitParam(url, DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT)) : candidates;
+  return Response.json({ files: listed.map((path) => ({ path, score: 0 })) });
 }
 
 /** `GET /search?q=&limit=20` (M24): live sessions whose transcript matches `q`, best first, factory tasks left out. */
@@ -140,23 +129,6 @@ async function handlePin(request: Request, sessionPath: string, live: LiveSessio
   return session ? Response.json({ session }) : fail(404, "not_found");
 }
 
-/** `PUT /sessions/:id/state` with `{revision, data}`, 409 `{revision, data}` on a stale revision. */
-async function handlePutState(request: Request, sessionPath: string, host: Host): Promise<Response> {
-  const body = await request.json().catch(() => undefined);
-  if (!isRecord(body) || !Number.isInteger(body.revision) || !isRecord(body.data)) {
-    return fail(400, "invalid_body");
-  }
-  const revision = body.revision as number;
-  const data = body.data;
-  return updateState(host, sessionPath, (state) => {
-    if (state.revision !== revision) {
-      return { result: Response.json({ revision: state.revision, data: state.data }, { status: 409 }) };
-    }
-    const next = { ...state, revision: state.revision + 1, data };
-    return { next, result: Response.json({ revision: next.revision }) };
-  });
-}
-
 /**
  * `GET /sessions/:id/entries`: the session file's entries. `?turns=N` answers a preview of the active branch's last N
  * turns. `?customType=<prefix>&since=<entryId>` answers only the `custom` entries whose `customType` starts with the
@@ -197,8 +169,5 @@ export async function handleCatalog(request: Request, url: URL, live: LiveSessio
   if (action === "archive" || action === "restore") return handleMove(sessionPath, action === "archive", live, host);
   if (action === "pin") return handlePin(request, sessionPath, live, host);
   if (action === "entries") return handleEntries(url, sessionPath, host);
-  if (action === "matches") return handleMatches(url, sessionPath, host);
-  if (request.method === "PUT") return handlePutState(request, sessionPath, host);
-  const { revision, data } = await host.readState(sessionPath);
-  return Response.json({ revision, data });
+  return handleMatches(url, sessionPath, host);
 }

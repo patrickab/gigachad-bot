@@ -18,7 +18,7 @@ vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
 
 /** A learn tab over a fake LearnHarness frame at `version`: what the shell posted to it, and a way to post from it. */
 function mountLearnTab(view: LearnView, version = LEARN_PROTOCOL_VERSION) {
-  const tab = { tab: { chatId: "c1", projectSlug: null } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
+  const tab = { tab: { chatId: "c1", projectSlug: null } as Tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
   const rendered = render(
     <LearnProvider onOpenItem={vi.fn()}>
       <TabContext.Provider value={tab}><LearnSurface view={view} onViewChange={vi.fn()} /></TabContext.Provider>

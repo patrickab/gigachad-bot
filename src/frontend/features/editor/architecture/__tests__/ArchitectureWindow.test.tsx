@@ -18,16 +18,16 @@ vi.mock("@/features/editor/TextDocumentEditor", () => ({
   ),
 }))
 
-const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
+const feed = vi.hoisted(() => new Set<(event: ChangeEvent) => void>())
 vi.mock("@/lib/backend/syncStream", () => ({
   syncCursorReady: () => Promise.resolve(),
   subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
-    feed.listener = listener
-    return () => { feed.listener = null }
+    feed.add(listener)
+    return () => { feed.delete(listener) }
   },
 }))
 /** Another device edited one of the project's architecture files. */
-const remoteChange = () => act(() => feed.listener!({ seq: 1, resource_kind: "document", resource_key: "graph/proj/backend/backend.c4", version: 2, operation: "write", device_id: "other-device" }))
+const remoteChange = () => act(() => feed.forEach((listener) => listener({ seq: 1, resource_kind: "document", resource_key: "graph/proj/backend/backend.c4", version: 2, operation: "write", device_id: "other-device" })))
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -71,6 +71,8 @@ vi.mock("@/lib/backend/api", () => api)
 
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
+import { resetResources } from "@/lib/resource"
+import { watchDocumentLists } from "@/lib/backend/resources"
 
 function Harness() {
   const [path, setPath] = useState("graph/proj/")
@@ -97,8 +99,16 @@ async function open(initial: ArchitectureWorkspace = workspace) {
 }
 
 describe("ArchitectureWindow", () => {
-  beforeEach(() => { vi.resetAllMocks() })
-  afterEach(() => { vi.useRealTimers() })
+  let unwatch = () => {}
+  beforeEach(() => {
+    vi.resetAllMocks()
+    resetResources()
+    unwatch = watchDocumentLists()
+  })
+  afterEach(() => {
+    unwatch()
+    vi.useRealTimers()
+  })
 
   it("opens on the first system and moves through its tree", async () => {
     const { button, createSystem, getByLabelText, getByRole, findByRole, getByTestId } = await open()
@@ -169,6 +179,38 @@ describe("ArchitectureWindow", () => {
     expect(queryByRole("alertdialog")).toBeNull()
   })
 
+  it("shows every window of one project the same model, read once", async () => {
+    api.readArchitecture.mockResolvedValue(workspace)
+    const window = (onNavigate: (path: string) => void) =>
+      <ArchitectureWindow path="graph/proj/" maximized={false} hostScale={1} onEdgeStyleChange={() => {}} onNavigate={onNavigate} />
+    const { findAllByText, queryAllByText, getAllByLabelText, getByLabelText } = render(<UndoDeleteProvider>{window(() => {})}{window(() => {})}</UndoDeleteProvider>)
+    await act(async () => {})
+    expect(api.readArchitecture).toHaveBeenCalledTimes(1)
+
+    // An edit in the first window reaches the second.
+    api.applyArchitectureOperations.mockResolvedValueOnce(retitled("Edited"))
+    act(() => { getAllByLabelText("New system")[0].click() })
+    const field = getByLabelText("System name")
+    fireEvent.change(field, { target: { value: "Frontend" } })
+    await act(async () => { fireEvent.keyDown(field, { key: "Enter" }) })
+    expect(await findAllByText("Edited")).toHaveLength(2)
+
+    // Another device's change is read once for both.
+    api.readArchitecture.mockResolvedValue(retitled("Changed elsewhere"))
+    remoteChange()
+    expect(await findAllByText("Changed elsewhere")).toHaveLength(2)
+    expect(queryAllByText("Edited")).toHaveLength(0)
+    expect(api.readArchitecture).toHaveBeenCalledTimes(2)
+  })
+
+  it("reads a model another device changed while no window showed it", async () => {
+    const { unmount } = await open()
+    unmount()
+    remoteChange()
+    const { findByText } = await open(retitled("Changed elsewhere"))
+    await findByText("Changed elsewhere")
+  })
+
   it("never lets an earlier read replace a later write's answer", async () => {
     const { createSystem, queryByText } = await open()
     const read = deferred<ArchitectureWorkspace>()
@@ -178,30 +220,15 @@ describe("ArchitectureWindow", () => {
 
     remoteChange()
     await createSystem("Frontend")
-    // The write's answer arrives first, the earlier read's after it.
+    // The write's answer arrives first, the earlier read's after it, which is dropped and read again.
+    api.readArchitecture.mockResolvedValueOnce(retitled("Written"))
     await act(async () => {
       write.resolve(retitled("Written"))
       read.resolve(retitled("Read"))
     })
-    await waitFor(() => expect(queryByText("Written")).toBeTruthy())
+    await waitFor(() => expect(api.readArchitecture).toHaveBeenCalledTimes(3))
+    expect(queryByText("Written")).toBeTruthy()
     expect(queryByText("Read")).toBeNull()
-  })
-
-  it("rereads once after a write when another device changed the model meanwhile", async () => {
-    const { createSystem, findByText } = await open()
-    const write = deferred<ArchitectureWorkspace>()
-    api.applyArchitectureOperations.mockReturnValueOnce(write.promise)
-    api.readArchitecture.mockResolvedValueOnce(retitled("Changed elsewhere"))
-
-    await createSystem("Frontend")
-    remoteChange()
-    remoteChange()
-    await act(async () => {})
-    expect(api.readArchitecture).toHaveBeenCalledTimes(1)
-
-    await act(async () => { write.resolve(workspace) })
-    await findByText("Changed elsewhere")
-    expect(api.readArchitecture).toHaveBeenCalledTimes(2)
   })
 
   it("shows a failed reread until a later one succeeds", async () => {

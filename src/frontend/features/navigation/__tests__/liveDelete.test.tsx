@@ -5,7 +5,7 @@ import { Sidebar } from "@/features/navigation/Sidebar"
 import { TabPicker } from "@/features/navigation/TabPicker"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { nextTab } from "@/features/navigation/tabs"
-import type { WorkspaceItem } from "@/contexts/TabContext"
+import { showingItem, type WorkspaceItem } from "@/contexts/TabContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
 import { watchDocumentLists } from "@/lib/backend/resources"
 import type { ChangeEvent } from "@/lib/backend/syncStream"
@@ -70,7 +70,7 @@ const emit = (key: string, operation: ChangeEvent["operation"]) => act(() => {
 
 /** One tab showing `item`, in the shape the sidebar opens it. */
 const tabShowing = (item: WorkspaceItem) =>
-  ({ ...nextTab(), appMode: item.kind === "workbench" ? "workbench" as const : "document" as const, projectSlug: item.projectSlug, workspaceItem: item })
+  ({ ...nextTab(), ...showingItem(item) })
 
 /** Sidebars of every tab inside a tab manager under the real undo provider, with tabs of the paper project open and the note's tab frontmost. */
 async function renderWorkspace(openTabs = true) {
@@ -87,7 +87,7 @@ async function renderWorkspace(openTabs = true) {
   await waitFor(() => expect(manager.current).not.toBeNull())
   const initial = manager.current!.getTabs()[0]
   const workbench = tabShowing({ kind: "workbench", path: `${FOLDER}/paper.tex`, projectSlug: "proj", texFolder: FOLDER })
-  const image = tabShowing({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj", rootFile: true })
+  const image = tabShowing({ kind: "document", path: `${FOLDER}/imgs/figure.png`, projectSlug: "proj" })
   const note = tabShowing({ kind: "document", path: NOTE.path, projectSlug: "proj" })
   if (openTabs) act(() => { for (const tab of [workbench, image, note]) manager.current!.openTab(tab) })
   fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))

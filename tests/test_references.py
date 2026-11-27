@@ -273,6 +273,7 @@ def test_dry_run_lists_sandbox_state_of_unstored_chats(world: World) -> None:
 
     assert world.references.orphan_sandbox_chats() == ["c2"]
 
+
 def test_mineru_output_is_never_deleted_even_when_nothing_references_its_pdf(world: World) -> None:
     world.library_pdf("paper.pdf")
     world.assets.write("upload", "attachment/chat/c1/paper.pdf", PDF, mime="application/pdf")

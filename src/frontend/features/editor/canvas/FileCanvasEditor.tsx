@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
 import { CanvasEditor } from "./CanvasEditor"
 import { EditorShell } from "@/features/editor/EditorShell"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "@/lib/domain/canvasDocument"
@@ -13,6 +13,7 @@ import { useModeLabel } from "@/hooks/useModeLabel"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { useRootFileDocument, type DocumentCodec } from "@/hooks/useRootFileDocument"
 import { useDebouncedSave } from "@/hooks/useDebouncedSave"
+import { writeRootFile } from "@/lib/backend/api"
 
 const AUTOSAVE_DELAY_MS = 1000
 
@@ -25,16 +26,15 @@ interface FileCanvasEditorProps {
   path: string
   slug: string
   onClose: () => void
-  /** Writes the serialized canvas to its storage. */
-  persistOverride: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
 }
 
-/** Full-screen overlay for a file-root canvas: loads through the file viewer, autosaves through `persistOverride`. */
-export function FileCanvasEditor({ path, slug, onClose, persistOverride, onModeLabel }: FileCanvasEditorProps) {
+/** Full-screen overlay for a file-root canvas: loads through the file viewer, autosaves to the same file. */
+export function FileCanvasEditor({ path, slug, onClose, onModeLabel }: FileCanvasEditorProps) {
+  const write = useCallback((content: string) => writeRootFile(path, content), [path])
   // A confirmed-missing document legitimately starts blank.
   const { value: canvasDoc, loadError, reload, setValue, persist } = useRootFileDocument({
-    path, codec: CANVAS_CODEC, write: persistOverride, blankWhenMissing: true,
+    path, codec: CANVAS_CODEC, write, blankWhenMissing: true,
   })
   useEffect(() => { reload() }, [reload])
   const shownName = useDisplayName()(slug, path) ?? baseName(path)

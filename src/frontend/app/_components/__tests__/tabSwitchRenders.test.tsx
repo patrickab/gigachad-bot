@@ -60,7 +60,7 @@ vi.mock("@/lib/backend/resources", async (importOriginal) => ({
 
 const { AppShell } = await import("../AppShell")
 
-const tab = (id: string): Tab => ({ id, chatId: `chat-${id}`, historyFile: `${id}.json`, title: id, config: DEFAULT_TAB_CONFIG, appMode: "chat", projectSlug: null, workspaceItem: null })
+const tab = (id: string): Tab => ({ id, chatId: `chat-${id}`, historyFile: `${id}.json`, title: id, config: DEFAULT_TAB_CONFIG, projectSlug: null, workspaceItem: null, itemHidden: false })
 const flush = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)) })
 
 /** Renders per tab while `action` runs and settles. */

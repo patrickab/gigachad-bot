@@ -22,7 +22,7 @@ import { createNoticeKeys, FactoryViewProvider, useTabAgentText, type FactoryVie
 import { PiSearchBar } from "./PiSearchBar"
 import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
 import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighlights"
-import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
+import { renderCustomMessage, renderToolCall } from "./renderers"
 import { ProcessDetails } from "@/features/conversation/tools/ProcessDetails"
 import { ToolCallRow } from "@/features/conversation/tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
@@ -55,9 +55,9 @@ type Piece =
 /** Calls of these tools are always visible between the texts, never folded (a `read` shows what the agent looked at). */
 const ALWAYS_VISIBLE_TOOLS = new Set(["read"])
 
-/** Folds into "Process details" when settled; a tool with a `standalone` renderer, and a `read`, stay between the texts. */
+/** Folds into "Process details" when settled; a `read` stays between the texts. */
 function isActivity(piece: Piece): boolean {
-  return piece.kind === "thinking" || piece.kind === "bash" || (piece.kind === "tool" && toolPlacement(piece.call.name) === "inline" && !ALWAYS_VISIBLE_TOOLS.has(piece.call.name))
+  return piece.kind === "thinking" || piece.kind === "bash" || (piece.kind === "tool" && !ALWAYS_VISIBLE_TOOLS.has(piece.call.name))
 }
 
 function assistantPieces(message: AssistantMessage, messageKey: string, runs: Record<string, ToolRun>): Piece[] {

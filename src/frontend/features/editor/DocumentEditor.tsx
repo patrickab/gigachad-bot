@@ -5,7 +5,6 @@ import { ArchitectureSourceEditor, TextDocumentEditor, type DocumentEditorProps 
 import { RawFileView } from "./RawFileView"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
-import { writeRootFile } from "@/lib/backend/api"
 import { kindOf } from "@/lib/paths"
 
 /** An image file as itself, from its raw URL: read-only, shrunk to fit the pane and never enlarged. */
@@ -18,10 +17,7 @@ function ImageDocument({ path, onClose }: Pick<DocumentEditorProps, "path" | "on
 export function DocumentEditor(props: DocumentEditorProps) {
   if (kindOf(props.path) === "image") return <ImageDocument path={props.path} onClose={props.onClose} />
   if (isArchitecturePath(props.path)) return <ArchitectureSourceEditor {...props} />
-  if (props.path.endsWith(".canvas")) {
-    // A canvas on disk is a file, whoever lists it: the collaborative store only serves stored keys
-    const persist = props.persistOverride ?? (props.path.startsWith("/") ? (content: string) => writeRootFile(props.path, content) : undefined)
-    return persist ? <LazyFileCanvasEditor {...props} persistOverride={persist} /> : <LazyCanvasDocumentEditor {...props} />
-  }
+  // A canvas on disk is a file, whoever lists it: the collaborative store only serves stored keys
+  if (props.path.endsWith(".canvas")) return props.path.startsWith("/") ? <LazyFileCanvasEditor {...props} /> : <LazyCanvasDocumentEditor {...props} />
   return <TextDocumentEditor {...props} />
 }

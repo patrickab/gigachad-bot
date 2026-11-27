@@ -87,7 +87,7 @@ export function Sidebar(props: SidebarProps) {
     // Other projects listing the file follow through their change events.
     onRenamed: refreshProjectDocuments,
   })
-  const selectFile = (path: string) => props.onItemOpen?.({ ...fileItem(path, owningProject(path, documents.documents, projects, code.mounts), Boolean(props.workbench)), rootFile: true })
+  const selectFile = (path: string) => props.onItemOpen?.(fileItem(path, owningProject(path, documents.documents, projects, code.mounts), Boolean(props.workbench)))
   const folderRows = {
     onFileSelect: selectFile,
     isExpanded: controller.isExpanded,

@@ -8,7 +8,7 @@ import re
 from typing import TYPE_CHECKING, Any
 import uuid
 
-from lib.data_store import DataStore, Meta, Revision, validate_key
+from lib.data_store import DataStore, Meta, validate_key
 from lib.json_docs import JsonDocs
 from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, library_pdf, project_json
 
@@ -138,16 +138,15 @@ class ChatStore:
             return None
         return {**Chat.from_raw(raw).as_dict(), "revision": revision.token}
 
-    def save(self, filename: str, data: dict[str, Any] | None = None, *, expected_revision: str | None = None) -> dict[str, str]:
-        """Write a chat file, merging *data* over the stored chat. A given *expected_revision* makes the write conflict-checked."""
+    def save(self, filename: str, data: dict[str, Any] | None = None) -> dict[str, str]:
+        """Write a chat file, merging *data* over the stored chat."""
         key = self._key(filename)
         existing = self._read(key)
         if existing and existing.chat_id and data and data.get("chat_id") and existing.chat_id != data["chat_id"]:
             raise ValueError("Chat ID mismatch")
         payload = _build_payload(data, existing.as_dict() if existing else None)
-        expected = None if expected_revision is None else Revision(expected_revision)
         meta = _tree_meta(payload) if _is_chat_key(key) else None
-        revision = self._docs.write(key, payload, expected=expected, meta=meta)
+        revision = self._docs.write(key, payload, meta=meta)
         self._reindex({key: payload}, [])
         return {"status": "ok", "filename": str(filename), "revision": revision.token}
 

@@ -44,10 +44,10 @@ function piSession(sessionId: string, ageMs: number, extra: Partial<PiSessionInf
 
 const live = { running: true, waiting: false, attached: 1 }
 
-const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
+const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], projectSlug: null, workspaceItem: null, itemHidden: false }
 
 function renderPicker(onOpenItem = vi.fn()) {
-  render(<TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+  render(<TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
     <PiSessionPicker onOpenItem={onOpenItem} />
   </TabContext.Provider>)
   fireEvent.keyDown(window, { key: "a", altKey: true })
@@ -152,7 +152,7 @@ describe("PiSessionPicker", () => {
   })
 
   it("reads no preview ahead for a running session, however often the list refreshes", async () => {
-    const tab = { tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
+    const tab = { tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }
     const picker = () => <TabContext.Provider value={tab}><PiSessionPicker onOpenItem={vi.fn()} /></TabContext.Provider>
     const idle = piSession("idle", 2 * HOUR)
     pi.sessions = [idle, piSession("busy", HOUR, { live })]

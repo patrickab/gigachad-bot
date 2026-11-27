@@ -1,5 +1,4 @@
 // Next's recommended React, hooks, a11y and TypeScript rules, plus folder boundaries: features own their domain, shared layers never reach into features or app.
-import { join } from "node:path"
 import { defineConfig, globalIgnores } from "eslint/config"
 import nextVitals from "eslint-config-next/core-web-vitals"
 import nextTypescript from "eslint-config-next/typescript"
@@ -82,13 +81,11 @@ export default defineConfig([
     },
   },
   {
-    // packages/* ship as tarballs to other apps, so they cannot reach this app's `@/` modules.
+    // packages/chat-ui ships to LearnHarness's overlay in part (`package.json` `exports`), nothing in it reaches this app's `@/` modules.
     files: ["packages/**/*.{ts,tsx}"],
     ignores: ["packages/**/__tests__/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: ["@/*"], message: "A package must not import the app it ships from." }] }],
-      // Only what the package's own manifest declares ships to a consumer, an import that resolves through the shell's node_modules breaks in LearnHarness's overlay.
-      "import/no-extraneous-dependencies": ["error", { packageDir: [join(import.meta.dirname, "packages/chat-ui")], includeTypes: true }],
     },
   },
 ])

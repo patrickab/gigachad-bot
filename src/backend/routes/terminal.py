@@ -32,7 +32,6 @@ from lib.pty_process import PtyProcess
 router = APIRouter(prefix="/api/terminal", tags=["terminal"])
 
 
-
 class OpenMessage(BaseModel):
     type: str = Field(pattern="^open$")
     rows: int = Field(gt=0, le=1000)

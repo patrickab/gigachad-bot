@@ -388,7 +388,7 @@ def test_files_of_an_absolute_cwd_inside_the_file_roots_or_the_workbench(monkeyp
 
     found = {"files": [{"path": "notes.md", "score": 1}]}
     for folder in (vault / "docs", workbench / "markdown"):
-        assert client.get("/api/pi/files", params={"cwd": str(folder), "q": "n"}).json() == found
+        assert client.get("/api/pi/files", params={"cwd": str(folder)}).json() == found
     assert [dict(request.url.params)["cwd"] for request in host.requests] == [str(vault / "docs"), str(workbench / "markdown")]
 
     assert client.get("/api/pi/files", params={"cwd": str(outside)}).status_code == 404
@@ -442,51 +442,42 @@ def test_a_changed_shape_answers_502_naming_the_field(monkeypatch):
 
 
 def test_a_refusal_keeps_its_status_and_body(monkeypatch, repositories):
-    current = {"revision": 3, "data": {"title": "newer"}}
-    _serve(monkeypatch, {"POST /sessions": (409, {"error": "locked"}), f"PUT /sessions/{SESSION_ID}/state": (409, current)})
+    live = {"error": "live", "holder": "tui"}
+    _serve(monkeypatch, {"POST /sessions": (409, {"error": "locked"}), f"POST /sessions/{SESSION_ID}/archive": (409, live)})
     client = _client()
 
     locked = client.post("/api/pi/sessions", json={"repo": "app", "resume": None})
-    stale = client.put(f"/api/pi/sessions/{SESSION_ID}/state", json={"revision": 2, "data": {"title": "mine"}})
+    archived = client.post(f"/api/pi/sessions/{SESSION_ID}/archive")
 
     assert (locked.status_code, locked.json()) == (409, {"detail": "locked", "body": {"error": "locked"}})
-    assert stale.status_code == 409
-    assert stale.json()["body"] == current
+    assert archived.status_code == 409
+    assert archived.json()["body"] == live
 
 
 def test_session_actions_reach_their_pi_host_routes(monkeypatch, repositories):
     host = _serve(
         monkeypatch,
         {
-            f"POST /sessions/{SESSION_ID}/close": (204, None),
             f"POST /sessions/{SESSION_ID}/archive": (200, {"session": {**SESSION, "live": None, "archived": True}}),
             f"POST /sessions/{SESSION_ID}/restore": (200, {"session": {**SESSION, "live": None}}),
             f"PUT /sessions/{SESSION_ID}/pin": (200, {"session": {**SESSION, "pinned": True}}),
-            f"GET /sessions/{SESSION_ID}/state": (200, {"revision": 1, "data": {}}),
-            f"PUT /sessions/{SESSION_ID}/state": (200, {"revision": 2}),
             "GET /files": (200, {"files": [{"path": "src/app.py", "score": 0.9}]}),
         },
     )
     client = _client()
 
-    assert client.post(f"/api/pi/sessions/{SESSION_ID}/close").status_code == 204
     assert client.post(f"/api/pi/sessions/{SESSION_ID}/archive").json()["session"]["archived"] is True
     assert client.post(f"/api/pi/sessions/{SESSION_ID}/restore").json()["session"]["live"] is None
     assert client.put(f"/api/pi/sessions/{SESSION_ID}/pin", json={"pinned": True}).json()["session"]["pinned"] is True
-    assert client.get(f"/api/pi/sessions/{SESSION_ID}/state").json() == {"revision": 1, "data": {}}
-    assert client.put(f"/api/pi/sessions/{SESSION_ID}/state", json={"revision": 1, "data": {"a": 1}}).json() == {"revision": 2}
-    assert client.get("/api/pi/files", params={"repo": "app", "q": "app"}).json() == {"files": [{"path": "src/app.py", "score": 0.9}]}
-    assert client.get("/api/pi/files", params={"repo": "app"}).status_code == 200
-    assert json.loads(host.requests[3].content) == {"pinned": True}
-    assert json.loads(host.requests[5].content) == {"revision": 1, "data": {"a": 1}}
-    assert dict(host.requests[6].url.params) == {"cwd": str(repositories / "app"), "q": "app"}
-    # K6: without a query pi-host answers the whole cached list, the UI ranks it.
-    assert dict(host.requests[7].url.params) == {"cwd": str(repositories / "app"), "q": ""}
+    assert client.get("/api/pi/files", params={"repo": "app"}).json() == {"files": [{"path": "src/app.py", "score": 0.9}]}
+    assert json.loads(host.requests[2].content) == {"pinned": True}
+    # K6: pi-host answers the whole cached list, the UI ranks it.
+    assert dict(host.requests[3].url.params) == {"cwd": str(repositories / "app"), "q": ""}
 
 
 def test_session_ids_outside_the_uuid_alphabet_are_refused(monkeypatch):
     host = _serve(monkeypatch, {})
-    assert _client().post("/api/pi/sessions/..%2Fhealth/close").status_code in (404, 422)
+    assert _client().post("/api/pi/sessions/..%2Fhealth/archive").status_code in (404, 422)
     assert host.requests == []
 
 

@@ -77,10 +77,12 @@ export function useChatStream(): UseChatStreamReturn {
       setIsStreaming(true)
 
       // Every message this reply put at the end of the list. Another chat opened meanwhile replaces it: the reply then leaves the list alone.
-      const mine = new Set([messagesRef.current.at(-1)])
+      const mine = new WeakSet<Message>()
+      const own = (message: Message | undefined) => { if (message) mine.add(message) }
+      own(messagesRef.current.at(-1))
       const publish = createMessagePublisher((update) => setMessages((prev) => {
         const next = typeof update === "function" ? update(prev) : update
-        if (next !== prev) mine.add(next.at(-1))
+        if (next !== prev) own(next.at(-1))
         return next
       }), assistantMsg, messagesRef.current.at(-1))
       // Answer text is paced, everything else lands as it arrives.
@@ -149,7 +151,7 @@ export function useChatStream(): UseChatStreamReturn {
         settleRunningToolCalls(assistantMsg, unresolvedReason)
         publish()
         const current = messagesRef.current
-        if (current.at(-1)?.role === "assistant" && mine.has(current.at(-1))) {
+        if (current.at(-1)?.role === "assistant" && mine.has(current.at(-1)!)) {
           finalMessages = deactivateSentImages(
             [...current.slice(0, -1), { ...assistantMsg }],
             req.img_paths,

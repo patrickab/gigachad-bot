@@ -1,5 +1,5 @@
 import { Children, type CSSProperties, type ReactNode, type Ref } from "react"
-import { Bot, Check, ChevronDown, ChevronRight, Copy, GitFork, Loader2, User, Wrench } from "lucide-react"
+import { Bot, Check, ChevronDown, ChevronRight, Copy, GitFork, User, Wrench } from "lucide-react"
 import { useCopyFeedback } from "./useCopyFeedback.ts"
 
 const ACTION_SIZE_PX = 22
@@ -77,12 +77,11 @@ export function TurnSurface({ children }: { children: ReactNode }) {
  * - `onCollapse`: makes the avatar, the strip above the content and the chevron collapse the turn, the content stays selectable
  * - `icon` replaces the role's avatar, for a question that is no typed prompt
  */
-export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, icon, children }: {
+export function TurnRegion({ role, tail = "text", actions, onCollapse, icon, children }: {
   role: TurnRole
   tail?: "text" | "activity"
   actions?: ReactNode
   onCollapse?: () => void
-  collapseRef?: Ref<HTMLButtonElement>
   icon?: ReactNode
   children: ReactNode
 }) {
@@ -109,7 +108,7 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
         )}
       </div>
       {onCollapse && (
-        <button type="button" ref={collapseRef} className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label="Collapse question and answer">
+        <button type="button" className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label="Collapse question and answer">
           <ChevronDown size={16} aria-hidden="true" />
         </button>
       )}
@@ -118,12 +117,10 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
 }
 
 /** Icon button in a region's action row. */
-export function TurnAction({ label, icon, onClick, disabled, busy, tone }: {
+export function TurnAction({ label, icon, onClick, tone }: {
   label: string
   icon: ReactNode
   onClick: () => void
-  disabled?: boolean
-  busy?: boolean
   tone?: "danger"
 }) {
   return (
@@ -132,14 +129,12 @@ export function TurnAction({ label, icon, onClick, disabled, busy, tone }: {
       className="gc-turn-action"
       data-tone={tone}
       aria-label={label}
-      aria-busy={busy || undefined}
-      disabled={disabled || busy}
       onClick={(event) => {
         event.stopPropagation()
         onClick()
       }}
     >
-      {busy ? <Loader2 className="gc-turn-spin" size={14} aria-hidden="true" /> : icon}
+      {icon}
     </button>
   )
 }
@@ -151,6 +146,6 @@ export function CopyAction({ text, label }: { text: string; label: string }) {
 }
 
 /** Start a new session or branch from this point. */
-export function ForkAction({ label, onFork, disabled, busy }: { label: string; onFork: () => void; disabled?: boolean; busy?: boolean }) {
-  return <TurnAction label={label} onClick={onFork} disabled={disabled} busy={busy} icon={<GitFork size={14} aria-hidden="true" />} />
+export function ForkAction({ label, onFork }: { label: string; onFork: () => void }) {
+  return <TurnAction label={label} onClick={onFork} icon={<GitFork size={14} aria-hidden="true" />} />
 }

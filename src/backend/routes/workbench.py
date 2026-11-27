@@ -47,7 +47,6 @@ _IMAGE_DIRECTORY = latex_templates.IMAGE_DIRECTORY
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # The chat of each file key being opened in this process, so concurrent first opens share the session the first one starts.
-# The lock of the chat of a file while any open of it holds it.
 _opening: KeyedLocks[str] = KeyedLocks()
 
 

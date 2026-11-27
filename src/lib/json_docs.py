@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
 from lib.data_store import DataStore, Entry, Meta, Revision, StorageNotFoundError, overwrite_text
@@ -15,8 +14,6 @@ if TYPE_CHECKING:
 
 JsonValue = dict[str, Any] | list[Any]
 
-logger = logging.getLogger(__name__)
-
 
 class JsonDocs:
     """Read and write JSON values by storage key."""
@@ -24,16 +21,14 @@ class JsonDocs:
     def __init__(self, store: DataStore) -> None:
         self._store = store
 
-    def read(self, key: str, default: object = None, *, log: str | None = None) -> Any:  # noqa: ANN401 - untyped until the caller checks it
-        """Parsed JSON at *key*, *default* when it is missing or malformed. A malformed document is logged under *log* when given."""
+    def read(self, key: str, default: object = None) -> Any:  # noqa: ANN401 - untyped until the caller checks it
+        """Parsed JSON at *key*, *default* when it is missing or malformed."""
         try:
             content, _ = self._store.read_bytes(key)
             return json.loads(content.decode("utf-8"))
         except StorageNotFoundError:
             return default
-        except ValueError as exc:
-            if log is not None:
-                logger.error("Failed to read %s at %s: %s", log, key, exc)
+        except ValueError:
             return default
 
     def read_many(self, keys: Iterable[str], default: object = None) -> dict[str, Any]:

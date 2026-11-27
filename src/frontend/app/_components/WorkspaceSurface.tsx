@@ -33,11 +33,10 @@ import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/Top
 import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
 import { factoryItem as factoryTaskItem } from "@/features/factory/items"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
-import { fileItem, itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { fileItem, shownItem, tabSurface, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import type { Usage } from "@/lib/domain/types"
 import { workbenchKindOf } from "@/lib/domain/workbench"
-import { writeRootFile } from "@/lib/backend/api"
 import { isNotebookPath } from "@/lib/paths"
 
 /** Model picker props shared by the chat, document, learn and Pi top bars. */
@@ -126,17 +125,17 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
 
 /** The top bar and the surface of the tab's current mode. */
 export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, launch, piStart, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
-  const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
+  const { tab, setModeLabel, updateConfig, hideItem, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // The workbench's Pi chats need host access, other logins keep the PDF's local assistant
   const hostAccess = useHostAccess()
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true)
-  const { config, projectSlug, appMode } = tab
+  const { config, projectSlug } = tab
   const piSlots = { thinking: useTopBarSlot("reasoning"), model: useTopBarSlot("model"), usage: useTopBarSlot("usage") }
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
   const closeFile = <TopBarTransparent>
     <ThemeToggle />
-    <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+    <button aria-label="Close file" onClick={hideItem} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
       <X className="h-4 w-4" />
     </button>
   </TopBarTransparent>
@@ -180,186 +179,175 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   }, [])
   const canvasChatPath = hostAccess && canvas.view.kind === "canvas" ? canvas.view.selection?.path ?? null : null
 
-  const surfaces: Record<AppSurface, () => Surface> = {
-    chat: () => ({
-      ...conversationBar({
-        reasoning: <TopBarPill>
-          {piStart
-            ? <PiThinkingSelector controls={piStart} />
-            : <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />}
-        </TopBarPill>,
-        model: <TopBarTransparent>
-          {piStart
-            ? <PiModelDropdown controls={piStart} modelProps={modelProps} chatColumn={chatColumn} />
-            : <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />}
-        </TopBarTransparent>,
-        usage: <ChatContextUsage usage={totalUsage} model={config.selectedModel} />,
-      }),
-      body: chatBody,
-    }),
-    canvas: () => ({
-      left: null,
-      center: <TopBarSlot name="drawing">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
-      right: <>
-        <TopBarPill>
-          <TopBarSlot name="view">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
-          <ThemeToggle />
-        </TopBarPill>
-        {canvasChatPath
-          ? !canvasChatOpen && openChat(() => setCanvasChatOpen(true))
-          : filePanelToggle}
-      </>,
-      runsUnderTopBar: canvas.view.kind !== "architecture",
-      runsUnderSidebars: canvas.view.kind !== "architecture",
-      raised: true,
-      body: canvas.view.kind === "architecture"
-        ? <LazyArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
-        : <CanvasCaptureContext.Provider value={canvasChatPath ? attachCapture : null}>
-          <LazyCanvasWorkspace
-            selected={canvas.view.selection}
-            slug={projectSlug}
-            onCloseEditor={canvas.closeCanvas}
-            onCreated={canvas.openCreatedCanvas}
-            onModeLabel={setModeLabel}
-            editorModel={config.selectedModel}
-          />
-          {canvasChatPath && canvasChatOpen && (
-            <FileChat
-              path={canvasChatPath}
-              width={CANVAS_CHAT_WIDTH_PX}
-              onClose={() => setCanvasChatOpen(false)}
-              modelProps={modelProps}
-              lead={() => canvasLead(canvasChatPath)}
-              insertion={canvasInsertion}
-              onInserted={() => setCanvasInsertion(null)}
-            />
-          )}
-        </CanvasCaptureContext.Provider>,
-    }),
-    document: () => {
-      const diffItem = itemOf(tab, "diff")
-      const documentItem = itemOf(tab, "document")
-      const isPdfDocument = !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
-      if (!diffItem && documentItem && isNotebookPath(documentItem.path)) return {
-        ...workbenchBar,
-        runsUnderTopBar: true,
-        body: <NotebookWorkbench
-          path={documentItem.path}
-          tabId={tab.id}
-          chatSessionId={documentItem.chat?.sessionId}
-          onChatSessionChange={(sessionId) => setWorkspaceItem({ ...documentItem, chat: { sessionId } })}
-          {...workbenchChatProps}
-        />,
+  const shown = shownItem(tab)
+  const surfaceFor = (): Surface => {
+    switch (shown?.kind) {
+      case undefined: return {
+        ...conversationBar({
+          reasoning: <TopBarPill>
+            {piStart
+              ? <PiThinkingSelector controls={piStart} />
+              : <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />}
+          </TopBarPill>,
+          model: <TopBarTransparent>
+            {piStart
+              ? <PiModelDropdown controls={piStart} modelProps={modelProps} chatColumn={chatColumn} />
+              : <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />}
+          </TopBarTransparent>,
+          usage: <ChatContextUsage usage={totalUsage} model={config.selectedModel} />,
+        }),
+        body: chatBody,
       }
-      return {
-        left: <TopBarTransparent>
-          <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
-        </TopBarTransparent>,
-        // Shown on hover or keyboard focus, pinned while an ink tool is selected (`data-ink-tool`)
-        center: isPdfDocument ? <div className="flex opacity-0 transition-opacity duration-200 hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-ink-tool]]:opacity-100">
-          <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>
-        </div> : undefined,
+      case "canvas": case "architecture": case "scratch": return {
+        left: null,
+        center: <TopBarSlot name="drawing">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
         right: <>
-          {closeFile}
-          {isPdfDocument
-            ? !pdfChatOpen && openChat(() => setPdfChatOpen(true))
+          <TopBarPill>
+            <TopBarSlot name="view">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
+            <ThemeToggle />
+          </TopBarPill>
+          {canvasChatPath
+            ? !canvasChatOpen && openChat(() => setCanvasChatOpen(true))
             : filePanelToggle}
         </>,
-        runsUnderTopBar: isPdfDocument,
-        raised: isPdfDocument,
-        body: diffItem ? <DiffViewer key={diffItem.path} root={diffItem.path} />
-          : !documentItem ? chatBody
-          : isPdfDocument ? (
-            <PdfAssistant
-              key={documentItem.path}
-              path={documentItem.path}
-              model={config.selectedModel}
-              chatOpen={pdfChatOpen}
-              onChatOpenChange={setPdfChatOpen}
-              renderChat={hostAccess ? ({ width, onClose }) => (
-                <FileChat path={documentItem.path} width={width} onClose={onClose} modelProps={modelProps} />
-              ) : undefined}
-            >
-              <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} />
-            </PdfAssistant>
-          ) : (
-            <DocumentEditor
-              path={documentItem.path}
-              slug={documentItem.projectSlug ?? ""}
-              persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
-              onClose={() => setAppMode("chat")}
+        runsUnderTopBar: canvas.view.kind !== "architecture",
+        runsUnderSidebars: canvas.view.kind !== "architecture",
+        raised: true,
+        body: canvas.view.kind === "architecture"
+          ? <LazyArchitectureWindow path={canvas.view.path} maximized hostScale={1} edgeStyle={canvas.architectureEdgeStyle} onEdgeStyleChange={canvas.setArchitectureEdgeStyle} onNavigate={canvas.navigateArchitecture} />
+          : <CanvasCaptureContext.Provider value={canvasChatPath ? attachCapture : null}>
+            <LazyCanvasWorkspace
+              selected={canvas.view.selection}
+              slug={projectSlug}
+              onCloseEditor={canvas.closeCanvas}
+              onCreated={canvas.openCreatedCanvas}
               onModeLabel={setModeLabel}
-              onNavigate={(path) => setWorkspaceItem({ ...documentItem, path })}
-              model={config.selectedModel}
+              editorModel={config.selectedModel}
             />
-          ),
+            {canvasChatPath && canvasChatOpen && (
+              <FileChat
+                path={canvasChatPath}
+                width={CANVAS_CHAT_WIDTH_PX}
+                onClose={() => setCanvasChatOpen(false)}
+                modelProps={modelProps}
+                lead={() => canvasLead(canvasChatPath)}
+                insertion={canvasInsertion}
+                onInserted={() => setCanvasInsertion(null)}
+              />
+            )}
+          </CanvasCaptureContext.Provider>,
       }
-    },
-    pi: () => {
-      const piItem = itemOf(tab, "pi")
-      return {
+      case "document": case "diff": {
+        const isPdfDocument = shown.kind === "document" && shown.path.toLowerCase().endsWith(".pdf")
+        if (shown.kind === "document" && isNotebookPath(shown.path)) return {
+          ...workbenchBar,
+          runsUnderTopBar: true,
+          body: <NotebookWorkbench
+            path={shown.path}
+            tabId={tab.id}
+            chatSessionId={shown.chat?.sessionId}
+            onChatSessionChange={(sessionId) => setWorkspaceItem({ ...shown, chat: { sessionId } })}
+            {...workbenchChatProps}
+          />,
+        }
+        return {
+          left: <TopBarTransparent>
+            <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
+          </TopBarTransparent>,
+          // Shown on hover or keyboard focus, pinned while an ink tool is selected (`data-ink-tool`)
+          center: isPdfDocument ? <div className="flex opacity-0 transition-opacity duration-200 hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-ink-tool]]:opacity-100">
+            <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>
+          </div> : undefined,
+          right: <>
+            {closeFile}
+            {isPdfDocument
+              ? !pdfChatOpen && openChat(() => setPdfChatOpen(true))
+              : filePanelToggle}
+          </>,
+          runsUnderTopBar: isPdfDocument,
+          raised: isPdfDocument,
+          body: shown.kind === "diff" ? <DiffViewer key={shown.path} root={shown.path} />
+            : isPdfDocument ? (
+              <PdfAssistant
+                key={shown.path}
+                path={shown.path}
+                model={config.selectedModel}
+                chatOpen={pdfChatOpen}
+                onChatOpenChange={setPdfChatOpen}
+                renderChat={hostAccess ? ({ width, onClose }) => (
+                  <FileChat path={shown.path} width={width} onClose={onClose} modelProps={modelProps} />
+                ) : undefined}
+              >
+                <LazyAnnotatedPdfViewer path={shown.path} topInset={44} />
+              </PdfAssistant>
+            ) : (
+              <DocumentEditor
+                path={shown.path}
+                slug={shown.projectSlug ?? ""}
+                onClose={hideItem}
+                onModeLabel={setModeLabel}
+                onNavigate={(path) => setWorkspaceItem({ ...shown, path })}
+                model={config.selectedModel}
+              />
+            ),
+        }
+      }
+      case "pi": return {
         // The Pi tab renders its thinking, model and usage into the places a chat's bar has its own
         ...conversationBar({
           reasoning: <TopBarSlot name="reasoning">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>,
           model: <TopBarSlot name="model">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
           usage: <TopBarSlot name="usage">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>,
         }),
-        body: piItem?.pi ? (
+        body: shown.pi ? (
           <div className="flex h-full min-h-0 flex-col">
-            <PiTab view={piItem.pi} onViewChange={(pi) => setWorkspaceItem({ ...piItem, pi })} modelProps={modelProps} slots={piSlots} launch={launch} onLaunched={onLaunched} onOpenTask={(repo, taskId) => setWorkspaceItem(factoryTaskItem(repo, taskId))} />
+            <PiTab view={shown.pi} onViewChange={(pi) => setWorkspaceItem({ ...shown, pi })} modelProps={modelProps} slots={piSlots} launch={launch} onLaunched={onLaunched} onOpenTask={(repo, taskId) => setWorkspaceItem(factoryTaskItem(repo, taskId))} />
           </div>
         ) : chatBody,
       }
-    },
-    workbench: () => {
-      const workbenchItem = itemOf(tab, "workbench")
-      return {
+      case "workbench": return {
         ...workbenchBar,
         runsUnderTopBar: true,
-        raised: !!workbenchItem && workbenchKindOf(workbenchItem.path) === "latex",
-        body: workbenchItem ? (
+        raised: workbenchKindOf(shown.path) === "latex",
+        body: (
           <WorkbenchItemBody
-            item={workbenchItem}
+            item={shown}
             onItemChange={setWorkspaceItem}
             onModeLabel={setModeLabel}
-            onClose={() => setAppMode("chat")}
+            onClose={hideItem}
             {...workbenchChatProps}
           />
-        ) : chatBody,
+        ),
       }
-    },
-    factory: () => {
-      const factoryItem = itemOf(tab, "factory")
-      return {
+      case "factory": return {
         left: <TopBarSlot name="title">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
         center: <TopBarSlot name="center">{(ref) => <TopBarTransparent ref={ref} />}</TopBarSlot>,
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
-        body: factoryItem ? <FactorySurface item={factoryItem} /> : chatBody,
+        body: <FactorySurface item={shown} />,
       }
-    },
-    learn: () => {
-      const learnItem = itemOf(tab, "learn")
-      const learnView = learnItem?.learn ?? null
-      return {
-        left: learnView && <>
-          <TopBarPill>
-            <LearnReasoningSelector view={learnView} />
-          </TopBarPill>
-          <TopBarTransparent>
-            <LearnModelSelector view={learnView} {...modelProps} />
-          </TopBarTransparent>
-        </>,
-        right: <TopBarPill>
-          {learnView && <LearnPlanButton view={learnView} />}
-          <ThemeToggle />
-        </TopBarPill>,
-        runsUnderTopBar: false,
-        body: learnItem && learnView ? <LearnSurface view={learnView} onViewChange={(learn) => setWorkspaceItem({ ...learnItem, learn })} /> : chatBody,
+      case "learn": {
+        const learnView = shown.learn ?? null
+        return {
+          left: learnView && <>
+            <TopBarPill>
+              <LearnReasoningSelector view={learnView} />
+            </TopBarPill>
+            <TopBarTransparent>
+              <LearnModelSelector view={learnView} {...modelProps} />
+            </TopBarTransparent>
+          </>,
+          right: <TopBarPill>
+            {learnView && <LearnPlanButton view={learnView} />}
+            <ThemeToggle />
+          </TopBarPill>,
+          runsUnderTopBar: false,
+          body: learnView ? <LearnSurface view={learnView} onViewChange={(learn) => setWorkspaceItem({ ...shown, learn })} /> : chatBody,
+        }
       }
-    },
+    }
   }
-  const surface = surfaces[appMode]()
+  const surface = surfaceFor()
 
   return <>
     <TopBar
@@ -371,7 +359,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
     <div
       data-workspace-surface
       // Isolated so its own z-indices stay under the left sidebar card (z-10)
-      className={`absolute inset-x-0 bottom-0 ${surface.runsUnderSidebars ? "isolate" : ""} ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}
+      className={`absolute inset-x-0 bottom-0 ${surface.runsUnderSidebars ? "isolate" : ""} ${surface.runsUnderTopBar ? "top-0" : "top-11"} ${tabSurface(tab) === "canvas" ? "overflow-hidden" : ""}`}
       style={surface.runsUnderSidebars ? { left: "calc(-1 * var(--under-left, 0px))", right: "calc(-1 * var(--under-right, 0px))" } : undefined}
     >
       {surface.body}

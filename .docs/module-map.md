@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run).
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run). Edited by hand on 2026-11-27 after the structural pass (no `/repomix` run).
 
 # Module map
 
@@ -192,8 +192,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       |-- AppShell.tsx      Cross-feature composition and workspace navigation
 |       |       |-- TabContent.tsx    Tab layout: sidebar, surface, overlays and modals, per-tab error boundary
 |       |       |-- TabSidebar.tsx    The tab's Sidebar apart from its chat: memoized, so stream tokens never re-render navigation
-|       |       |-- WorkspaceSurface.tsx Per-mode table of top-bar controls and surface body
-|       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every mode
+|       |       |-- WorkspaceSurface.tsx Per-surface table (by the tab's shown item) of top-bar controls and surface body
+|       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every surface
 |       |       |-- deepLink.ts       Preview/open-target parsing
 |       |-- features/                 Domain-owned interactive surfaces
 |       |   |-- chat/                 Turns, attachments, persistence and streaming (`useChatStream` over `lib/backend/tokenPacer.ts`)
@@ -346,9 +346,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the learn frame over a tab's slot, previewed tab first
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
-|       |   |-- backend/              HTTP, URL, runtime API base and stream clients
+|       |   |-- backend/              HTTP, URL, API base and stream clients
 |       |   |   |-- api/                  Resource endpoints: `index.ts` (public entry `@/lib/backend/api`), `http.ts` (fetch core), one client per route family
-|       |   |   |-- resources.ts          Shared instances of user-global reads (models, prompts, usage, sidebar lists), `refresh*` helpers, `forgetProjectDocuments`, `revalidateOnActivation`, `watchDocumentLists` (takes this device's change events too)
+|       |   |   |-- resources.ts          Shared instances of user-global reads (backend config, projects, models, prompts, usage, sidebar lists, project architecture workspaces), `refresh*` helpers, `forgetProjectDocuments`, `revalidateOnActivation`, `watchDocumentLists` (takes this device's change events too)
 |       |   |   |-- references.ts         Live document references (attach, write back)
 |       |   |   |-- config.ts
 |       |   |   |-- urls.ts
@@ -371,7 +371,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
-|           `-- chat-ui/              Independently packaged local/learn chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, click hints, palette, learn protocol
+|           `-- chat-ui/              Shared chat UI: turns, markdown, code/Mermaid/Markmap renderers, click hints, palette, learn protocol; ships the learn protocol and three stylesheets to LearnHarness
 |               |-- src/
 |               |   |-- index.ts      Public rendering exports
 |               |   |-- Turn.tsx      Shared turn rendering
@@ -380,7 +380,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               |   |-- hints.ts/.css Vimium-style `f` click hints, installed app-wide by `AppShell`
 |               |   `-- palette.css   Canonical role palette
 |               |-- pack.mjs          Build/pack/sync tooling
-|               `-- package.json      Package-local dependencies and distribution contract
+|               `-- package.json      Distribution contract: `exports` names the learn protocol and three stylesheets, no dependencies
 |-- templates/                        Shipped sources read through `config.TEMPLATES`
 |   |-- prompts/                      User-selectable seed prompts (`_order`, `_blocks/` fragments, e.g. `tutor.md`)
 |   |-- workbench/                    Workbench Pi chat prompts `latex.md`, `markdown.md`, `pdf.md`, `canvas.md`, `notebook.md` (source of truth, `lib/workbench/prompts.py`)
@@ -436,7 +436,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
 - Keep all Pi protocol knowledge in `features/pi/`, and the learn frame's iframe URL and message protocol (`packages/chat-ui/src/learn-protocol.ts`) in `features/learn/`.
-- Keep `packages/chat-ui/` independently distributable: no `@/` app imports and no undeclared reliance on the shell's dependencies. `pack.mjs` packs it for `run-learnharness.sh`, which installs it into the served LearnHarness for `learnharness-overlay/`.
+- Keep what `packages/chat-ui/package.json` `exports` names (the learn protocol, `markdown.css`, `palette.css`, `fonts.css`) independently distributable: no imports, no `@/` app modules. The rest of the package has no `@/` app imports. `pack.mjs` packs the exported files for `run-learnharness.sh`, which installs it into the served LearnHarness for `learnharness-overlay/`.
 
 ### Backend and separate services
 

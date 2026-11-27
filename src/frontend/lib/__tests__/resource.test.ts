@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
+import type { ChangeEvent } from "@/lib/backend/syncStream"
 import { createResource, refresh, resetResources, resourceFamily, revalidateStale } from "@/lib/resource"
+
+const feed = vi.hoisted(() => ({ listeners: [] as ((event: ChangeEvent) => void)[], listProjects: vi.fn() }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<object>(), listProjects: feed.listProjects }))
+vi.mock("@/lib/backend/syncStream", () => ({
+  subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
+    feed.listeners.push(listener)
+    return () => {}
+  },
+}))
 
 /** A read whose requests the test settles by hand. */
 function manualRead<T>() {
@@ -196,6 +206,30 @@ describe("createResource", () => {
     resource.invalidate()
     expect(read).not.toHaveBeenCalled()
   })
+
+  it("keeps its value and notifies nobody when a re-read answers the same, by its `same`", async () => {
+    const { read, requests } = manualRead<{ names: string[] }>()
+    const resource = createResource(read, { same: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
+    const listener = vi.fn()
+    resource.subscribe(listener)
+    const first = { names: ["a"] }
+    const loaded = resource.load()
+    requests[0].resolve(first)
+    await loaded
+    listener.mockClear()
+
+    resource.invalidate()
+    requests[1].resolve({ names: ["a"] })
+    await resource.load()
+    expect(resource.get()).toBe(first)
+    expect(listener).not.toHaveBeenCalled()
+
+    resource.invalidate()
+    requests[2].resolve({ names: ["b"] })
+    await resource.load()
+    expect(resource.get()).toEqual({ names: ["b"] })
+    expect(listener).toHaveBeenCalledOnce()
+  })
 })
 
 describe("resourceFamily", () => {
@@ -278,5 +312,21 @@ describe("resetResources", () => {
     resetResources()
     expect(single.get()).toBeUndefined()
     expect(family("kept").get()).toBeUndefined()
+  })
+})
+
+describe("projectsResource", () => {
+  it("reads the projects again when the project catalog changes", async () => {
+    const { projectsResource, watchDocumentLists } = await import("@/lib/backend/resources")
+    feed.listProjects.mockResolvedValueOnce([]).mockResolvedValueOnce([{ slug: "p", name: "P", tabs: [] }])
+    const stop = watchDocumentLists()
+    await projectsResource.load()
+    projectsResource.subscribe(() => {})
+
+    for (const listener of feed.listeners) {
+      listener({ seq: 1, resource_kind: "document", resource_key: "chat/projects-meta.json", version: null, operation: "write", device_id: null })
+    }
+    await vi.waitFor(() => expect(projectsResource.get()).toEqual([{ slug: "p", name: "P", tabs: [] }]))
+    stop()
   })
 })

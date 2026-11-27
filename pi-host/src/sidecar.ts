@@ -5,7 +5,7 @@
  * - Provides: revisioned, per-session serialized `updateState`, `isPinned`, `copyPrivateState`, `profileOf`,
  *   `markProfile`
  */
-import type { Host, PrivateState, Profile } from "../host/index.ts";
+import type { Host, PrivateState, Profile } from "./host/index.ts";
 
 const sidecarLocks = new Map<string, Promise<unknown>>();
 

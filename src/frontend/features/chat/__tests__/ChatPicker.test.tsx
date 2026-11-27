@@ -23,11 +23,11 @@ function chat(historyFile: string, title: string, ageHours: number, projectSlug:
   return { historyFile, projectSlug, title, updatedAt: new Date(Date.now() - ageHours * HOUR).toISOString() }
 }
 
-const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
+const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], projectSlug: null, workspaceItem: null, itemHidden: false }
 
 function renderPicker({ isActive = true, open = true } = {}) {
   const onOpenChat = vi.fn()
-  render(<TabContext.Provider value={{ tab: TAB, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+  render(<TabContext.Provider value={{ tab: TAB, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
     <ChatPicker onOpenChat={onOpenChat} />
   </TabContext.Provider>)
   if (open) fireEvent.keyDown(window, { key: "c", altKey: true })

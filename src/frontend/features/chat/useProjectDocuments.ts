@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState, type RefObject } from "react"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import type { AppSurface } from "@/contexts/TabContext"
 import { addDocument, loadFileViewerText, uploadFile } from "@/lib/backend/api"
 import { allDocumentsResource, projectDocumentsResource } from "@/lib/backend/resources"
 import { attachToComposer } from "@/features/chat/attachToComposer"
@@ -20,14 +19,14 @@ const NO_DOCUMENTS: ProjectDocument[] = []
 /** Own the document picker: project and global lists, selection into chat attachments, and the Alt+X shortcut. */
 export function useProjectDocuments({
   isActive,
-  appMode,
+  chatShown,
   projectSlug,
   chatId,
   chatInputRef,
   track,
 }: {
   isActive: boolean
-  appMode: AppSurface
+  chatShown: boolean
   projectSlug: string | null
   chatId: string
   chatInputRef: RefObject<ChatInputHandle | null>
@@ -88,7 +87,7 @@ export function useProjectDocuments({
       e.preventDefault()
       setDocumentOpen((open) => !open)
     }
-  }, { active: isActive && appMode === "chat" })
+  }, { active: isActive && chatShown })
 
   return {
     documentOpen,

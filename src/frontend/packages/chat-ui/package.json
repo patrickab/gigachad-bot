@@ -1,17 +1,11 @@
 {
   "name": "@gigachad/chat-ui",
   "version": "2.0.0",
-  "description": "gigachad-bot UI shared with its LearnHarness overlay: Q&A turn cards, the Streamdown/KaTeX markdown renderer with its code, Mermaid and Markmap renderers, the role palette, the Outfit UI font, keyboard click hints and the learn embed protocol",
+  "description": "What gigachad-bot shares with its LearnHarness overlay: the learn embed protocol, the role palette, the markdown prose styles and the Outfit UI face",
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": true,
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
     "./learn-protocol": {
       "types": "./dist/learn-protocol.d.ts",
       "default": "./dist/learn-protocol.js"
@@ -22,21 +16,5 @@
   },
   "files": [
     "dist"
-  ],
-  "dependencies": {
-    "@streamdown/math": "^1.0.2",
-    "markmap-lib": "^0.18.12",
-    "markmap-view": "^0.18.12",
-    "mermaid": "^11.15.0",
-    "remark-breaks": "^4.0.0",
-    "shiki": "^4.2.0",
-    "streamdown": "^2.5.0",
-    "turndown": "^7.2.4",
-    "turndown-plugin-gfm": "^1.0.2"
-  },
-  "peerDependencies": {
-    "katex": "^0.16.27 || ^0.18.0",
-    "lucide-react": "^0.503.0 || ^1.0.0",
-    "react": "^19.0.0"
-  }
+  ]
 }

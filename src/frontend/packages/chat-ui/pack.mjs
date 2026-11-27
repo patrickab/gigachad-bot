@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Builds @gigachad/chat-ui from src/ and packs it as <out>/gigachad-chat-ui-<version>.tgz.
+// Builds what @gigachad/chat-ui ships (the learn protocol, the exported stylesheets, the fonts) and packs it as <out>/gigachad-chat-ui-<version>.tgz.
 //
 //   node packages/chat-ui/pack.mjs --out <dir>
 //
@@ -11,7 +11,7 @@
 // resolve them. The tarball is reproducible: tsc output is deterministic and npm pack writes fixed timestamps,
 // so its digest changes only with its sources.
 import { execFileSync } from "node:child_process"
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -30,15 +30,9 @@ const tsc = createRequire(join(packageDir, "pack.mjs")).resolve("typescript/bin/
 const staging = mkdtempSync(join(tmpdir(), "gigachad-chat-ui-"))
 try {
   execFileSync(process.execPath, [tsc, "-p", join(packageDir, "tsconfig.build.json"), "--outDir", join(staging, "dist")], { stdio: "inherit" })
-  // tsc rewrites `from "./x.tsx"` to `./x.js` in the emitted JS, but neither in the declarations nor in a dynamic `import("./x.ts")`,
-  // which a consumer could not resolve.
-  for (const file of readdirSync(join(staging, "dist")).filter((name) => name.endsWith(".js") || name.endsWith(".d.ts"))) {
-    const path = join(staging, "dist", file)
-    writeFileSync(path, readFileSync(path, "utf8").replace(/((?:from |import\()"\.\/[^"]+)\.tsx?"/g, '$1.js"'))
-  }
-  // Stylesheets ship as-is, `@gigachad/chat-ui/<name>.css`. The shell imports the same files from src/.
-  for (const stylesheet of readdirSync(join(packageDir, "src")).filter((name) => name.endsWith(".css"))) {
-    copyFileSync(join(packageDir, "src", stylesheet), join(staging, "dist", stylesheet))
+  // The stylesheets the manifest exports ship as-is. The shell imports the same files from src/.
+  for (const specifier of Object.keys(manifest.exports).filter((key) => key.endsWith(".css"))) {
+    copyFileSync(join(packageDir, "src", specifier.slice(2)), join(staging, "dist", specifier.slice(2)))
   }
   // The font files `fonts.css` points at, next to it as in src/.
   cpSync(join(packageDir, "src", "fonts"), join(staging, "dist", "fonts"), { recursive: true })

@@ -241,8 +241,8 @@ test("supervisor and catalog run every machine action through the Host", async (
   expect(pinned.body.session.pinned).toBe(true);
   expect(host.states.get(archived.body.session.sessionPath)?.pinned).toBe(true);
 
-  const files = await api(`/files?cwd=${encodeURIComponent(CWD)}&q=main`);
-  expect(files.body.files[0].path).toBe("src/main.ts");
+  const files = await api(`/files?cwd=${encodeURIComponent(CWD)}`);
+  expect(files.body.files.map((file: { path: string }) => file.path)).toContain("src/main.ts");
   expect((await api("/files?cwd=/not/on/the/host")).status).toBe(400);
   expect((await api("/health")).body).toMatchObject({ ok: true, piVersion: "1.5.2", sessions: [] });
 });

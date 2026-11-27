@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } fr
 import type { CanvasSelection } from "@/features/editor/canvas/CanvasWorkspace"
 import { architectureSlug } from "@/lib/domain/architecturePaths"
 import type { EdgeStyle } from "@/lib/domain/edgeRouting"
-import { useTab } from "@/contexts/TabContext"
+import { scratchItem, shownItem, useTab } from "@/contexts/TabContext"
 
 /** What a tab's canvas mode shows: one project's architecture (`graph/<slug>/<file>`, an empty file opens the first system), or a canvas. */
 export type CanvasView =
@@ -23,17 +23,17 @@ interface CanvasViewState {
 /** Own which canvas or architecture a tab's canvas mode shows; selecting one clears the other. */
 export function useCanvasView(): CanvasViewState {
   const { tab, setWorkspaceItem } = useTab()
+  const item = shownItem(tab)
   const view = useMemo<CanvasView>(() => {
-    const item = tab.workspaceItem
     if (item?.kind === "architecture") return { kind: "architecture", path: item.path }
     return { kind: "canvas", selection: item?.kind === "canvas" ? { path: item.path, scope: item.projectSlug ?? "" } : null }
-  }, [tab.workspaceItem])
+  }, [item])
   const [architectureEdgeStyle, setArchitectureEdgeStyle] = useState<EdgeStyle>("elbow")
 
   const openCreatedCanvas = useCallback((selection: CanvasSelection) => {
     setWorkspaceItem({ kind: "canvas", path: selection.path, projectSlug: selection.scope || null })
   }, [setWorkspaceItem])
-  const closeCanvas = useCallback(() => { setWorkspaceItem(null) }, [setWorkspaceItem])
+  const closeCanvas = useCallback(() => { setWorkspaceItem(scratchItem(tab.projectSlug)) }, [setWorkspaceItem, tab.projectSlug])
   const navigateArchitecture = useCallback((path: string) => {
     setWorkspaceItem({ kind: "architecture", path, projectSlug: architectureSlug(path) })
   }, [setWorkspaceItem])

@@ -44,7 +44,7 @@ export function useFilePicker({ hasMessages, chatInputRef, track, onOpenItem }: 
   const openFile = useCallback((path: string) => {
     if (isNotebookPath(path)) {
       setStandaloneFile(null)
-      onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })
+      onOpenItem({ kind: "document", path, projectSlug: null })
     } else setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
   }, [onOpenItem])
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useLayoutE
 import { isEditableTarget } from "@/lib/utils"
 import { PICKER_PANEL_RADIUS_PX } from "@/components/ui/CommandPicker"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, TabPeekContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { TabContext, TabPeekContext, showingItem, shownItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -94,8 +94,9 @@ function TabScope({ tab, isActive, updateTab, setMode, children }: {
     return {
       setModeLabel: (label, loading) => setMode(id, label, loading),
       updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
-      setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
-      setWorkspaceItem: (workspaceItem) => updateTab(id, () => workspaceItem ? showingItem(workspaceItem) : { workspaceItem: null, appMode: "canvas" }),
+      setWorkspaceItem: (workspaceItem) => updateTab(id, () => showingItem(workspaceItem)),
+      hideItem: () => updateTab(id, () => ({ itemHidden: true })),
+      dropItem: () => updateTab(id, () => ({ workspaceItem: null, itemHidden: false })),
       setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
       setTitle: (title) => updateTab(id, () => ({ title })),
     }
@@ -144,11 +145,10 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     },
     showChat: (historyFile) => {
       updateTab(activeTab, (tab) => ({
-        appMode: "chat",
         projectSlug: parseHistoryFile(historyFile).slug,
         ...(tab.historyFile !== historyFile ? {
-          historyFile, chatId: crypto.randomUUID(), title: null, workspaceItem: null,
-        } : {}),
+          historyFile, chatId: crypto.randomUUID(), title: null, workspaceItem: null, itemHidden: false,
+        } : { itemHidden: true }),
       }))
     },
     showItem: (item) => {
@@ -157,7 +157,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
       if (open) {
         // The tab may hold the item hidden behind its chat ("Close file"): show it again, with the tab's own item (its chat session, editor session key)
         const held = open.workspaceItem
-        if (held && showingItem(held).appMode !== open.appMode) updateTab(open.id, () => showingItem(held))
+        if (held && open.itemHidden) updateTab(open.id, () => ({ itemHidden: false, projectSlug: held.projectSlug }))
         setActiveTab(open.id)
         return
       }
@@ -187,7 +187,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
         const historyFile = tab.historyFile ? moves.get(tab.historyFile) : undefined
         return historyFile ? {
           ...tab, historyFile,
-          projectSlug: tab.appMode === "chat" ? parseHistoryFile(historyFile).slug : tab.projectSlug,
+          projectSlug: shownItem(tab) === null ? parseHistoryFile(historyFile).slug : tab.projectSlug,
         } : tab
       }))
     },
