@@ -96,7 +96,7 @@ class SandboxStore:
         self,
         chat_id: str,
         *,
-        manifest: SandboxManifest,
+        manifest: SandboxManifest | None,
         runs: dict[str, RunRecord],
         latest_run_id: str | None,
     ) -> None:
@@ -104,7 +104,7 @@ class SandboxStore:
         writes: list[tuple[str, dict[str, Any]]] = []
         records = [record for run_id, record in runs.items() if run_id != latest_run_id]
         latest = runs.get(latest_run_id or "")
-        if latest is not None:
+        if latest is not None and manifest is not None:
             manifest_asset_shas(manifest)
             manifest_id = manifest.manifest_id
             manifest_key = sandbox_manifest(chat_id, manifest_id, self._scope)

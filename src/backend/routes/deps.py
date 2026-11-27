@@ -67,7 +67,7 @@ def get_share_links(scope: UserScope = Depends(get_user_scope)) -> ShareLinks:
 
 
 _sandbox_runner: SandboxRunner | None = None
-# Keep runtime state beyond request scope until chat save.
+# Slot locks outlive a request.
 _sandbox_runtime = SandboxRuntimeState()
 
 

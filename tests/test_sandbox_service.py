@@ -40,43 +40,26 @@ def runner() -> FakeSandboxRunner:
 
 
 @pytest.fixture
-def runtime_state() -> SandboxRuntimeState:
-    return SandboxRuntimeState()
-
-
-@pytest.fixture
-def sandbox_service(data_store, asset_store, runner, runtime_state) -> SandboxService:
+def sandbox_service(data_store, asset_store, runner) -> SandboxService:
     return SandboxService(
         data_store=data_store,
         asset_store=asset_store,
         runner=runner,
-        runtime_state=runtime_state,
+        runtime_state=SandboxRuntimeState(),
         model=SANDBOX_MODEL,
         profile="gigachad",
         slot_prefix="test-prefix",
     )
 
 
-async def test_workspace_is_staged_until_checkpoint_while_outputs_are_durable(
-    sandbox_service, asset_store, data_store, runtime_state, runner
-):
+async def test_a_runs_workspace_and_outputs_are_stored_when_it_returns(sandbox_service, asset_store, data_store, runner):
     chat_id = "chat-first-invoke"
     result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="tool-call-1", prompt="Create a workspace")
 
-    staged = runtime_state.get("test-prefix:workspace:chat-first-invoke")
-    assert staged is not None
-    assert staged.manifest is not None
-    assert staged.manifest.workspace is not None
     assert result.status == "completed"
     assert result.manifest_id is not None
     output = result.outputs[0]
     assert asset_store.read(output.mime_bundle["text/plain"]["asset_path"]).content == output.text.encode("utf-8")
-    assert SandboxStore(data_store).read_active(chat_id) is None
-    with pytest.raises(StorageNotFoundError):
-        asset_store.read(sandbox_asset(staged.manifest.workspace.sha256))
-
-    await sandbox_service.checkpoint(chat_id=chat_id)
-
     active = SandboxStore(data_store).read_active(chat_id)
     assert active is not None
     assert active.manifest_id == result.manifest_id
@@ -117,7 +100,7 @@ async def test_retired_omp_manifest_fails_as_an_invalid_manifest(sandbox_service
     assert result.error == "invalid_manifest"
 
 
-async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sandbox_service, data_store, runner):
+async def test_tool_scopes_keep_their_workspaces_independent(sandbox_service, data_store, runner):
     chat_id = "chat-scopes"
     await sandbox_service.invoke(chat_id=chat_id, tool_call_id="shared-call", prompt="workspace", scope="workspace_agent")
     await sandbox_service.invoke(chat_id=chat_id, tool_call_id="shared-call", prompt="plot", scope="sandbox_plot")
@@ -129,7 +112,6 @@ async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sand
     assert workspace_prior is not None and workspace_prior.workspace is not None
     assert plot_prior is not None and plot_prior.workspace is not None
 
-    await sandbox_service.checkpoint(chat_id=chat_id)
     assert SandboxStore(data_store, scope="workspace_agent").read_active(chat_id) is not None
     assert SandboxStore(data_store, scope="sandbox_plot").read_active(chat_id) is not None
 
@@ -243,7 +225,7 @@ async def test_delete_chat_state_preserves_shared_assets(sandbox_service, asset_
     await sandbox_service.delete_chat_state(chat_id=chat_id_1)
 
     store = SandboxStore(data_store)
-    assert store.read_active(chat_id_2) is None
+    assert store.read_active(chat_id_2) is not None
 
     for path in asset_paths_1:
         asset = asset_store.read(path)

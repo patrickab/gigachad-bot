@@ -1,4 +1,4 @@
-"""A native sandbox run restores the staged workspace, persists outputs and always releases its files."""
+"""A native sandbox run restores the stored workspace, persists outputs and always releases its files."""
 
 from __future__ import annotations
 

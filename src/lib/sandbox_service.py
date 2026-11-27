@@ -1,14 +1,13 @@
-"""Coordinate staged workspace snapshots and durable rich sandbox outputs.
+"""Coordinate workspace snapshots and durable rich sandbox outputs.
 
-`invoke` holds a chat's workspace in this runtime. `checkpoint` promotes it only
-after the corresponding chat history has been saved.
+`invoke` stores a run's workspace, outputs and record when the run returns.
 """
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import logging
@@ -102,43 +101,13 @@ class SandboxToolResult(BaseModel):
         }
 
 
-@dataclass
-class _StagedState:
-    """Hold runtime-only sandbox state until checkpointing."""
-
-    manifest: SandboxManifest | None = None
-    assets: dict[str, bytes] = field(default_factory=dict)
-    output_shas: set[str] = field(default_factory=set)
-    runs: dict[str, RunRecord] = field(default_factory=dict)
-    last_completed_run_id: str | None = None
-
-
 class SandboxRuntimeState:
-    """Architecture & Behavior.
-
-    Lifetime:
-        Retain chat slots across request-scoped service facades.
-    Synchronization:
-        Serialize one slot while allowing unrelated chats to proceed.
-    """
+    """Per-slot locks and the asset lock of this process."""
 
     def __init__(self) -> None:
-        self._states: dict[str, _StagedState] = {}
         self.locks: KeyedLocks[str] = KeyedLocks()
-        # Serializes checkpoints against asset garbage collection: both hop off the event loop between store reads and writes.
+        # Serializes run stores against asset garbage collection: both hop off the event loop between store reads and writes.
         self.assets_lock = asyncio.Lock()
-
-    def stage(self, slot_key: str) -> _StagedState:
-        return self._states.setdefault(slot_key, _StagedState())
-
-    def get(self, slot_key: str) -> _StagedState | None:
-        return self._states.get(slot_key)
-
-    def pop(self, slot_key: str) -> _StagedState | None:
-        return self._states.pop(slot_key, None)
-
-    def referenced_output_shas(self, *, exclude_slot: str) -> set[str]:
-        return {sha256 for slot_key, state in self._states.items() if slot_key != exclude_slot for sha256 in state.output_shas}
 
 
 def _normalize_prompt(prompt: str) -> str:
@@ -207,7 +176,7 @@ class SandboxService:
     Invocation:
         Materialize Gigachad workspace bytes, then call the native sandbox seam.
     Persistence:
-        Persist projected output assets immediately and stage workspace bytes until checkpointing.
+        Persist a run's workspace snapshot, outputs and record when it returns.
     Safety:
         Contain native failures, remove restore files, and release every native run.
     """
@@ -247,8 +216,8 @@ class SandboxService:
         return await self._runner.run_script(script, profile=self._profile, interpreter="venv", timeout=SCRIPT_TIMEOUT_SECONDS)
 
     @staticmethod
-    def _recorded(store: SandboxStore, staged: _StagedState, chat_id: str, tool_call_id: str) -> SandboxToolResult | None:
-        record = staged.runs.get(tool_call_id) or store.read_run(chat_id, tool_call_id)
+    def _recorded(store: SandboxStore, chat_id: str, tool_call_id: str) -> SandboxToolResult | None:
+        record = store.read_run(chat_id, tool_call_id)
         return None if record is None else SandboxToolResult.from_record(record)
 
     async def invoke(
@@ -270,24 +239,25 @@ class SandboxService:
 
         async with self._slot(chat_id, scope) as slot:
             store, slot_key = slot.store, slot.key
-            staged = self._runtime.stage(slot_key)
-            if (replayed := self._recorded(store, staged, chat_id, tool_call_id)) is not None:
+            if (replayed := self._recorded(store, chat_id, tool_call_id)) is not None:
                 return replayed
 
-            prior_manifest = staged.manifest
+            prior_manifest: SandboxManifest | None = None
+            manifest: SandboxManifest | None = None
+            assets: dict[str, bytes] = {}
+            media_types: dict[str, str] = {}
             started_at = time.time()
             restore: WorkspaceArchive | None = None
             run: SandboxRun | None = None
             runner_task: asyncio.Task[SandboxRun] | None = None
             try:
-                if prior_manifest is None:
-                    active = store.read_active(chat_id)
-                    if active is not None:
-                        try:
-                            prior_manifest = store.read_manifest(chat_id, active.manifest_id)
-                        except (StorageNotFoundError, ValueError) as exc:
-                            raise SandboxServiceError("active sandbox manifest is unavailable") from exc
-                restore = self._materialize_workspace_archive(prior_manifest, staged.assets)
+                active = store.read_active(chat_id)
+                if active is not None:
+                    try:
+                        prior_manifest = store.read_manifest(chat_id, active.manifest_id)
+                    except (StorageNotFoundError, ValueError) as exc:
+                        raise SandboxServiceError("active sandbox manifest is unavailable") from exc
+                restore = self._materialize_workspace_archive(prior_manifest)
                 invocation = SandboxInvocation(
                     slot_key=slot_key,
                     profile_name=self._profile,
@@ -306,7 +276,7 @@ class SandboxService:
                 # Shield so a cancelled caller cannot orphan the native run before it is released.
                 runner_task = asyncio.create_task(self._runner.run(invocation))
                 run = await asyncio.shield(runner_task)
-                result = self._accept_run(run, staged, tool_call_id=tool_call_id)
+                result, manifest, assets, media_types = self._accept_run(run)
             except asyncio.CancelledError:
                 if runner_task is not None and run is None:
                     runner_task.add_done_callback(lambda task, archive=restore: self._release_cancelled_run(task, archive))
@@ -314,19 +284,19 @@ class SandboxService:
                 raise
             except SandboxServiceError:
                 logger.exception("sandbox run %s produced an incoherent manifest for slot %s", tool_call_id, slot_key)
-                result = _failed_result(prior_manifest, "invalid_manifest")
+                result, manifest, assets, media_types = _failed_result(prior_manifest, "invalid_manifest"), None, {}, {}
             except Exception:  # noqa: BLE001 - contain runner failures within this tool call
                 logger.exception("sandbox runner failed for slot %s run %s", slot_key, tool_call_id)
-                result = _failed_result(prior_manifest, "runner_error")
+                result, manifest, assets, media_types = _failed_result(prior_manifest, "runner_error"), None, {}, {}
             finally:
                 _discard_restore(restore)
                 if run is not None:
                     try:
                         run.release()
-                    except Exception:  # noqa: BLE001 - cleanup must not invalidate a staged run
+                    except Exception:  # noqa: BLE001 - cleanup must not invalidate an accepted run
                         logger.exception("sandbox run %s release failed for slot %s", tool_call_id, slot_key)
 
-            staged.runs[tool_call_id] = RunRecord(
+            record = RunRecord(
                 tool_call_id=tool_call_id,
                 status=result.status,
                 started_at=started_at,
@@ -334,6 +304,8 @@ class SandboxService:
                 manifest_id=result.manifest_id,
                 result=result.model_dump(mode="json"),
             )
+            async with self._runtime.assets_lock:
+                await asyncio.to_thread(self._persist_run, chat_id, store, record, manifest, assets, media_types)
             return result
 
     @staticmethod
@@ -349,24 +321,20 @@ class SandboxService:
                 logger.exception("cancelled sandbox run release failed")
         _discard_restore(restore)
 
-    def _materialize_workspace_archive(
-        self, prior_manifest: SandboxManifest | None, staged_assets: dict[str, bytes]
-    ) -> WorkspaceArchive | None:
+    def _materialize_workspace_archive(self, prior_manifest: SandboxManifest | None) -> WorkspaceArchive | None:
         if prior_manifest is None:
             return None
         sha256 = prior_manifest.workspace.sha256
-        content = staged_assets.get(sha256)
-        if content is None:
-            try:
-                content = self._assets.read(sandbox_asset(sha256)).content
-            except StorageNotFoundError as exc:
-                raise SandboxServiceError(f"workspace snapshot {sha256} is unavailable") from exc
+        try:
+            content = self._assets.read(sandbox_asset(sha256)).content
+        except StorageNotFoundError as exc:
+            raise SandboxServiceError(f"workspace snapshot {sha256} is unavailable") from exc
         if content is None:
             raise SandboxServiceError(f"workspace snapshot {sha256} is unavailable")
         return WorkspaceArchive(write_temp_tar(content, "gigachad-sandbox-restore-"), sha256)
 
-    def _accept_run(self, run: SandboxRun, staged: _StagedState, *, tool_call_id: str) -> SandboxToolResult:
-        """Persist outputs now and stage workspace bytes until checkpointing."""
+    def _accept_run(self, run: SandboxRun) -> tuple[SandboxToolResult, SandboxManifest, dict[str, bytes], dict[str, str]]:
+        """The run's result, its manifest, and every asset to store by sha256 (outputs and workspace tar) with media types."""
         try:
             with open(run.workspace.path, "rb") as capture:
                 workspace_bytes = capture.read()
@@ -403,20 +371,16 @@ class SandboxService:
                 ),
             )
         media_types = {ref["sha256"]: media_type for output in outputs for media_type, ref in output.mime_bundle.items()}
-        self._persist_assets(output_assets, media_types)
-
-        # Only the newest workspace snapshot is kept in memory.
-        staged.assets = {workspace_sha256: workspace_bytes}
-        staged.output_shas.update(output_assets)
-        staged.manifest = manifest
-        staged.last_completed_run_id = tool_call_id
-        return SandboxToolResult(
+        output_assets[workspace_sha256] = workspace_bytes
+        media_types[workspace_sha256] = "application/x-tar"
+        result = SandboxToolResult(
             status=run.status,
             summary=run.summary,
             manifest_id=manifest.manifest_id,
             workspace_changed=run.workspace_changed,
             outputs=outputs[:MAX_OUTPUTS],
         )
+        return result, manifest, output_assets, media_types
 
     @classmethod
     def _project_outputs(cls, events: tuple[OutputEvent, ...]) -> tuple[tuple[SandboxOutputRecord, ...], dict[str, bytes]]:
@@ -468,27 +432,22 @@ class SandboxService:
             text = text[:MAX_INLINE_TEXT_CHARS] + "\u2026 [truncated]"
         return SandboxOutputRecord(display_id=display_id, title=title, mime_bundle=mime_bundle, text=text), assets
 
-    async def checkpoint(self, *, chat_id: str, scope: str | None = None) -> None:
-        """Promote the latest runtime-only workspace after its chat is saved."""
-        chat_id = _validate_chat_id(chat_id)
-        for scope_name in _scopes(scope):
-            async with self._slot(chat_id, scope_name) as slot, self._runtime.assets_lock:
-                staged = self._runtime.get(slot.key)
-                if staged is None:
-                    continue
-                if (manifest := staged.manifest) is not None:
-                    # Asset writes and the checkpoint block on Postgres or the mount, so they run off the event loop.
-                    await asyncio.to_thread(self._persist_checkpoint, chat_id, slot.store, staged, manifest)
-                self._runtime.pop(slot.key)
-
-    def _persist_checkpoint(self, chat_id: str, store: SandboxStore, staged: _StagedState, manifest: SandboxManifest) -> None:
-        """Write the staged workspace snapshot, then the checkpoint naming *manifest*."""
-        self._persist_assets(staged.assets, {manifest.workspace.sha256: "application/x-tar"})
+    def _persist_run(
+        self,
+        chat_id: str,
+        store: SandboxStore,
+        record: RunRecord,
+        manifest: SandboxManifest | None,
+        assets: dict[str, bytes],
+        media_types: dict[str, str],
+    ) -> None:
+        """Write the run's assets, then the checkpoint whose manifest names them."""
+        self._persist_assets(assets, media_types)
         store.checkpoint(
             chat_id,
             manifest=manifest,
-            runs=staged.runs,
-            latest_run_id=staged.last_completed_run_id,
+            runs={record.tool_call_id: record},
+            latest_run_id=record.tool_call_id if manifest is not None else None,
         )
 
     def _persist_assets(self, assets: dict[str, bytes], media_types: dict[str, str]) -> None:
@@ -513,22 +472,19 @@ class SandboxService:
         chat_id = _validate_chat_id(chat_id)
         for scope_name in _scopes(scope):
             async with self._slot(chat_id, scope_name) as slot, self._runtime.assets_lock:
-                staged = self._runtime.pop(slot.key)
-                staged_shas = staged.output_shas if staged is not None else set()
                 # Store IO blocks on Postgres, so it runs off the event loop.
-                shas, still_referenced = await asyncio.to_thread(self._delete_durable_state, chat_id, slot, staged_shas)
+                shas, still_referenced = await asyncio.to_thread(self._delete_durable_state, chat_id, slot)
                 if not shas:
                     continue
-                # Keep assets still referenced by other chats, scopes, or staged runtime state. Runs staged while the
-                # assets are deleted are not seen here, so the deletes stay on the event loop to stay atomic with them.
-                still_referenced.update(self._runtime.referenced_output_shas(exclude_slot=slot.key))
+                # Keep assets still referenced by other chats or scopes. The deletes stay on the event loop under
+                # `assets_lock` so a run being stored cannot interleave with them.
                 for sha256 in shas:
                     if sha256 not in still_referenced:
                         with suppress(StorageNotFoundError):
                             self._assets.delete(sandbox_asset(sha256))
 
     @staticmethod
-    def _delete_durable_state(chat_id: str, slot: _Slot, staged_shas: set[str]) -> tuple[set[str], set[str]]:
+    def _delete_durable_state(chat_id: str, slot: _Slot) -> tuple[set[str], set[str]]:
         """Delete the chat's durable state, returning its asset shas and those other chats or scopes still reference."""
-        shas = slot.store.delete_chat_state(chat_id) | staged_shas
+        shas = slot.store.delete_chat_state(chat_id)
         return shas, slot.store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=slot.scope) if shas else set()

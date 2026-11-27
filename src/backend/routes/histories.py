@@ -5,12 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from backend.routes.deps import get_chat_cleanup, get_chat_store, get_sandbox_service
+from backend.routes.deps import get_chat_cleanup, get_chat_store
 from backend.routes.schemas import ChatSnapshot
 from lib.chat_cleanup import ChatCleanup
 from lib.chat_store import ChatStore, ParentDiverged
 from lib.data_store import StorageConflictError
-from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
@@ -77,16 +76,12 @@ async def save_chat_history(
     filename: str,
     data: SaveRequest | None = None,
     store: ChatStore = Depends(get_chat_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
-    """Save a chat, 409 when `expected_revision` is stale, then checkpoint its sandbox."""
+    """Save a chat, 409 when `expected_revision` is stale."""
     with http_errors(((StorageConflictError, ValueError), 409, None)):
         payload = data.model_dump() if data else None
         expected_revision = payload.pop("expected_revision", None) if payload else None
-        result = await asyncio.to_thread(store.save, filename, payload, expected_revision=expected_revision)
-        if data is not None and data.chat_id:
-            await sandbox_service.checkpoint(chat_id=data.chat_id)
-        return result
+        return await asyncio.to_thread(store.save, filename, payload, expected_revision=expected_revision)
 
 
 @router.delete("/cascade/{filename:path}")

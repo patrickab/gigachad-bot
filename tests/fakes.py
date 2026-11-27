@@ -156,22 +156,18 @@ class MemoryAssetStore:
 
 
 class SandboxServiceStub:
-    """Sandbox facade that answers tool runs from canned output and records every call.
-
-    ``events`` is shared with sibling stubs so a test can assert the order of saves and checkpoints."""
+    """Sandbox facade that answers tool runs from canned output and records every call."""
 
     def __init__(
         self,
         stdout: str = "",
         script_stdout: str | None = None,
         invoke_result: SandboxToolResult | None = None,
-        events: list[tuple[str, str | None]] | None = None,
     ) -> None:
         self.model = TEST_MODEL
         self.stdout = stdout
         self.script_stdout = script_stdout
         self.invoke_result = invoke_result
-        self.events = events if events is not None else []
         self.calls: list[dict[str, Any]] = []
         self.scripts: list[str] = []
 
@@ -190,9 +186,6 @@ class SandboxServiceStub:
     def output_texts(self, _result: SandboxToolResult, media_type: str) -> tuple[str, ...]:
         assert media_type == sandbox_plot.PLOTLY_MEDIA_TYPE
         return (self.stdout,)
-
-    async def checkpoint(self, *, chat_id: str) -> None:
-        self.events.append(("checkpoint", chat_id))
 
 
 class FakeSandboxRunner:

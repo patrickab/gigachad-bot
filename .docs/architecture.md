@@ -174,8 +174,8 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 
 ### Sandbox checkpoints
 
-- Slots are scoped by user, chat and sandbox scope. `SandboxRuntimeState` lives per backend process and serializes per slot; uncheckpointed state is not shared across workers nor recovered after process loss. Checkpoints and `delete_chat_state` do store IO in a thread holding the slot lock and `SandboxRuntimeState.assets_lock`; asset deletes stay on the event loop.
-- Rich output assets persist immediately; the workspace archive/manifest stages in memory and `routes/histories.py` checkpoints it only after the chat saved. A finished tool call is not a durable checkpoint. `SandboxStore.checkpoint` writes slot, manifest, pointer and run records in one transaction.
+- Slots are scoped by user, chat and sandbox scope. `SandboxRuntimeState` lives per backend process and serializes per slot (two workers can still run one slot at once). Storing a run and `delete_chat_state` do store IO in a thread holding the slot lock and `SandboxRuntimeState.assets_lock`; asset deletes stay on the event loop.
+- A run's workspace archive, rich output assets and run record are stored when the run returns, assets before the manifest that names them; the chat save does not checkpoint. `SandboxStore.checkpoint` writes slot, manifest, pointer and run records in one transaction. A failed or cancelled run records itself and leaves the active pointer where it was. Runs of a chat that is never saved are not collected (see "Delete cleanup").
 - Completed `tool_call_id` results are reused; a running record is busy, abandoned ones (> 5 min) may rerun; native resources are released on cancellation.
 - Only a manifest with `pi_sessions` resumes. A schema-1 manifest (`omp_sessions`) restores its workspace and starts a fresh Pi session.
 

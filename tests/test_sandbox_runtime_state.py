@@ -1,37 +1,27 @@
-"""Staged sandbox state must outlive one request but stay off durable storage until save."""
+"""A workspace-agent run is durable when it returns, whichever worker serves the chat save."""
 
 import pytest
 
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
 from lib.sandbox_store import SandboxStore
-from lib.storage_namespace import sandbox_asset
-from tests.fakes import MemoryAssetStore, MemoryDataStore, memory_sandbox_service
+from tests.fakes import FakeSandboxRunner, MemoryAssetStore, MemoryDataStore, memory_sandbox_service
 
 
 @pytest.mark.asyncio
-async def test_request_scoped_services_share_one_runtime_state_until_checkpoint() -> None:
-    data_store, assets, runtime = MemoryDataStore(), MemoryAssetStore(), SandboxRuntimeState()
-    chat_id = "chat-shared-runtime"
+async def test_a_run_survives_a_save_on_another_worker() -> None:
+    data_store, assets = MemoryDataStore(), MemoryAssetStore()
 
-    def facade() -> SandboxService:
-        return memory_sandbox_service(data_store=data_store, assets=assets, runtime=runtime, slot_prefix="user-hash")
+    def worker() -> SandboxService:  # each worker has its own process state
+        return memory_sandbox_service(data_store=data_store, assets=assets, runtime=SandboxRuntimeState())
 
-    first = await facade().invoke(chat_id=chat_id, tool_call_id="call-1", prompt="create")
-    assert SandboxStore(data_store).read_active(chat_id) is None
+    first = await worker().invoke(chat_id="chat-1", tool_call_id="call-1", prompt="create")
 
-    # A later request gets a new facade, so continuing the workspace proves shared runtime state.
-    second_facade = facade()
-    second = await second_facade.invoke(chat_id=chat_id, tool_call_id="call-2", prompt="revise")
-    assert second.manifest_id != first.manifest_id
-    assert second.workspace_changed is True
+    active = SandboxStore(data_store).read_active("chat-1")
+    assert active is not None and active.manifest_id == first.manifest_id
 
-    await second_facade.checkpoint(chat_id=chat_id)
-
-    active = SandboxStore(data_store).read_active(chat_id)
-    assert active is not None
-    assert active.manifest_id == second.manifest_id
-    manifest = SandboxStore(data_store).read_manifest(chat_id, active.manifest_id)
-    assert manifest.workspace is not None
-    assert assets.read(sandbox_asset(manifest.workspace.sha256)).content
-    # Checkpoint discards the staged slot, leaving durable records as the only source.
-    assert runtime.get("user-hash:workspace:chat-shared-runtime") is None
+    runner = FakeSandboxRunner()
+    await memory_sandbox_service(runner, data_store=data_store, assets=assets, runtime=SandboxRuntimeState()).invoke(
+        chat_id="chat-1", tool_call_id="call-2", prompt="revise"
+    )
+    assert runner.calls[-1].active_manifest.manifest_id == first.manifest_id
+    assert runner.calls[-1].workspace is not None  # the stored tar was restored

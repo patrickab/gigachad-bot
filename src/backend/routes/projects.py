@@ -5,14 +5,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend.http_plumbing import http_errors
-from backend.routes.deps import get_chat_cleanup, get_project_store, get_sandbox_service
+from backend.routes.deps import get_chat_cleanup, get_project_store
 from backend.routes.schemas import ChatSnapshot
 from backend.routes.upstream import call_upstream
 from lib import learnharness
 from lib.chat_cleanup import ChatCleanup
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectExists, ProjectStore
-from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -115,10 +114,6 @@ async def save_project_tab(
     filename: str,
     data: SaveTabRequest,
     store: ProjectStore = Depends(get_project_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
     with http_errors(_PROJECT_NOT_FOUND, (ValueError, 409, None)):
-        result = await asyncio.to_thread(store.save_tab, slug, filename, data.model_dump())
-        if data.chat_id:
-            await sandbox_service.checkpoint(chat_id=data.chat_id)
-        return result
+        return await asyncio.to_thread(store.save_tab, slug, filename, data.model_dump())
