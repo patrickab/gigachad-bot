@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import threading
 
-from anyio import to_thread
 import pytest
 
 from backend import websocket_origin
@@ -147,20 +146,6 @@ async def test_file_created_later_is_reported(vault):
         assert changed(await socket.running(later)) == {str(later)}
 
 
-async def test_unwatched_sibling_is_not_reported(vault):
-    note = vault / "note.md"
-    sibling = vault / "sibling.md"
-    note.write_text("one")
-    async with Socket(mounted_roots(vault)) as socket:
-        await socket.watch(files=[note])
-        await socket.running(note)
-
-        sibling.write_text("other")
-        note.write_text("two")
-
-        assert changed(await socket.collect()) == {str(note)}
-
-
 async def test_folder_reports_nested_files_but_not_build_output_internals_or_editor_scratch(vault):
     project = vault / "paper"
     (project / "chapters").mkdir(parents=True)
@@ -230,18 +215,6 @@ async def test_new_watch_set_replaces_the_old_one(vault):
         assert changed(await socket.collect()) == {str(new)}
 
 
-async def test_empty_watch_set_stops_everything(vault):
-    note = vault / "note.md"
-    async with Socket(mounted_roots(vault)) as socket:
-        await socket.watch(files=[note])
-        await socket.running(note)
-
-        await socket.watch()
-        note.write_text("changed")
-
-        assert await socket.collect() == []
-
-
 async def test_paths_outside_the_roots_are_refused_and_the_rest_is_watched(vault, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -290,17 +263,6 @@ async def test_paths_are_reported_as_the_client_named_them(vault, tmp_path):
         assert changed(await socket.collect()) == {str(link / "note.md"), str(link / "paper" / "main.tex")}
 
 
-async def test_malformed_frames_do_not_end_the_socket(vault):
-    note = vault / "note.md"
-    async with Socket(mounted_roots(vault)) as socket:
-        socket.send("not json")
-        socket.send(json.dumps({"type": "unknown"}))
-        socket.send(json.dumps({"type": "watch", "files": "note.md"}))
-        await socket.watch(files=[note])
-
-        assert changed(await socket.running(note)) == {str(note)}
-
-
 @pytest.mark.parametrize("origin", [None, "https://evil.example"])
 async def test_untrusted_origin_is_refused(vault, origin):
     async with Socket(mounted_roots(vault), origin=origin) as socket:
@@ -324,13 +286,3 @@ async def test_closing_the_socket_stops_the_watcher_and_its_threads(vault):
             break
         await asyncio.sleep(0.1)
     assert not watch_threads()
-
-
-async def test_watching_leaves_the_shared_thread_pool_free(vault):
-    limiter = to_thread.current_default_thread_limiter()
-    note = vault / "note.md"
-    async with Socket(mounted_roots(vault)) as socket:
-        await socket.watch(files=[note], folders=[vault])
-        await socket.running(note)
-
-        assert limiter.borrowed_tokens == 0

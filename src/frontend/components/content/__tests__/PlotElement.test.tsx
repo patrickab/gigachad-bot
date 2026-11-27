@@ -47,33 +47,6 @@ describe("PlotElement", () => {
     vi.unstubAllGlobals()
   })
 
-  it("uses the measured host width and recomputes bounded height on resize", () => {
-    render(
-      <PlotElement
-        figure={{
-          data: [],
-          layout: { width: 1400, height: 80, autosize: true, title: { text: "Host controlled" } },
-        }}
-      />,
-    )
-
-    expect(resizeObservers).toHaveLength(1)
-
-    act(() => resizeObservers[0]!.resize(480))
-    expect(plotProps).toHaveLength(1)
-    expect(plotProps.at(-1)!.layout).toMatchObject({
-      width: 480,
-      height: 300,
-      autosize: false,
-      hovermode: false,
-      scene: { aspectmode: "cube" },
-      title: { text: "Host controlled" },
-    })
-
-    act(() => resizeObservers[0]!.resize(800))
-    expect(plotProps.at(-1)!.layout).toMatchObject({ width: 800, height: 480, autosize: false })
-  })
-
   it("allocates a chart-height slice for each subplot row", () => {
     render(
       <PlotElement

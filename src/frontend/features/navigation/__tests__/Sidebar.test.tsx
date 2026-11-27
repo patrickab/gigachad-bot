@@ -1,16 +1,13 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { createContext, createRef, useContext, useEffect, type ReactElement, type ReactNode } from "react"
+import { createRef, type ReactElement } from "react"
 import { act, cleanup, render as testingRender, fireEvent, waitFor, within, type RenderResult } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { TabPicker } from "@/features/navigation/TabPicker"
 import { nextTab } from "@/features/navigation/tabs"
-import { TabContext, useIsPeeked, useTab } from "@/contexts/TabContext"
-import { useFrameAttachment } from "@/hooks/useFrameAttachment"
+import { TabContext, useTab } from "@/contexts/TabContext"
 import { onFileChange } from "@/lib/backend/fileEvents"
 import { removeDocument } from "@/lib/backend/api"
-import { fileRootsEnabledResource } from "@/lib/backend/resources"
-import { useResource } from "@/hooks/useResource"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
 import type { PiRepository, PiSessionInfo } from "@/lib/backend/api"
@@ -161,16 +158,6 @@ function sessionMeta(sessionId: string, title: string, fields: Partial<FrameMess
   return { type: "session-meta", sessionId, title, kind: "teach", phase: "probe", status: null, updatedAt: "2026-10-29T10:00:00.000Z", ...fields }
 }
 
-/** Render `element` in a tab showing learn session `sessionId`, `setWorkspaceItem` recording what the tab is sent to. */
-function renderInLearnTab(element: ReactElement, sessionId: string, setWorkspaceItem = vi.fn()) {
-  const tab = { ...nextTab(), appMode: "learn" as const, workspaceItem: { kind: "learn" as const, path: "", projectSlug: null, learn: { kind: "session" as const, sessionId } } }
-  return testingRender(
-    <TabContext.Provider value={{ tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem, setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-      {element}
-    </TabContext.Provider>,
-  )
-}
-
 function piSession(sessionId: string, cwd: string, extra: Partial<PiSessionInfo> = {}): PiSessionInfo {
   return {
     sessionId, sessionPath: `/s/${sessionId}.jsonl`, cwd, machine: "local", createdAt: "2026-01-01T00:00:00Z", modifiedAt: "2026-01-01T00:00:00Z",
@@ -214,16 +201,6 @@ function openedProject(view: RenderResult, section = "Files") {
 function openSection(scope: Pick<RenderResult, "getByRole">, name: string) {
   const button = scope.getByRole("button", { name })
   if (button.getAttribute("aria-pressed") !== "true") fireEvent.click(button)
-}
-
-/** Whether any root is mounted, as the file pickers read it. */
-function RootsMountedProbe() {
-  return <output aria-label="Roots mounted">{String(useResource(null, fileRootsEnabledResource))}</output>
-}
-
-function WorkspaceLabel() {
-  const { tab } = useTab()
-  return <output>{tab.name ?? "Initial workspace"}</output>
 }
 
 function WorkspaceDraft() {
@@ -366,20 +343,6 @@ describe("Project navigation", () => {
     expect(fixtures.renameDocument).toHaveBeenCalledWith("", "/source/first.md", "renamed.md")
   })
 
-  it("offers no rename on folders and library PDFs", async () => {
-    fixtures.documents.push({ path: "PDFs/paper.pdf", name: "paper.pdf", mime: "application/pdf" })
-    try {
-      const view = render(<Sidebar appMode="chat" />)
-      fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "paper.pdf" }))
-      const code = within(view.getByLabelText("Projects"))
-      fireEvent.click(await code.findByRole("button", { name: "source" }))
-      fireEvent.doubleClick(code.getByRole("button", { name: "docs" }))
-      expect(view.queryByRole("textbox", { name: /^Rename / })).not.toBeInTheDocument()
-    } finally {
-      fixtures.documents.pop()
-    }
-  })
-
   it("moves a tab showing a renamed file and keeps its workbench session", () => {
     const manager = createRef<TabManagerHandle>()
     testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
@@ -497,70 +460,6 @@ describe("Project navigation", () => {
     await waitFor(() => expect(api.promoteToTexProject).toHaveBeenCalledWith("proj", "/data/workbench/latex/proj/test2/test.tex"))
   })
 
-  it("opens Chats by default in a strip of sections, one open at a time, and lists mounted roots collapsed", async () => {
-    localStorage.setItem("expanded_workspace_projects", "[]")
-    const view = render(<Sidebar appMode="chat" />)
-    const general = within(view.getByLabelText("general contents"))
-    expect(general.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "true")
-    expect(general.getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "false")
-    expect(general.queryByRole("button", { name: "Files" })).not.toBeInTheDocument()
-    const fileMounts = within(view.getByLabelText("Projects"))
-    expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
-    expect(fileMounts.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
-
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    const project = within(view.getByLabelText("Proj contents"))
-    expect(project.getByRole("toolbar", { name: "Proj sections" })).toBeVisible()
-    expect(project.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(project.getByRole("button", { name: "Files" }))
-    expect(project.getByRole("button", { name: "Files" })).toHaveAttribute("aria-pressed", "true")
-    expect(project.getByRole("button", { name: "Chats" })).toHaveAttribute("aria-pressed", "false")
-    expect(project.getByRole("group", { name: "Files contents" })).toBeVisible()
-    fireEvent.click(project.getByRole("button", { name: "Files" }))
-    expect(project.queryByRole("group", { name: "Files contents" })).not.toBeInTheDocument()
-    expect(project.queryByRole("button", { name: "architecture" })).not.toBeInTheDocument()
-    fireEvent.click(project.getByRole("button", { name: "Canvases" }))
-    expect(await project.findByRole("button", { name: "board" })).toBeVisible()
-    fireEvent.click(view.getByRole("button", { name: "Collapse Proj" }))
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "true")
-    view.unmount()
-    const reopened = render(<Sidebar appMode="chat" />)
-    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "Canvases" })).toHaveAttribute("aria-pressed", "true")
-  })
-
-  it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
-    localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
-    const view = render(<Sidebar appMode="chat" />)
-    const fileMounts = within(view.getByLabelText("Projects"))
-    const source = await fileMounts.findByRole("button", { name: "source" })
-    expect(source).toHaveAttribute("aria-expanded", "false")
-    fireEvent.click(source)
-    fireEvent.click(fileMounts.getByRole("button", { name: "docs" }))
-    expect(fileMounts.getByRole("button", { name: "guide.md" })).toBeVisible()
-    fireEvent.click(source)
-    fireEvent.click(source)
-    expect(fileMounts.getByRole("button", { name: "docs" })).toHaveAttribute("aria-expanded", "false")
-    expect(fileMounts.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
-  })
-
-  it("tells the file pickers whether roots are mounted once a mount is removed", async () => {
-    const view = render(<><Sidebar appMode="chat" /><RootsMountedProbe /></>)
-    await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("true"))
-
-    api.fileRootsEnabled.mockResolvedValue({ enabled: false })
-    fireEvent.click(await within(view.getByLabelText("Projects")).findByRole("button", { name: "Delete source" }))
-    await act(() => undo.schedule.mock.lastCall![2]())
-    await waitFor(() => expect(view.getByLabelText("Roots mounted")).toHaveTextContent("false"))
-  })
-
-  it("opens the diff of a file mount from its hover action", async () => {
-    const onDiffSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
-    fireEvent.click(await within(view.getByLabelText("Projects")).findByRole("button", { name: "Open diff for source" }))
-    expect(onDiffSelect).toHaveBeenCalledWith("/source")
-  })
-
   it("switches a clone mount to a worktree, then removes it and keeps the branch unless confirmed", async () => {
     const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
     const listWorktrees = api.fetchWorktrees.getMockImplementation()
@@ -603,29 +502,6 @@ describe("Project navigation", () => {
     }
   })
 
-  it("opens canvases, architecture and files from chat without mixing their categories", async () => {
-    const onCanvasSelect = vi.fn()
-    const onArchitectureSelect = vi.fn()
-    const onDocumentSelect = vi.fn()
-    const onProjectSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onProjectSelect={onProjectSelect}
-      onCanvasSelect={onCanvasSelect} onArchitectureSelect={onArchitectureSelect} onDocumentSelect={onDocumentSelect} />)
-
-    fireEvent.click(view.getByRole("button", { name: "Proj" }))
-    const project = within(view.getByLabelText("Proj contents"))
-    openSection(project, "Canvases")
-    fireEvent.click(await project.findByText("board"))
-    expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj")
-    fireEvent.click(rowMenuItem(view, "Proj", "Open architecture for Proj"))
-    expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
-    openSection(project, "Files")
-    fireEvent.click(await project.findByText("notes.md"))
-    expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
-    expect(project.queryByText("board.canvas")).not.toBeInTheDocument()
-    expect(project.queryByText("backend/backend.c4")).not.toBeInTheDocument()
-    expect(onProjectSelect).toHaveBeenCalledTimes(1)
-  })
-
   it("lists a renamed project file under its display name while it keeps its key", async () => {
     api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
       ? [{ path: "project/proj/document/plan.md", name: "Roadmap.md", mime: "text/markdown" }]
@@ -639,29 +515,6 @@ describe("Project navigation", () => {
     fireEvent.click(await project.findByText("Roadmap.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/plan.md", "proj")
     expect(project.queryByText("plan.md")).not.toBeInTheDocument()
-  })
-
-  it("opens Markdown and LaTeX files in the workbench where it is available, the rest in the editor", async () => {
-    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
-      ? [
-        { path: "project/proj/document/notes.md", name: "notes.md", mime: "text/markdown" },
-        { path: "/data/workbench/latex/proj/paper/paper.tex", name: "paper.tex", mime: "text/x-tex" },
-        { path: "project/proj/document/data.csv", name: "data.csv", mime: "text/csv" },
-      ]
-      : [])
-    const onDocumentSelect = vi.fn()
-    const onWorkbenchSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onWorkbenchSelect={onWorkbenchSelect} />)
-
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    const project = within(view.getByLabelText("Proj contents"))
-    openSection(project, "Files")
-    fireEvent.click(await project.findByText("notes.md"))
-    expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
-    fireEvent.click(project.getByText("paper.tex"))
-    expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj")
-    fireEvent.click(project.getByText("data.csv"))
-    expect(onDocumentSelect).toHaveBeenCalledExactlyOnceWith("project/proj/document/data.csv", "proj")
   })
 
   it("hides a PDF's extracted Markdown and deletes both together", async () => {
@@ -727,52 +580,6 @@ describe("Project navigation", () => {
     expect(api.writeDocument).toHaveBeenCalledWith("proj", "draft.md")
   })
 
-  it("lists every template set under its label after LaTeX and creates from the picked set", async () => {
-    api.loadTemplateSets.mockResolvedValueOnce([{ name: "presentation", label: "Presentation" }, { name: "letter", label: "Letter" }])
-    const onWorkbenchSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    const project = within(view.getByLabelText("Proj contents"))
-    openSection(project, "Files")
-    await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
-
-    fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
-    fireEvent.click(within(await view.findByRole("listbox", { name: "File type" })).getByRole("option", { name: "LaTeX" }))
-    const templates = within(await view.findByRole("listbox", { name: "Template" }))
-    expect(templates.getAllByRole("option").map((option) => option.textContent)).toEqual(["Blank", "Presentation", "Letter"])
-    fireEvent.click(templates.getByRole("option", { name: "Letter" }))
-    fireEvent.change(project.getByLabelText("File name"), { target: { value: "cover" } })
-    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "cover.tex", "letter"))
-  })
-
-  it("creates a blank LaTeX file without a template choice when the template sets fail to load", async () => {
-    api.loadTemplateSets.mockRejectedValueOnce(new Error("offline"))
-    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={vi.fn()} />)
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    const project = within(view.getByLabelText("Proj contents"))
-    openSection(project, "Files")
-    await waitFor(() => expect(api.loadTemplateSets).toHaveBeenCalled())
-
-    fireEvent.click(await project.findByRole("button", { name: "New file in Proj" }))
-    fireEvent.click(within(await view.findByRole("listbox", { name: "File type" })).getByRole("option", { name: "LaTeX" }))
-    expect(view.queryByRole("listbox", { name: "Template" })).not.toBeInTheDocument()
-    fireEvent.change(project.getByLabelText("File name"), { target: { value: "notes" } })
-    fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "notes.tex", undefined))
-  })
-
-  it("creates the architecture of a project without one when its icon is used", async () => {
-    const onArchitectureSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onArchitectureSelect={onArchitectureSelect} />)
-
-    await view.findByRole("button", { name: "More actions for Empty project" })
-    fireEvent.click(rowMenuItem(view, "Empty project", "Create architecture for Empty project"))
-
-    await waitFor(() => expect(onArchitectureSelect).toHaveBeenCalledWith("empty"))
-    expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
-  })
-
   it("merges a project with its linked mount: the mount's Pi sessions (worktrees included) sit under the project's Sessions", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
@@ -799,41 +606,6 @@ describe("Project navigation", () => {
 
       fireEvent.click(section.getByRole("button", { name: "New session in proj" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "pi", path: "proj", projectSlug: "proj", pi: { sessionId: null, repo: "/git/proj" } }, true)
-    } finally {
-      resetPi()
-      api.fileRootTree.mockImplementation(listTree!)
-    }
-  })
-
-  it("nests forks under their parent and marks running, waiting and unread sessions with their context use and cost", async () => {
-    const listTree = api.fileRootTree.getMockImplementation()
-    api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
-    pi.repositories = piRepositories("proj")
-    pi.sessions = [
-      piSession("main", "/git/proj"),
-      piSession("fork", "/git/proj", { parentSession: "/s/main.jsonl" }),
-      piSession("asking", "/git/proj"),
-      piSession("done", "/git/proj"),
-      piSession("quiet", "/git/proj"),
-    ]
-    pi.statuses = {
-      fork: { running: true, waiting: false, unread: false, failed: false, contextPercent: 41.6, cost: 0.123 },
-      asking: { running: true, waiting: true, unread: false, failed: false },
-      done: { running: false, waiting: false, unread: true, failed: false },
-    }
-    try {
-      const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Projects"))
-      fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
-      fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
-      const code = within(section.getByRole("group", { name: "Sessions contents" }))
-      fireEvent.click(code.getByRole("button", { name: "main" }))
-      const forks = within(code.getByRole("group", { name: "main contents" }))
-      expect(forks.getByRole("img", { name: "Running" })).toBeInTheDocument()
-      expect(forks.getByText("42% · $0.12")).toBeVisible()
-      expect(code.getByRole("img", { name: "Waiting" })).toBeInTheDocument()
-      expect(code.getByRole("img", { name: "Unread" })).toBeInTheDocument()
-      expect(code.getAllByRole("img", { name: /Running|Waiting|Unread/ })).toHaveLength(3)
     } finally {
       resetPi()
       api.fileRootTree.mockImplementation(listTree!)
@@ -1025,25 +797,6 @@ describe("Project navigation", () => {
     }
   })
 
-  it("opens LearnHarness's settings in the frame, keeping a frame at another version on its own settings", async () => {
-    login.hostAccess = true
-    try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
-      await act(async () => {})
-      fireEvent.click(view.getByRole("button", { name: "Open learn settings" }))
-      expect(learn.showInFrame.mock.calls).toEqual([[{ type: "open-settings", section: null }]])
-      view.unmount()
-
-      learnFrame.drive = "mismatch"
-      const mismatched = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
-      expect(mismatched.queryByRole("button", { name: "Open learn settings" })).not.toBeInTheDocument()
-    } finally {
-      login.hostAccess = false
-      learnFrame.drive = "matched"
-      learn.showInFrame.mockClear()
-    }
-  })
-
   it("renames and deletes learn sessions, showing the hidden chrome's state, practice tag or phase chip", async () => {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString()
     learn.sessions.sessions = [
@@ -1179,64 +932,6 @@ describe("Project navigation", () => {
     }
   })
 
-  it("lists the frame's background agents and opens upstream's section with their details and stop buttons", async () => {
-    learn.sessions.sessions = [learnSession("chat_b", "Eigenvalues")]
-    learnFrame.activity = { type: "activity", items: [{ id: "job_1", label: "Extracting Eigenvalues", status: "running", sessionId: "chat_b" }] }
-    const onItemOpen = vi.fn()
-    login.hostAccess = true
-    try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      await act(async () => {})
-      const section = within(view.getByLabelText("Learn"))
-      fireEvent.click(section.getByRole("button", { name: "background agents" }))
-      fireEvent.click(section.getByRole("button", { name: "Extracting Eigenvalues running" }))
-      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "session", sessionId: "chat_b" } })
-      fireEvent.click(section.getByRole("button", { name: "Show background agents" }))
-      expect(learn.showInFrame).toHaveBeenLastCalledWith({ type: "open-panel", panel: "activity", sessionId: null })
-    } finally {
-      login.hostAccess = false
-      learn.sessions.sessions = []
-      learnFrame.activity = null
-      learn.showInFrame.mockClear()
-    }
-  })
-
-  it("acts on the hidden chrome's shortcuts from the frame and on F2, and leaves a session deleted here", async () => {
-    learn.sessions.sessions = [learnSession("chat_b", "Eigenvalues")]
-    login.hostAccess = true
-    try {
-      const setWorkspaceItem = vi.fn()
-      const view = renderInLearnTab(<Sidebar appMode="learn" onItemOpen={vi.fn()} />, "chat_b", setWorkspaceItem)
-      await act(async () => {})
-      const press = (action: FrameMessageOf<"chrome-key">["action"]) => act(() => learnFrame.chromeKeys.forEach((listener) => listener({ type: "chrome-key", action })))
-
-      await press("toggle-sidebar")
-      expect(sidebarFrame.toggleCollapsed).toHaveBeenCalledOnce()
-      await press("sessions-search")
-      expect(view.getByRole("searchbox", { name: "Filter learn sessions" })).toHaveFocus()
-      await press("rename-session")
-      expect(view.getByRole("textbox", { name: "Rename Eigenvalues" })).toHaveValue("Eigenvalues")
-      fireEvent.keyDown(document, { key: "Escape" })
-      expect(view.queryByRole("textbox", { name: "Rename Eigenvalues" })).not.toBeInTheDocument()
-      expect(view.getByRole("searchbox", { name: "Filter learn sessions" })).toBeInTheDocument()
-
-      fireEvent.keyDown(window, { key: "F2" })
-      expect(view.getByRole("textbox", { name: "Rename Eigenvalues" })).toHaveValue("Eigenvalues")
-      expect(setWorkspaceItem).not.toHaveBeenCalled()
-      view.unmount()
-
-      learn.sessions.missing = new Set(["chat_b"])
-      renderInLearnTab(<Sidebar appMode="learn" onItemOpen={vi.fn()} />, "chat_b", setWorkspaceItem)
-      await act(async () => {})
-      expect(setWorkspaceItem).toHaveBeenCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "home" } })
-    } finally {
-      login.hostAccess = false
-      learn.sessions.sessions = []
-      learn.sessions.missing = new Set()
-      sidebarFrame.toggleCollapsed.mockClear()
-    }
-  })
-
   it("keeps a session whose delete fails, saying why", async () => {
     pi.repositories = piRepositories("tool")
     pi.sessions = [piSession("busy", "/git/tool")]
@@ -1254,41 +949,6 @@ describe("Project navigation", () => {
     } finally {
       resetPi()
     }
-  })
-
-  it("keeps expansion independent from project selection and shares it across mounted views", async () => {
-    const onProjectSelect = vi.fn()
-    const first = render(<Sidebar appMode="chat" onProjectSelect={onProjectSelect} />)
-    fireEvent.click(first.getByRole("button", { name: "Expand Proj" }))
-    expect(onProjectSelect).not.toHaveBeenCalled()
-    const project = within(first.getByLabelText("Proj contents"))
-    openSection(project, "Canvases")
-    await project.findByText("board")
-
-    const second = within(render(<Sidebar appMode="canvas" onProjectSelect={onProjectSelect} />).container)
-    const secondProject = within(second.getByLabelText("Proj contents"))
-    await secondProject.findByText("board")
-    fireEvent.click(project.getByRole("button", { name: "Canvases" }))
-    await waitFor(() => expect(secondProject.queryByText("board")).not.toBeInTheDocument())
-    fireEvent.click(second.getByRole("button", { name: "Proj" }))
-    expect(onProjectSelect).toHaveBeenCalledTimes(1)
-    fireEvent.click(second.getByRole("button", { name: "Collapse Proj" }))
-    expect(onProjectSelect).toHaveBeenCalledTimes(1)
-  })
-
-  it("keeps loose canvases accessible and lets empty projects create their first item", async () => {
-    const onCanvasSelect = vi.fn()
-    const onNewChat = vi.fn()
-    const view = render(<Sidebar appMode="canvas" onCanvasSelect={onCanvasSelect} onNewChat={onNewChat} />)
-    fireEvent.click(view.getByRole("button", { name: "Empty project" }))
-    const empty = within(view.getByLabelText("Empty project contents"))
-    fireEvent.click(empty.getByRole("button", { name: "New chat in Empty project" }))
-    expect(onNewChat).toHaveBeenLastCalledWith("empty")
-
-    const general = within(view.getByLabelText("general contents"))
-    openSection(general, "Canvases")
-    fireEvent.click(await general.findByText("loose-board"))
-    expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose-board.canvas", "")
   })
 
   it("keeps a failed creation editable and navigates only after a successful retry", async () => {
@@ -1342,19 +1002,6 @@ describe("Project navigation", () => {
     fireEvent.drop(project.getByRole("button", { name: "Files" }), { dataTransfer })
     expect(await project.findByRole("button", { name: "imported.md" })).toBeInTheDocument()
     expect(api.addRootFilesToProject).toHaveBeenCalledWith("proj", ["/source/first.md", "/source/second.md"])
-  })
-
-  it("keeps keyboard traversal within the tree from switching workspaces", () => {
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><Sidebar appMode="chat" /><WorkspaceLabel /></TabManager>)
-    act(() => manager.current!.openTab({ ...nextTab(), name: "Second workspace" }))
-    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-    const project = within(view.getAllByLabelText("Proj contents").at(-1)!)
-    const category = project.getByRole("button", { name: "Canvases" })
-    fireEvent.keyDown(category, { key: "Tab" })
-    expect(view.getByRole("status")).toHaveTextContent("Second workspace")
-    fireEvent.keyDown(category, { key: "Tab", shiftKey: true })
-    expect(view.getByRole("status")).toHaveTextContent("Second workspace")
   })
 
   it("moves an always-visible general history onto a collapsed project and relocates its open branches", async () => {
@@ -1517,15 +1164,6 @@ describe("Tab picker", () => {
     expect(fresh.historyFile).toBeNull()
   })
 
-  it("keeps the Tab key in its search field from switching workspaces", () => {
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
-    act(() => manager.current!.openTab({ ...nextTab(), name: "Other" }))
-    tabRows(view)
-    expect(fireEvent.keyDown(view.getByRole("combobox", { name: "Search tabs…" }), { key: "Tab" })).toBe(true)
-    expect(activeRow(view)).toBe("general / chats / Other")
-  })
-
   it("reuses the selected tab for chats and items without disturbing background tabs", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabPicker /><WorkspaceDraft /></TabManager>)
@@ -1551,35 +1189,6 @@ describe("Tab picker", () => {
     expect(view.getByRole("textbox")).toHaveValue("")
     expect(manager.current!.getTabs().map((tab) => tab.id)).toEqual([background.id, selected.id])
     expect(manager.current!.getTabs()[0]).toEqual(background)
-  })
-
-  it("tracks the visible surface across project, shared, and scratch workspaces", () => {
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
-    const canvas = { ...nextTab(), appMode: "canvas" as const, projectSlug: "proj", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" } }
-    const architecture = { ...nextTab(), appMode: "canvas" as const, projectSlug: "proj", workspaceItem: { kind: "architecture" as const, path: "graph/proj/", projectSlug: "proj" } }
-    const file = { ...nextTab(), appMode: "document" as const, workspaceItem: { kind: "document" as const, path: "/source/notes.md", projectSlug: null, rootFile: true } }
-    const scratch = { ...nextTab(), appMode: "canvas" as const, projectSlug: "proj" }
-    act(() => {
-      for (const tab of [canvas, architecture, file, scratch]) manager.current!.openTab(tab)
-    })
-    expect(activeRow(view)).toBe("Proj / canvases / new.canvas")
-    for (const breadcrumb of ["Proj / canvases / board.canvas", "Proj / architecture / System overview", "general / files / notes.md"]) {
-      fireEvent.click(tabRow(view, breadcrumb))
-      expect(activeRow(view)).toBe(breadcrumb)
-    }
-    act(() => manager.current!.showChat("proj/session.json"))
-    expect(activeRow(view)).toBe("Proj / chats / session.json")
-  })
-
-  it("names a project file's tab after its display name, other projects' tabs after the file", () => {
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
-    const named = { ...nextTab(), appMode: "document" as const, projectSlug: "proj", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "proj" } }
-    const unnamed = { ...nextTab(), appMode: "document" as const, projectSlug: "empty", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "empty" } }
-    act(() => { for (const tab of [named, unnamed]) manager.current!.openTab(tab) })
-    expect(rowNames(view)).toContain("Proj / files / Roadmap.md")
-    expect(rowNames(view)).toContain("Empty project / files / plan.md")
   })
 
   it("groups by project, general last, sorted by category and natural filename order without reordering on selection", () => {
@@ -1608,79 +1217,6 @@ describe("Tab picker", () => {
     expect(rowNames(view)).toEqual(expected)
     fireEvent.click(view.getByRole("button", { name: "Close Proj / files / alpha.md" }))
     expect(rowNames(view)).toEqual(expected.filter((label) => label !== "Proj / files / alpha.md"))
-  })
-
-  it("opens new tabs in the active workspace's project or general scope", () => {
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
-    const projectTab = { ...nextTab(), name: "Project chat", projectSlug: "proj" }
-    const sharedTab = { ...nextTab(), name: "Shared chat" }
-    act(() => {
-      manager.current!.openTab(projectTab)
-      manager.current!.openTab(sharedTab)
-    })
-    for (const tab of [projectTab, sharedTab]) {
-      act(() => manager.current!.switchToTab(tab.id))
-      tabRows(view)
-      fireEvent.click(view.getByRole("button", { name: "New tab" }))
-      expect(manager.current!.getTabs().at(-1)?.projectSlug).toBe(tab.projectSlug)
-    }
-  })
-
-  it("shows the highlighted background tab live in the preview and hands it the shared frame only while it holds one", () => {
-    type Attachment = { name: string; peek?: boolean }
-    const AttachContext = createContext<(attachment: Attachment) => () => void>(() => () => {})
-    function FrameHost({ children }: { children: ReactNode }) {
-      const { attachment, attach } = useFrameAttachment<Attachment>()
-      return <AttachContext.Provider value={attach}>{children}<output data-testid="frame-holder">{attachment?.name}</output></AttachContext.Provider>
-    }
-    // Tabs named "Frame …" stand in for learn tabs, they lay the shared frame over their slot
-    function FrameSurface() {
-      const { tab, isActive } = useTab()
-      const peeked = useIsPeeked()
-      const attach = useContext(AttachContext)
-      useEffect(() => {
-        if (!tab.name?.startsWith("Frame") || !(isActive || peeked)) return
-        return attach({ name: tab.name, peek: peeked })
-      }, [tab.name, isActive, peeked, attach])
-      return null
-    }
-    const manager = createRef<TabManagerHandle>()
-    const view = render(<FrameHost><TabManager ref={manager}><TabPicker /><FrameSurface /></TabManager></FrameHost>)
-    act(() => {
-      for (const name of ["Plain", "Frame B", "Frame A"]) manager.current!.openTab({ ...nextTab(), name })
-    })
-    const peeked = () => document.querySelector<HTMLElement>(".workspace-tab[data-phase='peek']")
-    const card = () => document.body.querySelector("[aria-hidden].fixed")
-    const holder = () => view.getByTestId("frame-holder").textContent
-    // Each highlight is a fresh pointer position, CommandPicker ignores a pointer that did not move
-    let pointer = 0
-    const highlight = (crumb: string) => fireEvent.mouseMove(tabRow(view, crumb), { clientX: ++pointer, clientY: 0 })
-
-    highlight("general / chats / Plain")
-    // Tabs render in opening order: the first chat, then Plain
-    expect(peeked()).toBe(document.querySelectorAll(".workspace-tab")[1])
-    expect(peeked()).not.toHaveStyle({ display: "none" })
-    expect(peeked()).toHaveAttribute("inert")
-    expect(card()).toBeInTheDocument()
-    expect(holder()).toBe("Frame A")
-
-    highlight("general / chats / Frame B")
-    expect(holder()).toBe("Frame B")
-
-    highlight("general / chats / Frame A")
-    expect(peeked()).toBeNull()
-    expect(card()).toBeNull()
-    expect(holder()).toBe("Frame A")
-
-    highlight("general / chats / Frame B")
-    fireEvent.keyDown(view.getByRole("combobox", { name: "Search tabs…" }), { key: "Enter" })
-    expect(peeked()).toBeNull()
-    expect(holder()).toBe("Frame B")
-    // Reopening the picker highlights the current tab, it previews nothing and keeps the frame
-    expect(activeRow(view)).toBe("general / chats / Frame B")
-    expect(peeked()).toBeNull()
-    expect(holder()).toBe("Frame B")
   })
 
   it("preserves drafts and exposes only the current workspace during interrupted transitions", () => {

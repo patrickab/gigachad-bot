@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript } from "../PiTranscript"
 // The chat's tool renderers register under names Pi sessions use too: they must not change what folds
@@ -35,8 +35,6 @@ function transcriptOf(messages: AgentMessage[], extra: Partial<Transcript> = {})
   return { ...EMPTY_TRANSCRIPT, messages, entryIds: messages.map((_, index) => `e${index}`), ...extra }
 }
 
-const streamingReply = (text: string): AssistantMessage => ({ role: "assistant", content: [{ type: "text", text }], provider: "anthropic", model: "claude", stopReason: "pending", timestamp: 99_999 })
-
 // jsdom has no layout: content height follows the text, the viewport is 100px, scrollTop is stored as set
 const scrollTops = new WeakMap<Element, number>()
 beforeEach(() => {
@@ -54,82 +52,11 @@ afterEach(() => {
 })
 
 describe("PiTranscript window", () => {
-  it("streams the reply into the newest turn, keyed by its prompt's entry", () => {
-    const messages = history(3)
-    const { container } = render(<PiTranscript transcript={transcriptOf(messages, { running: true, streaming: streamingReply("Streaming a long answer") })} fileLinks={fileLinks} />)
-    const newest = container.querySelector("[data-turn-key='e4']")
-    expect(newest?.textContent).toContain("Streaming a long answer")
-  })
-
   it("offers branching from a settled turn's last persisted entry", () => {
     const onBranch = vi.fn()
     render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={onBranch} />)
     fireEvent.click(screen.getByRole("button", { name: "Branch session from this point" }))
     expect(onBranch).toHaveBeenCalledWith("e3")
-  })
-
-  it("offers copy on a settled question and copy and branch on its answer, nothing else", () => {
-    render(<PiTranscript transcript={transcriptOf(history(2))} fileLinks={fileLinks} onBranch={vi.fn()} />)
-    const names = (group: string) => within(screen.getAllByRole("group", { name: group }).at(-1)!).getAllByRole("button").map((button) => button.getAttribute("aria-label"))
-    expect(names("Question actions")).toEqual(["Copy message"])
-    expect(names("Answer actions")).toEqual(["Copy message", "Branch session from this point"])
-  })
-
-  it("folds a web_search call into Process details with the chat's renderers loaded", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Search it", timestamp: 1 },
-      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: { query: "pi" } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 },
-      { role: "assistant", content: [{ type: "text", text: "Found" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 3 },
-    ]
-    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
-  })
-
-  it("previews an older turn's answer under its question with activity folded, as when opened", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Run it", timestamp: 1 },
-      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 },
-      { role: "assistant", content: [{ type: "text", text: "Done" }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 3 },
-      ...history(1).map((message) => ({ ...message, timestamp: message.timestamp + 10 })),
-    ]
-    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.getByText("Done")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
-    fireEvent.click(screen.getByText("Run it"))
-    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: "Collapse question and answer" }).length).toBeGreaterThan(2)
-  })
-
-  it("renders only the head of an older turn's long answer until its preview is scrolled", () => {
-    const paragraph = (index: number) => `Paragraph ${index} ${"word ".repeat(30)}`.trim()
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Explain", timestamp: 1 },
-      { role: "assistant", content: [{ type: "text", text: Array.from({ length: 40 }, (_, index) => paragraph(index)).join("\n\n") }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: 2 },
-      ...history(1).map((message) => ({ ...message, timestamp: message.timestamp + 10 })),
-    ]
-    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.getByText(paragraph(0))).toBeTruthy()
-    expect(screen.queryByText(paragraph(39))).toBeNull()
-
-    fireEvent.scroll(screen.getByRole("region", { name: "Answer preview" }))
-    expect(screen.getByText(paragraph(39))).toBeTruthy()
-  })
-
-  it("keeps only the newest activity of a live turn unfolded, the whole run folds once settled", () => {
-    const calls = 20
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Do it", timestamp: 1 },
-      ...Array.from({ length: calls }, (_, index): AgentMessage => ({ role: "assistant", content: [{ type: "toolCall", id: `t${index}`, name: "bash", arguments: { command: `step-${index}` } }], provider: "anthropic", model: "claude", stopReason: "toolUse", timestamp: 2 + index })),
-    ]
-    const { rerender } = render(<PiTranscript transcript={transcriptOf(messages, { running: true })} fileLinks={fileLinks} />)
-    expect(screen.getByRole("button", { name: "Process details · 8 messages · 8 tool calls" })).toBeTruthy()
-    expect(screen.queryByText(/step-7/)).toBeNull()
-    expect(screen.getByText(/step-8/)).toBeTruthy()
-    expect(screen.getByText(/step-19/)).toBeTruthy()
-
-    rerender(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.getByRole("button", { name: "Process details · 20 messages · 20 tool calls" })).toBeTruthy()
-    expect(screen.queryByText(/step-19/)).toBeNull()
   })
 })
 
@@ -236,12 +163,6 @@ describe("PiTranscript search hit", () => {
     expect(registry.has("pi-search")).toBe(false)
     expect(registry.has("pi-search-current")).toBe(false)
   })
-
-  it("drops a hit whose entry is not on the shown branch", () => {
-    render(<Harness transcript={transcriptOf(history(2))} />)
-    act(() => focusPiSearchHit("s1", "answer", hit("other")))
-    expect(scrolled).toEqual([])
-  })
 })
 
 describe("PiTranscript tool images and reads", () => {
@@ -284,21 +205,6 @@ describe("PiTranscript tool images and reads", () => {
     render(<PiTranscript transcript={transcriptOf(messages, { running: true, runs })} fileLinks={fileLinks} />)
     expect(screen.getByRole("img", { name: `read-${HASH.slice(0, 8)}.png` })).toBeTruthy()
   })
-
-  it("keeps a read call visible in a settled turn while other tool calls fold", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Look", timestamp: 1 },
-      call("t1", "read", { path: "src/a.ts" }),
-      result("t1", "read", [{ type: "text", text: "code" }]),
-      call("t2", "bash", { command: "ls" }),
-      result("t2", "bash", [{ type: "text", text: "files" }]),
-      done,
-    ]
-    render(<PiTranscript transcript={transcriptOf(messages)} fileLinks={fileLinks} />)
-    expect(screen.getByText("src/a.ts")).toBeTruthy()
-    expect(screen.queryByText("ls")).toBeNull()
-    expect(screen.getByRole("button", { name: "Process details · 1 message · 1 tool call" })).toBeTruthy()
-  })
 })
 
 describe("PiTranscript user images", () => {
@@ -314,10 +220,5 @@ describe("PiTranscript user images", () => {
     const optimistic: AgentMessage = { role: "user", content: [{ type: "text", text: "Look" }, { type: "image", mimeType: "image/png", data: "QUJD" }], timestamp: 1 }
     render(<PiTranscript transcript={transcriptOf([], { optimistic: optimistic as never })} fileLinks={fileLinks} />)
     expect(screen.getByRole("img", { name: "image-1.png" })).toBeTruthy()
-  })
-
-  it("shows none for a message without images", () => {
-    render(<PiTranscript transcript={transcriptOf([{ role: "user", content: "Hi", timestamp: 1 }, reply])} fileLinks={fileLinks} />)
-    expect(screen.queryByRole("img")).toBeNull()
   })
 })

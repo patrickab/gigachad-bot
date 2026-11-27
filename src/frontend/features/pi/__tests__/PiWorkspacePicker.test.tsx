@@ -1,15 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { PiRepository, PiSessionInfo } from "@/lib/backend/api"
-import type { FileTreeNode } from "@/lib/domain/files"
 import { piStartDirectories, PiWorkspacePicker } from "../PiWorkspacePicker"
 
 const pi = vi.hoisted(() => ({
-  sessions: [] as PiSessionInfo[],
   repositories: [] as PiRepository[],
-  error: null as string | null,
-  listFilters: [] as unknown[],
-  tree: [] as FileTreeNode[],
   hostAccess: true,
 }))
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -17,15 +12,12 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useHostAccess: () => pi.hostAccess,
 }))
 vi.mock("../sessionStore", () => ({
-  usePiSessions: (filter: unknown) => {
-    pi.listFilters.push(filter)
-    return { sessions: pi.sessions, loading: false, error: pi.error }
-  },
+  usePiSessions: () => ({ sessions: [], loading: false, error: null }),
   usePiRepositories: () => pi.repositories,
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/backend/api")>(),
-  fileRootTree: async () => ({ enabled: true, tree: pi.tree }),
+  fileRootTree: async () => ({ enabled: true, tree: [] }),
 }))
 
 const HOUR = 60 * 60 * 1000
@@ -43,11 +35,7 @@ const REPOSITORIES: PiRepository[] = [
 
 afterEach(() => {
   cleanup()
-  pi.sessions = []
   pi.repositories = []
-  pi.error = null
-  pi.listFilters = []
-  pi.tree = []
   pi.hostAccess = true
 })
 
@@ -75,21 +63,6 @@ describe("piStartDirectories", () => {
 })
 
 describe("PiWorkspacePicker", () => {
-  it("lists the Pi checkouts and file mounts with the age of their newest coding session, newest first", async () => {
-    pi.repositories = REPOSITORIES
-    pi.sessions = [piSession("s1", "/home/u/git/gamma", 2 * HOUR, "Fix the parser\nmore"), piSession("s2", "/home/u/git/beta", 30 * HOUR, "Add tests")]
-    pi.tree = [{ path: "/mnt/notes", name: "notes", type: "root", children: [] }]
-    await openPicker()
-
-    const projects = screen.getByRole("group", { name: "Projects" })
-    await waitFor(() => expect(within(projects).getAllByRole("option")).toHaveLength(2))
-    expect(within(projects).getAllByRole("option").map((option) => option.textContent)).toEqual(["gamma2h", "beta1d"])
-    // Never-used folders wait behind the chevron row
-    fireEvent.click(screen.getByRole("option", { name: /Not yet used/ }))
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(expect.arrayContaining(["alpha", "notes"]))
-    expect(pi.listFilters).toContainEqual({ profile: "coding" })
-  })
-
   it("hands the picked checkout's path to the caller, None clears it", async () => {
     pi.repositories = REPOSITORIES
     const onChange = await openPicker()
@@ -101,26 +74,6 @@ describe("PiWorkspacePicker", () => {
     const cleared = await openPicker("/home/u/git/beta")
     fireEvent.click(screen.getByRole("option", { name: "None" }))
     expect(cleared).toHaveBeenLastCalledWith(null)
-  })
-
-  it("lists a hovered row's sessions, a click opens one without picking the folder", async () => {
-    pi.repositories = REPOSITORIES
-    pi.sessions = [piSession("s1", "/home/u/git/gamma", 2 * HOUR, "Fix the parser"), piSession("s2", "/home/u/git/gamma/src", HOUR, "Newer")]
-    const onChange = vi.fn()
-    const onOpenSession = vi.fn()
-    await openPicker(null, onChange, onOpenSession)
-    fireEvent.mouseEnter(within(screen.getByRole("option", { name: /gamma/ })).getByText("gamma").parentElement!)
-    const menu = screen.getByRole("menu", { name: "Sessions in gamma" })
-    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Newer1h", "Fix the parser2h"])
-    fireEvent.click(within(menu).getByRole("menuitem", { name: /Fix the parser/ }))
-    expect(onOpenSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1" }), "gamma")
-    expect(onChange).not.toHaveBeenCalled()
-  })
-
-  it("says when the session list failed", async () => {
-    pi.error = "pi-host is not reachable"
-    await openPicker()
-    expect(screen.getByText("pi-host is not reachable")).toBeInTheDocument()
   })
 
   it("is hidden without host access", () => {

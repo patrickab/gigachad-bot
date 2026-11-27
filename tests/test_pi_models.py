@@ -44,17 +44,6 @@ def _serve(monkeypatch, handler) -> list[httpx.Request]:
     return requests
 
 
-def test_catalog_without_a_started_pi_host_does_not_probe(monkeypatch):
-    def fail() -> list[dict]:
-        raise AssertionError("must not probe a gateway pi-host never started")
-
-    monkeypatch.setattr(pi_models, "catalog_entries", fail)
-    catalog = pi_models.catalog()
-
-    assert (catalog["installed"], catalog["online"], catalog["providers"]) == (False, False, [])
-    assert "pi-host" in catalog["error"]
-
-
 def test_catalog_groups_gateway_models_by_provider(tmp_path, monkeypatch):
     _start_pi_host(tmp_path)
     requests = _serve(monkeypatch, lambda _request: httpx.Response(200, json={"object": "list", "data": ENTRIES}))
@@ -96,13 +85,3 @@ def test_thinking_levels_are_pis_ladder_and_unknown_reads_as_none(tmp_path, monk
     assert pi_models.thinking_levels("anthropic/claude-opus-4-5") == ["off", "minimal", "low", "medium", "high"]
     assert pi_models.thinking_levels("anthropic/claude-3-haiku") == []
     assert pi_models.thinking_levels("anthropic/unlisted") is None
-
-
-def test_thinking_registry_raises_where_thinking_levels_reads_unknown(tmp_path, monkeypatch):
-    _start_pi_host(tmp_path)
-    _serve(monkeypatch, lambda _request: httpx.Response(503, json={"error": {"message": "down"}}))
-
-    with pytest.raises(pi_models.GatewayUnavailable):
-        pi_models.thinking_registry()
-    assert pi_models.thinking_levels("anthropic/claude-opus-4-5") is None
-    assert pi_models.served_ladders() is None

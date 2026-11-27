@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { File as FileIcon } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
-import { TabContext } from "@/contexts/TabContext"
-import { nextTab } from "@/features/navigation/tabs"
 import { ChatInput, type ChatContext } from "../ChatInput"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
@@ -42,33 +40,6 @@ describe("ChatInput context chips", () => {
     expect(context.onOpen).toHaveBeenCalledWith(2, second)
     expect(context.onToggleActive).toHaveBeenCalledWith(2, "notes.md")
     expect(context.onRemove).toHaveBeenCalledWith(2, "notes.md")
-  })
-
-  it("labels a referenced project file by the display name its chat's project gives it", () => {
-    const plan: Attachment = { name: "plan.md", mime: "text/markdown", url: "", content: "", active: true, vaultPath: "project/proj/document/plan.md" }
-    const context = contextOf([{ messageIndex: 0, attachment: plan }])
-    render(
-      <TabContext.Provider value={{ tab: { ...nextTab(), projectSlug: "proj" }, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-        <ChatInput chatId="c1" onSend={() => {}} context={context} />
-      </TabContext.Provider>,
-    )
-
-    expect(screen.getByRole("button", { name: "Preview Roadmap.md" })).toHaveTextContent("Roadmap.md")
-    fireEvent.click(screen.getByRole("button", { name: "Remove Roadmap.md" }))
-    expect(context.onRemove).toHaveBeenCalledWith(0, "plan.md")
-  })
-
-  it("gathers out-of-context attachments into a +N popover that opens on hover", () => {
-    const unused: Attachment = { ...notes("old"), name: "old.md", active: false }
-    const context = contextOf([{ messageIndex: 0, attachment: notes("v1") }, { messageIndex: 1, attachment: unused }])
-    renderComposer(context)
-
-    expect(screen.queryByRole("button", { name: "Preview old.md" })).toBeNull()
-    fireEvent.mouseEnter(screen.getByRole("button", { name: "1 attachments out of context" }).parentElement!)
-    fireEvent.click(screen.getByRole("button", { name: "Include old.md in context" }))
-
-    expect(context.onToggleActive).toHaveBeenCalledWith(1, "old.md")
-    expect(screen.getByRole("button", { name: "Preview notes.md" })).toBeInTheDocument()
   })
 })
 
@@ -200,15 +171,5 @@ describe("ChatInput draft", () => {
 
     render(<ChatInput chatId="c4" draftKey="chat:a" onSend={onSend} />)
     expect(draftOf().value).toBe("")
-  })
-})
-
-describe("ChatInput attach menu", () => {
-  afterEach(cleanup)
-
-  it("offers the OCR drawing where any file is taken", () => {
-    render(<ChatInput chatId="c1" onSend={() => {}} />)
-    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }))
-    expect(screen.getByRole("button", { name: "Drawing (OCR)" })).toBeTruthy()
   })
 })

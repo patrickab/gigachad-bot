@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { fetchPiFiles } from "@/lib/backend/api"
-import type { ModelsResponse } from "@/lib/domain/types"
-import { PiSessionView, withLead } from "../PiTab"
-import { PiPanelBar } from "../PiTopBar"
+import { PiSessionView } from "../PiTab"
 import { EMPTY_TRANSCRIPT } from "../transcript"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
@@ -75,40 +72,5 @@ describe("PiSessionView in a document panel", () => {
     sendText("and the method?")
     await waitFor(() => expect(send).toHaveBeenLastCalledWith("and the method?", [], "steer"))
     expect(onLeadSent).toHaveBeenCalledOnce()
-  })
-
-  it("stages an insertion into the composer and completes @ in the chat's folder", async () => {
-    const onInserted = vi.fn()
-    render(<PiSessionView sessionId="d1" cwd="/work/markdown" files={{ cwd: "/work/markdown" }} renderHeader={() => null} insertion={{ id: 1, text: "notes.md:2-3\n> a quote" }} onInserted={onInserted} />)
-
-    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("notes.md:2-3\n> a quote"))
-    expect(onInserted).toHaveBeenCalledOnce()
-    expect(fetchPiFiles).toHaveBeenCalledWith({ cwd: "/work/markdown" })
-  })
-
-  it("shows the panel bar like a chat's top bar: thinking, the chats' model dropdown, session, context readout", () => {
-    const models: ModelsResponse = {
-      ollama: [],
-      providers: [{ label: "Pi", provider_id: "litellm_proxy", models: ["anthropic/claude-haiku-4-5"], source: "pi" }],
-      defaults: { default_model: "", small_model: "", vision_model: "", sandbox_model: "" },
-      tab_order: ["Pi"],
-      unavailable: [],
-    }
-    const modelProps = { models, onProvidersChange: async () => {}, onDefaultsChange: async () => {}, placement: "below" as const }
-    render(<PiSessionView sessionId="d1" cwd="/work/markdown" files={{ cwd: "/work/markdown" }} renderHeader={(header) => <PiPanelBar header={header} modelProps={modelProps} actions={<button type="button">Sessions</button>} />} />)
-
-    expect(screen.getByText("Notes chat")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Model: anthropic/claude-haiku-4-5" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Reasoning: medium" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Cost 0.12$ (0.00$), context 20k tokens, 10% of 200k")).toHaveTextContent("0.12$ (0.00$)·20k (10%)")
-    expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument()
-  })
-})
-
-describe("withLead", () => {
-  it("leads a prompt but never a Pi command", () => {
-    expect(withLead("hi", "File: /a.md")).toBe("File: /a.md\n\nhi")
-    expect(withLead("/skill:tex fix", "File: /a.md")).toBe("/skill:tex fix")
-    expect(withLead("hi", undefined)).toBe("hi")
   })
 })

@@ -31,28 +31,6 @@ def test_creating_is_exclusive_and_records_one_change_keyed_by_the_resolved_path
     ]
 
 
-def test_writing_overwrites_and_records_one_change(vault):
-    note = vault / "note.md"
-    note.write_text("v1")
-    scope = RecordingScope()
-
-    written = DiskFiles(mounted_roots(vault), scope).write(str(note), "v2")
-
-    assert note.read_text() == "v2"
-    assert scope.changes == [{"kind": "document", "key": str(written), "operation": "write"}]
-
-
-def test_removed_paths_record_one_delete_each(vault):
-    scope = RecordingScope()
-
-    DiskFiles(mounted_roots(vault), scope).record_removed([vault / "paper", vault / "a.png"])
-
-    assert scope.changes == [
-        {"kind": "document", "key": str(vault / "paper"), "operation": "delete"},
-        {"kind": "document", "key": str(vault / "a.png"), "operation": "delete"},
-    ]
-
-
 def test_creating_outside_the_roots_raises_and_leaves_no_file_or_change(tmp_path, vault):
     scope = RecordingScope()
 

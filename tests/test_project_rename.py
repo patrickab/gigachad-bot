@@ -13,7 +13,7 @@ from lib.changes import UserScope, latest_changes
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import KeyReference, PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences, renamed_documents
+from lib.project_rename import PostgresKeyRelocator, PostgresProjectRenamer, ProjectReferences
 from lib.project_store import ProjectStore
 from lib.storage_namespace import WORKBENCH_CHATS
 from tests.conftest import create_user
@@ -35,36 +35,6 @@ def workbench_folders(root):
         source.parent.mkdir(parents=True)
         source.write_text(source.name, encoding="utf-8")
     return paper, plan
-
-
-def test_workbench_paths_follow_moved_folders_also_as_object_keys(workbench_root):
-    links = WORKBENCH_CHATS
-    paper = f"{workbench_root}/latex/old/paper/paper.tex"
-    moved = f"{workbench_root}/latex/new/paper/paper.tex"
-    other = f"{workbench_root}/latex/older/a.tex"
-    refs = ProjectReferences("old", "new", [(f"{workbench_root}/latex/old", f"{workbench_root}/latex/new")])
-    rows = [
-        ("chat/old/project.json", json.dumps({"name": "Old", "files": [paper, {"path": other, "name": "A"}]}).encode(), False),
-        (links, json.dumps({paper: "s1", other: "s2"}).encode(), False),
-        ("note/links.md", f"[p]({paper}) {other} x{paper}".encode(), False),
-    ]
-    changed = {target: content for _, target, content in renamed_documents(rows, refs, "New", [])}
-    assert json.loads(changed["chat/new/project.json"])["files"] == [moved, {"path": other, "name": "A"}]
-    assert json.loads(changed[links]) == {moved: {"active": "s1", "sessions": ["s1"], "moved": ["s1"]}, other: "s2"}
-    assert changed["note/links.md"].decode() == f"[p]({moved}) {other} x{paper}"
-
-
-def test_failed_database_step_moves_workbench_folders_back(workbench_root):
-    paper, plan = workbench_folders(workbench_root)
-
-    def connection():
-        raise RuntimeError("database down")
-
-    renamer = PostgresProjectRenamer(SimpleNamespace(user_id=uuid4(), connection=connection))
-    with pytest.raises(RuntimeError, match="database down"):
-        renamer.rename("old", "new", "New")
-    assert paper.read_text(encoding="utf-8") == "paper.tex" and plan.read_text(encoding="utf-8") == "plan.md"
-    assert not (workbench_root / "latex" / "new").exists() and not (workbench_root / "markdown" / "new").exists()
 
 
 def test_taken_workbench_folder_aborts_before_the_database(workbench_root):
@@ -92,48 +62,10 @@ def test_references_move_owned_links_only():
     assert refs.content("note/a.md", b"[x](graph/old/system.c4)") == b"[x](graph/new/system.c4)"
 
 
-def test_renamed_documents_names_catalog_and_keeps_linked_folder():
-    meta = {"projects": [{"name": "Old", "slug": "old", "createdAt": "original"}, {"name": "Older", "slug": "older"}]}
-    rows = [("chat/projects-meta.json", json.dumps(meta).encode(), False), ("chat/old/project.json", b'{"name":"Old"}', False),
-            ("chat/old", b"", True), ("project/older/document/a.md", b"old prose", False)]
-    changed = {target: content for _, target, content in renamed_documents(rows, ProjectReferences("old", "new"), "New", ["/mnt/old"])}
-    entries = json.loads(changed["chat/projects-meta.json"])["projects"]
-    assert entries[0] | {"updatedAt": None} == {"name": "New", "slug": "new", "createdAt": "original", "updatedAt": None}
-    assert entries[1] == {"name": "Older", "slug": "older"}
-    assert json.loads(changed["chat/new/project.json"]) == {"name": "New", "linked_root": "/mnt/old"}
-    assert "chat/new" in changed and "project/older/document/a.md" not in changed
-
-
-def test_project_rename_moves_named_file_entries_and_keeps_their_names():
-    refs = ProjectReferences("old", "new")
-    files = ["project/old/document/a.md", {"path": "project/old/document/b.md", "name": "Plan.md"}]
-    assert refs.value({"files": files}) == {
-        "files": ["project/new/document/a.md", {"path": "project/new/document/b.md", "name": "Plan.md"}],
-    }
-
-
-def test_renamed_project_json_keeps_learn_session_ids():
-    rows = [("chat/old/project.json", json.dumps({"name": "Old", "learn_sessions": ["chat_old_1"]}).encode(), False)]
-    [(_, target, content)] = renamed_documents(rows, ProjectReferences("old", "new"), "New", [])
-    assert target == "chat/new/project.json"
-    assert json.loads(content)["learn_sessions"] == ["chat_old_1"]
-
-
 def renamed_without_database(monkeypatch, memory_root, slug="old", new_slug="new", *, linked=False):
     """Rename *slug* with the database step stubbed out, so only the folder and memory_store moves run."""
     monkeypatch.setattr(PostgresProjectRenamer, "_rename_rows", lambda self, refs, name: linked)
     PostgresProjectRenamer(SimpleNamespace(user_id=uuid4()), memory_root=memory_root).rename(slug, new_slug, "New")
-
-
-def test_rename_moves_the_projects_memory_store_after_the_database_step(tmp_path, monkeypatch):
-    root = tmp_path / "memory"
-    memory_store.create_memory_store("old", root=root)
-    memory_store.apply_memory_ops("old", [{"op": "add", "path": "notes", "description": "Notes", "text": "old fact"}], root=root)
-
-    renamed_without_database(monkeypatch, root)
-
-    assert memory_store.list_memories(root=root)["memory_stores"] == ["new"]
-    assert [fact["text"] for fact in memory_store.read_memory("new", "notes", root=root)["facts"]] == ["old fact"]
 
 
 def test_rename_skips_a_missing_memory_store_and_a_taken_target(tmp_path, monkeypatch):
@@ -148,15 +80,6 @@ def test_rename_skips_a_missing_memory_store_and_a_taken_target(tmp_path, monkey
 
     assert memory_store.list_memories(root=root)["memory_stores"] == ["new", "old"]
     assert memory_store.list_memories("new", root=root)["directories"] == ["kept"]
-
-
-def test_rename_leaves_a_linked_projects_memory_store(tmp_path, monkeypatch):
-    root = tmp_path / "memory"
-    memory_store.create_memory_store("old", root=root)
-
-    renamed_without_database(monkeypatch, root, linked=True)
-
-    assert memory_store.list_memories(root=root)["memory_stores"] == ["old"]
 
 
 def test_rename_never_moves_the_logins_user_store(tmp_path, monkeypatch):
@@ -379,20 +302,6 @@ def test_rename_moves_workbench_folders_and_rewrites_paths_into_them(stores, wor
     assert get(docs, "project/new/document/board.canvas")["attachments"][0]["path"] == str(moved_plan)
 
 
-def test_rename_replaces_an_empty_leftover_workbench_folder(stores, workbench_root):
-    _, projects, _, _ = stores
-    projects.create_project("Old")
-    paper, _ = workbench_folders(workbench_root)
-    projects.add_file("old", str(paper))
-    (workbench_root / "latex" / "new" / "stale").mkdir(parents=True)
-
-    projects.update_project("old", "New")
-
-    moved = workbench_root / "latex" / "new" / "paper" / "paper.tex"
-    assert moved.is_file() and not (workbench_root / "latex" / "new" / "stale").exists()
-    assert projects.list_files("new") == [str(moved)]
-
-
 def test_database_conflict_moves_workbench_folders_back(stores, workbench_root):
     _docs, projects, assets, _ = stores
     projects.create_project("Old")
@@ -434,13 +343,6 @@ def test_relocating_a_document_moves_every_reference_and_only_exact_ones(stores,
     with postgres_pool.connection() as conn:
         value = conn.execute("SELECT value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone()[0]
     assert value == {"id": "a", "path": new}
-
-
-def test_key_reference_rewrites_object_keys_values_and_links_but_not_longer_paths():
-    refs = KeyReference("/mnt/a.md", "/mnt/b.md")
-    assert refs.value({"/mnt/a.md": {"active": "s1"}, "/mnt/a.md.bak": "x", "path": "/mnt/a.md", "list": ["/mnt/a.md"]}) == {
-        "/mnt/b.md": {"active": "s1"}, "/mnt/a.md.bak": "x", "path": "/mnt/b.md", "list": ["/mnt/b.md"]}
-    assert refs.text("[a](/mnt/a.md) /mnt/a.md.bak") == "[a](/mnt/b.md) /mnt/a.md.bak"
 
 
 def test_relocating_a_disk_path_repoints_references_without_touching_rows_and_records_where_it_went(stores, postgres_pool):

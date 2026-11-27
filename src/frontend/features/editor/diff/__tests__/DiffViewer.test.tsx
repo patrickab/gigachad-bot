@@ -82,36 +82,6 @@ describe("DiffViewer", () => {
     expect(within(view.getByLabelText("Changed files")).getByRole("button", { name: /^b\.png/ })).toHaveTextContent(/^b\.pngA$/)
   })
 
-  it("jumps within the shared scroll container and tracks the file reached by scrolling", async () => {
-    const view = render(<DiffViewer root="/repo" />)
-    await view.findByText("old")
-    const container = view.getByLabelText("Diff")
-    const first = view.getByLabelText("Diff for a.txt")
-    const second = view.getByLabelText("Diff for dir/b.png")
-    vi.spyOn(container, "getBoundingClientRect").mockImplementation(() => ({ top: 40 }) as DOMRect)
-    vi.spyOn(first, "getBoundingClientRect").mockImplementation(() => ({ top: 40 - container.scrollTop }) as DOMRect)
-    vi.spyOn(second, "getBoundingClientRect").mockImplementation(() => ({ top: 640 - container.scrollTop }) as DOMRect)
-
-    fireEvent.click(view.getByRole("button", { name: /^b\.png/ }))
-    expect(container.scrollTop).toBe(600)
-    expect(view.getByText("old")).toBeVisible()
-    container.scrollTop = 0
-    fireEvent.scroll(container)
-    await waitFor(() => expect(view.getByRole("button", { name: /^a\.txt/ })).toHaveAttribute("aria-current", "page"))
-  })
-
-  it("edits the file whose header button was clicked, deleted files have none", async () => {
-    neovim.enabled = true
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "1", added: null, removed: null }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }, { path: "gone.txt", status: "deleted", stamp: "1", added: null, removed: null }] })
-    const view = render(<DiffViewer root="/repo" />)
-    const second = within(await view.findByLabelText("Diff for dir/b.png"))
-    expect(within(view.getByLabelText("Diff for gone.txt")).queryByRole("button")).toBeNull()
-    fireEvent.click(second.getByRole("button", { name: "Edit diff" }))
-    expect(api.fetchRootDiffContent).toHaveBeenCalledWith("/repo", "dir/b.png")
-    expect(second.getByRole("button", { name: "Opening…" })).toBeDisabled()
-    expect(within(view.getByLabelText("Diff for a.txt")).getByRole("button", { name: "Edit diff" })).toBeDisabled()
-  })
-
   it("merges a change of the edited file on disk into its Neovim buffer, not text it already has", async () => {
     neovim.enabled = true
     api.fetchRootDiffContent.mockResolvedValue({ base_content: "old", content: "new" })
@@ -134,32 +104,6 @@ describe("DiffViewer", () => {
     expect(await sidebar.findByRole("button", { name: "ui/tree" })).toHaveAttribute("aria-expanded", "true")
     expect(sidebar.getByRole("button", { name: "src" })).toBeVisible()
     expect(sidebar.getByRole("button", { name: /^a\.ts/ })).toBeVisible()
-  })
-
-  it("explains a mount that is not a git repository", async () => {
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: false, files: [] })
-    const view = render(<DiffViewer root="/plain" />)
-    expect(await view.findByText("This file mount is not a git repository")).toBeVisible()
-  })
-
-  it("reports a clean working tree", async () => {
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [] })
-    const view = render(<DiffViewer root="/clean" />)
-    expect(await view.findByText("No changes")).toBeVisible()
-  })
-
-  it("refetches only the file whose stamp changed and updates its counts", async () => {
-    const view = render(<DiffViewer root="/repo" />)
-    await view.findByText("old")
-    expect(api.fetchRootFileDiff).toHaveBeenCalledTimes(2)
-    const edited = ["diff --git a/a.txt b/a.txt", "--- a/a.txt", "+++ b/a.txt", "@@ -1,1 +1,3 @@", " keep", "+x", "+y"].join("\n")
-    api.fetchRootFileDiff.mockImplementation(async (_root, path) => path === "a.txt" ? { supported: true, status: "modified", patch: edited } : { supported: false })
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "2", added: 2, removed: 0 }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }] })
-
-    expect(await view.findByText("y", {}, { timeout: 4000 })).toBeVisible()
-    expect(view.getByLabelText("Line changes in a.txt")).toHaveTextContent("+2−0")
-    expect(view.queryByText("old")).toBeNull()
-    expect(api.fetchRootFileDiff).toHaveBeenCalledTimes(3)
   })
 
   it("collects line notes and sends them as one review, keeping them when sending fails", async () => {

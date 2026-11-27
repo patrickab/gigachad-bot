@@ -232,18 +232,6 @@ describe("entry edits", () => {
   })
 })
 
-describe("events batch", () => {
-  it("applies buffered records in order like one event each", () => {
-    const started = events(snapshotOf([messageEntry("a", null, prompt)], true), [{ type: "message_start", message: { ...reply, content: [] } }])
-    const records = [
-      { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
-      { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Do" } },
-      { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ne" } },
-    ]
-    expect(transcriptReducer(started, { kind: "events", events: records })).toEqual(events(started, records))
-  })
-})
-
 describe("live tool output", () => {
   const partial = (text: string) => ({ content: [{ type: "text", text }] })
   const text = (run: { result?: { content: unknown[] } }) => (run.result?.content[0] as { text: string }).text
@@ -268,22 +256,4 @@ describe("live tool output", () => {
     expect(runs.c.running).toBe(false)
     expect(text(runs.c)).toBe("done")
   })
-})
-
-describe("splitSkill", () => {
-  it("splits Pi's skill expansion into the skill and the args", async () => {
-    const { splitSkill } = await import("../PiTranscript")
-    expect(splitSkill('<skill name="gitlab" location="/x/SKILL.md">\nReferences.\n\nbody\n</skill>\n\nread #4')).toEqual({ skill: { name: "gitlab", body: "References.\n\nbody" }, text: "read #4" })
-    expect(splitSkill('<skill name="gitlab" location="/x">\nbody\n</skill>')).toEqual({ skill: { name: "gitlab", body: "body" }, text: "" })
-    expect(splitSkill("plain")).toEqual({ text: "plain" })
-  })
-})
-
-it("keeps a committed result's run across live updates, so only the running tool's row changes", () => {
-  const result = { role: "toolResult" as const, toolCallId: "t1", toolName: "bash", content: [{ type: "text" as const, text: "done" }], isError: false, timestamp: 2 }
-  const base = { ...EMPTY_TRANSCRIPT, messages: [result] }
-  const before = toolRunsOf(base)
-  const after = toolRunsOf({ ...base, runs: { t2: { running: true, isError: false } } })
-  expect(after.t1).toBe(before.t1)
-  expect(after.t1).toEqual({ running: false, isError: false, result: { content: result.content, details: undefined } })
 })

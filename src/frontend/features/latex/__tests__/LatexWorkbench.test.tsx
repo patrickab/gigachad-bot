@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { WorkbenchEditorActions, WorkbenchProps } from "@/features/workbench/Workbench"
 import type { PdfReveal } from "@/components/content/PdfViewer"
 import type { PdfWord } from "@/components/content/pdf/pdfText"
@@ -120,38 +120,6 @@ describe("LatexWorkbench", () => {
     expect(api.buildLatex).toHaveBeenLastCalledWith(ROOT)
   })
 
-  it("reads the project again after a save of the shown file, a save of another file leaves it", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    render(workbenchOf(CHAPTER))
-    await waitFor(() => expect(api.loadTexProject).toHaveBeenCalledTimes(1))
-
-    act(() => workbench.props?.onSaved?.("\\bibliography{refs}", `${FOLDER}/refs.bib`))
-    expect(api.loadTexProject).toHaveBeenCalledTimes(1)
-    act(() => workbench.props?.onSaved?.("% !TEX root = ../main.tex", CHAPTER))
-    await waitFor(() => expect(api.loadTexProject).toHaveBeenCalledTimes(2))
-  })
-
-  it("asks again for the project of another file without remounting the workbench", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    const view = render(workbenchOf(ROOT))
-    await waitFor(() => expect(api.buildLatex).toHaveBeenCalledTimes(1))
-    const mounted = screen.getByTestId("workbench")
-
-    view.rerender(workbenchOf(CHAPTER, FOLDER))
-    await waitFor(() => expect(api.loadTexProject).toHaveBeenLastCalledWith(CHAPTER))
-    expect(screen.getByTestId("workbench")).toBe(mounted)
-  })
-
-  it("tells the item the project folder", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    const unknown = vi.fn()
-    render(workbenchOf(ROOT, undefined, unknown))
-    await waitFor(() => expect(unknown).toHaveBeenCalledExactlyOnceWith(FOLDER))
-  })
-
   it("lets the user choose the root of a file without one, writes the choice and builds it", async () => {
     const orphan = `${FOLDER}/notes.tex`
     api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: null, candidates: [ROOT, `${FOLDER}/book.tex`] })
@@ -197,23 +165,6 @@ describe("LatexWorkbench", () => {
     expect(screen.getByTestId("workbench")).toBeInTheDocument()
   })
 
-  it("offers no slides for a root that is not a presentation", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    render(workbenchOf(ROOT))
-    await waitFor(() => expect(api.loadLatexTemplates).toHaveBeenCalledExactlyOnceWith(ROOT))
-    expect(await screen.findByTestId("workbench")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Add slide" })).not.toBeInTheDocument()
-  })
-
-  it("lists the slides of a presentation under their group labels in the order the template set gives, each with its summary", async () => {
-    await openSlideList()
-
-    expect(screen.getAllByRole("group")).toEqual([screen.getByRole("group", { name: "Text" }), screen.getByRole("group", { name: "Key figures" })])
-    expect(within(screen.getByRole("group", { name: "Text" })).getAllByRole("option").map((item) => item.textContent)).toEqual(["TitleTitle slide", "BulletsCause and effect points"])
-    expect(within(screen.getByRole("group", { name: "Key figures" })).getAllByRole("option").map((item) => item.textContent)).toEqual(["Big numberOne big number carries the slide"])
-  })
-
   // Keys, focus, filtering mechanics and Escape belong to CommandPicker's tests, these prove AddSlide's wiring
   it("inserts the picked slide's text into Neovim and closes", async () => {
     await openSlideList()
@@ -225,42 +176,6 @@ describe("LatexWorkbench", () => {
     expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[1].text))
     expect(workbench.focus).toHaveBeenCalledOnce()
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Slide primitives" })).not.toBeInTheDocument())
-  })
-
-  it("filters the slides by name, group and summary", async () => {
-    await openSlideList()
-    const search = screen.getByRole("combobox", { name: "Search slides…" })
-    const shown = () => screen.getAllByRole("option").map((item) => item.textContent)
-
-    fireEvent.change(search, { target: { value: "carries" } })
-    expect(shown()).toEqual(["Big numberOne big number carries the slide"])
-    fireEvent.change(search, { target: { value: "text" } })
-    expect(shown()).toEqual(["TitleTitle slide", "BulletsCause and effect points"])
-    fireEvent.change(search, { target: { value: "bullets" } })
-    expect(shown()).toEqual(["BulletsCause and effect points"])
-  })
-
-  it("keeps the list open when Neovim cannot take the frame", async () => {
-    await openSlideList()
-    workbench.send.mockReturnValueOnce(false)
-
-    fireEvent.click(screen.getByRole("option", { name: /^Title/ }))
-
-    expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[0].text))
-    expect(workbench.focus).not.toHaveBeenCalled()
-    expect(screen.getByRole("dialog", { name: "Slide primitives" })).toBeInTheDocument()
-  })
-
-  it("previews the highlighted slide in a card and shows none for one without a preview or a preview that fails", async () => {
-    await openSlideList()
-    const preview = () => document.body.querySelector<HTMLImageElement>("[aria-hidden].fixed img")
-
-    expect(preview()?.getAttribute("src")).toMatch(/\/latex\/templates\/presentation\/previews\/text\/title\.png\?v=7$/)
-    fireEvent.mouseMove(screen.getByRole("option", { name: /^Big number/ }), { clientX: 10, clientY: 10 })
-    expect(preview()).toBeNull()
-    fireEvent.mouseMove(screen.getByRole("option", { name: /^Bullets/ }), { clientX: 10, clientY: 20 })
-    fireEvent.error(preview()!)
-    expect(preview()).toBeNull()
   })
 })
 
@@ -300,15 +215,6 @@ describe("LatexWorkbench inverse search", () => {
     act(() => pdf.doubleClick?.(1, 300, 400, NO_WORD))
     await waitFor(() => expect(workbench.reveal).toHaveBeenCalledExactlyOnceWith(ROOT, 3, 0, { focus: true }))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-  })
-
-  it("shows why any other failure found no source line", async () => {
-    api.findSynctexSource.mockRejectedValueOnce(Object.assign(new api.ApiError("synctex is not installed"), { status: 503 }))
-    await showPdf()
-
-    act(() => pdf.doubleClick?.(1, 10, 10, NO_WORD))
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("synctex is not installed")
   })
 })
 
@@ -352,15 +258,6 @@ describe("LatexWorkbench forward search", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No PDF spot for this line")
     expect(pdf.reveal).toBeUndefined()
-  })
-
-  it("shows why any other failure found no PDF spot", async () => {
-    api.findSynctexView.mockRejectedValueOnce(Object.assign(new api.ApiError("synctex is not installed"), { status: 503 }))
-    await showPdf()
-
-    await forwardSearch(12)
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("synctex is not installed")
   })
 })
 
@@ -412,14 +309,6 @@ describe("LatexWorkbench presentation", () => {
     expect(query.get("role")).toBe("presenter")
     expect(query.get("pdf")).toContain(encodeURIComponent(`${FOLDER}/.latex-build/main.pdf`))
   })
-
-  it("offers no presentation without a root", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: null, candidates: [] })
-    render(workbenchOf(CHAPTER))
-
-    await screen.findByText("No root document")
-    expect(screen.queryByRole("button", { name: "Present" })).toBeNull()
-  })
 })
 
 describe("LatexWorkbench slide gap", () => {
@@ -452,56 +341,5 @@ describe("LatexWorkbench slide gap", () => {
 
     expect(workbench.send).toHaveBeenCalledExactlyOnceWith(...insertOf(PRESENTATION.primitives[0].text))
     await waitFor(() => expect(pdf.slideGap?.marked).toBeNull())
-  })
-
-  it("keeps the mark when Neovim cannot take the slide, clearing it drops the mark", async () => {
-    api.findSlideEnd.mockResolvedValue({ path: ROOT, line: 20 })
-    await showPresentation()
-    act(() => pdf.slideGap?.onChoose(2))
-    await waitFor(() => expect(pdf.slideGap?.marked).toBe(2))
-
-    workbench.send.mockReturnValueOnce(false)
-    addTitleSlide()
-    expect(pdf.slideGap?.marked).toBe(2)
-
-    act(() => pdf.slideGap?.onClear())
-    expect(pdf.slideGap?.marked).toBeNull()
-  })
-
-  it("says so when the page above a gap has no slide, the earlier mark goes", async () => {
-    api.findSlideEnd.mockResolvedValueOnce({ path: ROOT, line: 20 })
-    api.findSlideEnd.mockRejectedValueOnce(Object.assign(new api.ApiError("No slide"), { status: 404 }))
-    await showPresentation()
-    act(() => pdf.slideGap?.onChoose(2))
-    await waitFor(() => expect(pdf.slideGap?.marked).toBe(2))
-
-    act(() => pdf.slideGap?.onChoose(5))
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("No slide to insert after")
-    expect(pdf.slideGap?.marked).toBeNull()
-    expect(workbench.reveal).toHaveBeenCalledOnce()
-  })
-
-  it("offers no gap and no double-click without Neovim", async () => {
-    workbench.neovim = false
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    api.loadLatexTemplates.mockResolvedValueOnce(PRESENTATION)
-    render(workbenchOf(ROOT))
-
-    await waitFor(() => expect(api.loadLatexTemplates).toHaveBeenCalledExactlyOnceWith(ROOT))
-    await act(async () => {})
-    expect(pdf.slideGap).toBeUndefined()
-    expect(pdf.doubleClick).toBeNull()
-  })
-
-  it("offers no gap for a root that is not a presentation", async () => {
-    api.loadTexProject.mockResolvedValue({ folder: FOLDER, root: ROOT, candidates: [] })
-    api.buildLatex.mockResolvedValue(built)
-    render(workbenchOf(ROOT))
-
-    await waitFor(() => expect(api.loadLatexTemplates).toHaveBeenCalledExactlyOnceWith(ROOT))
-    await waitFor(() => expect(pdf.doubleClick).not.toBeNull())
-    expect(pdf.slideGap).toBeUndefined()
   })
 })

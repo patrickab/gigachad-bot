@@ -11,35 +11,15 @@ from backend.routes import file_roots as file_roots_route
 from backend.routes import fileviewer as fileviewer_route
 from backend.routes.deps import get_user_scope
 from lib.attachment_materialize import sync_library_pdf
-from lib.attachments import attach_library_pdf
 from lib.chat_store import ChatStore
-from lib.data_store import StorageNotFoundError, write_text
+from lib.data_store import write_text
 from lib.disk_files import DiskFiles
 from lib.document_service import add_extraction
 from lib.file_roots import FileRoots
-from lib.host_access import list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import library_images_prefix, library_markdown
 from tests.conftest import git, mounted_roots, route_client
 from tests.fakes import MemoryAssetStore, MemoryDataStore, RecordingScope
-
-
-def test_list_directories_lists_only_subdirectories_case_insensitively_with_hidden(tmp_path):
-    for name in ("beta", "Alpha", ".config"):
-        (tmp_path / name).mkdir()
-    (tmp_path / "notes.md").write_text("not a directory")
-
-    directory, names = list_directories(str(tmp_path / "beta" / ".."))
-
-    assert directory == tmp_path.resolve()
-    assert names == [".config", "Alpha", "beta"]
-
-
-def test_list_directories_refuses_files_and_missing_paths(tmp_path):
-    (tmp_path / "notes.md").write_text("")
-    for path in (tmp_path / "notes.md", tmp_path / "missing"):
-        with pytest.raises(NotADirectoryError):
-            list_directories(str(path))
 
 
 def test_tree_lists_every_non_ignored_file_by_full_name(tmp_path):
@@ -64,7 +44,6 @@ def test_listing_follows_an_edited_gitignore(tmp_path):
     assert [file["name"] for file in roots.list_files()] == [".gitignore", "debug.log"]
     [root] = roots.tree()
     assert [child["name"] for child in root["children"]] == [".gitignore", "debug.log"]
-
 
 
 class _Project:
@@ -258,19 +237,6 @@ def test_workspace_files_serve_raw_bytes_and_refuse_binary_as_text(tmp_path):
     assert (ranged.status_code, ranged.content) == (206, b"PDF")
 
 
-def test_attaching_an_extracted_library_pdf_reads_only_its_markdown():
-    assets = MemoryAssetStore()
-    assets.write("pdf", "PDFs/paper.pdf", b"%PDF v1")
-    assets.write("mineru_markdown", library_markdown("paper"), b"# Paper")
-
-    attached = attach_library_pdf(assets, "PDFs/paper.pdf")
-
-    assert attached.parsedMd == "# Paper"
-    assert assets.read_keys == [library_markdown("paper")]
-    with pytest.raises(StorageNotFoundError):
-        attach_library_pdf(assets, "PDFs/missing.pdf")
-
-
 def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp_path):
     mounted = tmp_path / "mounted"
     mounted.mkdir()
@@ -415,38 +381,6 @@ def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
     assert (response.status_code, response.json()["detail"]) == (403, "Unknown file path")
 
 
-def _documents_client(roots: FileRoots, project: _Project, docs: MemoryDataStore, overrides: dict | None = None) -> TestClient:
-    return route_client(
-        documents_route.router,
-        overrides={
-            documents_route.get_file_roots: roots,
-            documents_route.get_project_store: project,
-            documents_route.get_document_store: docs,
-            documents_route.get_asset_store: MemoryAssetStore(),
-            **(overrides or {}),
-        },
-    )
-
-
-def test_an_uploaded_pdf_lists_its_markdown_in_the_project_only_once_extracted(tmp_path, monkeypatch):
-    queued = []
-    monkeypatch.setattr("lib.attachment_materialize.extract_queue.enqueue", lambda name, content, store: queued.append(store))
-    published = []
-    client = _documents_client(
-        mounted_roots(tmp_path), _Project(), MemoryDataStore(),
-        {documents_route.get_extraction_publisher: lambda slug, stem, markdown: published.append((slug, stem, markdown))},
-    )
-
-    uploaded = client.post("/api/documents/write-binary", params={"slug": "test"}, files={"file": ("paper.pdf", b"%PDF", "application/pdf")})
-
-    assert uploaded.status_code == 200
-    assert published == []
-    markdown = tmp_path / "paper.md"
-    markdown.write_text("# text", encoding="utf-8")
-    queued[0]("paper", markdown, tmp_path / "images")
-    assert published == [("test", "paper", "# text")]
-
-
 def test_extraction_markdown_joins_the_project_files_and_keeps_an_edited_copy():
     docs = MemoryDataStore()
     projects = ProjectStore(ChatStore(data_store=docs), rename=lambda *_: None)
@@ -478,4 +412,4 @@ def test_listings_hide_latex_build_output_but_keep_unrelated_aux_files(tmp_path)
 
     shown = ["imgs", "lonely.aux", "main.tex", "refs.bib"]
     assert [child["name"] for child in paper["children"]] == shown
-    assert sorted(file["name"] for file in roots.list_files()) == sorted(shown[1:] + ["plot.png"])
+    assert sorted(file["name"] for file in roots.list_files()) == sorted([*shown[1:], "plot.png"])

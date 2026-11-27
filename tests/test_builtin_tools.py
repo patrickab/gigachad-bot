@@ -1,4 +1,4 @@
-"""Built-in tools: web search labels, the workspace agent, the LLM-rendered mind map, diagram and OCR cards, learn sessions."""
+"""Built-in tools: the workspace agent, the OCR card, learn sessions."""
 
 import base64
 from typing import Any
@@ -6,16 +6,12 @@ from typing import Any
 import pytest
 
 from config import TEST_MODEL
-from lib import completions, learnharness, toolcalling, tools, web_search
+from lib import completions, learnharness, toolcalling, tools
 from lib.chat_store import ChatStore
 from lib.project_store import ProjectStore
 from lib.tool_context import ToolContext, ToolOptions
 from lib.upstream import UpstreamContractError, UpstreamRequestFailed
 from tests.fakes import MemoryDataStore, SandboxServiceStub, collect_tool_turn, text_chunk, tool_chunk
-
-
-def test_source_label_extracts_a_stable_hostname_label() -> None:
-    assert web_search.source_label("https://www.example.com/article", set()) == "example"
 
 
 @pytest.mark.asyncio
@@ -59,87 +55,6 @@ async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_rai
 
     assert outcome.error is not None
     assert outcome.content
-
-
-@pytest.mark.asyncio
-async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    def fake_text(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> str:
-        calls.append({"model": model, "messages": messages, **kwargs})
-        return "```markmap\n# Topic\n```"
-
-    monkeypatch.setattr(completions, "text", fake_text)
-    context = ToolContext(
-        model=TEST_MODEL,
-        opts=ToolOptions(),
-        history=({"role": "assistant", "content": "Prior explanation"},),
-        user_msg="Make a mind map",
-    )
-
-    outcome = await tools.BUILTIN_TOOLS.execute("mindmap", {}, context)
-
-    assert outcome.detail["mindmap"] == "```markmap\n# Topic\n```"
-    assert "<transcript>" in calls[0]["messages"][-1]["content"]
-
-
-@pytest.mark.asyncio
-async def test_diagram_tool_returns_mermaid_source_for_the_tool_card(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    def fake_text(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> str:
-        calls.append({"model": model, "messages": messages, **kwargs})
-        return "```diagram\nflowchart LR\nA --> B\n```"
-
-    monkeypatch.setattr(completions, "text", fake_text)
-    context = ToolContext(
-        model=TEST_MODEL,
-        opts=ToolOptions(),
-        history=({"role": "assistant", "content": "Prior explanation"},),
-        user_msg="Make a diagram",
-    )
-
-    outcome = await tools.BUILTIN_TOOLS.execute("diagram", {}, context)
-
-    assert outcome.detail["mermaid"] == "flowchart LR\nA --> B"
-    assert "Do not create, return, or repeat Mermaid or any other diagram." in outcome.content
-    assert "extremely concise companion explanation" not in outcome.content
-    assert "skimmable Markdown layout" not in outcome.content
-    assert "```mermaid\nflowchart LR\nA --> B\n```" in outcome.content
-    assert "<transcript>" in calls[0]["messages"][-1]["content"]
-    assert calls[0]["messages"][0] == {"role": "system", "content": tools.SYS_DIAGRAM_MERMAID}
-    assert "significantly reduce the text needed" in tools.BUILTIN_TOOLS.specs(["diagram"])[0]["function"]["description"]
-
-
-@pytest.mark.asyncio
-async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    rounds = [
-        iter([tool_chunk(0, "diagram_a", "diagram", "{}")]),
-        iter([text_chunk("The explanation appears below the diagram.")]),
-    ]
-    sent: list[list[dict[str, Any]]] = []
-
-    def fake_stream(_model: str, messages: list[dict[str, Any]], **_kwargs: Any) -> Any:
-        sent.append(messages)
-        return rounds.pop(0)
-
-    def fake_text(*_: Any, **__: Any) -> str:
-        return "```mermaid\nflowchart LR\nA --> B\n```"
-
-    monkeypatch.setattr(completions, "stream", fake_stream)
-    monkeypatch.setattr(completions, "text", fake_text)
-
-    events = await collect_tool_turn(
-        user_msg="Show the request lifecycle",
-        system_prompt="Follow the main system prompt.",
-        enabled=["diagram"],
-    )
-
-    assert [name for name, _ in events][-2:] == ["tool_result", "token"]
-    assert events[-1] == ("token", "The explanation appears below the diagram.")
-    assert "Follow the main system prompt." in sent[1][0]["content"]
-    assert "```mermaid\nflowchart LR\nA --> B\n```" in sent[1][3]["content"]
-    assert "Do not create, return, or repeat Mermaid" in sent[1][3]["content"]
 
 
 @pytest.mark.asyncio
@@ -257,9 +172,3 @@ async def test_a_failed_assignment_still_starts_and_links_the_session_outside_th
     assert harness.turns == [("chat_new_1", GOAL)]
     assert "listed under Learn" in outcome.content
     assert store.learn_session_projects() == {}
-
-
-def test_host_tools_are_offered_to_host_logins_only() -> None:
-    enabled = ["web_search", "start_learn_session"]
-    assert tools.offered_tools(enabled, host_access=True) == enabled
-    assert tools.offered_tools(enabled, host_access=False) == ["web_search"]

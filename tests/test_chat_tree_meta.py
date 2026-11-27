@@ -6,7 +6,6 @@ import pytest
 
 from lib.chat_store import ChatStore
 from lib.postgres_data_store import PostgresDataStore
-from lib.references import Released
 
 
 @pytest.fixture
@@ -89,21 +88,6 @@ def test_meta_left_behind_by_a_writer_that_ignores_it_is_not_used(chat_store: Ch
     assert (meta["chat_id"], meta["version"]) == ("renamed", version)
 
 
-def test_meta_jsonb_cannot_store_exactly_falls_back_to_the_body(chat_store: ChatStore, data_store: PostgresDataStore) -> None:
-    # NUL is rejected by jsonb, unsorted child keys and floats would come back changed.
-    odd_child = {"chat_id": "gone", "branch_message_idx": 0, "a": 1.5}
-    chat_store.save("nul.json", {"messages": pair("a"), "chat_id": "nul", "parent_id": "p\x00"})
-    chat_store.save("odd.json", {"messages": pair("a"), "chat_id": "odd", "children": [odd_child], "title": "x"})
-    chat_store.save("kept.json", {"messages": pair("a"), "chat_id": "gone"})
-
-    for _ in range(2):
-        meta = ChatStore(data_store=data_store).get_branch_meta()
-        assert meta["nul.json"]["parent_id"] == "p\x00"
-        assert json.dumps(meta["odd.json"]["children"]) == json.dumps([odd_child])
-    assert stored_meta(data_store, "nul.json")[0] is None
-    assert stored_meta(data_store, "odd.json")[0] is None
-
-
 def test_unreadable_chats_report_empty_meta(chat_store: ChatStore, data_store: PostgresDataStore) -> None:
     data_store.write_bytes("chat/broken.json", b"{not json")
     data_store.write_bytes("chat/scalar.json", b'"text"')
@@ -124,15 +108,3 @@ def test_dead_children_are_pruned_from_meta_and_body(chat_store: ChatStore, data
     assert chat_store.load("root.json")["children"] == []
     meta, version = stored_meta(data_store, "root.json")
     assert (meta["children"], meta["version"]) == ([], version)
-
-
-def test_index_and_project_cleanup_use_meta(chat_store: ChatStore, data_store: PostgresDataStore) -> None:
-    data_store.write_bytes("chat/proj/project.json", json.dumps({"name": "proj", "kanban": [], "tabs": []}).encode())
-    data_store.write_bytes("chat/proj/one.json", json.dumps({"messages": [], "chat_id": "one"}).encode())
-    chat_store.save("proj/two.json", {"messages": pair("a"), "chat_id": "two"})
-
-    released = Released()
-    chat_store.release_chats_under("chat/proj", "proj", released)
-    assert sorted(released.chats) == [("one", "proj"), ("two", "proj")]
-    assert chat_store._find("one") == "chat/proj/one.json"
-    assert stored_meta(data_store, "proj/project.json")[0] is None

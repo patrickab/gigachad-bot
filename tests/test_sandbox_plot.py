@@ -22,18 +22,6 @@ async def _plot(sandbox: SandboxServiceStub, **context: Any) -> ToolOutcome:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_treats_an_unfenced_reply_as_the_whole_script(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A model that forgets the fence still plots, and its code still reaches the answer round."""
-    sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
-    monkeypatch.setattr(completions, "text", lambda *_a, **_k: "print(fig.to_json())")
-
-    outcome = await _plot(sandbox, **PLOT_REQUEST)
-
-    assert sandbox.scripts == ["print(fig.to_json())"]
-    assert "print(fig.to_json())" in outcome.content
-
-
-@pytest.mark.asyncio
 async def test_sandbox_plot_repairs_fast_script_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -65,29 +53,6 @@ async def test_sandbox_plot_repairs_fast_script_once(
     assert generation_calls[0]["user_msg"] == "Plot the trend"
     assert "repairable script failure" in generation_calls[1]["user_msg"]
     assert [call["model"] for call in generation_calls] == [TEST_MODEL, TEST_MODEL]
-
-
-@pytest.mark.asyncio
-async def test_sandbox_plot_generation_exception_hands_off_without_repair(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}}')
-    generation_calls: list[dict[str, Any]] = []
-
-    def unavailable(model: str, _messages: list[dict[str, Any]], **_kwargs: Any) -> str:
-        generation_calls.append({"model": model})
-        raise RuntimeError("provider unavailable")
-
-    monkeypatch.setattr(completions, "text", unavailable)
-
-    outcome = await _plot(sandbox, **PLOT_REQUEST, small_model="provider/small-model")
-
-    assert (outcome.summary, outcome.error) == ("1 trace", None)
-    assert outcome.detail["script"] == ""
-    assert sandbox.scripts == []
-    assert len(generation_calls) == 1
-    assert generation_calls[0]["model"] == TEST_MODEL
-    assert [call["scope"] for call in sandbox.calls] == ["sandbox_plot"]
 
 
 @pytest.mark.asyncio

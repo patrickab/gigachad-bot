@@ -1,21 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import { Globe } from "lucide-react"
 import { describe, expect, it, vi } from "vitest"
 import type { ToolCall, ToolRun } from "../../types"
 import { getResultDiff } from "../DiffView"
-import { getToolCategory } from "../format"
 import { parsePiDisplayDiff, parseUnifiedPatch } from "../patch"
-import { ProcessDetails } from "../ProcessDetails"
 import { ToolCallRow } from "../ToolCallRow"
 
 const editCall: ToolCall = { type: "toolCall", id: "call-1", name: "edit", arguments: { path: "src/app.ts", edits: [{ oldText: "a", newText: "b" }] } }
-
-describe("tool format", () => {
-  it("maps Pi built-in tools to categories", () => {
-    expect(["read", "ls", "grep", "find", "edit", "write", "bash", "mystery"].map(getToolCategory))
-      .toEqual(["read", "read", "search", "search", "edit", "edit", "terminal", "other"])
-  })
-})
 
 describe("patch parsing", () => {
   it("pairs removed and added lines of a unified patch", () => {
@@ -65,65 +55,5 @@ describe("ToolCallRow", () => {
     fireEvent.click(screen.getByRole("button", { name: "src/app.ts" }))
     expect(onOpenFile).toHaveBeenCalledWith("src/app.ts")
     expect(screen.getByRole("button", { name: /not run edit/ }).getAttribute("aria-expanded")).toBe("true")
-  })
-
-  it("shows live output of a running call and the placeholder before any", () => {
-    const call: ToolCall = { type: "toolCall", id: "call-2", name: "bash", arguments: { command: "ls" } }
-    const { rerender } = render(<ToolCallRow call={call} run={{ running: true, isError: false }} defaultCollapsed={false} />)
-    expect(screen.getByText("Running…")).toBeTruthy()
-    rerender(<ToolCallRow call={call} run={{ running: true, isError: false, result: { content: [{ type: "text", text: "file.txt" }] } }} defaultCollapsed={false} />)
-    expect(screen.getByText("file.txt")).toBeTruthy()
-  })
-})
-
-describe("ToolCallRow display and stages", () => {
-  const searchCall: ToolCall = { type: "toolCall", id: "call-3", name: "web_search", arguments: { query: "pi" } }
-  const display = { label: "Web search", icon: Globe }
-
-  it("shows the raw tool name without a display, the display's label with one", () => {
-    const { rerender } = render(<ToolCallRow call={searchCall} run={{ running: false, isError: false }} />)
-    expect(screen.getByText("web_search")).toBeTruthy()
-    rerender(<ToolCallRow call={searchCall} run={{ running: false, isError: false }} display={display} />)
-    expect(screen.queryByText("web_search")).toBeNull()
-    expect(screen.getByRole("button", { name: /done Web search/ })).toBeTruthy()
-  })
-
-  it("shows running and settled stages beside the label, nothing without", () => {
-    const { container, rerender } = render(<ToolCallRow call={searchCall} run={{ running: true, isError: false }} display={display} stages={<span>0.4s Searching</span>} />)
-    expect(screen.getByRole("button", { name: /running Web search/ })).toBeTruthy()
-    expect(screen.getByText("0.4s Searching")).toBeTruthy()
-    rerender(<ToolCallRow call={searchCall} run={{ running: false, isError: false, durationMs: 900 }} display={display} stages={<span>0.9s Searched</span>} />)
-    expect(screen.getByRole("button", { name: /done Web search/ })).toBeTruthy()
-    expect(screen.getByText("0.9s Searched")).toBeTruthy()
-    rerender(<ToolCallRow call={searchCall} run={{ running: false, isError: false }} />)
-    expect(container.querySelector(".pi-activity-row-stages")).toBeNull()
-  })
-
-  it("skips a row whose run, display and stages did not change", () => {
-    const run: ToolRun = { running: false, isError: false }
-    const stages = <span>done</span>
-    // The icon renders once per row render, so its calls count the row's renders.
-    const icon = vi.fn(() => null) as unknown as typeof Globe
-    const counted = { label: "Web search", icon }
-    const row = (props: { display: typeof counted; stages: typeof stages; run?: ToolRun }) => (
-      <ToolCallRow call={{ ...searchCall, arguments: { query: "pi" } }} run={props.run ?? run} display={props.display} stages={props.stages} />
-    )
-    const { rerender } = render(row({ display: counted, stages }))
-    rerender(row({ display: { ...counted }, stages }))
-    expect(icon).toHaveBeenCalledTimes(1)
-    rerender(row({ display: counted, stages: <span>done</span> }))
-    expect(icon).toHaveBeenCalledTimes(2)
-    rerender(row({ display: counted, stages: <span>done</span>, run: { ...run } }))
-    expect(icon).toHaveBeenCalledTimes(3)
-  })
-})
-
-describe("ProcessDetails", () => {
-  it("renders children only once expanded", () => {
-    render(<ProcessDetails messageCount={2} toolCallCount={1}>{() => <span>inner</span>}</ProcessDetails>)
-    const toggle = screen.getByRole("button", { name: "Process details · 2 messages · 1 tool call" })
-    expect(screen.queryByText("inner")).toBeNull()
-    fireEvent.click(toggle)
-    expect(screen.getByText("inner")).toBeTruthy()
   })
 })

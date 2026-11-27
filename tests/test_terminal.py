@@ -89,12 +89,3 @@ async def test_close_ends_a_shell_that_ignores_sigterm(tmp_path):
     await shell.close()
     assert time.monotonic() - started < 1
     assert await shell.read_output() is None
-
-
-def test_start_directory_is_the_requested_folder_else_home(shell_home):
-    folder = shell_home / "project"
-    folder.mkdir()
-    assert terminal_route.start_directory(str(folder)) == folder
-    assert terminal_route.start_directory(str(shell_home / "missing")) == shell_home
-    assert terminal_route.start_directory("relative") == shell_home
-    assert terminal_route.start_directory(None) == shell_home

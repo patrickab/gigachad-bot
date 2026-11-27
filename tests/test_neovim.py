@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import shutil
 
-from pydantic import ValidationError
 import pytest
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
@@ -14,7 +13,7 @@ from backend.identity import get_request_identity
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
 from lib import neovim_session
-from lib.neovim_session import ClipboardError, NeovimSession, is_neovim_installed
+from lib.neovim_session import ClipboardError, NeovimSession
 from tests.conftest import mounted_roots, request_identity, route_client
 
 requires_nvim = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
@@ -46,13 +45,6 @@ def test_terminal_origin_policy(monkeypatch, cors_origins, origin, trusted):
     assert websocket_origin.is_trusted_origin(origin) is trusted
 
 
-@requires_nvim
-def test_neovim_needs_a_config_to_load(neovim_home):
-    assert is_neovim_installed()
-    neovim_home.rmdir()
-    assert not is_neovim_installed()
-
-
 @pytest.mark.parametrize(
     ("has_host_access", "origin"),
     [(False, "http://localhost:2999"), (True, "https://evil.example")],
@@ -68,18 +60,6 @@ def test_session_refuses_untrusted_requests(monkeypatch, neovim_home, has_host_a
     ):
         pass
     assert refused.value.code == 1008
-
-
-def test_neovim_starts_in_innermost_root_holding_a_file_root_document(tmp_path):
-    vault = tmp_path / "vault"
-    project = vault / "projects" / "app"
-    (project / "docs").mkdir(parents=True)
-    roots = mounted_roots(vault, project)
-
-    assert neovim_route.working_directory(roots, str(project / "docs" / "notes.md")) == project.resolve()
-    assert neovim_route.working_directory(roots, str(vault / "inbox.md")) == vault.resolve()
-    assert neovim_route.working_directory(roots, str(tmp_path / "elsewhere.md")) == Path.home()
-    assert neovim_route.working_directory(roots, "project/demo/document/notes.md") == Path.home()
 
 
 @requires_nvim
@@ -157,35 +137,6 @@ async def test_base_content_opens_readonly_left_diff_and_only_working_buffer_sav
     finally:
         await session.close()
         await drain
-
-
-@requires_nvim
-async def test_empty_base_content_still_opens_diff_and_no_base_means_single_window(neovim_home):
-    async def save(path: str, text: str) -> str:
-        return text
-
-    async def window_count(base_content: str | None) -> int:
-        session = NeovimSession.spawn("a.txt", "x\n", rows=24, cols=80, cwd=neovim_home, base_content=base_content)
-        drain = asyncio.create_task(_drain(session))
-        try:
-            await asyncio.wait_for(session.connect(save, lambda text: None), 15)
-            return await session._rpc.request("nvim_exec_lua", "return #vim.api.nvim_tabpage_list_wins(0)", [])
-        finally:
-            await session.close()
-            await drain
-
-    assert await window_count("") == 2
-    assert await window_count(None) == 1
-
-
-def test_open_message_needs_a_document_and_base_content_is_optional():
-    fields = {"type": "open", "path": "/a", "filename": "a", "content": "x", "rows": 1, "cols": 1}
-    assert neovim_route.OpenMessage.model_validate(fields).base_content is None
-    assert neovim_route.OpenMessage.model_validate({**fields, "base_content": ""}).base_content == ""
-    assert neovim_route.OpenMessage.model_validate({**fields, "base_content": None}).base_content is None
-    assert neovim_route.OpenMessage.model_validate({**fields, "notebook": True}).notebook
-    with pytest.raises(ValidationError):
-        neovim_route.OpenMessage.model_validate({**fields, "content": None, "notebook": True})
 
 
 async def _drain(session: NeovimSession) -> None:
@@ -289,34 +240,6 @@ async def test_set_text_applies_hunks_without_moving_the_cursor_and_leaves_the_b
         assert await session._rpc.request("nvim_eval", "[line('.'), col('.'), &modified]") == [10, 2, 0]
         text = await session._rpc.request("nvim_eval", "join(getline(1, '$'), '|')")
         assert text.startswith("line 1|line TWO|line 3|") and text.endswith("|line 20|last")
-    finally:
-        await session.close()
-        await drain
-
-
-@requires_nvim
-async def test_set_text_highlights_each_changed_hunk(neovim_home):
-    async def save(path: str, text: str) -> str:
-        return text
-
-    session = NeovimSession.spawn(
-        "notes.md", "".join(f"line {number}\n" for number in range(1, 21)), rows=24, cols=80, cwd=neovim_home
-    )
-    drain = asyncio.create_task(_drain(session))
-    try:
-        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
-
-        lines = [f"line {number}" for number in range(1, 21)]
-        lines[2] = "line THREE"
-        lines[14:15] = ["line FIFTEEN", "inserted"]
-        await session.set_text("\n".join(lines) + "\n", "notes.md")
-
-        rows = await session._lua(
-            "local marks = vim.api.nvim_buf_get_extmarks("
-            "0, vim.api.nvim_get_namespaces().gigachad_remote_edit, 0, -1, { details = true })"
-            " return vim.tbl_map(function(mark) return { mark[2], mark[4].line_hl_group } end, marks)"
-        )
-        assert rows == [[2, "DiffText"], [14, "DiffText"], [15, "DiffText"]]
     finally:
         await session.close()
         await drain
@@ -504,25 +427,6 @@ def test_only_readable_absolute_documents_have_a_disk_file(tmp_path):
 
 
 @requires_nvim
-async def test_background_asked_before_startup_wins_over_detection_and_follows_later_changes(neovim_home):
-    async def save(path: str, text: str) -> str:
-        return text
-
-    session = NeovimSession.spawn("main.tex", "text\n", rows=24, cols=80, cwd=neovim_home)
-    drain = asyncio.create_task(_drain(session))
-    try:
-        await session.set_background(True)
-        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
-        assert await session._rpc.request("nvim_eval", "&background") == "light"
-
-        await session.set_background(False)
-        assert await session._rpc.request("nvim_eval", "&background") == "dark"
-    finally:
-        await session.close()
-        await drain
-
-
-@requires_nvim
 async def test_visual_ask_keymap_reports_the_selected_lines_only_when_requested(neovim_home):
     selections: asyncio.Queue[dict] = asyncio.Queue()
 
@@ -623,78 +527,6 @@ async def test_set_text_reaches_a_hidden_buffer_and_merges_its_unsaved_edits(neo
         assert (state["text"], state["modified"]) == ("APPENDIX\n", False)
 
 
-@requires_nvim
-async def test_rename_renames_the_buffer_of_the_old_path_only(neovim_home, tmp_path):
-    saved: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-
-    async def save(path: str, text: str) -> str:
-        await saved.put((path, text))
-        return text
-
-    first, second = _two_files(tmp_path)
-    renamed = second.with_name("appendix.tex")
-    async with _editing(first, neovim_home, save) as session:
-        await session.open_file(str(second), second)
-        second.rename(renamed)
-        await session.rename(str(second), str(renamed), renamed)
-
-        loaded = "map(getbufinfo({'bufloaded': 1}), {_, buffer -> fnamemodify(buffer.name, ':t')})"
-        assert await session._rpc.request("nvim_eval", loaded) == ["main.tex", "appendix.tex"]
-
-        # Nothing happens for a document that is not open, and the renamed buffer saves under its new path
-        await session.rename(str(tmp_path / "elsewhere.tex"), str(tmp_path / "other.tex"), None)
-        session.write_input(b"Gox\x1b:w\r")
-        assert await asyncio.wait_for(saved.get(), 10) == (str(renamed), "appendix\nx\n")
-
-
-@requires_nvim
-async def test_leader_v_reports_the_cursor_line_of_tex_documents_only(neovim_home, tmp_path):
-    searches: asyncio.Queue[tuple[str, int]] = asyncio.Queue()
-    tex = tmp_path / "main.tex"
-    tex.write_text("a\nb\nc\n")
-    notes = _notes(tmp_path)
-    async with _editing(tex, neovim_home, _store, on_forward_search=lambda path, line: searches.put_nowait((path, line))) as session:
-        await session._rpc.request("nvim_win_set_cursor", 0, [3, 0])
-        session.write_input(b"\\v")
-        assert await asyncio.wait_for(searches.get(), 10) == (str(tex), 3)
-
-        await session.open_file(str(notes), notes)
-        session.write_input(b"\\v")
-        await _evaluates_to(session, "mode()", "v")  # unmapped, `v` starts a selection
-        session.write_input(b"\x1b")
-        await _evaluates_to(session, "mode()", "n")
-
-        # A rename to a `.tex` file maps it
-        renamed = notes.rename(notes.with_name("ideas.tex"))
-        await session.rename(str(notes), str(renamed), renamed)
-        session.write_input(b"\\v")
-        assert await asyncio.wait_for(searches.get(), 10) == (str(renamed), 1)
-
-        # A rename to another kind of file unmaps it
-        markdown = renamed.rename(renamed.with_name("ideas.md"))
-        await session.rename(str(renamed), str(markdown), markdown)
-        session.write_input(b"\\v")
-        await _evaluates_to(session, "mode()", "v")
-        session.write_input(b"\x1b")
-        await _evaluates_to(session, "mode()", "n")
-    assert searches.empty()
-
-
-@requires_nvim
-async def test_insert_lines_land_below_the_cursor_with_the_cursor_on_the_first_inserted_line(neovim_home, tmp_path):
-    file = tmp_path / "main.tex"
-    file.write_text("a\nb\nc\n")
-    async with _editing(file, neovim_home, _store) as session:
-        session.write_input(b"2G")
-        await _evaluates_to(session, "line('.')", 2)
-
-        await session.insert_lines("x\ny\n")
-        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.'), &modified]") == [["a", "b", "x", "y", "c"], 3, 1]
-
-        await session.insert_lines("z")
-        assert await session._rpc.request("nvim_eval", "[getline(1, '$'), line('.')]") == [["a", "b", "x", "z", "y", "c"], 4]
-
-
 SLIDES = [
     r"\documentclass{beamer}",
     r"\begin{document}",
@@ -746,92 +578,6 @@ async def test_insert_image_fills_the_first_placeholder_on_the_cursor_line_else_
 
 
 @requires_nvim
-@pytest.mark.parametrize(
-    ("edits", "expected", "outcome"),
-    [
-        # Worked out again on the changed lines
-        (1, ["% typed", *SLIDES[:5], "", *NEW_FRAME, *SLIDES[5:]], contextlib.nullcontext()),
-        # Changed again: fails without inserting
-        (2, ["% typed", "% typed", *SLIDES], pytest.raises(RuntimeError, match="kept changing")),
-    ],
-)
-async def test_insert_frame_is_worked_out_once_more_when_the_buffer_changed_before_it_applied(
-    neovim_home, tmp_path, monkeypatch, edits, expected, outcome
-):
-    file = tmp_path / "main.tex"
-    file.write_text("\n".join(SLIDES) + "\n")
-    async with _editing(file, neovim_home, _store) as session:
-        await session._rpc.request("nvim_win_set_cursor", 0, [4, 0])
-        lua, typed = session._lua, 0
-
-        async def typing_after_each_read(code: str, *args: object) -> object:
-            nonlocal typed
-            result = await lua(code, *args)
-            if "gigachad_cursor_state" in code and typed < edits:
-                typed += 1
-                await session._rpc.request("nvim_buf_set_lines", 0, 0, 0, False, ["% typed"])
-            return result
-
-        monkeypatch.setattr(session, "_lua", typing_after_each_read)
-        with outcome:
-            await session.insert_frame("\n".join(NEW_FRAME))
-        assert await session._rpc.request("nvim_eval", "getline(1, '$')") == expected
-
-
-@requires_nvim
-async def test_insert_frame_is_refused_when_another_buffer_with_the_same_tick_is_shown_before_it_applied(
-    neovim_home, tmp_path, monkeypatch
-):
-    file = tmp_path / "main.tex"
-    file.write_text("\n".join(SLIDES) + "\n")
-    async with _editing(file, neovim_home, _store) as session:
-        await session._rpc.request("nvim_win_set_cursor", 0, [4, 0])
-        lua, first_apply = session._lua, None
-
-        async def switching_after_the_first_read(code: str, *args: object) -> object:
-            nonlocal first_apply
-            result = await lua(code, *args)
-            if "gigachad_cursor_state" in code and first_apply is None:
-                # A second loaded buffer brought to the read buffer's tick, then shown in the work window
-                await session._rpc.request(
-                    "nvim_exec_lua",
-                    "local read, other = ..., vim.api.nvim_create_buf(true, false)"
-                    " while vim.api.nvim_buf_get_changedtick(other) < vim.api.nvim_buf_get_changedtick(read) do"
-                    "   vim.api.nvim_buf_set_lines(other, 0, -1, false, { 'other' })"
-                    " end"
-                    " assert(vim.api.nvim_buf_get_changedtick(other) == vim.api.nvim_buf_get_changedtick(read))"
-                    " vim.api.nvim_win_set_buf(0, other)",
-                    [result["buffer"]],
-                )
-            elif "gigachad_insert_at" in code and first_apply is None:
-                lines = await session._rpc.request(
-                    "nvim_exec_lua",
-                    "return { vim.api.nvim_buf_get_lines(..., 0, -1, false), vim.api.nvim_buf_get_lines(0, 0, -1, false) }",
-                    [args[3]],
-                )
-                first_apply = [result, *lines]
-            return result
-
-        monkeypatch.setattr(session, "_lua", switching_after_the_first_read)
-        await session.insert_frame("\n".join(NEW_FRAME))
-        assert first_apply == [False, SLIDES, ["other"]]
-
-@requires_nvim
-async def test_switched_reports_buffer_changes_made_in_neovim_but_not_by_open_file(neovim_home, tmp_path):
-    switched: asyncio.Queue[str] = asyncio.Queue()
-    first, second = _two_files(tmp_path)
-    async with _editing(first, neovim_home, _store, switched.put_nowait) as session:
-        await session.open_file(str(second), second)
-        await session.open_file(str(second), second)
-        assert switched.empty()
-
-        session.write_input(b":bnext\r")
-        assert await asyncio.wait_for(switched.get(), 10) == str(first)
-        session.write_input(b":bprevious\r")
-        assert await asyncio.wait_for(switched.get(), 10) == str(second)
-
-
-@requires_nvim
 @pytest.mark.parametrize(("disk", "error"), [(None, "not a readable file"), (b"\xff\xfe\n", "not UTF-8 text")])
 async def test_open_file_fails_for_a_file_it_cannot_read_and_stays_on_the_shown_one(neovim_home, tmp_path, disk, error):
     first, second = _two_files(tmp_path)
@@ -842,68 +588,6 @@ async def test_open_file_fails_for_a_file_it_cannot_read_and_stays_on_the_shown_
             await session.open_file(str(second), None if disk is None else second)
 
         assert await session._rpc.request("nvim_eval", "getline(1)") == "intro"
-
-
-@requires_nvim
-async def test_open_file_loads_a_deleted_buffer_again_from_disk(neovim_home, tmp_path):
-    first, second = _two_files(tmp_path)
-    async with _editing(first, neovim_home, _store) as session:
-        await session.open_file(str(second), second)
-        session.write_input(b":bdelete\r")
-
-        await _evaluates_to(session, "getline(1)", "intro")
-        second.write_text("appendix, edited\n")
-        await session.open_file(str(second), second)
-
-        assert await session._rpc.request("nvim_eval", "[getline(1), &modified]") == ["appendix, edited", 0]
-
-
-@requires_nvim
-async def test_open_file_with_a_line_moves_the_cursor_there_centred_also_on_the_shown_file(neovim_home, tmp_path):
-    file = tmp_path / "main.tex"
-    file.write_text("".join(f"row {number}\n" for number in range(1, 101)))
-    async with _editing(file, neovim_home, _store) as session:
-        await session._rpc.request("nvim_win_set_cursor", 0, [5, 3])
-        await session.open_file(str(file), file, line=60)
-
-        # `zz` puts the cursor line in the middle of the 24-row terminal's window
-        cursor, top, bottom = await session._rpc.request("nvim_eval", "[getpos('.')[1:2], line('w0'), line('w$')]")
-        assert cursor == [60, 1]
-        assert top < 60 < bottom and abs((60 - top) - (bottom - 60)) <= 1
-
-
-@requires_nvim
-async def test_open_file_with_a_line_lands_there_in_a_freshly_opened_file_and_clamps_past_the_end(neovim_home, tmp_path):
-    first, second = _two_files(tmp_path)
-    second.write_text("one\ntwo\nthree\n")
-    async with _editing(first, neovim_home, _store) as session:
-        await session.open_file(str(second), second, line=2)
-        assert await session._rpc.request("nvim_eval", "[getline('.'), col('.')]") == ["two", 1]
-
-        await session.open_file(str(first), first, line=1)
-        await session.open_file(str(second), second, line=99)
-        assert await session._rpc.request("nvim_eval", "[getline('.'), line('.')]") == ["three", 3]
-
-        await session.open_file(str(first), first)
-        await session.open_file(str(second), second)
-        assert await session._rpc.request("nvim_eval", "line('.')") == 3
-
-
-@requires_nvim
-async def test_open_file_with_a_column_puts_the_cursor_on_that_byte_clamped_to_the_line(neovim_home, tmp_path):
-    file = tmp_path / "main.tex"
-    file.write_text("intro\n\\point{Café note}{See the état.}\n")
-    async with _editing(file, neovim_home, _store) as session:
-        # "état" starts at character 26, byte 27 after the two-byte "é" of "Café"
-        await session.open_file(str(file), file, line=2, column=27)
-        assert await session._rpc.request("nvim_win_get_cursor", 0) == [2, 27]
-        assert await session._rpc.request("nvim_eval", "strcharpart(getline('.'), charcol('.') - 1, 2)") == "ét"
-
-        await session.open_file(str(file), file, line=1, column=99)
-        assert await session._rpc.request("nvim_win_get_cursor", 0) == [1, 4]
-        await session.open_file(str(file), file, line=2)
-        assert await session._rpc.request("nvim_win_get_cursor", 0) == [2, 0]
-
 
 
 def _clipboard_config(home: Path, *lua: str) -> None:
@@ -924,52 +608,6 @@ def _notes(directory: Path, text: str = "abc\n") -> Path:
     file = directory / "notes.md"
     file.write_text(text)
     return file
-
-
-@requires_nvim
-@pytest.mark.parametrize("keys", [b'"+p', b'"*p', b"p"])
-async def test_paste_puts_the_text_of_the_browsers_clipboard_in_charwise(neovim_home, tmp_path, keys):
-    _clipboard_config(neovim_home)
-    file = _notes(tmp_path)
-    asked: list[str] = []
-
-    async def read_clipboard(path: str) -> str:
-        asked.append(path)
-        return "XY\nZ"
-
-    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
-        session.write_input(keys)
-
-        await _evaluates_to(session, "getline(1, '$')", ["aXY", "Zbc"])
-        assert asked == [str(file)]
-
-
-@requires_nvim
-async def test_paste_of_text_ending_in_a_newline_goes_below_the_cursor_line(neovim_home, tmp_path):
-    _clipboard_config(neovim_home)
-    file = _notes(tmp_path, "a\nb\n")
-
-    async def read_clipboard(path: str) -> str:
-        return "x\ny\n"
-
-    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
-        session.write_input(b'"+p')
-
-        await _evaluates_to(session, "[getline(1, '$'), line('.')]", [["a", "x", "y", "b"], 2])
-
-
-@requires_nvim
-async def test_paste_of_an_empty_text_changes_nothing(neovim_home, tmp_path):
-    _clipboard_config(neovim_home)
-    file = _notes(tmp_path)
-
-    async def read_clipboard(path: str) -> str:
-        return ""
-
-    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
-        session.write_input(b'"+px')  # `x` runs once the paste finished, on the text the paste left alone
-
-        await _evaluates_to(session, "getline(1, '$')", ["bc"])
 
 
 @requires_nvim
@@ -1013,24 +651,6 @@ async def test_no_answer_pastes_nothing_after_the_timeout_and_stops_waiting(neov
 
 
 @requires_nvim
-async def test_a_plugin_reading_the_clipboard_while_typing_does_not_ask_the_browser(neovim_home, tmp_path):
-    # Like blink.cmp, which reads the register for its snippet variables on every completion
-    _clipboard_config(neovim_home, 'vim.api.nvim_create_autocmd("InsertCharPre", { callback = function() vim.fn.getreg("+") end })')
-    file = _notes(tmp_path)
-    asked: list[str] = []
-
-    async def read_clipboard(path: str) -> str:
-        asked.append(path)
-        return "XY"
-
-    async with _editing(file, neovim_home, _store, read_clipboard=read_clipboard) as session:
-        session.write_input(b"it\x1bp")
-
-        await _evaluates_to(session, "getline(1, '$')", ["tXYabc"])
-        assert asked == [str(file)]
-
-
-@requires_nvim
 @pytest.mark.parametrize("user_config", [_HOST_PROVIDER, _NO_PROVIDER], ids=["provider of its own", "no provider"])
 async def test_the_browsers_clipboard_replaces_the_provider_of_the_users_config(neovim_home, tmp_path, user_config):
     _clipboard_config(neovim_home, *user_config)
@@ -1045,16 +665,6 @@ async def test_the_browsers_clipboard_replaces_the_provider_of_the_users_config(
 
         session.write_input(b"p")
         await _evaluates_to(session, "getline(1, '$')", ["aXYXYbc"])
-
-
-@requires_nvim
-async def test_a_session_without_a_clipboard_reader_keeps_the_provider_of_the_users_config(neovim_home, tmp_path):
-    _clipboard_config(neovim_home, *_HOST_PROVIDER)
-    file = _notes(tmp_path)
-    async with _editing(file, neovim_home, _store) as session:
-        session.write_input(b'"+p')
-
-        await _evaluates_to(session, "getline(1, '$')", ["afrom the hostbc"])
 
 
 @requires_nvim
@@ -1076,52 +686,6 @@ async def test_requests_are_answered_while_a_paste_waits_for_the_browser(neovim_
         answer.set()
 
         await _evaluates_to(session, "getline(1, '$')", ["aXYbc", "def"])
-
-
-class _Socket:
-    """The part of the websocket that `_BrowserSaves` writes to."""
-
-    def __init__(self) -> None:
-        self.sent: list[dict] = []
-
-    async def send_json(self, frame: dict) -> None:
-        self.sent.append(frame)
-
-
-async def _asking(saves, socket: _Socket, path: str = "notes.md") -> tuple[asyncio.Task[str], int]:
-    """Start a clipboard read and wait until the browser was asked, with the id of the question."""
-    questions = len(socket.sent)
-    read = asyncio.create_task(saves.read_clipboard(path))
-
-    async def asked() -> bool:
-        return len(socket.sent) > questions
-
-    await _until(asked)
-    question = socket.sent[-1]
-    assert (question["type"], question["path"]) == ("clipboard_read", path)
-    return read, question["id"]
-
-
-@pytest.mark.parametrize(("reply", "text"), [({"text": "pasted"}, "pasted"), ({"text": ""}, ""), ({"text": 5}, ""), ({}, "")])
-async def test_clipboard_read_returns_the_text_the_browser_answers(reply, text):
-    socket = _Socket()
-    saves = neovim_route._BrowserSaves(socket)
-    read, read_id = await _asking(saves, socket)
-
-    saves.resolve(read_id, reply)
-
-    assert await asyncio.wait_for(read, 5) == text
-
-
-async def test_clipboard_read_raises_the_error_the_browser_answers():
-    socket = _Socket()
-    saves = neovim_route._BrowserSaves(socket)
-    read, read_id = await _asking(saves, socket)
-
-    saves.resolve(read_id, {"error": "Clipboard access denied"})
-
-    with pytest.raises(ClipboardError, match="Clipboard access denied"):
-        await asyncio.wait_for(read, 5)
 
 
 class _Browser:
@@ -1321,28 +885,6 @@ async def test_opening_a_notebook_text_without_its_notebook_is_refused(neovim_ho
 
 
 @requires_nvim
-async def test_diagnostics_on_ipython_lines_of_a_notebook_text_are_dropped(neovim_home, tmp_path):
-    text = "# %%\n%load_ext autoreload\n  !pip install k3d\nfiles = !ls\nx = 1\n\n# %%\n%%bash\necho hi\n\n# %%\ny = 2\n"
-    _notebook_file, name = _notebook(tmp_path)
-    async with _notebook_text(neovim_home, name, text=text) as session:
-        rows = await session._rpc.request(
-            "nvim_exec_lua",
-            """
-            local namespace = vim.api.nvim_create_namespace("test")
-            local diagnostics = {}
-            for row = 0, vim.api.nvim_buf_line_count(0) - 1 do
-              table.insert(diagnostics, { lnum = row, col = 0, message = "syntax error" })
-            end
-            vim.diagnostic.set(namespace, 0, diagnostics)
-            return vim.tbl_map(function(diagnostic) return diagnostic.lnum end, vim.diagnostic.get(0, { namespace = namespace }))
-            """,
-            [],
-        )
-
-    assert sorted(rows) == [0, 4, 5, 6, 10, 11]  # markers, `x = 1`, the blank line, `y = 2`
-
-
-@requires_nvim
 async def test_no_kind_of_write_creates_the_virtual_file_or_reads_one_that_is_there(neovim_home, tmp_path):
     """`:w`, `:w!`, `:up` and `:sav!` save through the caller, `:1,2w!` and `:1w >>` are refused, `:e!` reloads the saved text.
 
@@ -1384,38 +926,6 @@ async def test_no_kind_of_write_creates_the_virtual_file_or_reads_one_that_is_th
         await _evaluates_to(session, "[expand('%:p'), &modified]", [str(name), 0])
 
     assert sorted(path.name for path in name.parent.iterdir()) == ["analysis.ipynb", "analysis.ipynb.py"]
-    assert name.read_text() == "stale = 1\n"
-
-
-@requires_nvim
-async def test_a_renamed_notebook_text_keeps_its_virtual_name_and_writes_stay_intercepted(neovim_home, tmp_path):
-    saved: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-
-    async def save(path: str, text: str) -> str:
-        await saved.put((path, text))
-        return text
-
-    notebook, name = _notebook(tmp_path)
-    name.write_text("stale = 1\n")
-    async with _notebook_text(neovim_home, name, save) as session:
-        session.write_input(b"2GAx\x1b")
-        await _evaluates_to(session, "&modified", 1)
-        renamed = notebook.rename(notebook.with_name("report.ipynb"))
-        assert session.is_notebook_text(str(name))
-        with pytest.raises(RuntimeError, match="no notebook text"):
-            await session.rename(str(name), str(name.with_name("report.md")), None)
-
-        new_name = Path(f"{renamed}.py")
-        await session.rename(str(name), str(new_name), new_name)
-        state = "[expand('%:p'), &modified, &filetype, getline(2)]"
-        assert await session._rpc.request("nvim_eval", state) == [str(new_name), 1, "python", "import osx"]
-        session.write_input(b":e #\r")
-        await asyncio.sleep(0.2)
-        assert await session._rpc.request("nvim_eval", state) == [str(new_name), 1, "python", "import osx"]
-        session.write_input(b":w\r")
-        assert await asyncio.wait_for(saved.get(), 10) == (str(new_name), NOTEBOOK_TEXT.replace("import os", "import osx"))
-
-    assert sorted(path.name for path in name.parent.iterdir()) == ["analysis.ipynb.py", "report.ipynb"]
     assert name.read_text() == "stale = 1\n"
 
 

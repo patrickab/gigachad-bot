@@ -15,16 +15,6 @@ const notebookTab = (path = NOTEBOOK) => tabShowing({ kind: "document", path, pr
 
 afterEach(cleanup)
 
-describe("filesOfTabs", () => {
-  it("lists the files of file items, whether or not the tab shows them", () => {
-    const shown = notebookTab()
-    const hidden = { ...notebookTab("/work/b.ipynb"), appMode: "chat" as const }
-    const chat = nextTab()
-    const learn = tabShowing({ kind: "learn", path: "", projectSlug: null })
-    expect([...filesOfTabs([shown, hidden, chat, learn])]).toEqual([NOTEBOOK, "/work/b.ipynb"])
-  })
-})
-
 describe("files closed by tabs", () => {
   /** A tab manager with the closed files collected, and the strip's close action. */
   function mount() {

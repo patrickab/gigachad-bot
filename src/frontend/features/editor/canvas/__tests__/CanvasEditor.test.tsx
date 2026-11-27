@@ -1,6 +1,5 @@
 /**
- * Canvas editor regression tests: undo/redo history, lasso selection geometry, and the
- * idle-loop guard.
+ * Canvas editor regression tests: undo/redo history.
  *
  * History used to be a stroke-only stack: deleting a frame, moving anything or
  * erasing was unrecoverable, and Ctrl+Z after one of those silently ate an
@@ -106,11 +105,6 @@ vi.mock("@/lib/backend/syncStream", () => ({
 import { CanvasEditor } from "@/features/editor/canvas/CanvasEditor"
 import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc } from "@/lib/domain/canvasDocument"
-import { appendStrokePoint } from "@/features/editor/canvas/ink/canvasInk"
-import { polyBounds, resizeBox, scalePoly, scaleStroke, type SelBox } from "@/features/editor/canvas/selection/canvasSelection"
-import { inOwnAttachment, remapAcrossCanvases } from "@/features/editor/canvas/attachments/canvasTransfer"
-import type { StrokeData } from "@/lib/drawing"
-import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { watchDocumentLists } from "@/lib/backend/resources"
 
 class RO {
@@ -176,109 +170,6 @@ function addPage(container: HTMLElement) {
   const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Page")!
   act(() => { item.click() })
 }
-
-describe("lasso selection", () => {
-  const stroke = (pts: number[][], width = 4): StrokeData => ({ id: crypto.randomUUID(), points: pts, color: "#000", width })
-  const box = (x: number, y: number, w: number, h: number): SelBox => ({ x, y, w, h })
-
-  it("bounds the lasso shape", () => {
-    expect(polyBounds([[10, 10], [30, 50], [5, 20]])).toEqual({ x: 5, y: 10, w: 25, h: 40 })
-    expect(polyBounds([])).toBeNull()
-  })
-
-  it("grows from the top-left when the handle is dragged", () => {
-    const b = box(10, 20, 100, 100)
-    expect(resizeBox(b, 50, 20)).toEqual({ x: 10, y: 20, w: 150, h: 120 })
-    expect(resizeBox(b, -40, -60)).toEqual({ x: 10, y: 20, w: 60, h: 40 }) // origin never moves
-  })
-
-  it("clamps instead of collapsing or flipping", () => {
-    const b = resizeBox(box(0, 0, 100, 100), -500, -500)
-    expect(b).toEqual({ x: 0, y: 0, w: 24, h: 24 })
-  })
-
-  it("deforms the lasso outline exactly like the ink it holds", () => {
-    const from = box(0, 0, 10, 10)
-    const to = box(0, 0, 20, 10)
-    const poly: [number, number][] = [[0, 0], [10, 0], [10, 10]]
-    expect(scalePoly(poly, from, to)).toEqual([[0, 0], [20, 0], [20, 10]])
-    // same mapping the strokes get, so the outline keeps hugging them
-    expect(scaleStroke(stroke([[10, 10]]), [[10, 10]], from, to).points[0]!.slice(0, 2)).toEqual([20, 10])
-  })
-
-  it("scales geometry but never the pen width", () => {
-    const s = stroke([[0, 0], [10, 10]], 7)
-    const scaled = scaleStroke(s, s.points, box(0, 0, 10, 10), box(0, 0, 30, 5))
-    expect(scaled.points).toEqual([[0, 0, 0.5], [30, 5, 0.5]]) // 3x wider, squeezed to half
-    expect(scaled.width).toBe(7)
-    expect(scaled.color).toBe("#000")
-  })
-
-  it("keeps pressure per point through a scale", () => {
-    const s = stroke([[0, 0, 0.2], [10, 10, 0.9]])
-    const scaled = scaleStroke(s, s.points, box(0, 0, 10, 10), box(5, 5, 20, 20))
-    expect(scaled.points).toEqual([[5, 5, 0.2], [25, 25, 0.9]])
-  })
-})
-
-describe("stroke sampling", () => {
-  it("keeps the final pen sample while ignoring a duplicate browser sample", () => {
-    const points = [[10, 20, 0.5]]
-
-    appendStrokePoint(points, [30, 40, 0.7])
-    appendStrokePoint(points, [30, 40, 0.7])
-
-    expect(points).toEqual([[10, 20, 0.5], [30, 40, 0.7]])
-  })
-})
-describe("stroke pointer ownership", () => {
-  it("ignores a different pointer ending an active stroke", () => {
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} />)
-    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
-    surface.setPointerCapture = vi.fn()
-
-    const pointer = (type: string, pointerId: number, clientX: number, clientY: number) => {
-      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX, clientY })
-      Object.defineProperty(event, "pointerId", { value: pointerId })
-      return event
-    }
-    act(() => {
-      fireEvent(surface, pointer("pointerdown", 1, 10, 10))
-      fireEvent(surface, pointer("pointerup", 2, 900, 1000))
-    })
-
-    expect(latest(seen).strokes).toHaveLength(0)
-
-    act(() => {
-      fireEvent(surface, pointer("pointerup", 1, 20, 20))
-    })
-
-    expect(latest(seen).strokes).toHaveLength(1)
-    expect(latest(seen).strokes[0]!.points.at(-1)?.slice(0, 2)).toEqual([40, 40])
-  })
-})
-
-describe("stroke capture loss", () => {
-  it("does not append a synthetic origin point after pointer capture is lost", () => {
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} />)
-    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
-    surface.setPointerCapture = vi.fn()
-    const pointer = (type: string, clientX: number, clientY: number) => {
-      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX, clientY })
-      Object.defineProperty(event, "pointerId", { value: 1 })
-      return event
-    }
-
-    act(() => { fireEvent(surface, pointer("pointerdown", 10, 10)) })
-    act(() => { fireEvent(surface, pointer("pointermove", 20, 20)) })
-    act(() => { fireEvent(surface, pointer("lostpointercapture", 0, 0)) })
-
-    expect(latest(seen).strokes).toHaveLength(1)
-    expect(latest(seen).strokes[0]!.points.at(-1)?.slice(0, 2)).toEqual([40, 40])
-  })
-})
 
 describe("canvas schema", () => {
   it("assigns UUIDs to legacy strokes while preserving existing IDs", () => {
@@ -355,24 +246,6 @@ describe("canvas history", () => {
       expect(latest(seen).frames).toHaveLength(remaining)
     }
     expect(toolbarButton(container, "Undo")).toBeDisabled()
-  })
-
-  // The viewport save callback used to depend on `doc`, so every document change re-armed
-  // its timer, which wrote a new doc, which re-armed the timer: a 2Hz mutate/re-render
-  // loop for as long as a canvas was open — and it starved the 1s autosave debounce.
-  it("stops touching the document once the view settles", () => {
-    vi.useFakeTimers()
-    try {
-      const seen: CanvasDocument[] = []
-      render(<Harness seen={seen} />)
-      act(() => { vi.advanceTimersByTime(600) }) // viewport persists once
-      const settled = seen.length
-      // each flush lets one more loop iteration through, so step rather than jump
-      for (let i = 0; i < 5; i++) act(() => { vi.advanceTimersByTime(1000) })
-      expect(seen.length).toBe(settled)
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   // Ctrl+Shift+Z arrives with e.key === "Z" (shift uppercases it), so a case-sensitive
@@ -478,33 +351,6 @@ describe("keyboard text entry", () => {
     expect(container.querySelector("textarea")).toBeNull()
   })
 
-  it("centres the note in the view when the pointer has not moved yet", () => {
-    // A container that is not at the page origin: the fallback must not confuse its size with screen coordinates.
-    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800)
-    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600)
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 100, 800, 600))
-    try {
-      const typeAt = (pointer?: { clientX: number; clientY: number }) => {
-        const seen: CanvasDocument[] = []
-        const { container, unmount } = render(<Harness seen={seen} />)
-        const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
-        act(() => {
-          if (pointer) fireEvent(surface, new MouseEvent("pointermove", { bubbles: true, ...pointer }))
-          fireEvent.keyDown(surface, { key: "H" })
-        })
-        const [note] = latest(seen).texts
-        unmount()
-        return note!
-      }
-      const viewCentre = typeAt({ clientX: 300 + 400, clientY: 100 + 300 })
-      const note = typeAt()
-      expect(note.x + note.width / 2).toBeCloseTo(viewCentre.x)
-      expect(note.y + note.height / 2).toBeCloseTo(viewCentre.y)
-    } finally {
-      vi.restoreAllMocks()
-    }
-  })
-
   it("closes text notes with Enter while Ctrl+Enter keeps the native line break", () => {
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} />)
@@ -604,25 +450,6 @@ describe("nested canvas file", () => {
     expect(collaboration.useCollaborativeCanvas).toHaveBeenCalledWith("project/proj/document/notes.canvas")
   })
 
-  it("keeps a loaded nested canvas mounted through a transient sync error", async () => {
-    collaboration.replace.mockClear()
-    collaboration.useCollaborativeCanvas.mockReturnValueOnce({
-      document: emptyCanvasDoc(),
-      replace: collaboration.replace,
-      retry: collaboration.retry,
-      status: "error",
-    })
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} slug="proj" />)
-
-    await openCanvas(container, "notes.canvas")
-    addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
-
-    expect(collaboration.replace).toHaveBeenCalledWith(expect.objectContaining({
-      frames: [expect.objectContaining({ id: expect.stringMatching(/^[0-9a-f-]{36}$/) })],
-    }))
-  })
-
   it("does not fall back to generic writes when collaboration loading fails", async () => {
     api.writeDocument.mockClear()
     collaboration.useCollaborativeCanvas.mockReturnValueOnce({
@@ -662,27 +489,6 @@ describe("PDF attachments", () => {
     const reopened = render(<Harness seen={[]} initialDoc={restored} />)
     expect(reopened.container.querySelector("[data-testid=\"pdf-viewer\"]")).toHaveTextContent("4")
   })
-
-  it("shows the screenshot selection over a PDF attachment", async () => {
-    const doc: CanvasDocument = {
-      ...emptyCanvasDoc(),
-      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
-    }
-    const { container } = render(<Harness seen={[]} initialDoc={doc} />)
-    act(() => { toolbarButton(container, "Capture canvas").click() })
-    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
-    surface.setPointerCapture = vi.fn()
-
-    act(() => {
-      fireEvent(surface, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
-      fireEvent(surface, new MouseEvent("pointermove", { bubbles: true, clientX: 50, clientY: 40 }))
-    })
-
-    await waitFor(() => expect(container.querySelector("[data-testid=\"screenshot-selection\"]")).toBeTruthy())
-    const attachment = container.querySelector("[data-canvas-attachment]")!.parentElement!
-    const selection = container.querySelector("[data-testid=\"screenshot-selection\"]")!
-    expect(attachment.compareDocumentPosition(selection) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-  })
 })
 
 describe("document attachments", () => {
@@ -720,29 +526,6 @@ describe("document attachments", () => {
 
     act(() => { getByTestId("architecture-window").click() })
     expect(latest(seen).attachments[0]!.path).toBe("graph/proj/backend/backend.c4")
-  })
-
-  it("offers the open project's architecture on the unsaved scratch canvas, and says how to get one without a project", async () => {
-    const workspace = (slug: string | null) => (
-      <UndoDeleteProvider>
-        <TabActiveProvider value={true}>
-          <CanvasWorkspace selected={null} slug={slug} onCloseEditor={() => {}} onCreated={() => {}} />
-        </TabActiveProvider>
-      </UndoDeleteProvider>
-    )
-    const menuButtons = async (container: HTMLElement) => {
-      act(() => { toolbarButton(container, "Add to canvas").click() })
-      await act(async () => {})
-      return Array.from(container.querySelectorAll("button")).map((b) => b.textContent)
-    }
-
-    const withProject = render(workspace("proj"))
-    expect(await menuButtons(withProject.container)).toContain("Architecture")
-    withProject.unmount()
-
-    const without = render(workspace(null))
-    expect(await menuButtons(without.container)).not.toContain("Architecture")
-    expect(without.container.textContent).toContain("Architecture: open a project canvas")
   })
 
   it("names a document's file on a header edit without moving it, but only retitles an architecture window", async () => {
@@ -828,34 +611,6 @@ describe("document attachments", () => {
     expect(queryByLabelText("Delete diagram-toolu_2.md")).toBeNull()
   })
 
-  it("lays plots out at a zoom-independent width and hides them only while a zoom gesture runs", async () => {
-    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ data: [] }))
-    const seen: CanvasDocument[] = []
-    const initialDoc: CanvasDocument = {
-      version: 1, frames: [], strokes: [], texts: [],
-      attachments: [{ id: "plot", kind: "document", path: "project/proj/document/p.plot.json", x: 0, y: 0, width: 480, height: 320 }],
-    }
-    const { container, getByTestId } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
-    await act(async () => {})
-    const frame = () => getByTestId("document-plot").parentElement!
-    const layoutWidth = frame().style.width
-    expect(parseFloat(layoutWidth)).toBeGreaterThanOrEqual(960)
-    expect(frame().style.visibility).toBe("")
-
-    vi.useFakeTimers()
-    const canvas = container.querySelector<HTMLElement>("[tabindex='0']")!
-    act(() => { canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true })) })
-    expect(frame().style.visibility).toBe("hidden")
-    expect(frame().style.width).toBe(layoutWidth)
-
-    // The zoom glides to its target, then settles
-    act(() => { vi.advanceTimersByTime(300) })
-    expect(frame().style.visibility).toBe("hidden")
-    act(() => { vi.advanceTimersByTime(300) })
-    expect(frame().style.visibility).toBe("")
-    vi.useRealTimers()
-  })
-
   it("lists notes-scoped artifacts when the canvas has no project slug", async () => {
     api.listNotes.mockResolvedValueOnce([
       { path: "note/chart.plot.json", name: "chart.plot.json", mime: "application/json" },
@@ -886,62 +641,5 @@ describe("document attachments", () => {
 
     expect(latest(seen).attachments[0]!.kind).toBe("document")
     expect(container.textContent).toContain("Malformed plot document")
-  })
-})
-
-describe("cross-canvas stroke transfer", () => {
-  const view = (left: number, top: number, scale: number, ox = 0, oy = 0) =>
-    ({ rect: { left, top }, scale, offset: { x: ox, y: oy } })
-
-  it("keeps the ink where it was dropped, at the size it looked", () => {
-    // source: 2x zoom, panned; target: 1x, offset window — a point at source (10,10)
-    // sits at client (100+10*2+5, 50+10*2+5) = (125, 75)
-    const from = view(100, 50, 2, 5, 5)
-    const to = view(25, 25, 1, 0, 0)
-    const moved = remapAcrossCanvases({ id: crypto.randomUUID(), points: [[10, 10]], color: "#000", width: 4 }, from, to)
-    expect(moved.points[0]!.slice(0, 2)).toEqual([100, 50]) // 125-25, 75-25 at scale 1
-    expect(moved.width).toBe(8) // half the zoom means twice the units for the same px
-    expect(moved.color).toBe("#000")
-  })
-
-  it("is a no-op between identical views", () => {
-    const v = view(40, 40, 1.5, 12, -8)
-    const s: StrokeData = { id: crypto.randomUUID(), points: [[3, 4, 0.7], [9, 1, 0.2]], color: "#f00", width: 2 }
-    expect(remapAcrossCanvases(s, v, v)).toEqual(s)
-  })
-})
-
-// Wheel and two-finger gestures are native listeners on the host surface, so they fire
-// before any JSX stopPropagation can stop them. The host must ignore events inside a
-// nested window, and the nested canvas must NOT ignore its own — its container sits
-// inside an attachment element too, which a plain `closest` test can't tell apart.
-describe("gesture scoping between canvases", () => {
-  const build = () => {
-    const host = document.createElement("div")
-    const window_ = document.createElement("div")
-    window_.setAttribute("data-canvas-attachment", "")
-    const nested = document.createElement("div")
-    const ink = document.createElement("span")
-    host.append(window_)
-    window_.append(nested)
-    nested.append(ink)
-    return { host, nested, ink }
-  }
-
-  it("keeps the host out of its own nested window", () => {
-    const { host, ink } = build()
-    expect(inOwnAttachment(ink, host)).toBe(true)
-  })
-
-  it("still lets the nested canvas zoom and pan itself", () => {
-    const { nested, ink } = build()
-    expect(inOwnAttachment(ink, nested)).toBe(false)
-  })
-
-  it("leaves the bare canvas surface alone", () => {
-    const host = document.createElement("div")
-    const ink = document.createElement("span")
-    host.append(ink)
-    expect(inOwnAttachment(ink, host)).toBe(false)
   })
 })

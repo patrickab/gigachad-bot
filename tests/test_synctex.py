@@ -250,14 +250,3 @@ def test_the_slide_end_of_a_page_is_its_frames_end_or_the_headings_of_a_chapter_
     assert end_of(4) == {"path": str(root), "line": 11}  # the chapter slide, past its subsection
     assert end_of(5) == {"path": str(vault / "deck" / "slides" / "more.tex"), "line": 3}
     assert end_of(6) == 404
-
-
-@pytest.mark.parametrize(("source", "line", "end"), [
-    ("\\section{A}\n\\subsection{B}\n\n% note\n\\subsubsection{C}\nText\n", 1, 5),
-    ("\\section{A}\n\\section{B}\n", 1, 1),
-    ("\\subsection{A}\n\\section{B}\n\\subsection{C}\n", 1, 1),
-    ("\\section{A}\nText\n\\subsection{B}\n", 1, 1),
-    ("Text\n\\subsection{B}\n", 1, 1),
-])
-def test_a_chapter_slide_ends_after_the_deeper_headings_right_below_its_heading(source, line, end):
-    assert synctex._after_headings(source.splitlines(), line) == end

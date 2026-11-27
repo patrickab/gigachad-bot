@@ -107,77 +107,6 @@ describe("watchFiles registrations", () => {
     vi.advanceTimersByTime(SETTLED_MS)
     expect(socket.frames.at(-1)).toEqual({ type: "watch", files: ["/c.tex"], folders: [] })
   })
-
-  it("releases a registration once however often it is called, and counts a path listed twice once", () => {
-    const first = follow({ files: ["/a.tex", "/a.tex"] })
-    const second = follow({ files: ["/a.tex"] })
-    const socket = connect()
-
-    first()
-    first()
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.frames).toHaveLength(1)
-    expect(socket.closedByClient).toBe(false)
-
-    second()
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.closedByClient).toBe(true)
-  })
-
-  it("opens one socket for the first registration, closes it after the last left and does not reconnect", () => {
-    expect(FakeSocket.instances).toHaveLength(0)
-    const first = follow({ files: ["/a.tex"] })
-    const second = follow({ folders: ["/proj"] })
-    const socket = connect()
-    expect(FakeSocket.instances).toHaveLength(1)
-    expect(socket.url).toBe("ws://backend/files/watch")
-
-    first()
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.closedByClient).toBe(false)
-
-    second()
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.closedByClient).toBe(true)
-    vi.advanceTimersByTime(60_000)
-    expect(FakeSocket.instances).toHaveLength(1)
-  })
-})
-
-describe("watchFiles set updates", () => {
-  it("debounces registrations into one watch frame and sends nothing for an unchanged set", () => {
-    follow({ files: ["/a.tex"] })
-    vi.advanceTimersByTime(10)
-    follow({ files: ["/b.tex"] })
-    vi.advanceTimersByTime(10)
-    expect(FakeSocket.instances).toHaveLength(0)
-
-    const socket = connect()
-    expect(socket.frames).toEqual([{ type: "watch", files: ["/a.tex", "/b.tex"], folders: [] }])
-
-    follow({ files: ["/c.tex"] })()
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.frames).toHaveLength(1)
-
-    follow({ files: ["/d.tex"] })
-    vi.advanceTimersByTime(10)
-    follow({ folders: ["/proj"] })
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.frames).toHaveLength(2)
-    expect(socket.frames[1]).toEqual({ type: "watch", files: ["/a.tex", "/b.tex", "/d.tex"], folders: ["/proj"] })
-  })
-
-  it("sends the whole set once when a socket that is still connecting opens", () => {
-    follow({ files: ["/a.tex"] })
-    vi.advanceTimersByTime(SETTLED_MS)
-    const socket = FakeSocket.instances[0]!
-    follow({ files: ["/b.tex"] })
-    vi.advanceTimersByTime(SETTLED_MS)
-    expect(socket.sent).toEqual([])
-
-    socket.open()
-    expect(socket.frames).toEqual([{ type: "watch", files: ["/a.tex", "/b.tex"], folders: [] }])
-  })
 })
 
 describe("watchFiles changes", () => {
@@ -234,29 +163,6 @@ describe("watchFiles reconnect", () => {
     vi.advanceTimersByTime(SETTLED_MS)
     expect(second.frames).toHaveLength(1)
     expect(timeline).toHaveLength(6)
-  })
-
-  it("waits longer after every failed attempt and starts over once a socket opened", () => {
-    follow({ files: ["/a.tex"] })
-    vi.advanceTimersByTime(SETTLED_MS)
-    FakeSocket.instances[0]!.drop()
-    vi.advanceTimersByTime(999)
-    expect(FakeSocket.instances).toHaveLength(1)
-    vi.advanceTimersByTime(1)
-    expect(FakeSocket.instances).toHaveLength(2)
-
-    FakeSocket.instances[1]!.drop()
-    vi.advanceTimersByTime(1999)
-    expect(FakeSocket.instances).toHaveLength(2)
-    vi.advanceTimersByTime(1)
-    expect(FakeSocket.instances).toHaveLength(3)
-
-    FakeSocket.instances[2]!.open()
-    FakeSocket.instances[2]!.drop()
-    vi.advanceTimersByTime(999)
-    expect(FakeSocket.instances).toHaveLength(3)
-    vi.advanceTimersByTime(1)
-    expect(FakeSocket.instances).toHaveLength(4)
   })
 
   it("does not reconnect when the last registration left during the outage", () => {

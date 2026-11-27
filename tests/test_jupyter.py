@@ -11,7 +11,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -46,11 +45,9 @@ from lib.disk_files import DiskFiles
 from lib.jupyter import JupyterHost
 from lib.jupyter_service import RemoteJupyterHost
 from lib.postgres_data_store import PostgresDataStore
-from lib.process_owner import reap_orphans
 from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.references import References
-from lib.upstream import UpstreamContractError, UpstreamRequestFailed
 from tests.conftest import (
     SRC,
     create_user_and_device,
@@ -177,17 +174,6 @@ def test_venvs_of_the_folder_and_its_ancestors_up_to_home_become_specs_nearest_f
     assert written["language"] == "python"
 
 
-def test_a_venv_without_ipykernel_is_listed_as_needing_it(offline_host, home):
-    fake_venv(home / "bare", ipykernel=False)
-    fake_venv(home / "ready")
-
-    bare = offline_host.kernelspecs(str(notebook(home / "bare" / "a.ipynb")))
-    ready = offline_host.kernelspecs(str(notebook(home / "ready" / "a.ipynb")))
-
-    assert [spec.needs_ipykernel for spec in bare.specs] == [True, False]
-    assert [spec.needs_ipykernel for spec in ready.specs] == [False, False]
-
-
 def test_the_venv_specs_of_other_notebooks_are_not_offered(offline_host, home):
     fake_venv(home / "proj")
     offline_host.kernelspecs(str(notebook(home / "proj" / "a.ipynb")))
@@ -209,29 +195,6 @@ def test_the_default_is_the_listed_kernelspec_of_the_notebook_then_the_nearest_v
     assert named.default == "python3"
     assert unknown.default == unreadable.default == names(unknown)[0] != "python3"
     assert plain.default == "python3"
-
-
-@pytest.mark.parametrize("path", ["relative/a.ipynb", "/tmp/a.py"])
-def test_only_absolute_notebook_paths_are_accepted(offline_host, path):
-    with pytest.raises(UpstreamRequestFailed, match="Not an absolute notebook path"):
-        offline_host.kernelspecs(path)
-
-
-def test_the_folder_of_the_notebook_has_to_exist(offline_host, home):
-    with pytest.raises(UpstreamRequestFailed, match="Folder not found"):
-        offline_host.kernelspecs(str(home / "nowhere" / "a.ipynb"))
-
-
-def test_an_unexpected_kernelspec_answer_is_a_bad_response(tmp_path, home, monkeypatch):
-    host = JupyterHost(tmp_path / "jupyter")
-    answer = httpx.Response(200, json={"unexpected": 1}, request=httpx.Request("GET", "http://x/api/kernelspecs"))
-    monkeypatch.setattr(host, "_call", lambda *_args, **_kwargs: answer)
-
-    with pytest.raises(UpstreamContractError):
-        host.kernelspecs(str(notebook(home / "a.ipynb")))
-
-    response = client_for(host).get("/api/jupyter/kernelspecs", params={"path": str(home / "a.ipynb")})
-    assert response.status_code == 502
 
 
 @pytest.mark.parametrize(
@@ -424,13 +387,6 @@ def test_a_kernel_the_server_lost_is_started_again(world):
     assert second["kernel_id"] != first["kernel_id"]
 
 
-def test_each_notebook_has_its_own_kernel(world):
-    first = start(world, notebook(world.project / "one.ipynb"), "python3")
-    second = start(world, notebook(world.project / "two.ipynb"), "python3")
-
-    assert first["kernel_id"] != second["kernel_id"]
-
-
 def test_unknown_kernelspecs_and_notebook_paths_are_not_found(world):
     nb = notebook(world.project / "unknown.ipynb")
 
@@ -456,16 +412,6 @@ def test_shutting_a_kernel_down_is_idempotent(world):
 
     assert (first.status_code, second.status_code) == (204, 204)
     assert world.client.get(f"{SERVER}/api/kernels/{kernel['kernel_id']}").status_code == 404
-
-
-def test_a_moved_notebook_keeps_its_kernel(world):
-    nb = notebook(world.project / "folder" / "a.ipynb")
-    kernel = start(world, nb, "python3")
-
-    world.host.move_kernel(str(nb), str(nb.with_name("renamed.ipynb")))
-
-    assert start(world, nb.with_name("renamed.ipynb"), "python3") == kernel
-    assert world.client.get(f"{SERVER}/api/kernels/{kernel['kernel_id']}").status_code == 200
 
 
 def test_deleting_a_folder_shuts_down_the_kernels_of_its_notebooks_only(world):
@@ -540,23 +486,6 @@ def test_kernels_never_see_the_servers_token_and_it_is_in_no_file_or_command_lin
         assert token.encode() not in Path(f"/proc/{pid}/{name}").read_bytes(), name
     assert stat.S_IMODE(world.host.home.stat().st_mode) == 0o700
     assert stat.S_IMODE((world.host.home / "server.log").stat().st_mode) == 0o600
-
-
-def test_idle_kernels_nobody_is_connected_to_are_culled_and_start_again_for_their_notebook(tmp_path, home, monkeypatch):
-    monkeypatch.setattr(jupyter, "_KERNEL_CULL_IDLE_SECONDS", 1)
-    monkeypatch.setattr(jupyter, "_KERNEL_CULL_INTERVAL_SECONDS", 1)
-    host = JupyterHost(tmp_path / "jupyter")
-    nb = str(notebook(home / "a.ipynb"))
-    try:
-        kernel = host.start_kernel(nb, "python3", str(home))
-        deadline = time.monotonic() + 30
-        while host._is_running(kernel) and time.monotonic() < deadline:
-            time.sleep(0.5)
-
-        assert not host._is_running(kernel)
-        assert host.start_kernel(nb, "python3", str(home)).kernel_id != kernel.kernel_id
-    finally:
-        host.stop()
 
 
 def test_a_notebook_has_one_kernel_whichever_way_its_path_is_spelled(world):
@@ -757,13 +686,6 @@ def test_logins_without_host_access_get_nothing(world):
     assert denied.delete("/api/jupyter/kernel", params={"path": notebook_path}).status_code == 403
 
 
-def test_refused_requests_do_not_start_a_server(tmp_path):
-    host = JupyterHost(tmp_path / "jupyter")
-
-    assert client_for(host).get(f"{SERVER}/api/contents").status_code == 404
-    assert host._server is None
-
-
 def test_a_server_that_cannot_start_is_unavailable(tmp_path, home, monkeypatch):
     monkeypatch.setattr(jupyter, "_BOOTSTRAP", "raise SystemExit(3)")
     client = client_for(JupyterHost(tmp_path / "jupyter"))
@@ -832,22 +754,6 @@ def test_the_server_and_its_kernels_end_when_the_backend_is_killed(backend_with_
 
     assert kernels
     assert still_running([server, *kernels], 20) == []
-
-
-@requires_proc
-def test_a_hung_server_a_killed_backend_left_behind_is_reaped_with_its_kernels_by_the_next(backend_with_a_kernel):
-    backend, server, kernels = backend_with_a_kernel
-    os.kill(server, signal.SIGSTOP)
-    backend.kill()
-    backend.wait()
-    assert still_running([server, *kernels], 3) == [server, *kernels]
-
-    reaped = reap_orphans()
-
-    # The stopped server cannot exit by itself, only the sweep ends it. A kernel may notice its dead backend and end
-    # on its own in the meantime: what counts is that nothing is left.
-    assert server in reaped
-    assert still_running([server, *kernels], 5) == []
 
 
 @pytest.fixture

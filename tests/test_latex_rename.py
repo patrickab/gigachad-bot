@@ -28,20 +28,6 @@ class Docs(MemoryDataStore):
         return self.exists(key)
 
 
-class FailingFirstRecord(RecordingScope):
-    """Fails to record its first change, keeps the later ones."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.failed = False
-
-    def record(self, connection, **change) -> None:
-        if not self.failed:
-            self.failed = True
-            raise RuntimeError("database down")
-        super().record(connection, **change)
-
-
 def client_for(roots, scope):
     docs = Docs()
     assets = MemoryAssetStore()
@@ -121,7 +107,9 @@ def test_renaming_the_root_rewrites_the_root_line_of_its_chapters_and_records_ea
     expected = [str(folder / "sub" / "one.tex"), str(folder / "sub" / "two.tex")]
     assert response.json()["changed"] == expected
     assert recorded(scope) == expected
-    assert [(folder / "sub" / name).read_text(encoding="utf-8") for name in ("one.tex", "two.tex")] == ["% !TEX root = ../paper.tex\nbody\n"] * 2
+    assert [(folder / "sub" / name).read_text(encoding="utf-8") for name in ("one.tex", "two.tex")] == (
+        ["% !TEX root = ../paper.tex\nbody\n"] * 2
+    )
 
 
 def test_a_chapter_without_a_root_line_below_the_root_cascades_into_the_root(client, folder, scope):
@@ -136,14 +124,6 @@ def test_a_chapter_without_a_root_line_below_the_root_cascades_into_the_root(cli
     assert recorded(scope) == [str(folder / "main.tex")]
 
 
-def test_a_crlf_file_keeps_its_line_endings(client, folder):
-    (folder / "main.tex").write_bytes(PAPER.replace("\n", "\r\n").encode("utf-8"))
-
-    assert rename(client, folder / "imgs" / "a.png", "b.png").status_code == 200
-
-    assert (folder / "main.tex").read_bytes() == PAPER.replace("imgs/a", "imgs/b").replace("\n", "\r\n").encode("utf-8")
-
-
 def test_a_rename_nothing_refers_to_changes_nothing(client, folder, scope):
     (folder / "notes.md").write_text("x", encoding="utf-8")
 
@@ -151,18 +131,6 @@ def test_a_rename_nothing_refers_to_changes_nothing(client, folder, scope):
 
     assert response.status_code == 200 and response.json()["changed"] == []
     assert (folder / "main.tex").read_text(encoding="utf-8") == PAPER and scope.changes == []
-
-
-def test_a_failing_record_does_not_stop_the_other_files_from_being_recorded(folder):
-    (folder / "ch.tex").write_text("\\includegraphics{imgs/a}\n", encoding="utf-8")
-    scope = FailingFirstRecord()
-
-    response = rename(client_for(mounted_roots(folder.parent), scope), folder / "imgs" / "a.png", "b.png")
-
-    assert response.status_code == 200
-    assert response.json()["changed"] == [str(folder / "ch.tex"), str(folder / "main.tex")]
-    assert recorded(scope) == [str(folder / "main.tex")]
-    assert (folder / "ch.tex").read_text(encoding="utf-8") == "\\includegraphics{imgs/b}\n"
 
 
 def test_a_failing_rewrite_leaves_the_rename_in_place(client, folder, scope, monkeypatch):

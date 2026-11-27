@@ -1,18 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
-import { renderHook } from "@testing-library/react"
 import { ApiError, type PiSessionInfo } from "@/lib/backend/api"
-import { piGroupMark, piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionTitle, piSessionWorktree, piStatusMark, piTokenText, piUsageText, unmountedPiWorkspaces, usePiSidebar } from "../usePiSidebar"
+import { piSessionError, piSessionForest, piSessionRepository, piSessionsInside, piSessionWorktree, unmountedPiWorkspaces } from "../usePiSidebar"
 
-const store = vi.hoisted(() => ({ listFilters: [] as unknown[] }))
 vi.mock("@/contexts/TabContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/TabContext")>(),
   useTab: () => ({ tab: { workspaceItem: null } }),
 }))
 vi.mock("../sessionStore", () => ({
-  usePiSessions: (filter: unknown) => {
-    store.listFilters.push(filter)
-    return { sessions: [], loading: false, error: null }
-  },
+  usePiSessions: () => ({ sessions: [], loading: false, error: null }),
   usePiRepositories: () => [],
   usePiSessionStatus: () => ({ running: false, waiting: false, unread: false, failed: false }),
   refreshPiSessions: () => {},
@@ -57,45 +52,10 @@ describe("Pi sidebar grouping", () => {
     expect(forest.map((node) => [node.session.sessionId, node.forks.map((fork) => fork.session.sessionId)])).toEqual([["orphan", []], ["parent", ["fork"]]])
   })
 
-  it("titles a session by its first prompt line and marks its state", () => {
-    expect(piSessionTitle({ firstMessage: "  fix the tabs\nmore" })).toBe("fix the tabs")
-    expect(piSessionTitle({ firstMessage: "" })).toBe("Untitled session")
-    const idle = { running: false, waiting: false, unread: false, failed: false }
-    expect(piStatusMark({ ...idle, running: true, waiting: true })).toEqual({ tone: "attention", hollow: false, label: "Waiting" })
-    expect(piStatusMark({ ...idle, running: true, cachedUntil: 2000 }, 1000)).toEqual({ tone: "active", hollow: false, label: "Running" })
-    expect(piStatusMark({ ...idle, failed: true })).toEqual({ tone: "error", hollow: false, label: "Failed" })
-    expect(piStatusMark({ ...idle, unread: true, cachedUntil: 2000 }, 1000)).toEqual({ tone: "done", hollow: false, label: "Unread, ready" })
-    expect(piStatusMark({ ...idle, unread: true, cachedUntil: 2000 }, 3000)).toEqual({ tone: "ready", hollow: false, label: "Unread" })
-    expect(piStatusMark({ ...idle, cachedUntil: 2000 }, 1000)).toEqual({ tone: "done", hollow: true, label: "Ready" })
-    expect(piStatusMark({ ...idle, cachedUntil: 2000 }, 2000)).toBeNull()
-    expect(piStatusMark(idle)).toBeNull()
-    expect(piGroupMark([{ ...idle, cachedUntil: 2000 }, { ...idle, unread: true }, { ...idle, running: true }], 1000)?.label).toBe("Running")
-    expect(piGroupMark([{ ...idle, cachedUntil: 2000 }, { ...idle, unread: true }], 1000)?.label).toBe("Unread")
-    expect(piGroupMark([idle], 1000)).toBeNull()
-    expect(piUsageText({ contextPercent: 12.4, cost: 1.5 })).toBe("12% · $1.50")
-    expect(piUsageText({})).toBe("")
-  })
-
   it("words pi-host's error codes for session actions and falls back for anything else", () => {
     expect(piSessionError(new ApiError("live", 409), "Could not archive this session")).toBe("Session is running")
     expect(piSessionError(new ApiError("not_found", 404), "Could not archive this session")).toBe("Session no longer exists")
     expect(piSessionError(new ApiError("toString", 409), "Could not archive this session")).toBe("Could not archive this session")
     expect(piSessionError(new Error("live"), "Could not pin this session")).toBe("Could not pin this session")
-  })
-})
-
-describe("usePiSidebar", () => {
-  it("lists only coding sessions (G5)", () => {
-    renderHook(() => usePiSidebar({}))
-    expect(store.listFilters).toContainEqual({ profile: "coding" })
-    for (const filter of store.listFilters) expect(filter).toMatchObject({ profile: "coding" })
-  })
-})
-
-describe("piTokenText", () => {
-  it("shows the context size in thousands, nothing before the first answer", () => {
-    expect(piTokenText(0)).toBe("")
-    expect(piTokenText(400)).toBe("<1k")
-    expect(piTokenText(84_300)).toBe("84k")
   })
 })

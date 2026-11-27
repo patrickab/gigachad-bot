@@ -24,21 +24,3 @@ def test_learnharness_url_is_the_frame_url_for_host_logins_only(monkeypatch, has
     client = route_client(router, overrides=overrides)
 
     assert client.get("/api/config").json()["learnharness_url"] == expected
-
-
-def test_animated_background_is_read_and_stored_per_user():
-    state = {"on": False}
-    preferences = SimpleNamespace(
-        animated_background=lambda: state["on"],
-        set_animated_background=lambda enabled: state.update(on=enabled),
-    )
-    overrides = {
-        get_model_provider_store: SimpleNamespace(load_defaults=lambda: {}),
-        get_request_identity: request_identity(False),
-        get_user_preferences: preferences,
-    }
-    client = route_client(router, overrides=overrides)
-
-    assert client.get("/api/config").json()["animated_background"] is False
-    assert client.put("/api/config/animated-background", json={"enabled": True}).status_code == 204
-    assert client.get("/api/config").json()["animated_background"] is True

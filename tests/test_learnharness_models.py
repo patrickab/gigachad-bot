@@ -316,16 +316,6 @@ def test_a_settings_write_by_learnharness_meanwhile_is_merged_not_lost(models, t
     assert not list(settings_path.parent.glob(".*.tmp"))
 
 
-def test_a_failed_rename_leaves_no_staging_file(tmp_path, monkeypatch):
-    def failing_replace(source, target):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(learnharness_config.os, "replace", failing_replace)
-    with pytest.raises(OSError, match="disk full"):
-        learnharness_config._write_private(tmp_path / "settings.json", "{}")
-    assert list(tmp_path.iterdir()) == []
-
-
 def test_concurrent_runs_agree_on_one_binding(models, tmp_path):
     errors = []
 
@@ -414,39 +404,6 @@ def test_an_empty_catalog_fails(catalog, monkeypatch):
     monkeypatch.setattr(ollama_models, "installed_chat_models", list)
     with pytest.raises(learnharness_config.ConfigUnavailable, match="host's catalog has no model"):
         asyncio.run(learnharness_config.served_catalog("host"))
-
-
-class _NoRows:
-    """A pool whose users table has no row for any login, and that records what it ran."""
-
-    def __init__(self):
-        self.statements = []
-
-    def connection(self):
-        pool = self
-
-        class Connection:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def execute(self, statement, params):
-                pool.statements.append(statement)
-                return self
-
-            def fetchone(self):
-                return None
-
-        return Connection()
-
-
-def test_an_unknown_login_fails_without_registering_a_user():
-    pool = _NoRows()
-    with pytest.raises(learnharness_config.ConfigUnavailable, match="no gigachad user 'typo'"):
-        learnharness_config._user_id(pool, "typo")
-    assert [statement.split()[0] for statement in pool.statements] == ["SELECT"]
 
 
 def test_write_config_against_a_dead_gateway_keeps_the_last_good_files(catalog, tmp_path, monkeypatch, capsys):

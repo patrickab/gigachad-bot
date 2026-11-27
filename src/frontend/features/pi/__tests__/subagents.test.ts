@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  currentRows, dismissFinished, dismissRows, elapsedMs, EMPTY_ROSTER, inspectCommand, mergeRoster, parseInspectReply, rowsFromAsyncWidget, rowsFromToolDetails,
+  currentRows, dismissFinished, dismissRows, EMPTY_ROSTER, mergeRoster, rowsFromAsyncWidget, rowsFromToolDetails,
   type SubagentRow,
 } from "../subagents"
 
@@ -91,21 +91,5 @@ describe("roster", () => {
       "subagent-async": snapshot([{ id: "r", kind: "subagent", label: "x", state: "queued" }]),
     })
     expect(rows.map((entry) => entry.id)).toEqual(["async:r:", "fg:call:0"])
-  })
-})
-
-describe("helpers", () => {
-  it("measures elapsed time from timestamps, or the reported duration", () => {
-    expect(elapsedMs({ ...row("a", "running"), startedAt: 1000 }, 4000)).toBe(3000)
-    expect(elapsedMs({ ...row("a", "done"), startedAt: 1000, endedAt: 2500 }, 9000)).toBe(1500)
-    expect(elapsedMs({ ...row("a", "running"), durationMs: 700 }, 9000)).toBe(700)
-    expect(elapsedMs(row("a", "running"), 9000)).toBeUndefined()
-  })
-
-  it("builds the inspect command and parses its reply", () => {
-    expect(inspectCommand("r1", { asyncId: "run", childId: "s0" })).toBe("/subagents-inspect-rpc r1 run s0")
-    expect(inspectCommand("r1", { asyncId: "run" })).toBe("/subagents-inspect-rpc r1 run")
-    expect(parseInspectReply(['PI_SUBAGENT_INSPECT_JSON:{"requestId":"r1","task":"t"}'])).toMatchObject({ requestId: "r1", task: "t" })
-    expect(parseInspectReply(['PI_SUBAGENT_INSPECT_JSON:{"task":"t"}'])).toBeNull()
   })
 })

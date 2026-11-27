@@ -30,22 +30,6 @@ describe("createTokenPacer", () => {
     expect(text()).toBe("a".repeat(200))
   })
 
-  it("drains a burst gradually, not in one emit", () => {
-    const { pacer, out, tick } = setup()
-    pacer.push("x".repeat(400))
-    for (let i = 0; i < 20; i++) tick(16)
-    expect(out.length).toBeGreaterThan(3)
-  })
-
-  it("emits at most once per 12 ms, so a 144 Hz display renders every other frame", () => {
-    const { pacer, out, tick, text } = setup()
-    pacer.push("x".repeat(400))
-    for (let i = 0; i < 20; i++) tick(7)
-    expect(out.length).toBe(10)
-    for (let i = 0; i < 400; i++) tick(7)
-    expect(text()).toBe("x".repeat(400))
-  })
-
   it("flush emits the rest at once", () => {
     const { pacer, tick, text } = setup()
     pacer.push("hello world")

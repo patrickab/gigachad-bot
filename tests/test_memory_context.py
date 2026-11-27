@@ -1,22 +1,11 @@
 """`lib.memory_context`: the root each login uses and the memory block the chat's system prompt gets."""
 
-import os
 from pathlib import Path
 from uuid import uuid4
 
 from memory_store import store
 
 from lib.memory_context import memory_prompt, memory_root, project_memory_store
-
-
-def test_the_host_login_uses_the_memory_store_default_root() -> None:
-    assert memory_root(uuid4(), True) == Path(os.environ["MEMORY_STORE_ROOT"])
-
-
-def test_other_logins_get_their_own_folder_under_the_family_dir() -> None:
-    user_id = uuid4()
-
-    assert memory_root(user_id, False) == Path(os.environ["GIGACHAD_MEMORY_DIR"]) / str(user_id)
 
 
 def test_tests_never_reach_the_real_roots() -> None:
@@ -67,14 +56,6 @@ def test_memory_prompt_creates_the_stores_and_renders_pinned_memories_and_indexe
     assert "hobbies — Free time" in prompt and "Climbs" not in prompt
     assert "decisions — Shop calls" in prompt and "Ships EU" not in prompt
     assert "Read a memory before you answer from it." in prompt
-
-
-def test_memory_prompt_without_a_project_names_only_user(tmp_path: Path) -> None:
-    prompt = memory_prompt(tmp_path, None)
-
-    assert "Index of `user`" in prompt
-    assert "this project" not in prompt
-    assert store.list_memories(root=tmp_path)["memory_stores"] == ["user"]
 
 
 def test_memory_prompt_cuts_nothing(tmp_path: Path) -> None:

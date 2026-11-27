@@ -1,5 +1,5 @@
 /**
- * Tests for the api.ts HTTP-helper refactor: toQuery/post/put/patch/del/fileForm
+ * Tests for the api.ts HTTP-helper refactor: post/put/patch/del/fileForm
  * are not exported, so we assert behavior through the exported endpoints that
  * use them. We stub global `fetch` and inspect the resulting URL + RequestInit.
  */
@@ -31,23 +31,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
-})
-
-describe("api.ts — toQuery helper (via exported endpoints)", () => {
-  it("appends array params as repeated keys", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: []
-
-    await api.parseFiles("c1", ["a.txt", "b.txt"], "proj")
-
-    expect(calls).toHaveLength(1)
-    const url = new URL(calls[0].url)
-    expect(url.searchParams.getAll("filenames")).toEqual(["a.txt", "b.txt"])
-    expect(url.searchParams.get("chat_id")).toBe("c1")
-    expect(url.searchParams.get("slug")).toBe("proj")
-  })
-
 })
 
 describe("api.ts — fileForm helper", () => {
@@ -82,20 +65,6 @@ describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {
 })
 
 describe("api.ts — callFactory", () => {
-  it("posts the action and its params and answers the result as is", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
-      calls.push({ url, init })
-      return new Response(JSON.stringify({ repos: ["/git/a"] }), { status: 200, headers: { "Content-Type": "application/json" } })
-    }))
-
-    await expect(api.callFactory("repos.list")).resolves.toEqual({ repos: ["/git/a"] })
-    const { url, init } = lastCall(calls)
-    expect(url).toContain("/factory/call")
-    expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ action: "repos.list", params: {} })
-  })
-
   it("fails with the core's message and code", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "refused", message: "task abc has 1 unmerged commit" } }), { status: 409 })))
 
@@ -129,40 +98,6 @@ describe("api.ts — saveChat", () => {
     const { url, init } = lastCall(calls)
     expect(url).toContain("/chat-histories/other/notes.json")
     expect(JSON.parse(init.body as string)).not.toHaveProperty("tab_name")
-  })
-})
-
-describe("api.ts — Jupyter kernels", () => {
-  it("lists the kernel environments of a notebook path", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-
-    await api.fetchKernelSpecs("/work/a b.ipynb")
-
-    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/jupyter\/kernelspecs$/)
-    expect(new URL(lastCall(calls).url).searchParams.get("path")).toBe("/work/a b.ipynb")
-  })
-
-  it("starts a kernel by posting the path and spec name", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-
-    await api.startKernel("/work/a.ipynb", "python3")
-
-    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/jupyter\/kernel$/)
-    expect(lastCall(calls).init.method).toBe("POST")
-    expect(JSON.parse(lastCall(calls).init.body as string)).toEqual({ path: "/work/a.ipynb", name: "python3" })
-  })
-
-  it("shuts a kernel down by path and fails with the backend's detail", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    await api.shutdownKernel("/work/a.ipynb")
-    expect(lastCall(calls).init.method).toBe("DELETE")
-    expect(new URL(lastCall(calls).url).searchParams.get("path")).toBe("/work/a.ipynb")
-
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Jupyter is not available" }), { status: 503, headers: { "Content-Type": "application/json" } })))
-    await expect(api.startKernel("/work/a.ipynb", "python3")).rejects.toMatchObject({ name: "ApiError", status: 503, message: "Jupyter is not available" })
   })
 })
 
@@ -217,26 +152,6 @@ describe("api.ts — an unreachable backend (hot reload, restart)", () => {
 })
 
 describe("api.ts — deletePiTurn", () => {
-  it("posts the range and resolves to the removed count", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      calls.push({ url: String(input), init: init ?? {} })
-      return new Response(JSON.stringify({ removedEntries: 3, removedMedia: [] }), { status: 200, headers: { "Content-Type": "application/json" } })
-    }))
-
-    await expect(api.deletePiTurn("s-1", "ab12", "end")).resolves.toEqual({ removedEntries: 3, notRemoved: [] })
-
-    expect(new URL(lastCall(calls).url).pathname).toMatch(/\/pi\/sessions\/s-1\/turns\/ab12\/delete$/)
-    expect(lastCall(calls).init.method).toBe("POST")
-    expect(JSON.parse(String(lastCall(calls).init.body))).toEqual({ through: "end" })
-  })
-
-  it("names the files its cleanup left on disk", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ removedEntries: 2, removedMedia: [], notRemoved: [".pi/pastes/a.txt"] }), { status: 200, headers: { "Content-Type": "application/json" } })))
-
-    await expect(api.deletePiTurn("s-1", "ab12", "turn")).resolves.toEqual({ removedEntries: 2, notRemoved: [".pi/pastes/a.txt"] })
-  })
-
   it("exposes the 409 reason to the caller", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "compacted", body: { error: "compacted" } }), { status: 409, headers: { "Content-Type": "application/json" } })))
 

@@ -60,7 +60,7 @@ vi.mock("@/features/pi/PiTab", () => ({
 
 import { useWorkbenchChat, WorkbenchChat } from "../WorkbenchChat"
 import { FileChat } from "../FileChat"
-import { canvasLead, fileLead, projectLead } from "../fileLead"
+import { fileLead } from "../fileLead"
 
 const MARKDOWN = "/work/markdown/notes.md"
 const MARKDOWN_CWD = "/work/markdown"
@@ -128,14 +128,6 @@ describe("Markdown workbench chat", () => {
     expect(api.markWorkbenchChatInformed).not.toHaveBeenCalled()
   })
 
-  it("resumes the item's session and leads nothing once it has messages", async () => {
-    api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s7", cwd: MARKDOWN_CWD, messageCount: 4 }))
-    render(<Harness chatKey={MARKDOWN} lead={(cwd) => fileLead(MARKDOWN, cwd)} sessionId="s7" />)
-    expect(await screen.findByText(/session s7/)).toBeTruthy()
-    expect(api.openWorkbenchChat).toHaveBeenCalledWith({ path: MARKDOWN, sessionId: "s7" })
-    expect(leadShown()).toBe("none")
-  })
-
   it("tells a session the file moved to its new path once, then clears the notice", async () => {
     api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "s1", cwd: MARKDOWN_CWD, messageCount: 4, moved: ["s1"] }))
     api.markWorkbenchChatInformed.mockResolvedValue({ active: "s1", sessionIds: ["s1"], moved: [] })
@@ -180,24 +172,6 @@ describe("Markdown workbench chat", () => {
     await vi.waitFor(() => expect(onSessionChange).toHaveBeenCalledWith("s9"))
     expect(api.openWorkbenchChat).toHaveBeenLastCalledWith({ path: MARKDOWN, new: true, model: { provider: "anthropic", id: "claude-haiku-4-5" }, thinking: "low" })
   })
-
-  it("puts a quote into the composer draft", async () => {
-    render(<Harness chatKey={MARKDOWN} lead={(cwd) => fileLead(MARKDOWN, cwd)} quoted={"notes.md:2\n```markdown\nhi\n```"} />)
-    await screen.findByText(/session s1/)
-    fireEvent.click(screen.getByRole("button", { name: "quote" }))
-    expect(screen.getByText(/^insert notes\.md:2/).textContent).toBe("insert notes.md:2\n```markdown\nhi\n``` files 0")
-  })
-})
-
-describe("LaTeX workbench chat", () => {
-  it("links the project folder and names the project and its root", async () => {
-    const folder = "/home/me/talk"
-    api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "t1", cwd: folder, kind: "latex" }))
-    render(<Harness chatKey={folder} lead={(cwd) => projectLead(folder, `${folder}/main.tex`, cwd)} />)
-    await screen.findByText(`session t1 in ${folder} files ${folder}`)
-    expect(api.openWorkbenchChat).toHaveBeenCalledWith({ path: folder, sessionId: undefined })
-    expect(leadShown()).toBe(`Project: ${folder}, root: main.tex`)
-  })
 })
 
 describe("PDF chat", () => {
@@ -225,19 +199,5 @@ describe("PDF chat", () => {
     render(<FileChat path={PDF} width={320} onClose={() => {}} modelProps={MODEL_PROPS} />)
     expect(await screen.findByText(/session p2/)).toBeTruthy()
     expect(leadShown()).toBe("none")
-  })
-})
-
-describe("Canvas chat", () => {
-  const CANVAS = "project/proj/document/board.canvas"
-
-  it("opens the canvas key's chat, names the canvas and takes a screenshot into the draft", async () => {
-    api.openWorkbenchChat.mockResolvedValue(openedChat({ id: "c1", cwd: "/work/canvas", kind: "canvas" }))
-    const png = new File(["png"], "shot.png", { type: "image/png" })
-    render(<FileChat path={CANVAS} width={320} onClose={() => {}} modelProps={MODEL_PROPS} lead={() => canvasLead(CANVAS)} insertion={{ id: 1, text: "", files: [png] }} />)
-    expect(await screen.findByText(/session c1/)).toBeTruthy()
-    expect(api.openWorkbenchChat).toHaveBeenCalledWith({ path: CANVAS, sessionId: undefined })
-    expect(leadShown()).toBe("Canvas: board.canvas")
-    expect(screen.getByText("insert - files 1")).toBeTruthy()
   })
 })

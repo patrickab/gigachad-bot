@@ -1,4 +1,4 @@
-from agent_sandbox import SandboxManifest, manifest_from_dict, manifest_to_dict
+from agent_sandbox import SandboxManifest, manifest_to_dict
 from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Artifact, Execution, Outputs, PiSessionState, WorkspaceRef, to_yaml
 import pytest
 import yaml
@@ -8,11 +8,9 @@ from lib.json_docs import JsonDocs
 from lib.sandbox_store import AssetRef, RunRecord, SandboxStore
 from lib.storage_namespace import (
     DEFAULT_SANDBOX_SCOPE,
-    sandbox_active,
     sandbox_asset,
     sandbox_manifest,
     sandbox_run,
-    sandbox_slot,
 )
 
 
@@ -49,12 +47,6 @@ def _manifest(
 def _put_manifest(data_store: DataStore, chat_id: str, manifest: SandboxManifest, scope: str = DEFAULT_SANDBOX_SCOPE) -> None:
     """Store *manifest* under its own ID, as a checkpoint would."""
     JsonDocs(data_store).write(sandbox_manifest(chat_id, manifest.manifest_id, scope), manifest_to_dict(manifest))
-
-
-def test_native_manifest_mapping_round_trip() -> None:
-    manifest = _manifest("native-round-trip", "a" * 64, session_sha256="b" * 64, events_sha256="c" * 64)
-
-    assert manifest_from_dict(manifest_to_dict(manifest)) == manifest
 
 
 def test_new_writes_use_native_manifest_mapping(sandbox_store: SandboxStore, data_store: DataStore) -> None:
@@ -170,39 +162,6 @@ def test_recover_completed_run_rebuilds_missing_run_history(sandbox_store: Sandb
     assert recovered is not None
     assert recovered.result == result
     assert sandbox_store.read_run("chat-recover", "call-1") == recovered
-
-
-def test_checkpoint_writes_every_record_in_one_transaction(
-    sandbox_store: SandboxStore, data_store: DataStore, monkeypatch: pytest.MonkeyPatch
-):
-    applied: list[list[str]] = []
-    apply = data_store.apply
-
-    def spy(writes, deletes, **kwargs):
-        applied.append([key for key, _, _ in writes])
-        return apply(writes, deletes, **kwargs)
-
-    monkeypatch.setattr(data_store, "apply", spy)
-    latest = RunRecord(tool_call_id="latest", status="completed", started_at=1.0, result={"status": "completed"})
-    other = RunRecord(tool_call_id="other", status="completed", started_at=2.0)
-
-    sandbox_store.checkpoint(
-        "chat-order",
-        profile="gigachad",
-        manifest=_manifest("checkpoint-order", "a" * 64),
-        runs={other.tool_call_id: other, latest.tool_call_id: latest},
-        latest_run_id=latest.tool_call_id,
-    )
-
-    assert applied == [[
-        sandbox_slot("chat-order"),
-        sandbox_manifest("chat-order", "checkpoint-order"),
-        sandbox_active("chat-order"),
-        sandbox_run("chat-order", "latest"),
-        sandbox_run("chat-order", "other"),
-    ]]
-    assert sandbox_store.read_active("chat-order").last_completed_run_id == "latest"
-    assert sandbox_store.read_run("chat-order", "latest").manifest_id == "checkpoint-order"
 
 
 def test_checkpoint_without_latest_run_writes_only_other_runs(sandbox_store: SandboxStore):

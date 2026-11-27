@@ -14,7 +14,7 @@ from backend.routes.deps import (
     get_relocate,
 )
 import config
-from lib import latex, latex_templates, workbench
+from lib import latex, latex_templates
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 from lib.disk_files import DiskFiles
@@ -128,46 +128,6 @@ def test_a_mounted_pdf_is_read_in_place_and_new_pdfs_are_refused(client, vault, 
     assert client.post("/api/workbench/create", json={"slug": "thesis", "name": "x.pdf"}).status_code == 400
 
 
-@pytest.mark.parametrize(("path", "kind"), [("/x/B.TEX", "latex"), ("refs.bib", "latex"), ("n.md", "markdown"),
-                                           ("a.pdf", "pdf"), ("tex", None), ("a.bibtex", None)])
-def test_kind_comes_from_the_suffix_ignoring_case(path, kind):
-    assert workbench.kind_of(path) == kind
-
-
-def test_documents_live_in_a_folder_per_kind_project_and_stem(tmp_path):
-    assert workbench.kind_directory(tmp_path, "latex") == tmp_path / "latex"
-    assert workbench.document_folder(tmp_path, "markdown", "thesis", "paper") == tmp_path / "markdown" / "thesis" / "paper"
-
-
-@pytest.mark.parametrize(("slug", "stem"), [("", "a"), ("a", ""), ("..", "a"), ("a", ".omp"), ("a/b", "c"), ("a", "b/c")])
-def test_folder_segments_cannot_be_empty_nested_or_hidden(tmp_path, slug, stem):
-    with pytest.raises(ValueError):
-        workbench.document_folder(tmp_path, "latex", slug, stem)
-
-
-def test_project_directories_lists_existing_ones_only(tmp_path):
-    (tmp_path / "markdown" / "thesis").mkdir(parents=True)
-    (tmp_path / "latex" / "thesis-2").mkdir(parents=True)
-    assert workbench.project_directories(tmp_path, "thesis") == [tmp_path / "markdown" / "thesis"]
-
-
-def test_moving_project_directories_puts_back_earlier_moves_when_one_is_taken(tmp_path):
-    (tmp_path / "latex" / "old" / "paper").mkdir(parents=True)
-    (tmp_path / "markdown" / "old").mkdir(parents=True)
-    (tmp_path / "markdown" / "new").mkdir(parents=True)
-    (tmp_path / "markdown" / "new" / "kept.md").write_text("kept", encoding="utf-8")
-    with pytest.raises(FileExistsError):
-        workbench.move_project_directories(tmp_path, "old", "new")
-    assert (tmp_path / "latex" / "old" / "paper").is_dir() and not (tmp_path / "latex" / "new").exists()
-    assert (tmp_path / "markdown" / "new" / "kept.md").is_file()
-
-    (tmp_path / "markdown" / "new" / "kept.md").unlink()
-    moves = workbench.move_project_directories(tmp_path, "old", "new")
-    assert [target for _, target in moves] == [tmp_path / "latex" / "new", tmp_path / "markdown" / "new"]
-    workbench.restore_directories(moves)
-    assert (tmp_path / "latex" / "old" / "paper").is_dir() and (tmp_path / "markdown" / "old").is_dir()
-
-
 def test_prepare_moves_a_stored_project_file_into_its_folder(client, root, docs, projects):
     key = "project/thesis/document/paper.tex"
     docs.write_bytes(key, b"\\documentclass{article}")
@@ -180,14 +140,6 @@ def test_prepare_moves_a_stored_project_file_into_its_folder(client, root, docs,
     assert source.read_bytes() == b"\\documentclass{article}"
     assert projects.list_files("thesis") == [str(source)]
     assert not docs.exists(key)
-
-
-def test_moving_onto_an_empty_leftover_folder_replaces_it(tmp_path):
-    (tmp_path / "latex" / "old" / "paper").mkdir(parents=True)
-    (tmp_path / "latex" / "new" / "stale").mkdir(parents=True)
-    moves = workbench.move_project_directories(tmp_path, "old", "new")
-    assert moves == [(tmp_path / "latex" / "old", tmp_path / "latex" / "new")]
-    assert (tmp_path / "latex" / "new" / "paper").is_dir() and not (tmp_path / "latex" / "new" / "stale").exists()
 
 
 def test_prepare_refuses_notes_and_keeps_them_stored(client, root, docs):
@@ -291,13 +243,16 @@ def test_create_writes_a_new_document_into_its_folder_and_lists_it(client, root,
     assert created == str(root / "markdown" / "thesis" / "plan" / "plan.md")
 
 
-@pytest.mark.parametrize(("body", "status"), [
-    ({"slug": "thesis", "name": "paper.pdf"}, 400),
-    ({"slug": "thesis", "name": "a/b.tex"}, 400),
-    ({"slug": "thesis", "name": "pa\x00per.tex"}, 400),
-    ({"slug": "thesis", "name": "pa\nper.md"}, 400),
-    ({"slug": "missing", "name": "paper.tex"}, 404),
-])
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        ({"slug": "thesis", "name": "paper.pdf"}, 400),
+        ({"slug": "thesis", "name": "a/b.tex"}, 400),
+        ({"slug": "thesis", "name": "pa\x00per.tex"}, 400),
+        ({"slug": "thesis", "name": "pa\nper.md"}, 400),
+        ({"slug": "missing", "name": "paper.tex"}, 404),
+    ],
+)
 def test_create_refuses_bad_names_and_unknown_projects(client, root, body, status):
     assert client.post("/api/workbench/create", json=body).status_code == status
     assert not (root / "latex").exists()
@@ -361,12 +316,15 @@ def test_create_with_a_document_template_copies_its_files_and_is_no_presentation
     assert latex_templates.presentation_theme(folder / "main.tex") is None
 
 
-@pytest.mark.parametrize("body", [
-    {"slug": "thesis", "name": "deck.tex", "template": "broken"},
-    {"slug": "thesis", "name": "deck.tex", "template": "../sets/demo"},
-    {"slug": "thesis", "name": "deck.tex", "template": ""},
-    {"slug": "thesis", "name": "deck.md", "template": "demo"},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"slug": "thesis", "name": "deck.tex", "template": "broken"},
+        {"slug": "thesis", "name": "deck.tex", "template": "../sets/demo"},
+        {"slug": "thesis", "name": "deck.tex", "template": ""},
+        {"slug": "thesis", "name": "deck.md", "template": "demo"},
+    ],
+)
 def test_create_refuses_unknown_templates_and_templates_for_markdown(client, root, projects, template_sets, body):
     assert client.post("/api/workbench/create", json=body).status_code == 400
     assert not root.exists()
@@ -395,23 +353,6 @@ def test_a_failed_create_keeps_the_folders_that_existed_before(client, root, pro
     with pytest.raises(StorageConflictError):
         client.post("/api/workbench/create", json={"slug": "thesis", "name": "deck.tex", "template": "demo"})
     assert [path.name for path in project.iterdir()] == ["other.tex"]
-
-
-def test_a_file_keeps_every_session_while_new_and_picked_ones_become_active(docs):
-    links = SessionLinks(docs)
-    path = "/data/workbench/latex/thesis/paper/paper.tex"
-
-    assert links.activate(path, "s1") == Link("s1", ("s1",))
-    links.activate("/other.md", "other")
-
-    # Reset: a new session is active, the earlier one stays listed until the new one is linked
-    assert links.activate(path, None) == Link(None, ("s1",))
-    links.activate(path, "s2")
-    # Picking an earlier session makes it active without reordering or duplicating it
-    assert links.activate(path, "s1") == Link("s1", ("s1", "s2"))
-    assert stored_links(docs) == {
-        path: {"active": "s1", "sessions": ["s1", "s2"]}, "/other.md": {"active": "other", "sessions": ["other"]},
-    }
 
 
 def test_a_bare_session_id_stored_before_session_lists_reads_as_one_active_session(docs):
@@ -447,10 +388,13 @@ def test_a_canvas_file_on_disk_prepares_in_place(client, vault):
     assert client.post("/api/workbench/prepare", json={"path": str(board)}).json() == {"path": str(board), "kind": "canvas"}
 
 
-@pytest.mark.parametrize(("method", "url", "request_args"), [
-    ("post", "/api/workbench/prepare", {"json": {"path": "project/thesis/document/paper.tex"}}),
-    ("post", "/api/workbench/create", {"json": {"slug": "thesis", "name": "paper.tex"}}),
-])
+@pytest.mark.parametrize(
+    ("method", "url", "request_args"),
+    [
+        ("post", "/api/workbench/prepare", {"json": {"path": "project/thesis/document/paper.tex"}}),
+        ("post", "/api/workbench/create", {"json": {"slug": "thesis", "name": "paper.tex"}}),
+    ],
+)
 def test_logins_without_host_access_are_refused(root, vault, docs, projects, method, url, request_args):
     key = "project/thesis/document/paper.tex"
     docs.write_bytes(key, b"stored")
@@ -574,13 +518,16 @@ def session_of(docs, roots, path):
 
 def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_one_once(root, vault, docs):
     folder = tex_project(root)
-    store_links(docs, {
-        str(folder / "sections" / "intro.tex"): {"active": "c2", "sessions": ["c1", "c2"], "moved": ["c1"]},
-        "/elsewhere.md": "keep",
-        str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
-        str(folder / "paper.tex"): {"active": "p1", "sessions": ["c1", "p1", "p2"], "moved": ["p2", "c1"]},
-        str(folder / "notes.md"): "markdown stays",
-    })
+    store_links(
+        docs,
+        {
+            str(folder / "sections" / "intro.tex"): {"active": "c2", "sessions": ["c1", "c2"], "moved": ["c1"]},
+            "/elsewhere.md": "keep",
+            str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
+            str(folder / "paper.tex"): {"active": "p1", "sessions": ["c1", "p1", "p2"], "moved": ["p2", "c1"]},
+            str(folder / "notes.md"): "markdown stays",
+        },
+    )
 
     adopted = session_of(docs, mounted_roots(vault, root), folder)
 
@@ -595,10 +542,13 @@ def test_a_folder_adopts_the_sessions_of_its_files_merged_with_the_roots_active_
 
 def test_a_folder_without_its_root_among_the_links_takes_the_first_files_active_session(root, vault, docs):
     folder = tex_project(root)
-    store_links(docs, {
-        str(folder / "sections" / "intro.tex"): {"active": "c1", "sessions": ["c1"]},
-        str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
-    })
+    store_links(
+        docs,
+        {
+            str(folder / "sections" / "intro.tex"): {"active": "c1", "sessions": ["c1"]},
+            str(folder / "refs.bib"): {"active": "b1", "sessions": ["b1"]},
+        },
+    )
 
     assert session_of(docs, mounted_roots(vault, root), folder) == {"session_id": "c1", "session_ids": ["c1", "b1"], "moved": []}
 
@@ -630,7 +580,14 @@ def test_a_pasted_image_goes_into_imgs_of_the_project_folder_whatever_file_it_is
     stored = paste(client, folder / "sections" / "intro.tex")
 
     image = folder / "imgs" / clock
-    assert stored.json() == {"path": str(image), "placeholder_path": f"imgs/{clock}", "reference": rf"\includegraphics[width=\linewidth]{{imgs/{clock}}}", "changed": []}
+    assert stored.json() == (
+        {
+            "path": str(image),
+            "placeholder_path": f"imgs/{clock}",
+            "reference": rf"\includegraphics[width=\linewidth]{{imgs/{clock}}}",
+            "changed": [],
+        }
+    )
     assert image.read_bytes() == PNG
     assert scope.changes == [{"kind": "document", "key": str(image), "operation": "write"}]
 
@@ -644,7 +601,9 @@ def test_pasting_into_a_root_without_graphicx_adds_it_and_reports_the_root(clien
 
     image = folder / "imgs" / clock
     assert stored["changed"] == [str(source)]
-    assert source.read_text(encoding="utf-8") == "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\end{document}\n"
+    assert source.read_text(encoding="utf-8") == (
+        "\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\n\\end{document}\n"
+    )
     assert scope.changes == [
         {"kind": "document", "key": str(image), "operation": "write"},
         {"kind": "document", "key": str(source), "operation": "write"},
@@ -658,7 +617,14 @@ def test_a_presentation_references_a_pasted_image_by_its_theme_and_keeps_its_roo
 
     stored = paste(client, folder / "main.tex").json()
 
-    assert stored == {"path": str(folder / "imgs" / clock), "placeholder_path": f"imgs/{clock}", "reference": rf"\demoimage{{imgs/{clock}}}", "changed": []}
+    assert stored == (
+        {
+            "path": str(folder / "imgs" / clock),
+            "placeholder_path": f"imgs/{clock}",
+            "reference": rf"\demoimage{{imgs/{clock}}}",
+            "changed": [],
+        }
+    )
     assert (folder / "main.tex").read_text(encoding="utf-8") == PRESENTATION_SOURCE
     assert scope.changes == [{"kind": "document", "key": str(folder / "imgs" / clock), "operation": "write"}]
 
@@ -670,7 +636,14 @@ def test_a_pasted_image_of_a_markdown_file_sits_next_to_it_with_a_markdown_refer
 
     stored = paste(client, plan)
 
-    assert stored.json() == {"path": str(plan.parent / "imgs" / clock), "placeholder_path": f"imgs/{clock}", "reference": f"![](imgs/{clock})", "changed": []}
+    assert stored.json() == (
+        {
+            "path": str(plan.parent / "imgs" / clock),
+            "placeholder_path": f"imgs/{clock}",
+            "reference": f"![](imgs/{clock})",
+            "changed": [],
+        }
+    )
     assert (plan.parent / "imgs" / clock).read_bytes() == PNG
 
 

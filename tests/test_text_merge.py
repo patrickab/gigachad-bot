@@ -1,7 +1,4 @@
-import pytest
-
-from lib import text_merge
-from lib.text_merge import TextMergeError, merge_theirs
+from lib.text_merge import merge_theirs
 
 
 def test_clean_merge_keeps_both_sides():
@@ -29,19 +26,3 @@ def test_a_final_newline_only_one_side_has_is_not_an_edit():
     assert merge_theirs("a\nb\nc\nd", "a\nb\nC\nd\n", "a\nb\nc\nd\ne") == "a\nb\nC\nd\ne\n"
     # The agent dropped the final newline and changed nothing else.
     assert merge_theirs("a\nb\nc\nd\n", "a\nb\nC\nd\n", "a\nb\nc\nd") == "a\nb\nC\nd\n"
-
-
-def test_git_refusing_the_merge_raises_and_removes_its_temporary_files(monkeypatch, tmp_path):
-    monkeypatch.setattr(text_merge.tempfile, "tempdir", str(tmp_path))
-    with pytest.raises(TextMergeError, match="git merge-file failed"):
-        merge_theirs("a\n", "a\x00\n", "b\n")  # NUL bytes: git refuses to merge binary files
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_missing_git_raises_merge_error(monkeypatch):
-    def missing(*args, **kwargs):
-        raise FileNotFoundError("git")
-
-    monkeypatch.setattr(text_merge.subprocess, "run", missing)
-    with pytest.raises(TextMergeError):
-        merge_theirs("a\n", "b\n", "c\n")

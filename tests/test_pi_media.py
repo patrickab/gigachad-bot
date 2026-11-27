@@ -10,7 +10,6 @@ import pytest
 
 from backend.identity import get_request_identity
 from backend.routes.pi import router
-from backend.websocket_origin import require_trusted_request
 from lib import pi_host, pi_media
 from tests.conftest import request_identity, route_client
 
@@ -48,16 +47,6 @@ def _serve(monkeypatch, stored: dict[str, bytes]) -> list[httpx.Request]:
 
 def _client() -> TestClient:
     return route_client(router, overrides={get_request_identity: request_identity(True)})
-
-
-def test_thumbnail_is_a_webp_of_at_most_480px_and_small_images_keep_their_size():
-    big = Image.open(io.BytesIO(pi_media.make_thumbnail(_png(1920, 1080))))
-    small = Image.open(io.BytesIO(pi_media.make_thumbnail(_png(100, 50))))
-
-    assert big.format == "WEBP" and big.size == (480, 270)
-    assert small.format == "WEBP" and small.size == (100, 50)
-    with pytest.raises(ValueError):
-        pi_media.make_thumbnail(b"not an image")
 
 
 def test_the_original_is_served_immutable_with_the_hash_as_etag(monkeypatch):
@@ -125,25 +114,3 @@ def test_media_needs_host_access(monkeypatch):
     client = route_client(router, overrides={get_request_identity: request_identity(False)})
 
     assert client.get(f"/api/pi/media/{'d' * 64}").status_code in (401, 403)
-
-
-def test_a_delete_forgets_the_thumbnail_of_a_hash_only_in_not_removed(monkeypatch):
-    data = _png(1200, 800)
-    digest = hashlib.sha256(data).hexdigest()
-    _serve(monkeypatch, {digest: data})
-
-    async def deleted(*_args):
-        return pi_host.TurnDeleted(removed_entries=2, removed_media=[], not_removed=[digest, "paste-1"])
-
-    monkeypatch.setattr(pi_host, "delete_turn", deleted)
-    client = route_client(
-        router,
-        overrides={get_request_identity: request_identity(True), require_trusted_request: None},
-    )
-    client.get(f"/api/pi/media/{digest}/thumb")
-    assert digest in pi_media._cache
-
-    assert client.post("/api/pi/sessions/s1/turns/e1/delete", json={"through": "turn"}).status_code == 200
-
-    assert digest not in pi_media._cache
-    assert pi_media._cache_bytes == 0

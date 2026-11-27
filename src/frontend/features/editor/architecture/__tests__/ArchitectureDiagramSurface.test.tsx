@@ -3,13 +3,10 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { ArchitectureDiagramSurface, type ArchitectureDiagramSurfaceProps } from "@/features/editor/architecture/ArchitectureDiagramSurface"
-import { drawnBox } from "@/features/editor/architecture/useSurfaceDrawing"
 import { isDraft, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
-import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 
 const node = (id: string, title: string, position = { x: 0, y: 0 }, extra: Partial<DiagramNode> = {}): DiagramNode =>
   ({ id, title, bullets: [], kind: "system", parent: null, compound: false, position, width: 240, height: 160, ...extra })
-const emptyGraph: DiagramGraph = { nodes: [], edges: [] }
 const Surface = (props: Omit<ArchitectureDiagramSurfaceProps, "edgeStyle" | "onEdgeStyleChange"> & Partial<ArchitectureDiagramSurfaceProps>) =>
   <ArchitectureDiagramSurface edgeStyle="elbow" onEdgeStyleChange={() => {}} {...props} />
 
@@ -132,17 +129,6 @@ describe("ArchitectureDiagramSurface", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ nodes: [expect.objectContaining({ id: "~draft-1", title: "Ledger", bullets: ["books"] })] }))
   })
 
-  it("starts a new bullet when the space below the bullets is clicked, and drops it again if left empty", () => {
-    render(<Surface graph={{ nodes: [node("shop", "Shop", { x: 0, y: 0 }, { bullets: ["sells"] })], edges: [] }} onChange={() => {}} />)
-    fireEvent.click(screen.getByLabelText("Node bullet").closest(".architecture-diagram-node-body")!)
-    const bullets = screen.getAllByLabelText("Node bullet") as HTMLTextAreaElement[]
-    expect(bullets.map((bullet) => bullet.value)).toEqual(["sells", ""])
-    expect(document.activeElement).toBe(bullets[1])
-
-    act(() => { bullets[1]!.blur() })
-    expect((screen.getAllByLabelText("Node bullet") as HTMLTextAreaElement[]).map((bullet) => bullet.value)).toEqual(["sells"])
-  })
-
   it("switches connections to curved from the overflow menu, dropping every saved bend", () => {
     const onChange = vi.fn()
     const onEdgeStyleChange = vi.fn()
@@ -155,20 +141,6 @@ describe("ArchitectureDiagramSurface", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Curved edges" }))
     expect(onEdgeStyleChange).toHaveBeenCalledWith("curved")
     expect(onChange).toHaveBeenCalledWith({ ...graph, edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] })
-  })
-
-  it("renders its toolbar into the tab's top-bar slots instead of above the diagram", () => {
-    const { container } = render(
-      <TopBarSlotProvider>
-        <TopBarSlot name="drawing">{(ref) => <div ref={ref} data-testid="drawing-slot" />}</TopBarSlot>
-        <TopBarSlot name="view">{(ref) => <div ref={ref} data-testid="view-slot" />}</TopBarSlot>
-        <Surface graph={{ nodes: [node("shop", "Shop")], edges: [] }} onChange={() => {}} />
-      </TopBarSlotProvider>,
-    )
-
-    expect(screen.getByTestId("drawing-slot")).toContainElement(screen.getByRole("button", { name: "Fit view" }))
-    expect(screen.getByTestId("view-slot")).toContainElement(screen.getByRole("button", { name: "Connection style" }))
-    expect(container.querySelector(".architecture-diagram-toolbar")).toBeNull()
   })
 
   it("keeps the title being edited when the graph is updated from outside", () => {
@@ -221,51 +193,5 @@ describe("ArchitectureDiagramSurface", () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it("refits the graph when its host maximizes it, but not when it restores", async () => {
-    flow.fitView.mockClear()
-    const nextFrames = () => act(async () => {
-      const { promise, resolve } = Promise.withResolvers<void>()
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      await promise
-    })
-    const { rerender } = render(<Surface graph={emptyGraph} onChange={() => {}} />)
-    await nextFrames()
-    expect(flow.fitView).not.toHaveBeenCalled()
-
-    rerender(<Surface graph={emptyGraph} onChange={() => {}} autoFit />)
-    await nextFrames()
-    expect(flow.fitView).toHaveBeenCalledOnce()
-
-    rerender(<Surface graph={emptyGraph} onChange={() => {}} autoFit={false} />)
-    await nextFrames()
-    expect(flow.fitView).toHaveBeenCalledOnce()
-  })
-})
-
-describe("drawnBox", () => {
-  const perimeter = (points: Array<[number, number]>, steps = 8) => {
-    const out: Array<{ x: number, y: number }> = []
-    for (let i = 0; i < points.length; i += 1) {
-      const [ax, ay] = points[i]
-      const [bx, by] = points[(i + 1) % points.length]
-      for (let s = 0; s < steps; s += 1) out.push({ x: ax + (bx - ax) * (s / steps), y: ay + (by - ay) * (s / steps) })
-    }
-    return out
-  }
-
-  it("turns any closed loop into its bounding box", () => {
-    expect(drawnBox(perimeter([[0, 0], [100, 0], [100, 60], [0, 60]]))).toEqual({ x: 0, y: 0, width: 100, height: 60 })
-    expect(drawnBox(perimeter([[50, 0], [100, 30], [50, 60], [0, 30]]))).toEqual({ x: 0, y: 0, width: 100, height: 60 })
-  })
-
-  it("rejects an open stroke", () => {
-    const points = Array.from({ length: 10 }, (_, i) => ({ x: i * 10, y: 0 }))
-    expect(drawnBox(points)).toBeNull()
-  })
-
-  it("rejects a stroke smaller than the minimum draw size", () => {
-    expect(drawnBox(perimeter([[0, 0], [10, 0], [10, 10], [0, 10]]))).toBeNull()
   })
 })

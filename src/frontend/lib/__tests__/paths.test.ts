@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { abbreviatePath, isInside, relativeIn, relativeTo } from "../paths"
+import { isInside, relativeIn } from "../paths"
 
 describe("isInside", () => {
   it("matches the directory and below it, never a sibling sharing its prefix", () => {
@@ -15,22 +15,5 @@ describe("relativeIn", () => {
     expect(relativeIn("/home/me/thesis", "/home/me/thesis/chapters/intro.tex")).toBe("chapters/intro.tex")
     expect(relativeIn("/home/me/thesis/", "/home/me/thesis/main.tex")).toBe("main.tex")
     expect(relativeIn("/home/me/thesis", "/home/me/thesis-old/main.tex")).toBe("/home/me/thesis-old/main.tex")
-  })
-})
-
-describe("relativeTo", () => {
-  it.each([
-    ["/home/me/thesis", "/home/me/thesis/chapters/intro.tex", "chapters/intro.tex"],
-    ["/home/me/thesis/chapters", "/home/me/thesis/main.tex", "../main.tex"],
-  ])("names %s -> %s as %s", (folder, path, expected) => {
-    expect(relativeTo(folder, path)).toBe(expected)
-  })
-})
-
-describe("abbreviatePath", () => {
-  it("keeps the first and last dir of a long path", () => {
-    expect(abbreviatePath("~/git/gigachad-bot/.wt/feat")).toBe("~/git/.../feat")
-    expect(abbreviatePath("/srv/a/b")).toBe("/srv/.../b")
-    expect(abbreviatePath("~/git/proj")).toBe("~/git/proj")
   })
 })

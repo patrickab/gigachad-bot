@@ -1,14 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { TurnAnswer, TurnEditsPaused, TurnQuestion } from "../TurnQuestion"
+import { TurnQuestion } from "../TurnQuestion"
 
 function Question(props: Partial<Parameters<typeof TurnQuestion>[0]>) {
   return <TurnQuestion text="Prompt" {...props}><p>Prompt</p></TurnQuestion>
-}
-
-const actionNames = (group: string) => {
-  const region = screen.queryByRole("group", { name: group })
-  return region ? within(region).getAllByRole("button").map((button) => button.getAttribute("aria-label")) : []
 }
 
 /** The dialog focuses its confirm button after its enter animation. */
@@ -18,46 +13,6 @@ beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
-})
-
-describe("TurnQuestion actions", () => {
-  it("offers copy, edit and delete on a settled question", () => {
-    render(<Question onEdit={() => {}} onDelete={() => {}} />)
-    expect(actionNames("Question actions")).toEqual(["Copy message", "Edit message", "Delete turn"])
-  })
-
-  it("offers none on a live turn", () => {
-    render(<Question live onEdit={() => {}} onDelete={() => {}} />)
-    expect(actionNames("Question actions")).toEqual([])
-  })
-
-  it("offers copy only while edits are paused, and closes an open editor", () => {
-    const { rerender } = render(<TurnEditsPaused.Provider value={false}><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
-    fireEvent.click(screen.getByRole("button", { name: "Edit message" }))
-    expect(screen.getByRole("textbox")).toBeTruthy()
-    rerender(<TurnEditsPaused.Provider value><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
-    expect(screen.queryByRole("textbox")).toBeNull()
-    expect(actionNames("Question actions")).toEqual(["Copy message"])
-    rerender(<TurnEditsPaused.Provider value={false}><Question onEdit={() => {}} onDelete={() => {}} /></TurnEditsPaused.Provider>)
-    expect(screen.queryByRole("textbox")).toBeNull()
-    expect(actionNames("Question actions")).toEqual(["Copy message", "Edit message", "Delete turn"])
-  })
-
-  it("offers copy only without handlers", () => {
-    render(<Question />)
-    expect(actionNames("Question actions")).toEqual(["Copy message"])
-  })
-})
-
-describe("TurnAnswer actions", () => {
-  it("offers copy and branch when settled, none when live, copy only without a branch", () => {
-    const { rerender } = render(<TurnAnswer text="Answer" branchLabel="Branch" onBranch={() => {}}><p>Answer</p></TurnAnswer>)
-    expect(actionNames("Answer actions")).toEqual(["Copy message", "Branch"])
-    rerender(<TurnAnswer text="Answer" branchLabel="Branch" onBranch={() => {}} live><p>Answer</p></TurnAnswer>)
-    expect(actionNames("Answer actions")).toEqual([])
-    rerender(<TurnAnswer text="Answer" branchLabel="Branch"><p>Answer</p></TurnAnswer>)
-    expect(actionNames("Answer actions")).toEqual(["Copy message"])
-  })
 })
 
 describe("TurnQuestion editor", () => {

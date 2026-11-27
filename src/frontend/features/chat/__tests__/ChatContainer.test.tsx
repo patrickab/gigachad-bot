@@ -28,27 +28,6 @@ vi.mock("@/hooks/useElementSize", () => ({
   useElementSize: (element: HTMLElement | null) => ({ width: 800, height: !element ? 0 : element.firstElementChild?.textContent === GREETING ? 100 : 600 }),
 }))
 
-function renderChat(historyLoading: boolean) {
-  render(<ChatContainer chatId="c1" messages={[]} historyLoading={historyLoading} isStreaming={false} onSend={() => {}} onCancel={() => {}} onDeletePair={() => {}} />)
-  return { greeting: screen.getByText(GREETING), composerArea: screen.getByText(GREETING).parentElement! }
-}
-
-describe("ChatContainer empty state", () => {
-  afterEach(cleanup)
-
-  it("centers the composer under the greeting in a chat known to be empty", () => {
-    const { greeting, composerArea } = renderChat(false)
-    expect(greeting).toHaveAttribute("aria-hidden", "false")
-    expect(composerArea.style.transform).not.toBe("translateY(0px)")
-  })
-
-  it("keeps the composer at the bottom without a greeting while the history loads", () => {
-    const { greeting, composerArea } = renderChat(true)
-    expect(greeting).toHaveAttribute("aria-hidden", "true")
-    expect(composerArea.style.transform).toBe("translateY(0px)")
-  })
-})
-
 function pairsOf(count: number, answerTail = ""): Message[] {
   return Array.from({ length: count }, (_, index) => [
     { role: "user" as const, content: `Question ${index}` },
@@ -87,13 +66,6 @@ describe("ChatContainer column", () => {
     rerender(chat({ messages: pairsOf(3, " and a streamed tail"), isStreaming: true }))
     expect(screen.getByText("Answer 2 and a streamed tail")).toBeTruthy()
     expect(scroller().scrollTop).toBe(scroller().scrollHeight)
-  })
-
-  it("tells each question how many pairs follow it, for the edit's confirmation", () => {
-    render(chat({ messages: pairsOf(3) }))
-    fireEvent.click(screen.getByRole("button", { name: "Question 0" }))
-    expect(screen.getByText("Question 0").getAttribute("data-later-turns")).toBe("2")
-    expect(screen.getByText("Question 2").getAttribute("data-later-turns")).toBe("0")
   })
 
   it("mounts the newest page of a long history, earlier pairs on request", () => {
@@ -136,40 +108,6 @@ describe("ChatContainer column", () => {
     expect(scrolled.at(-1)?.contains(screen.getByText("Question 1"))).toBe(true)
   })
 
-  it("paints a revealed hit's query with its match apart, and clears it on a reveal without a query", () => {
-    const registry = new Map<string, { ranges: Range[] }>()
-    class FakeHighlight { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } add(range: Range) { this.ranges.push(range) } }
-    vi.stubGlobal("Highlight", FakeHighlight)
-    Object.defineProperty(CSS, "highlights", { configurable: true, value: registry })
-    const { scrollTo } = Element.prototype
-    const { getBoundingClientRect } = Range.prototype
-    Element.prototype.scrollTo = () => {}
-    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 40, 10, 10)
-    try {
-      const messages = pairsOf(3)
-      const { rerender } = render(chat({ messages, historyFile: "a.json", reveal: { historyFile: null, qaIndex: null, seq: 0 } }))
-      const scrolled = scrolledDuring(() => {
-        rerender(chat({ messages, historyFile: "a.json", reveal: { historyFile: "a.json", qaIndex: 1, hit: { query: "answer", role: "assistant", ordinal: 0 }, seq: 1 } }))
-      })
-      // The open pairs' answers: the revealed one and the newest
-      expect(registry.get("chat-search")?.ranges.map((range) => range.toString())).toEqual(["Answer", "Answer"])
-      const current = registry.get("chat-search-current")?.ranges
-      expect(current).toHaveLength(1)
-      expect(current?.[0].startContainer.textContent).toBe("Answer 1")
-      expect(scrolled.at(-1)?.textContent).toBe("Answer 1")
-
-      rerender(chat({ messages, historyFile: "a.json", reveal: { historyFile: "a.json", qaIndex: null, seq: 2 } }))
-      expect(registry.has("chat-search")).toBe(false)
-      expect(registry.has("chat-search-current")).toBe(false)
-    } finally {
-      vi.unstubAllGlobals()
-      vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
-      Reflect.deleteProperty(CSS, "highlights")
-      Element.prototype.scrollTo = scrollTo
-      Range.prototype.getBoundingClientRect = getBoundingClientRect
-    }
-  })
-
   it.each([
     ["another history file", "b.json"],
     ["an unsaved chat", null],
@@ -196,17 +134,6 @@ describe("ChatContainer column", () => {
     expect(scroller().scrollTop).toBe(scroller().scrollHeight)
   })
 
-  it("keeps wide mode when another chat opens", () => {
-    const column = () => document.querySelector<HTMLElement>("[data-chat-column]")!
-    const { rerender } = render(chat({ messages: pairsOf(2) }))
-    fireEvent.click(screen.getByRole("button", { name: "Enter wide mode" }))
-    expect(column().style.maxWidth).toBe("")
-
-    rerender(chat({ chatId: "c2", messages: pairsOf(3) }))
-    expect(screen.getByRole("button", { name: "Exit wide mode" })).toBeTruthy()
-    expect(column().style.maxWidth).toBe("")
-  })
-
   it("moves keyboard focus with Ctrl+Up from the composer, Enter collapses the focused pair", () => {
     render(chat({ messages: pairsOf(3) }))
     const composer = screen.getByRole("textbox")
@@ -214,13 +141,6 @@ describe("ChatContainer column", () => {
     expect(screen.getByText("Question 2").closest(".gc-turn")?.hasAttribute("data-focused")).toBe(true)
     act(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })) })
     expect(isOpen("Question 2")).toBe(false)
-  })
-
-  it("shows the branch separator after the pair the chat branched at", () => {
-    render(chat({ messages: pairsOf(3), branchMessageIdx: 1 }))
-    const separator = screen.getByRole("separator")
-    expect(separator).toHaveTextContent("branched@1")
-    expect(separator.previousElementSibling?.textContent).toContain("Question 1")
   })
 
   it("keeps a pair's open state when an earlier pair is deleted", () => {

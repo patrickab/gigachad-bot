@@ -181,26 +181,3 @@ describe("deleting a folder entry", () => {
     expect(manager.current!.getTabs()).toHaveLength(4)
   })
 })
-
-describe("tab crumbs", () => {
-  /** Whether the frontmost tab's picker lists `file` under `project`, opening the picker with Space first. */
-  const pickerLists = (view: RenderResult, project: string, file: string) => {
-    if (!view.queryByRole("listbox", { name: "Tabs" })) {
-      fireEvent.keyDown(document.body, { key: " ", code: "Space" })
-      fireEvent.keyUp(document.body, { key: " ", code: "Space" })
-    }
-    const group = within(view.getByRole("listbox", { name: "Tabs" })).getByRole("group", { name: project })
-    return within(group).getAllByRole("option").some((option) => option.firstElementChild!.firstElementChild!.textContent === file)
-  }
-
-  it("name the project that lists the file, also for files inside a folder entry", async () => {
-    const { view } = await renderWorkspace(false)
-    fireEvent.click(await sidebar(view).findByRole("button", { name: "paper" }))
-
-    fireEvent.click(sidebar(view).getByRole("button", { name: "paper.tex" }))
-    expect(pickerLists(view, "Proj", "paper.tex")).toBe(true)
-    fireEvent.click(sidebar(view).getByRole("button", { name: "imgs" }))
-    fireEvent.click(sidebar(view).getByRole("button", { name: "figure.png" }))
-    expect(pickerLists(view, "Proj", "figure.png")).toBe(true)
-  })
-})

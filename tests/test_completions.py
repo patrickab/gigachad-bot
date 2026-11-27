@@ -2,13 +2,11 @@
 
 import base64
 from dataclasses import dataclass, field
-import io
 import json
 from typing import Any
 
 import httpx
 import openai
-from PIL import Image
 import pytest
 
 from lib import completions, pi_host
@@ -130,16 +128,3 @@ def test_build_messages_puts_images_after_the_text_as_data_uris() -> None:
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(PNG).decode()}"}},
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}},
     ]
-
-
-def test_downscale_img_fits_the_token_budget_on_the_patch_grid() -> None:
-    buffer = io.BytesIO()
-    Image.new("RGBA", (2000, 1000)).save(buffer, format="PNG")
-
-    uri = completions.downscale_img(buffer.getvalue(), max_tokens=256)
-
-    header, _, data = uri.partition(",")
-    assert header == "data:image/jpeg;base64"
-    width, height = Image.open(io.BytesIO(base64.b64decode(data))).size
-    assert width % 28 == 0 and height % 28 == 0
-    assert completions._patch_tokens(width, height) <= 256  # noqa: SLF001

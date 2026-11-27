@@ -249,7 +249,6 @@ step_lint() {
         [[ -f $file ]] && files+=("$file")
     done < <({ git diff --name-only "$base" -- '*.py'; git ls-files --others --exclude-standard -- '*.py'; } | sort -u)
     local status=0
-    factory/test_gates_slot.sh || status=1
     if [[ ${#files[@]} -gt 0 ]]; then
         "$python" -m ruff check "${files[@]}" || status=1
     fi

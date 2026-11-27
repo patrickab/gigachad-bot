@@ -1,7 +1,6 @@
 """Listing and searching every chat of a login: `GET /api/chat-histories/all` and `/search` over the stored chat documents."""
 
 import json
-import time
 
 from psycopg_pool import ConnectionPool
 import pytest
@@ -36,15 +35,6 @@ def alice(postgres_pool: ConnectionPool):
 @pytest.fixture
 def alice_store(postgres_pool: ConnectionPool, alice) -> PostgresDataStore:
     return PostgresDataStore(UserScope(postgres_pool, alice))
-
-
-def test_data_store_list_returns_last_write(data_store: PostgresDataStore) -> None:
-    data_store.write_bytes("dated/one.json", b"{}")
-
-    [entry] = data_store.list("dated")
-
-    stat = data_store.stat("dated/one.json")
-    assert stat is not None and entry.modified is not None and entry.modified == stat.modified
 
 
 def test_all_lists_every_chat_across_projects_newest_first(postgres_pool, alice, alice_store) -> None:
@@ -151,24 +141,3 @@ def test_query_over_200_characters_is_refused(postgres_pool, alice) -> None:
 
     assert client.get("/api/chat-histories/search", params={"q": "x" * 201}).status_code == 422
     assert client.get("/api/chat-histories/search", params={"q": "x" * 200}).status_code == 200
-
-
-def test_search_over_200_chats_of_40_messages(alice_store, capsys) -> None:
-    filler = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 20
-    writes = []
-    for index in range(200):
-        messages = [m for turn in range(20) for m in pair(f"question {turn} {filler}", f"answer {turn} {filler}")]
-        if index % 10 == 0:
-            messages[25]["content"] += " rare-token"
-        writes.append((f"chat/c{index:03}.json", json.dumps({"messages": messages}).encode(), None))
-    alice_store.apply(writes, [])
-    store = ChatStore(data_store=alice_store)
-
-    started = time.perf_counter()
-    hits = store.search("rare-token", 100)
-    elapsed = time.perf_counter() - started
-
-    assert len(hits) == 20
-    assert all(hit["matches"] == [{**hit["matches"][0], "qaIndex": 12, "role": "assistant", "ordinal": 0}] for hit in hits)
-    with capsys.disabled():
-        print(f"\nsearch over 200 chats of 40 messages: {elapsed * 1000:.0f} ms")

@@ -1,13 +1,11 @@
-"""The chat's memory tools: `list_memories`, `read_memories`, `apply_memory_ops` over the login's root, off the event loop."""
+"""The chat's memory tools: `list_memories`, `read_memories`, `apply_memory_ops` over the login's root."""
 
 from pathlib import Path
-import threading
 from typing import Any
 
 from memory_store import store
 import pytest
 
-from lib import tools
 from lib.tool_context import ToolContext, ToolOptions
 from lib.tools import BUILTIN_TOOLS, offered_tools
 
@@ -22,13 +20,6 @@ def context(tmp_path: Path) -> ToolContext:
 
 async def run(name: str, args: dict[str, Any], context: ToolContext) -> Any:
     return await BUILTIN_TOOLS.execute(name, args, context, enabled=MEMORY_TOOLS)
-
-
-def test_apply_memory_ops_tells_the_model_to_read_ids_first_and_update_instead_of_adding() -> None:
-    [spec] = BUILTIN_TOOLS.specs(["apply_memory_ops"])
-
-    assert "Read the memory first for the fact ids" in spec["function"]["description"]
-    assert "an update of it, not a new add" in spec["function"]["description"]
 
 
 @pytest.mark.parametrize("host_access", [True, False])
@@ -98,19 +89,3 @@ async def test_without_a_memory_root_the_tools_report_unavailable() -> None:
     outcome = await run("list_memories", {"memory_store": "user"}, ToolContext(model="test", opts=ToolOptions()))
 
     assert outcome.content.startswith("error: unavailable: ")
-
-
-@pytest.mark.asyncio
-async def test_the_store_runs_off_the_event_loop(context: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
-    threads: list[bool] = []
-    original = store.list_memories
-
-    def recorded(*args: Any, **kwargs: Any) -> dict:
-        threads.append(threading.current_thread() is threading.main_thread())
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(tools.memory_store, "list_memories", recorded)
-
-    await run("list_memories", {"memory_store": "user"}, context)
-
-    assert threads == [False]

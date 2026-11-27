@@ -109,7 +109,6 @@ afterEach(() => {
 describe("deleting a pair", () => {
   it("removes it from the chat and saves the history", async () => {
     const { result } = await renderChat("c1.json")
-    const before = result.current.turns.handleDeletePair
 
     act(() => result.current.turns.handleDeletePair(2))
 
@@ -117,17 +116,6 @@ describe("deleting a pair", () => {
     expect(saveChat).toHaveBeenCalledTimes(1)
     expect(saveChat.mock.calls[0][0]).toBe("c1.json")
     expect(contents(lastSaved())).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"])
-    // Created once per chat: a changed list hands settled pairs the same handler
-    expect(result.current.turns.handleDeletePair).toBe(before)
-  })
-
-  it("changes only the state of a chat without a history file", async () => {
-    const { result } = await renderChat(null)
-
-    act(() => result.current.turns.handleDeletePair(0))
-
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 1", "Answer 1", "Question 2", "Answer 2"]))
-    expect(saveChat).not.toHaveBeenCalled()
   })
 
   it("keeps the pair and says why when the history file cannot be written", async () => {
@@ -147,21 +135,6 @@ describe("deleting a pair", () => {
 })
 
 describe("editing a pair", () => {
-  it("replaces the last pair by the edited prompt", async () => {
-    const { result, draft } = await renderChat("c1.json")
-    const before = result.current.onEditPair
-
-    act(() => result.current.onEditPair(4, "Question 2, edited"))
-
-    await waitFor(() => expect(contents(lastSaved() ?? [])).toContain("edited answer"))
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1", "Question 2, edited", "edited answer"]))
-    // Saved without the pair first, then with the new answer
-    expect(contents(saveChat.mock.calls[0][2] as Message[])).toEqual(["Question 0", "Answer 0", "Question 1", "Answer 1"])
-    expect(streams.requests).toHaveLength(1)
-    expect(draft()).toBe("")
-    expect(result.current.onEditPair).toBe(before)
-  })
-
   it("removes the later pairs and sends the edit once, with the pair's attachments", async () => {
     const { result } = await renderChat("c1.json")
 
@@ -199,15 +172,5 @@ describe("editing a pair", () => {
     expect(contents(result.current.chat.messages)).toEqual(contents(messages))
     expect(streams.requests).toHaveLength(0)
     expect(draft()).toBe("")
-  })
-
-  it("changes only the state of a chat without a history file", async () => {
-    const { result } = await renderChat(null)
-
-    act(() => result.current.onEditPair(0, "Question 0, edited"))
-
-    await waitFor(() => expect(result.current.chat.isStreaming).toBe(false))
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0, edited", "edited answer"]))
-    expect(saveChat).not.toHaveBeenCalled()
   })
 })

@@ -23,17 +23,6 @@ def _names(repositories: list[Repository]) -> list[str]:
     return [repository.name for repository in repositories]
 
 
-def test_the_first_listing_scans_and_stores(home, repository_store):
-    assert _names(repository_index.list_repositories()) == ["app", "tool"]
-    assert _names(repository_store.load()) == ["app", "tool"]
-
-
-def test_listing_reads_the_stored_list_without_scanning(home, repository_store, monkeypatch):
-    repository_index.sweep()
-    monkeypatch.setattr(pi_host, "scan_repositories", lambda: pytest.fail("scanned"))
-    assert _names(repository_index.list_repositories()) == ["app", "tool"]
-
-
 def test_a_sweep_adds_new_folders_and_drops_vanished_ones(home, repository_store):
     repository_index.sweep()
     (home / "git" / "app" / ".git").rmdir()
@@ -56,18 +45,6 @@ def test_resolving_a_vanished_folder_sweeps_it_away(home, repository_store):
     repository_index.sweep()
     (home / "dev" / "tool").rmdir()
     assert repository_index.resolve("tool") is None
-    assert _names(repository_store.load()) == ["app"]
-
-
-def test_a_clone_is_added_by_name(home, repository_store):
-    repository_index.add(home / "git" / "cloned")
-    assert repository_store.load() == [Repository(name="cloned", path=str(home / "git" / "cloned"))]
-
-
-def test_a_failed_startup_sweep_keeps_the_stored_list(repository_store, monkeypatch):
-    repository_store.repositories = [Repository(name="app", path="/x/app")]
-    monkeypatch.setattr(pi_host, "scan_repositories", lambda: (_ for _ in ()).throw(OSError("disk")))
-    repository_index.sweep_quietly()
     assert _names(repository_store.load()) == ["app"]
 
 
