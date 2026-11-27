@@ -284,6 +284,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       <DrawingAttach
         mode={drawing}
         chatId={chatId}
+        slug={slug}
         onClose={() => setDrawing(null)}
         onAttach={drafts.add}
         onUpload={(file) => takeFiles([file])}

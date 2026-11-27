@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { File as FileIcon } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
+import { uploadFile } from "@/lib/backend/api"
 import { ChatInput, type ChatContext } from "../ChatInput"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
@@ -10,6 +11,11 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useSettings: () => ({ ocrModel: "" }),
   useNeovimSetting: () => ({ available: false, enabled: false, setPreferred: () => {} }),
 }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/backend/api")>(),
+  uploadFile: vi.fn(async () => ({ name: "drawing.jpg", mime: "image/jpeg", url: "/drawing.jpg" })),
+}))
+vi.mock("@/lib/canvasExport", () => ({ renderStrokesToJpeg: async () => new Blob(["jpg"], { type: "image/jpeg" }) }))
 vi.mock("@/contexts/ProjectContext", () => ({
   useDisplayName: () => (slug: string | null, path: string) => slug === "proj" && path === "project/proj/document/plan.md" ? "Roadmap.md" : undefined,
 }))
@@ -171,5 +177,28 @@ describe("ChatInput draft", () => {
 
     render(<ChatInput chatId="c4" draftKey="chat:a" onSend={onSend} />)
     expect(draftOf().value).toBe("")
+  })
+})
+
+describe("ChatInput drawing", () => {
+  // jsdom has no PointerEvent: without it the canvas never sees which button or pointer drew
+  beforeEach(() => vi.stubGlobal("PointerEvent", class extends MouseEvent {
+    pointerType: string
+    constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerType = init.pointerType ?? "" }
+  }))
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  it("uploads a drawing of a project chat under the chat's project", async () => {
+    render(<ChatInput chatId="c1" slug="physics" onSend={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }))
+    fireEvent.click(screen.getByText("Drawing"))
+    const canvas = document.querySelector("svg.w-full") as SVGSVGElement
+    canvas.setPointerCapture = () => {}
+    fireEvent.pointerDown(canvas, { button: 0, pointerType: "mouse", clientX: 1, clientY: 1 })
+    fireEvent.pointerMove(canvas, { pointerType: "mouse", clientX: 5, clientY: 5 })
+    fireEvent.pointerUp(canvas, { pointerType: "mouse" })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Confirm/ })) })
+
+    expect(uploadFile).toHaveBeenCalledWith("c1", expect.anything(), "physics")
   })
 })

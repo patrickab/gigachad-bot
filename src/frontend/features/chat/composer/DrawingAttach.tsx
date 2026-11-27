@@ -17,9 +17,10 @@ export type DrawingMode = "attach" | "ocr"
  * - "attach" hands the uploaded drawing to `onAttach`
  * - "ocr" opens the drawing in the OCR panel, whose confirmed output goes to `onUpload` as a markdown file
  */
-export function DrawingAttach({ mode, chatId, onClose, onAttach, onUpload }: {
+export function DrawingAttach({ mode, chatId, slug, onClose, onAttach, onUpload }: {
   mode: DrawingMode | null
   chatId: string
+  slug: string | null
   onClose: () => void
   onAttach: (attachment: Attachment) => void
   onUpload: (file: File) => void
@@ -31,6 +32,7 @@ export function DrawingAttach({ mode, chatId, onClose, onAttach, onUpload }: {
       {mode && (
         <DrawingCanvas
           chatId={chatId}
+          slug={slug}
           onConfirm={(att) => {
             onClose()
 
