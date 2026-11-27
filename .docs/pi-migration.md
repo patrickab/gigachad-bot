@@ -95,7 +95,7 @@ Rationale for D1, D2, D6, D7 and the choice of Pi is in the ADR.
 
 ## Gateway
 
-- **Credentials:** `ModelRuntime.create()` from `@earendil-works/pi-coding-agent`, the same version as the pinned Pi: Pi's registry, `auth.json` locking and token refresh, shared with running Pi processes. `pi-ai` alone has no file-backed store. The same runtime serves `/usage`
+- **Credentials:** `ModelRuntime.create()` from `@earendil-works/pi-coding-agent`, the same version as the installed Pi (`run-pi-host.sh`): Pi's registry, `auth.json` locking and token refresh, shared with running Pi processes. `pi-ai` alone has no file-backed store. The same runtime serves `/usage`
 - **Tools:** OpenAI JSON Schema passes through unchanged, no TypeBox. `tool_choice` supports only `auto` and `none`, `required` or a named function degrade to `auto`. `temperature` is dropped while thinking is on
 - **Thinking:** `reasoning_effort` is clamped per model. `/v1/models` lists each model's `thinking_levels`. Signed `thinking_blocks` go out next to `reasoning_content` (a stream chunk with blocks only also carries `reasoning_content: ""`, LiteLLM drops it otherwise). `src/lib/toolcalling.py` must collect `delta.thinking_blocks` and send them back, else turns after a tool call run without thinking
 - **Errors:** upstream status is parsed from `pi-ai`'s error text and kept (400, 404, 429). The first stream event is awaited so an early error gets a real status. `Retry-After` is lost, `pi-ai` does not retry
@@ -177,7 +177,7 @@ Reference implementation for M2, M18, M22-M25, notifications and streaming: `~/g
 - Subscription chat completions depend on the `omp` binary and `~/.omp/agent/agent.db` (Gateway, "Subscription identity").
 - Restarting pi-host ends running turns (ADR 0003).
 - Two tabs steering one session may need a controlling-client lease (M21).
-- Pi is pinned, upgrades are deliberate (ADR 0003); M13 restarts pi-host when `pi --version` changes.
+- Pi is not pinned: `run-pi-host.sh` installs the Pi SDK of the version `pi --version` names at every start; M13 restarts pi-host when `pi --version` changes.
 - Old OMP sessions stay in place, reachable through the `omp` CLI, nothing is converted (ADR 0003).
 
 ## Future

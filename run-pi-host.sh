@@ -43,6 +43,16 @@ if [[ ! -d "$pi_host_dir/node_modules" || "$pi_host_dir/package.json" -nt "$pi_h
     touch "$pi_host_dir/node_modules"
 fi
 
+# The Pi SDK follows the installed Pi: whatever `pi` runs is the version pi-host is built against. Not saved: the
+# manifest names no version. A failed fetch (offline) leaves the SDK that is installed.
+pi_version="$("${PI_HOST_PI_BIN:-pi}" --version 2>/dev/null | awk 'END { print $NF }')" || pi_version=''
+sdk_version="$(sed -n 's/^[[:space:]]*"version": "\(.*\)",\{0,1\}$/\1/p' "$pi_host_dir/node_modules/@earendil-works/pi-coding-agent/package.json" | head -n 1)"
+if [[ -n "$pi_version" && "$pi_version" != "$sdk_version" ]]; then
+    printf 'Pi is %s, the Pi SDK %s: installing the SDK of %s\n' "$pi_version" "${sdk_version:-missing}" "$pi_version"
+    (cd -- "$pi_host_dir" && bun add --no-save --exact "@earendil-works/pi-coding-agent@$pi_version" "@earendil-works/pi-ai@$pi_version") \
+        || printf 'The Pi SDK of %s could not be installed, pi-host runs with %s\n' "$pi_version" "${sdk_version:-none}" >&2
+fi
+
 # True once `bind` answers or the child has exited; an exit sets `child_exited`.
 pi_host_settled() {
     port_open "$bind" && return 0
