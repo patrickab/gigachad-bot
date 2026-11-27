@@ -14,6 +14,7 @@ from lib.document_service import DocumentScope
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_store import ProjectStore
 from lib.references import References, Released, annotation_canvas
+from lib.sandbox_store import RunRecord, SandboxStore
 from lib.storage_namespace import pdf_annotations
 
 PDF = b"%PDF-1.7 paper"
@@ -261,6 +262,15 @@ def test_dry_run_lists_existing_orphans_and_deletes_nothing(world: World) -> Non
     assert world.references.size("PDFs/orphan.pdf") == len(b"%PDF orphan")
     assert world.library_left("orphan.pdf") and world.mineru_kept("orphan.pdf") and world.has(orphan_annotation)
 
+
+def test_dry_run_lists_sandbox_state_of_unstored_chats(world: World) -> None:
+    world.chat("one.json", "c1", [])
+    sandbox = SandboxStore(world.docs)
+    for chat_id in ("c1", "c2"):
+        run = RunRecord(tool_call_id="t1", status="completed", started_at=0.0)
+        sandbox.checkpoint(chat_id, manifest=None, runs={"t1": run}, latest_run_id=None)
+
+    assert world.references.orphan_sandbox_chats() == ["c2"]
 
 def test_mineru_output_is_never_deleted_even_when_nothing_references_its_pdf(world: World) -> None:
     world.library_pdf("paper.pdf")

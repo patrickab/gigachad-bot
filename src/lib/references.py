@@ -15,16 +15,18 @@ inside it. An annotation canvas stays while any stored or referenced host PDF ha
 recorded in its meta `hosts` (opened with it from the file tree) still does. Host files are only hashed, never written.
 
 `python -m lib.references --dry-run` lists, per user, what earlier deletes left behind.
+The dry run also lists sandbox state of unstored chats.
 """
 
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 from dataclasses import dataclass, field
 import hashlib
 import logging
-import shutil
 from pathlib import Path, PurePosixPath
+import shutil
 from typing import TYPE_CHECKING
 
 from psycopg_pool import ConnectionPool
@@ -37,6 +39,7 @@ from lib.data_store import DataStore, InvalidStorageKey, Meta, validate_key
 from lib.db_schema import database_url
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
+from lib.sandbox_store import SandboxStore
 from lib.storage_namespace import (
     ATTACHMENT,
     CHAT,
@@ -45,9 +48,12 @@ from lib.storage_namespace import (
     PDFS,
     PROJECT,
     PROJECT_JSON,
+    SANDBOX,
     chat_upload_prefix,
     library_pdf,
+    parse_sandbox_key,
     pdf_annotations,
+    sandbox_asset,
 )
 from lib.workbench import KINDS
 from lib.workbench.links import SessionLinks
@@ -233,7 +239,10 @@ class References:
         return sorted(gone)
 
     def _drop_workbench_folders(self, refs: Iterable[str], gone: set[str]) -> None:
-        """Delete the workbench document folder of each released host path, with its chat link, once no project references anything inside it."""
+        """Delete the workbench document folder of each released host path, with its chat link.
+
+        A folder stays while a project references anything inside it.
+        """
         folders = {folder for ref in refs if _is_host(ref) and (folder := _workbench_folder(Path(ref))) is not None}
         if not folders:
             return
@@ -244,10 +253,8 @@ class References:
                 folder.unlink(missing_ok=True)
             else:
                 shutil.rmtree(folder, ignore_errors=True)
-            try:
+            with suppress(OSError):  # the slug folder still holds other documents
                 folder.parent.rmdir()
-            except OSError:
-                pass  # the slug folder still holds other documents
             gone.add(str(folder))
         if dropped:
             SessionLinks(self._docs).forget_inside(dropped)
@@ -265,6 +272,21 @@ class References:
         """Chat uploads whose chat is not stored, such as uploads of chats never saved."""
         chat_ids = {meta["chat_id"] for meta in self._chats.tree_metas().values() if meta}
         return [asset for asset in self._assets.list(ATTACHMENT) if _upload_chat_id(asset.logical_path) not in chat_ids]
+
+    def orphan_sandbox_chats(self) -> list[str]:
+        """Chats with sandbox records but no stored chat, such as chats never saved."""
+        chat_ids = {meta["chat_id"] for meta in self._chats.tree_metas().values() if meta}
+        entries = self._docs.list(SANDBOX, recursive=True)
+        sandbox_ids = {key.chat_id for entry in entries if not entry.is_dir and (key := parse_sandbox_key(entry.key))}
+        return sorted(sandbox_ids - chat_ids)
+
+    def sandbox_size(self, chat_id: str) -> int:
+        """Stored bytes of the sandbox records of *chat_id* and of the assets they reference."""
+        entries = [entry for entry in self._docs.list(f"{SANDBOX}/{chat_id}", recursive=True) if not entry.is_dir]
+        scopes = {key.scope for entry in entries if (key := parse_sandbox_key(entry.key))}
+        shas = {sha for scope in scopes for sha in SandboxStore(self._docs, scope=scope).referenced_chat_shas(chat_id)}
+        assets = [asset for sha in shas if (asset := self._assets.stat(sandbox_asset(sha)))]
+        return sum(entry.size or 0 for entry in entries) + sum(asset.size_bytes for asset in assets)
 
     def size(self, key: str) -> int:
         """Stored bytes of *key*, 0 when it is gone."""
@@ -431,6 +453,7 @@ def main() -> None:
             references = References(PostgresDataStore(scope), AssetStore(scope))
             rows = [(key, references.size(key)) for key in references.orphans()]
             rows += [(asset.logical_path, asset.size_bytes) for asset in references.orphan_uploads()]
+            rows += [(f"{SANDBOX}/{chat_id}", references.sandbox_size(chat_id)) for chat_id in references.orphan_sandbox_chats()]
             print(f"{login}: {len(rows)} unused, {_megabytes(sum(size for _, size in rows))}")
             for key, size in rows:
                 print(f"  {_megabytes(size):>12}  {key}")
