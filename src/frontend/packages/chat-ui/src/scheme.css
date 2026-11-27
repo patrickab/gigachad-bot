@@ -1,22 +1,12 @@
 /* Fallback copy of the oh-lucy-evening scheme (Neovim/Pi), for installs without ~/.os. Edited by hand, no generator.
    With ~/.config/theme/palette.json present (deployed by ~/.os chezmoi), the backend's `/api/theme.css` (`lib/os_theme.py`) overrides these values live.
-   --md-*  markdown prose roles (markdown.css), same roles as Neovim's @markup.*
+   --md-*  the markdown prose roles markdown.css reads, same roles as Neovim's @markup.*
    --nb-syn-*  code roles (notebook editor), same roles as Neovim's syntax groups
    Dark is `html:root`, light is `html.light:root`. */
 
 html:root {
-  --md-heading1: #7ec49d;
-  --md-heading2: #7ec49d;
-  --md-heading3: #7ec49d;
-  --md-heading4: #7ec49d;
-  --md-heading5: #7ec49d;
-  --md-heading6: #7ec49d;
   --md-link: #8bb8d0;
-  --md-link-label: #8bb8d0;
   --md-link-url: #686069;
-  --md-list: #bda9d4;
-  --md-list-text: #ded7d0;
-  --md-math: #b898dd;
   --md-quote: #bbbbbb;
   --md-raw: #8bb8d0;
   --md-strong: #ded7d0;
@@ -33,18 +23,8 @@ html:root {
 }
 
 html.light:root {
-  --md-heading1: #00814f;
-  --md-heading2: #00814f;
-  --md-heading3: #00814f;
-  --md-heading4: #00814f;
-  --md-heading5: #00814f;
-  --md-heading6: #00814f;
   --md-link: #0573aa;
-  --md-link-label: #0573aa;
   --md-link-url: #8c827b;
-  --md-list: #805ab8;
-  --md-list-text: #2a2520;
-  --md-math: #8635cc;
   --md-quote: #7a7068;
   --md-raw: #0573aa;
   --md-strong: #2a2520;

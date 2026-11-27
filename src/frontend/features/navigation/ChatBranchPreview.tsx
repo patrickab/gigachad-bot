@@ -137,11 +137,10 @@ function BranchRow({ node }: { node: Node }) {
 
 /** Show the active chat's branch genealogy before its standard tree row. */
 export function ChatBranchPreview({ file }: { file: string }) {
-  const { branchMeta, chatIdMap, activeFile, activeQaIndex } = useBranches()
+  const { branchMeta, chatIdMap, activeFile } = useBranches()
   const metadata = branchMeta[file]
   const hasChildren = (metadata?.children?.length ?? 0) > 0
-  const isActive = activeFile === file && activeQaIndex == null
-  const isRelevant = isActive || activeFile === file || isAncestorOf(activeFile, file, branchMeta, chatIdMap)
+  const isRelevant = activeFile === file || isAncestorOf(activeFile, file, branchMeta, chatIdMap)
   const tree = useMemo(() => hasChildren && isRelevant ? buildTree(file, branchMeta, chatIdMap) : null,
     [hasChildren, isRelevant, file, branchMeta, chatIdMap])
   return tree ? <BranchTree root={tree} /> : null

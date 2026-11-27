@@ -35,7 +35,6 @@ function surfaceOf(item: WorkspaceItem): AppSurface {
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
 }
 
-/** A new Pi session item in the checkout at `directory`: its repo is the folder name, as pi-host knows checkouts directly under `~/git`. */
 /** A new Pi session in `directory`: any folder, its absolute path is the session's `repo`. */
 export function newPiItem(directory: string, projectSlug: string | null): WorkspaceItem {
   const repo = directory.replace(/\/+$/, "") || "/"
@@ -44,7 +43,6 @@ export function newPiItem(directory: string, projectSlug: string | null): Worksp
 
 export interface Tab {
   id: string
-  name: string | null
   chatId: string
   historyFile: string | null
   title: string | null

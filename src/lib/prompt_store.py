@@ -6,17 +6,20 @@ includes from ``templates/prompts/_blocks/*.md``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from functools import cached_property
 import logging
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
 
 import yaml
 
 import config
 from lib.data_store import DataStore, StorageNotFoundError, overwrite_text, read_text_or
 from lib.storage_namespace import PROMPT
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +39,7 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
         meta = {}
     if not isinstance(meta, dict):
         meta = {}
-    return meta, raw[m.end():]
+    return meta, raw[m.end() :]
 
 
 def seed_prompts(store: DataStore) -> None:
@@ -59,7 +62,7 @@ def seed_prompts(store: DataStore) -> None:
 
 
 class PromptStore:
-    """Reads, resolves, and manages stored prompt definitions. The library is read on first use and after every write."""
+    """Reads, resolves, and manages stored prompt definitions. The library is read on first use."""
 
     def __init__(self, data_store: DataStore) -> None:
         self._store = data_store
@@ -67,11 +70,6 @@ class PromptStore:
     @staticmethod
     def _key(slug: str) -> str:
         return f"{PROMPT}/{slug}.md"
-
-    def reload(self) -> None:
-        """Drop the cached library so the next resolved view reads it again."""
-        for name in ("_order", "_block_cache", "_prompt_cache"):
-            self.__dict__.pop(name, None)
 
     @cached_property
     def _order(self) -> list[str]:
@@ -115,6 +113,7 @@ class PromptStore:
                 return self._block_cache[name]
             log.warning("prompt include {{%s}} not found in _blocks/", name)
             return m.group(0)
+
         return _INCLUDE_RE.sub(_repl, body)
 
     def prompt_map(self) -> dict[str, str]:
@@ -130,7 +129,6 @@ class PromptStore:
     def save(self, slug: str, content: str) -> str:
         """Write a prompt file. Returns the resolved name."""
         overwrite_text(self._store, self._key(slug), content)
-        self.reload()
         meta, _ = _parse_frontmatter(content)
         return str(meta.get("name", slug))
 
@@ -141,14 +139,11 @@ class PromptStore:
         self._store.delete(key)
         if slug in self._order:
             self.set_order([s for s in self._order if s != slug])
-        else:
-            self.reload()
         return True
 
     def set_order(self, slugs: list[str]) -> None:
         """Persist the prompt display order. Slugs not listed fall to the end, alphabetical."""
         overwrite_text(self._store, ORDER_KEY, "\n".join(slugs) + "\n")
-        self.reload()
 
     def list_prompts(self) -> list[dict[str, object]]:
         """Return metadata for all prompts (for the UI)."""

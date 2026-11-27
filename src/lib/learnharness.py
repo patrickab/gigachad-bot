@@ -34,14 +34,9 @@ DEFAULT_URL = "http://127.0.0.1:30181"
 client = UpstreamClient(env="GIGACHAD_LEARNHARNESS_URL", default=DEFAULT_URL, label="LearnHarness")
 
 
-def learnharness_url() -> str:
-    """Base URL the backend reaches LearnHarness at."""
-    return upstream_url("GIGACHAD_LEARNHARNESS_URL", DEFAULT_URL)
-
-
 def learnharness_frame_url() -> str:
     """Base URL the browser frames LearnHarness from, `GIGACHAD_LEARNHARNESS_FRAME_URL` when it sits behind the Tailnet gate."""
-    return upstream_url("GIGACHAD_LEARNHARNESS_FRAME_URL", learnharness_url())
+    return upstream_url("GIGACHAD_LEARNHARNESS_FRAME_URL", client.url)
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────

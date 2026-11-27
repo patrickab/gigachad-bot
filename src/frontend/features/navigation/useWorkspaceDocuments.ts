@@ -61,7 +61,6 @@ export function useWorkspaceDocuments({
   const isActive = useTabActive()
   const documents = useResourceFamily("Sidebar project documents", projectDocumentsResource, projects.map((project) => project.slug))
   const notes = useResource("Sidebar notes", notesResource) ?? NO_NOTES
-  /** Project whose create-document panel is open. */
   const [fileError, setFileError] = useState("")
 
   // The LaTeX templates come from the template sets on the server, none when they fail to load. The tab's next activation tries again.

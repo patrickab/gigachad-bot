@@ -1,7 +1,7 @@
 /**
  * UI extension points of the Pi transcript (F2, F2b): native React UI for a tool or a `custom` message type.
  *
- * - Tool renderers, placements and display resolvers live in the registry the chat shares (`features/conversation/tools/renderers.ts`), re-exported here
+ * - Tool renderers and placements live in the registry the chat shares (`features/conversation/tools/renderers.ts`), re-exported here
  * - A message renderer turns a `custom` message of its `customType` into a card; renderers of one type chain newest first, `next()` the one registered before
  *
  * After pi-web.dev's `resolve(toolName, next)` chain.
@@ -10,17 +10,7 @@ import type { ReactNode } from "react"
 import { register } from "@/features/conversation/tools/renderers"
 import type { CustomMessage } from "./types"
 
-export {
-  registerToolDisplay,
-  registerToolRenderer,
-  renderToolCall,
-  toolDisplayOf,
-  toolPlacement,
-  type ToolDisplay,
-  type ToolDisplayResolver,
-  type ToolPlacement,
-  type ToolRenderer,
-} from "@/features/conversation/tools/renderers"
+export { registerToolRenderer, renderToolCall, toolPlacement } from "@/features/conversation/tools/renderers"
 
 export type MessageRenderer = (message: CustomMessage, next: () => ReactNode) => ReactNode
 

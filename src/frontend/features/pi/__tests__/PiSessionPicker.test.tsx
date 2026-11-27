@@ -42,7 +42,7 @@ function piSession(sessionId: string, ageMs: number, extra: Partial<PiSessionInf
 
 const live = { running: true, waiting: false, attached: 1 }
 
-const TAB: Tab = { id: "tab", name: null, chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
+const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
 
 function renderPicker(onOpenItem = vi.fn()) {
   render(<TabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>

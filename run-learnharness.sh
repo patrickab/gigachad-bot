@@ -180,10 +180,6 @@ upstream_markers=(
 for event in $(grep -o 'lh:kbd-[a-z-]*' "$overlay/embed/freeze.ts" | sort -u); do
     upstream_markers+=("components/model-picker.tsx|$event")
 done
-# The freeze's keyboard events, read from the freeze itself.
-for event in $(grep -o 'lh:kbd-[a-z-]*' "$overlay/embed/freeze.ts" | sort -u); do
-    upstream_markers+=("components/model-picker.tsx|$event")
-done
 # Prints the first file|marker the checkout at $1 lacks, fails when it has them all.
 lacking_marker() {
     local entry
@@ -412,7 +408,7 @@ prepare() {
     build_inputs="$(
         {
             printf '%s\n' "$target" "$chat_ui_digest" "$frame_ancestors"
-            cd -- "$overlay" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
+            printf '%s\n' "$overlay_digest"
         } | sha256sum | cut -d' ' -f1
     )"
     if [[ ! -f "$build_stamp" || "$(<"$build_stamp")" != "$build_inputs" ]] \

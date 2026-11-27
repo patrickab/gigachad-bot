@@ -1,8 +1,7 @@
-// Planners that rename or move an element, rewriting every reference to it.
+// Planner that moves an element, rewriting every reference to it.
 import { AstUtils, type AstNode, type CstNode } from 'langium'
 import { isWithin, nameOf, parentOf } from '../fqn.ts'
-import { cst, propertyNode, type PlanContext } from './context.ts'
-import { ID_PATTERN } from './ids.ts'
+import { cst, type PlanContext } from './context.ts'
 import { OperationError, type Op, type Plan } from './operation.ts'
 import { applyEdits, indentAt, wholeLines, type TextEdit } from './text.ts'
 
@@ -17,21 +16,6 @@ function* references(c: PlanContext): Generator<{ holder: AstNode, cst: CstNode,
       }
     }
   }
-}
-
-export async function rename(c: PlanContext, op: Op<'rename'>): Promise<Plan> {
-  if (!ID_PATTERN.test(op.id)) throw new OperationError('An id may contain only letters, digits, and underscores, and must not start with a digit')
-  const element = c.element(op.element)
-  const parent = parentOf(op.element)
-  if (op.id === nameOf(op.element)) return { edits: [] }
-  if ((await c.childNames(parent)).has(op.id)) throw new OperationError(`An element named ${op.id} already exists there`)
-  const name = propertyNode(element, 'name')
-  if (!name) throw new OperationError('Unexpected element shape in source')
-  const edits = [c.replace(name, c.ws.documentPath(element), op.id)]
-  for (const reference of references(c)) {
-    if (reference.target === op.element) edits.push(c.replace(reference.cst, reference.file, op.id))
-  }
-  return { edits, renames: { [op.element]: parent ? `${parent}.${op.id}` : op.id } }
 }
 
 /** Moves an element's text under `parent`, rewriting qualified references into it as absolute FQNs. */

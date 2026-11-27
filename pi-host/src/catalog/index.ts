@@ -6,7 +6,7 @@
  *   `profileOf` and `markProfile` for the supervisor
  */
 import { isAbsolute, resolve } from "node:path";
-import { PROFILES, type Host, type Profile, type SessionMatch } from "../host/index.ts";
+import type { Host, SessionMatch } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
 import { rankFiles } from "./files.ts";
@@ -65,17 +65,15 @@ function limitParam(url: URL, fallback: number, max: number): number {
 }
 
 /**
- * `GET /sessions?cwd=&archived=0|1&profile=`, every cwd's sessions without `cwd`, every profile's without `profile`.
+ * `GET /sessions?cwd=&archived=0|1`, every cwd's sessions without `cwd`.
  * Never a factory-root session.
  */
 async function handleList(url: URL, live: LiveSessions, host: Host): Promise<Response> {
   const rawCwd = url.searchParams.get("cwd");
   const cwd = rawCwd === null ? null : await validCwd(host, rawCwd);
   if (cwd === undefined) return fail(400, "invalid_cwd");
-  const profile = url.searchParams.get("profile") ?? undefined;
-  if (profile !== undefined && !PROFILES.includes(profile as Profile)) return fail(400, "invalid_profile");
   const archived = url.searchParams.get("archived") === "1";
-  return Response.json({ sessions: await listSessions(host, cwd, archived, live, profile as Profile | undefined) });
+  return Response.json({ sessions: await listSessions(host, cwd, archived, live) });
 }
 
 /**

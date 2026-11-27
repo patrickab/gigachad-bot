@@ -2,12 +2,7 @@
 
 import { useSyncExternalStore } from "react"
 import { STORAGE_KEY_GLASS } from "@/lib/backend/config"
-
-function subscribe(onChange: () => void): () => void {
-  const observer = new MutationObserver(onChange)
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-  return () => observer.disconnect()
-}
+import { subscribeRootClass } from "@/hooks/useThemeName"
 
 const isGlass = () => document.documentElement.classList.contains("glass")
 
@@ -19,5 +14,5 @@ export function setGlassMode(on: boolean): void {
 
 /** Whether glass mode is on, read from the `<html>` class, which the layout's startup script sets before hydration. */
 export function useGlassMode(): boolean {
-  return useSyncExternalStore(subscribe, isGlass, () => false)
+  return useSyncExternalStore(subscribeRootClass, isGlass, () => false)
 }

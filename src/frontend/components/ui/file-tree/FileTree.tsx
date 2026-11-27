@@ -61,8 +61,6 @@ export interface FileTreeItem<T = unknown> {
   icon?: ElementType
   /** A folder shown as a chevron and its child count in the disclosure column, `label` only its accessible name, e.g. a row hiding rarely used entries. */
   chevronOnly?: boolean
-  /** Space below the row and its contents, separating it from the next sibling. */
-  gapAfter?: boolean
   /** A section's live mark on its strip icon, e.g. the most pressing state of its sessions. */
   signal?: ReactNode
   /** Right-aligned row end, e.g. line change counts. The label truncates first. */
@@ -106,10 +104,8 @@ interface FileTreeProps<T> {
   headerActions?: ReactNode
   renderBeforeItem?: (item: FileTreeItem<T>) => ReactNode
   onMoveToRoot?: (id: string) => Promise<void>
-  /** Makes the section label a button named `label`, e.g. to open the section's settings. `expanded` makes it a disclosure toggle, `false` hides the items. */
-  labelAction?: { label: string; onClick: () => void; expanded?: boolean }
-  /** Always-visible content right after the label, e.g. a count and an action. */
-  labelSuffix?: ReactNode
+  /** Makes the section label a button named `label`, e.g. to open the section's settings. */
+  labelAction?: { label: string; onClick: () => void }
 }
 
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
@@ -173,7 +169,7 @@ function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchContro
 }
 
 /** Render every hierarchy level with the same indentation, disclosure, selection and action rules. */
-export function FileTree<T>({ items, controller, label, loading, create, headerActions, renderBeforeItem, onMoveToRoot, labelAction, labelSuffix }: FileTreeProps<T>) {
+export function FileTree<T>({ items, controller, label, loading, create, headerActions, renderBeforeItem, onMoveToRoot, labelAction }: FileTreeProps<T>) {
   const [creation, setCreation] = useState<{
     parentId: string | null
     action: Extract<FileTreeCreateAction, { onSubmit: unknown }>
@@ -268,7 +264,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       ? <item.icon className={cn("h-3 w-3 shrink-0 transition-colors", expanded ? "text-ink" : "text-ink-faint")} />
       : <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
     const { inline, menu } = splitActions(item)
-    return <div key={item.id} className={cn(item.gapAfter && "mb-2")}>
+    return <div key={item.id}>
       {!branch && renderBeforeItem && <div style={{ paddingLeft: paddingLeft + 20 }}>
         {renderBeforeItem(item)}
       </div>}
@@ -435,14 +431,12 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     </div>
   }
 
-  const collapsed = labelAction?.expanded === false
   return <div aria-label={label} data-file-tree>
-    <div className={cn("group/row flex h-7 items-center justify-between px-2", !collapsed && "mb-1")}>
+    <div className="group/row flex h-7 items-center justify-between px-2 mb-1">
       <div className="flex items-center gap-1.5">
         {labelAction
-          ? <button type="button" aria-label={labelAction.label} aria-expanded={labelAction.expanded} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
+          ? <button type="button" aria-label={labelAction.label} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
           : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
-        {labelSuffix}
       </div>
       <div className="flex items-center gap-0.5">
         {headerActions}
@@ -455,7 +449,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     </div>
     {creation?.parentId === null && <InlineCreateForm action={creation.action} depth={0}
       onDone={() => setCreation((current) => current === creation ? null : current)} onCancel={() => setCreation(null)} />}
-    {collapsed ? null : loading ? <div className="space-y-2 px-2 py-1"><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
+    {loading ? <div className="space-y-2 px-2 py-1"><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
       : <div className="min-h-2"
         onDragOver={(event) => {
           if (event.target !== event.currentTarget || !onMoveToRoot || !carriesKind(event.dataTransfer.types)) return

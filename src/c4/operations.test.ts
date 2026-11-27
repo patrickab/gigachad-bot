@@ -115,23 +115,6 @@ describe('applyOperations', () => {
     assert.doesNotMatch(result.sources['model.c4'], /bank/)
   })
 
-  it('renames an element, its references, and its saved positions', async () => {
-    const pinned = await apply([{ op: 'layout', view: 'shopView', nodes: { 'shop.api': { x: 1, y: 2 } }, edges: { 'shop.api->bank': { bend: 12 } } }])
-    const result = await apply([{ op: 'rename', element: 'shop', id: 'store' }], readPins(pinned.snapshots))
-    assert.equal(result.sources['model.c4'], SOURCE
-      .replace("shop = system 'Shop'", "store = system 'Shop'")
-      .replace('shop.api -> bank', 'store.api -> bank')
-      .replace('of shop', 'of store')
-      .replace('include shop, bank', 'include store, bank'))
-    const pins = readPins(result.snapshots).shopView!
-    assert.deepEqual([pins.nodes['store.api']?.x, pins.nodes['store.api']?.y], [1, 2])
-    assert.deepEqual(pins.edges, { 'store.api->bank': 12 })
-  })
-
-  it('rejects a rename onto a sibling id', async () => {
-    await assert.rejects(apply([{ op: 'rename', element: 'shop', id: 'bank' }]), /already exists/)
-  })
-
   it('moves an element under a new parent with reindented text and rewritten references', async () => {
     const source = SOURCE.replace("  bank = system 'Bank'\n", "  bank = system 'Bank'\n  group = system 'Group'\n")
     const result = await apply([{ op: 'reparent', element: 'shop.api', parent: 'group' }], {}, source)

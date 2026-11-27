@@ -1,10 +1,10 @@
-import { Children, useEffect, useState, type CSSProperties, type ReactNode, type Ref } from "react"
+import { Children, type CSSProperties, type ReactNode, type Ref } from "react"
 import { Bot, Check, ChevronDown, ChevronRight, Copy, GitFork, Loader2, User, Wrench } from "lucide-react"
+import { useCopyFeedback } from "./useCopyFeedback.ts"
 
 const ACTION_SIZE_PX = 22
 const ACTION_GAP_PX = 4
 const ACTION_END_GUTTER_PX = 12
-const COPY_FEEDBACK_MS = 1500
 
 export type TurnRole = "question" | "answer"
 
@@ -146,15 +146,7 @@ export function TurnAction({ label, icon, onClick, disabled, busy, tone }: {
 
 /** Copy `text` as markdown, confirmed by a check mark. */
 export function CopyAction({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
-    return () => clearTimeout(timer)
-  }, [copied])
-  const copy = () => {
-    void navigator.clipboard.writeText(text).then(() => setCopied(true), () => {})
-  }
+  const { copied, copy } = useCopyFeedback(text)
   return <TurnAction label={label} onClick={copy} icon={copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />} />
 }
 

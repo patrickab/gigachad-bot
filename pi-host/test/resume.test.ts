@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Server } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 import { startServer } from "../src/server.ts";
 import { isProcessAlive, processStartIdentity } from "../src/supervisor/process-identity.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
@@ -145,11 +145,16 @@ describe("resume after an interruption", () => {
   async function interruptedRun(supervisor: Supervisor, dir: string): Promise<{ sessionId: string; sessionPath: string }> {
     const started = await post(supervisor, "/sessions", { cwd, profile: "coding", resume: null });
     const { session } = await started.json();
-    const prompt = async (message: string) => post(supervisor, `/sessions/${session.sessionId}/prompt`, { message });
-    expect((await prompt("hello")).status).toBe(200);
+    const frames: string[] = [];
+    const sink = { send: (frame: string) => frames.push(frame), data: { clientId: "resume" } } as unknown as ServerWebSocket<SocketData>;
+    const send = (frame: object) => supervisor.websocket.message!(sink, JSON.stringify(frame));
+    const prompt = (message: string) => send({ type: "command", sessionId: session.sessionId, command: { type: "prompt", message } });
+    send({ type: "attach", sessionId: session.sessionId });
+    prompt("hello");
+    await until(() => (frames.some((frame) => frame.includes('"agent_settled"')) ? true : undefined));
     await until(() => (existsSync(session.sessionPath) ? true : undefined));
     await until(() => (supervisor.liveStatus(session.sessionPath)?.running === false ? true : undefined));
-    expect((await prompt("hold")).status).toBe(200);
+    prompt("hold");
     await until(() => (listFiles(dir).length === 1 ? true : undefined));
     return session;
   }

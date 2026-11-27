@@ -10,7 +10,7 @@ from lib.chat_store import ChatStore
 from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.naming import slugify
-from lib.storage_namespace import META_JSON, PROJECT_JSON, chat_root, project_dir, project_document_prefix
+from lib.storage_namespace import CHAT, META_JSON, PROJECT_JSON, project_dir, project_document_prefix
 
 if TYPE_CHECKING:
     from lib.references import Released
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 # Moves a project to a new slug: `(slug, new_slug, name)`.
 Rename = Callable[[str, str, str], None]
 
-_META_KEY = f"{chat_root()}/{META_JSON}"
+_META_KEY = f"{CHAT}/{META_JSON}"
 # The project.json field holding the ids of the project's learn sessions (LearnHarness chats).
 LEARN_SESSIONS = "learn_sessions"
 # Tries of a guarded read-modify-write of `project.json` before it gives up, one per concurrent writer (parallel uploads).
@@ -331,7 +331,8 @@ class ProjectStore:
         self._mutate_files(slug, lambda files: {f: name for f, name in files.items() if f != path})
 
     def replace_file(self, slug: str, old: str, new: str, *, name: str | None = None) -> None:
-        """Point the reference *old* at *new*, in place and keeping its display name (or showing it as *name*), merging when *new* is already referenced."""
+        """Point the reference *old* at *new*, in place and keeping its display name (or showing it as *name*),
+        merging when *new* is already referenced."""
         def shown(path: str, current: str | None) -> str | None:
             if path != old or name is None:
                 return current

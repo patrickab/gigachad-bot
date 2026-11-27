@@ -14,7 +14,7 @@ import { useCanvasInsert } from "@/features/editor/canvas/attachments/useCanvasI
 import { useCanvasScreenshot } from "@/features/editor/canvas/attachments/useCanvasScreenshot"
 import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
-import { canvasEndpoint } from "@/lib/backend/api"
+import { canvasEndpoint, type CanvasEndpoint } from "@/lib/backend/api"
 import { useTabActive } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -37,7 +37,6 @@ export interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
   slug?: string
-  onImageAdded?: (path: string) => void
   // Path of the `.canvas` file being edited — kept out of the "open canvas" picker so a
   // canvas can't embed itself.
   docPath?: string
@@ -51,7 +50,7 @@ export interface CanvasEditorProps {
 }
 
 /** Infinite pan/zoom canvas of ink, frames, attachments and text notes. Camera state is local, every document edit goes through `onChange`. */
-export function CanvasEditor({ doc, onChange, slug, onImageAdded, docPath, depth = 0, hostScale = 1 }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, slug, docPath, depth = 0, hostScale = 1 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
@@ -61,7 +60,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, docPath, depth
   const { beginDrag, startDrag } = useCanvasDrag({ liveRef, scaleRef, snapshotOnce, applyChange, endGesture })
   const selection = useCanvasSelection({ liveRef, containerRef, scaleRef, offsetRef, commit, beginDrag })
   const { clear: clearSelection, select } = selection
-  const insert = useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active, onImageAdded })
+  const insert = useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active })
   const attachments = useCanvasAttachments({ liveRef, commit, applyChange, slug })
   const shownName = useDisplayName()
   const captureScreenshot = useCanvasScreenshot({ liveRef, containerRef, screenToCanvas })
@@ -269,22 +268,17 @@ function NestedCanvas({ attachment, name, slug, depth, hostScale, onChange }: {
       </div>
     )
   }
-  return <NestedCanvasFile path={attachment.path} slug={slug} depth={depth + 1} hostScale={hostScale} />
+  return <CollaborativeCanvasEditor endpoint={canvasEndpoint(attachment.path)} docPath={attachment.path} slug={slug} depth={depth + 1} hostScale={hostScale} />
 }
 
-// A file-backed window is another view onto the same canvas collaboration owner.
-function NestedCanvasFile({ path, slug, depth, hostScale }: {
-  path: string
-  slug?: string
-  depth: number
-  hostScale: number
-}) {
-  const { document, replace, status, retry } = useCollaborativeCanvas(canvasEndpoint(path))
+/** A canvas from its collaboration: a file-backed window or a shared canvas, another view onto the same collaboration owner. */
+export function CollaborativeCanvasEditor({ endpoint, ...props }: { endpoint: CanvasEndpoint } & Omit<CanvasEditorProps, "doc" | "onChange">) {
+  const { document, replace, status, retry } = useCollaborativeCanvas(endpoint)
 
   if (!document) {
     return status === "error"
       ? <LoadFailure message="Failed to load this canvas." onRetry={retry} size="fill" />
       : <LoadingPlaceholder size="fill" />
   }
-  return <CanvasEditor doc={document} onChange={replace} slug={slug} depth={depth} hostScale={hostScale} docPath={path} />
+  return <CanvasEditor doc={document} onChange={replace} {...props} />
 }

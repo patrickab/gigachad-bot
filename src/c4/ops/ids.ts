@@ -1,6 +1,4 @@
-// Element ids: derived from titles, made unique, validated.
-
-export const ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+// Element ids: derived from titles, made unique.
 
 /** lowerCamelCase ASCII id from a title: "Payment Service" -> "paymentService". */
 export function idFromTitle(title: string): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_TRANSCRIPT, messagesOfEntries, reduceTranscript, shownMessages, toolRunsOf, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
+import { EMPTY_TRANSCRIPT, reduceTranscript, shownMessages, toolRunsOf, transcriptOfEntries, transcriptReducer, type SessionEntry, type Transcript, type TranscriptAction } from "../transcript"
 import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "../types"
 
 const prompt: UserMessage = { role: "user", content: "Fix the bug", timestamp: 1_000 }
@@ -20,7 +20,7 @@ function events(transcript: Transcript, records: { type: string; [field: string]
   return records.reduce(reduceTranscript, transcript)
 }
 
-describe("messagesOfEntries", () => {
+describe("transcriptOfEntries", () => {
   it("follows the active branch from the leaf, skipping abandoned ones", () => {
     const abandoned: UserMessage = { role: "user", content: "Other idea", timestamp: 2_500 }
     const entries = [
@@ -29,8 +29,8 @@ describe("messagesOfEntries", () => {
       messageEntry("x", "b", abandoned),
       messageEntry("c", "b", followUp),
     ]
-    expect(messagesOfEntries({ entries, leafId: "c" })).toEqual([prompt, reply, followUp])
-    expect(messagesOfEntries({ entries, leafId: "x" })).toEqual([prompt, reply, abandoned])
+    expect(transcriptOfEntries({ entries, leafId: "c" }).messages).toEqual([prompt, reply, followUp])
+    expect(transcriptOfEntries({ entries, leafId: "x" }).messages).toEqual([prompt, reply, abandoned])
   })
 
   it("shows compactions as summaries in place and drops entries that are not messages", () => {
@@ -40,13 +40,13 @@ describe("messagesOfEntries", () => {
       { type: "compaction", id: "k", parentId: "m", timestamp: "2026-01-01T00:00:01.000Z", summary: "Earlier work", firstKeptEntryId: "a", tokensBefore: 900 },
       messageEntry("c", "k", followUp),
     ]
-    expect(messagesOfEntries({ entries, leafId: "c" }).map((message) => message.role)).toEqual(["user", "compactionSummary", "user"])
+    expect(transcriptOfEntries({ entries, leafId: "c" }).messages.map((message) => message.role)).toEqual(["user", "compactionSummary", "user"])
   })
 
   it("is empty without a leaf and survives a parent cycle", () => {
-    expect(messagesOfEntries({ entries: [], leafId: null })).toEqual([])
+    expect(transcriptOfEntries({ entries: [], leafId: null }).messages).toEqual([])
     const cycle = [messageEntry("a", "b", prompt), messageEntry("b", "a", reply)]
-    expect(messagesOfEntries({ entries: cycle, leafId: "b" })).toHaveLength(2)
+    expect(transcriptOfEntries({ entries: cycle, leafId: "b" }).messages).toHaveLength(2)
   })
 })
 

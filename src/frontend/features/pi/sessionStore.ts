@@ -3,7 +3,7 @@
 /**
  * The app's Pi session store, mounted once in `AppShell` as `<PiSessionsProvider>`.
  *
- * - Lists every repo's sessions from `GET /api/pi/sessions` and filters by repo and profile in the browser (the coding sidebar and
+ * - Lists every repo's sessions from `GET /api/pi/sessions` and filters by profile in the browser (the coding sidebar and
  *   picker ask for `coding`, G5). Lists refresh on the host frame `sessions_changed` (M25), on window focus, on socket
  *   reopen and every 30 s, while any `usePiSessions` is mounted
  * - Status per session: `running`/`waiting` from the listed `live`, or from the frames of sessions this page attached
@@ -51,7 +51,6 @@ interface ListState {
 }
 
 interface SessionList {
-  archived: boolean
   state: ListState
   /** Mounted `usePiSessions` hooks reading this list. */
   watchers: number
@@ -87,7 +86,7 @@ const NO_REPOSITORIES: PiRepository[] = []
 const eventListeners = new Set<PiSessionListener>()
 const listListeners = new Set<() => void>()
 const statusListeners = new Set<() => void>()
-const lists = { active: listOf(false), archived: listOf(true) }
+const list: SessionList = { state: { sessions: [], loading: true, error: null }, watchers: 0, reading: false, again: false }
 let repositories: PiRepository[] = NO_REPOSITORIES
 let repositoriesRead: Promise<void> | null = null
 let stopLive: (() => void) | null = null
@@ -95,15 +94,9 @@ const attached = new Map<string, AttachedSession>()
 let listedLive = new Map<string, PiLiveStatus | null>()
 /** The listed `cachedUntil` of each session that has one, epoch ms. */
 let listedCache = new Map<string, number>()
-/** The `live` of each unarchived list's sessions, merged into `listedLive`. */
-const listedLiveByList = new Map<SessionList, Map<string, PiLiveStatus | null>>()
 let unread = readUnread()
 const statuses = new Map<string, PiSessionStatus>()
 let nextStatsId = 0
-
-function listOf(archived: boolean): SessionList {
-  return { archived, state: { sessions: [], loading: true, error: null }, watchers: 0, reading: false, again: false }
-}
 
 function readRepositories(): Promise<void> {
   repositoriesRead ??= fetchPiRepositories().then(
@@ -126,8 +119,8 @@ async function readList(list: SessionList): Promise<void> {
   do {
     list.again = false
     try {
-      const [sessions] = await Promise.all([fetchPiSessions(undefined, { archived: list.archived }), readRepositories()])
-      if (!list.archived) noteListed(list, sessions)
+      const [sessions] = await Promise.all([fetchPiSessions(), readRepositories()])
+      noteListed(sessions)
       list.state = { sessions, loading: false, error: null }
     } catch (error) {
       list.state = { ...list.state, loading: false, error: error instanceof Error ? error.message : String(error) }
@@ -138,7 +131,7 @@ async function readList(list: SessionList): Promise<void> {
 }
 
 function refreshWatched() {
-  for (const list of Object.values(lists)) if (list.watchers > 0) void readList(list)
+  if (list.watchers > 0) void readList(list)
 }
 
 /** Keep the watched lists fresh: host `sessions_changed`, socket reopen, focus, visibility and a poll. */
@@ -169,7 +162,7 @@ function watchList(list: SessionList): () => void {
   void readList(list)
   return () => {
     list.watchers -= 1
-    if (Object.values(lists).some((watched) => watched.watchers > 0)) return
+    if (list.watchers > 0) return
     stopLive?.()
     stopLive = null
   }
@@ -185,22 +178,15 @@ export function piSessionProfile(session: Pick<PiSessionInfo, "profile">): PiPro
   return session.profile ?? "coding"
 }
 
-/**
- * Sessions of `repo` (all repos when omitted) and of `profile` (any when omitted), the archived ones with `archived`, kept
- * live.
- */
-export function usePiSessions(filter: { repo?: string; archived?: boolean; profile?: PiProfile } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
-  const { repo, archived = false, profile } = filter
-  const list = archived ? lists.archived : lists.active
+/** Sessions of `profile` (any when omitted), kept live. */
+export function usePiSessions(filter: { profile?: PiProfile } = {}): { sessions: PiSessionInfo[]; loading: boolean; error: string | null } {
+  const { profile } = filter
   const state = useSyncExternalStore(subscribeLists, () => list.state, () => list.state)
-  const known = useSyncExternalStore(subscribeLists, () => repositories, () => NO_REPOSITORIES)
-  useEffect(() => watchList(list), [list])
-  const sessions = useMemo(() => {
-    const profiled = profile === undefined ? state.sessions : state.sessions.filter((session) => piSessionProfile(session) === profile)
-    if (repo === undefined) return profiled
-    const path = repo.startsWith("/") ? repo : known.find((repository) => repository.name === repo)?.path
-    return path === undefined ? [] : profiled.filter((session) => session.cwd === path || session.cwd.startsWith(`${path}/`))
-  }, [state.sessions, known, repo, profile])
+  useEffect(() => watchList(list), [])
+  const sessions = useMemo(
+    () => profile === undefined ? state.sessions : state.sessions.filter((session) => piSessionProfile(session) === profile),
+    [state.sessions, profile],
+  )
   return { sessions, loading: state.loading, error: state.error }
 }
 
@@ -290,20 +276,16 @@ export function usePiSessionStatus(sessionId: string | null): PiSessionStatus {
 }
 
 /** A listed session that stopped running while this page did not watch its frames settled unseen. */
-function noteListed(list: SessionList, sessions: PiSessionInfo[]) {
+function noteListed(sessions: PiSessionInfo[]) {
   const previous = listedLive
-  const listed = new Map(sessions.map((session) => [session.sessionId, session.live]))
-  listedLiveByList.set(list, listed)
-  // The list just read is the freshest: its entries win over another list's older read of the same session
-  const others = [...listedLiveByList].filter(([other]) => other !== list).flatMap(([, byId]) => [...byId])
-  listedLive = new Map([...others, ...listed])
+  listedLive = new Map(sessions.map((session) => [session.sessionId, session.live]))
   for (const session of sessions) {
     const until = session.cachedUntil ? Date.parse(session.cachedUntil) : NaN
     if (Number.isNaN(until)) listedCache.delete(session.sessionId)
     else listedCache.set(session.sessionId, until)
   }
   listedCache = new Map(listedCache)
-  for (const [sessionId, live] of listed) {
+  for (const [sessionId, live] of listedLive) {
     if (previous.get(sessionId)?.running && !live?.running && !attached.has(sessionId)) markUnread(sessionId)
   }
   statusChanged()

@@ -43,8 +43,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 PROMPT_MAX_LEN = 12000
-# A "running" record older than this is treated as abandoned and may be re-run.
-STALE_RUN_TIMEOUT_SECONDS = 300.0
 SCRIPT_TIMEOUT_SECONDS = 60.0
 
 MAX_OUTPUTS = 20
@@ -55,10 +53,6 @@ KNOWN_SANDBOX_SCOPES = (DEFAULT_SANDBOX_SCOPE, WORKSPACE_AGENT_SCOPE, SANDBOX_PL
 
 
 class SandboxServiceError(RuntimeError):
-    pass
-
-
-class SandboxBusyError(SandboxServiceError):
     pass
 
 
@@ -251,28 +245,14 @@ class SandboxService:
         async with await self._runtime.lock(slot.key):
             yield slot
 
-    async def run_script(self, script: str, *, interpreter: str = "venv", timeout: float = SCRIPT_TIMEOUT_SECONDS) -> str:
+    async def run_script(self, script: str) -> str:
         """Run one throwaway script with no workspace or secrets."""
-        return await self._runner.run_script(script, profile=self._profile, interpreter=interpreter, timeout=timeout)
+        return await self._runner.run_script(script, profile=self._profile, interpreter="venv", timeout=SCRIPT_TIMEOUT_SECONDS)
 
     @staticmethod
-    def _replay_or_busy(store: SandboxStore, staged: _StagedState, chat_id: str, tool_call_id: str) -> SandboxToolResult | None:
-        """The recorded result of a finished call, None when the call must run. Raises while it is still running."""
-        staged_record = staged.runs.get(tool_call_id)
-        if staged_record is not None:
-            return SandboxToolResult.from_record(staged_record)
-        existing = store.read_run(chat_id, tool_call_id)
-        if existing is None:
-            return None
-        if existing.status != "running":
-            return SandboxToolResult.from_record(existing)
-        # A running record may belong to a finished run whose record write was interrupted.
-        if (recovered := store.recover_completed_run(chat_id, tool_call_id)) is not None:
-            return SandboxToolResult.from_record(recovered)
-        # Fresh running record means a live run. Stale ones fall through and re-run.
-        if time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
-            raise SandboxBusyError(f"sandbox run {tool_call_id} is already in progress")
-        return None
+    def _recorded(store: SandboxStore, staged: _StagedState, chat_id: str, tool_call_id: str) -> SandboxToolResult | None:
+        record = staged.runs.get(tool_call_id) or store.read_run(chat_id, tool_call_id)
+        return None if record is None else SandboxToolResult.from_record(record)
 
     async def invoke(
         self,
@@ -286,10 +266,7 @@ class SandboxService:
         thinking: Literal["low", "medium"] = "medium",
         lean: bool = False,
     ) -> SandboxToolResult:
-        """Run one workspace-agent task, idempotent per `tool_call_id`.
-
-        Raises `SandboxBusyError` while the same call is still running elsewhere.
-        """
+        """Run one workspace-agent task, idempotent per `tool_call_id`."""
         chat_id = _validate_chat_id(chat_id)
         prompt = _normalize_prompt(prompt)
         scope = sandbox_scope(scope)
@@ -297,7 +274,7 @@ class SandboxService:
         async with self._slot(chat_id, scope) as slot:
             store, slot_key = slot.store, slot.key
             staged = self._runtime.stage(slot_key)
-            if (replayed := self._replay_or_busy(store, staged, chat_id, tool_call_id)) is not None:
+            if (replayed := self._recorded(store, staged, chat_id, tool_call_id)) is not None:
                 return replayed
 
             prior_manifest = staged.manifest
@@ -326,7 +303,6 @@ class SandboxService:
                         append_system=append_system,
                         lean=lean,
                     ),
-                    # A manifest without a Pi session (an OMP-era one) resumes nothing, only its workspace is restored.
                     active_manifest=prior_manifest if prior_manifest is not None and prior_manifest.pi_sessions else None,
                     workspace=restore,
                 )
@@ -513,7 +489,6 @@ class SandboxService:
         self._persist_assets(staged.assets, {manifest.workspace.sha256: "application/x-tar"})
         store.checkpoint(
             chat_id,
-            profile=self._profile,
             manifest=manifest,
             runs=staged.runs,
             latest_run_id=staged.last_completed_run_id,
@@ -527,7 +502,7 @@ class SandboxService:
             if not self._assets.list(key):
                 self._assets.write("sandbox", key, content, mime=media_types[sha256])
 
-    def output_texts(self, result: SandboxToolResult, *, media_type: str = "text/plain") -> tuple[str, ...]:
+    def output_texts(self, result: SandboxToolResult, media_type: str) -> tuple[str, ...]:
         """Return selected sandbox output bytes without widening the UI payload."""
         texts: list[str] = []
         for output in result.outputs:
@@ -535,9 +510,6 @@ class SandboxService:
             if text_ref is not None:
                 with suppress(StorageNotFoundError, UnicodeDecodeError):
                     texts.append(self._assets.read(text_ref["asset_path"]).content.decode("utf-8"))
-                    continue
-            if media_type == "text/plain" and output.text:
-                texts.append(output.text)
         return tuple(texts)
 
     async def delete_chat_state(self, *, chat_id: str, scope: str | None = None) -> None:

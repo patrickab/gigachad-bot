@@ -26,16 +26,6 @@ def is_development() -> bool:
     return os.environ.get("GIGACHAD_ENV") == "development"
 
 
-def env_flag(name: str, default: bool) -> bool:
-    """Read a boolean env var: 1/true/yes and 0/false/no win in any case, anything else keeps *default*."""
-    value = os.environ.get(name, "").lower()
-    if value in {"1", "true", "yes"}:
-        return True
-    if value in {"0", "false", "no"}:
-        return False
-    return default
-
-
 def is_cors_unsafe_for_production() -> bool:
     """Whether production would let any web page call the API: identity comes from the tailnet, not a cookie."""
     return is_production() and (not CORS_ORIGINS or "*" in CORS_ORIGINS)
@@ -48,7 +38,6 @@ def is_cors_unsafe_for_production() -> bool:
 MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "sandbox_model")
 # Every test runs against this model, and it seeds a store that has no defaults yet.
 TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
-DEFAULT_DOWNSCALE_IMAGES = True
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 

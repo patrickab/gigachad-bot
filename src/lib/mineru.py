@@ -54,15 +54,10 @@ def should_cancel() -> bool:
     return _cancel_event.is_set()
 
 
-async def parse_pdf(
-    pdf_path: str | Path,
-    output_dir: str | Path,
-    backend: str = "pipeline",
-) -> tuple[Path, Path]:
+async def parse_pdf(pdf_path: str | Path, output_dir: str | Path) -> tuple[Path, Path]:
     """Parse a PDF with MinerU into ``(md_path, images_dir)`` under *output_dir*.
 
     - Always runs MinerU, the per-user Postgres asset is the only extraction cache
-    - ``backend="auto"`` picks by GPU presence
     - Images are renamed ``<stem>-<padded>.<ext>`` and markdown links rewritten to ``images/``
     """
     from mineru.cli import api_client
@@ -77,13 +72,9 @@ async def parse_pdf(
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    if backend == "auto":
-        backend = _detect_backend()
-    log.info("MinerU using backend: %s", backend)
-
     form_data = api_client.build_parse_request_form_data(
         lang_list=["en"],
-        backend=backend,
+        backend="pipeline",
         parse_method="auto",
         formula_enable=True,
         table_enable=True,
@@ -164,11 +155,3 @@ async def parse_pdf(
         final_md_path.write_text(md_content, encoding="utf-8")
 
     return final_md_path, images_dir
-
-
-def _detect_backend() -> str:
-    # nvidia-smi presence stands in for torch.cuda.is_available() so the slim
-    # desktop sidecar (which excludes torch) can still pick a sensible backend.
-    if shutil.which("nvidia-smi") is not None:
-        return "hybrid-auto-engine"
-    return "pipeline"

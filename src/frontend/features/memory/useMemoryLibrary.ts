@@ -12,12 +12,6 @@ export interface MemorySection extends MemoryLocation {
   listing: MemoryListing
 }
 
-/** The memory or document open in the window. */
-export interface MemoryPageTarget {
-  memoryStore: string
-  path: string
-}
-
 export type MemoryPage =
   | { kind: "memory"; description: string; facts: Fact[] }
   | { kind: "document"; text: string }
@@ -32,8 +26,8 @@ function toPage(read: MemoryRead): MemoryPage {
   return read.kind === "memory" ? { ...read, facts: newestFirst(read.facts) } : read
 }
 
-const sameTarget = (a: MemoryPageTarget | null, b: MemoryPageTarget) => a?.memoryStore === b.memoryStore && a.path === b.path
-const retireKey = (at: MemoryPageTarget, id: string) => `memory-fact:${at.memoryStore}:${at.path}:${id}`
+const sameTarget = (a: MemoryLocation | null, b: MemoryLocation) => a?.memoryStore === b.memoryStore && a.path === b.path
+const retireKey = (at: MemoryLocation, id: string) => `memory-fact:${at.memoryStore}:${at.path}:${id}`
 
 /**
  * Browse the memory root and edit the open memory.
@@ -45,13 +39,13 @@ export function useMemoryLibrary() {
   const { schedule, pending } = useUndoDelete()
   const [trail, setTrail] = useState<MemoryLocation[]>([ROOT_LOCATION])
   const [sections, setSections] = useState<MemorySection[] | null>(null)
-  const [target, setTarget] = useState<MemoryPageTarget | null>(null)
+  const [target, setTarget] = useState<MemoryLocation | null>(null)
   const [storedPage, setPage] = useState<MemoryPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [listVersion, setListVersion] = useState(0)
   const location = trail[trail.length - 1]
 
-  const currentTarget = useRef<MemoryPageTarget | null>(null)
+  const currentTarget = useRef<MemoryLocation | null>(null)
   const writes = useRef<Promise<unknown>>(Promise.resolve())
   const pendingWrites = useRef(0)
   // A shown fact keeps its id while its add or update is written; this maps it to the latest stored id.
@@ -66,7 +60,7 @@ export function useMemoryLibrary() {
     return () => { cancelled = true }
   }, [location, listVersion])
 
-  const refresh = useCallback(async (at: MemoryPageTarget) => {
+  const refresh = useCallback(async (at: MemoryLocation) => {
     try {
       const read = await readMemory(at.memoryStore, at.path)
       if (sameTarget(currentTarget.current, at)) setPage(toPage(read))
@@ -102,7 +96,7 @@ export function useMemoryLibrary() {
   }, [target, trail.length])
 
   /** Queue a batch; `ops` is built when the batch runs, so local ids resolve to the ids stored meanwhile. Rejects when an op fails. */
-  const write = useCallback((at: MemoryPageTarget, ops: () => MemoryOp[], onResults?: (results: MemoryOpResult[]) => void): Promise<void> => {
+  const write = useCallback((at: MemoryLocation, ops: () => MemoryOp[], onResults?: (results: MemoryOpResult[]) => void): Promise<void> => {
     pendingWrites.current += 1
     const run = writes.current.then(async () => {
       const results = await applyMemoryOps(at.memoryStore, ops())

@@ -1,6 +1,6 @@
 "use client"
 
-import { CodeBlock, MarkdownRenderer, MarkmapDiagram, MermaidDiagram, type CodeBlockProps, type CodeRenderers, type LinkPolicy, type MarkdownComponents, type MarkmapViewport } from "@gigachad/chat-ui"
+import { CodeBlock, MarkdownRenderer, MarkmapDiagram, MermaidDiagram, type CodeBlockProps, type CodeRenderers, type MarkdownComponents, type MarkmapViewport } from "@gigachad/chat-ui"
 import { memo, useContext, useMemo, useRef, type CSSProperties, type RefObject } from "react"
 import { HostScaleContext } from "@/contexts/HostScaleContext"
 import { useThemeName } from "@/hooks/useThemeName"
@@ -62,8 +62,6 @@ function imageComponent(imageDirectory: string | undefined): MarkdownComponents[
   }
 }
 
-// Streamdown's hardening blocks relative image and link paths, a document that resolves them itself turns it off.
-const RELATIVE_LINKS: LinkPolicy = { harden: false }
 const FILE_LINK_PLUGINS = [remarkInlineCodeFileLinks]
 
 /** Local file links of an agent answer: relative ones resolve against `base`, `open` shows the absolute path. */
@@ -116,7 +114,7 @@ function LaTeXMarkdownInner({
       codeRenderers={CODE_RENDERERS}
       components={components}
       remarkPlugins={fileLinks ? FILE_LINK_PLUGINS : undefined}
-      linkPolicy={imageDirectory === undefined && !fileLinks ? undefined : RELATIVE_LINKS}
+      hardenLinks={imageDirectory === undefined && !fileLinks}
       onContentChange={onContentChange}
       checkboxClassName="mr-1.5 accent-ink cursor-pointer"
     />

@@ -102,12 +102,8 @@ export function composeUserMessage(text: string, hiddenContent = ""): string {
   return hiddenContent ? `${hiddenContent}\n\n${prompt}` : prompt
 }
 
-export function collectActiveImagePaths(
-  messages: Message[],
-  scope?: { userIndex: number },
-): string[] {
-  const scoped = scope ? [messages[scope.userIndex]] : messages.filter((m) => m.role === "user")
-  return scoped.flatMap((m) => (m?.attachments ?? []).filter(isActiveImage).map((a) => a.name))
+export function collectActiveImagePaths(messages: Message[]): string[] {
+  return messages.filter((m) => m.role === "user").flatMap((m) => (m.attachments ?? []).filter(isActiveImage).map((a) => a.name))
 }
 
 type ParseAttachments = (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>

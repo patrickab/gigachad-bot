@@ -15,8 +15,6 @@ from lib.storage_namespace import chat_upload
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_DEFAULT_MAX_TOKENS = 2048
-
 
 def _chat_uploads(assets: AssetStore, chat_id: str, slug: str | None, filenames: list[str]) -> Iterator[Asset]:
     """Each stored chat upload, skipping missing files and invalid names."""
@@ -43,11 +41,10 @@ def resolve_chat_image_paths(
     filenames: list[str],
     downscale: bool,
     assets: AssetStore,
-    max_tokens: int = _DEFAULT_MAX_TOKENS,
 ) -> list[bytes | str]:
-    """Load chat upload images, optionally downscaled to *max_tokens*. Missing files are skipped."""
+    """Load chat upload images, optionally downscaled to 2048 tokens. Missing files are skipped."""
     return [
-        downscale_img(asset.content, max_tokens=max_tokens) if downscale else asset.content
+        downscale_img(asset.content, max_tokens=2048) if downscale else asset.content
         for asset in _chat_uploads(assets, chat_id, slug, filenames)
         if asset.content is not None
     ]

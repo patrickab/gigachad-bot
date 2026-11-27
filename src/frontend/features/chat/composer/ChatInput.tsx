@@ -38,8 +38,8 @@ interface ChatInputProps {
   complete?: CompleteDraft
   /** A choice the draft filters (a Pi extension's `select`), shown instead of suggestions. Enter picks, never sends, while set. */
   picker?: DraftPicker
-  /** Mode note under the draft, e.g. that `!ls` runs in a shell, null for none. */
-  hint?: (text: string, attachmentCount: number) => string | null
+  /** Mode note under the draft. */
+  hint?: string
   /** Attachments of earlier messages, shown as chips before the draft's own. */
   context?: ChatContext
   /** Extra entries of the "+" menu after the built-in ones. */
@@ -224,7 +224,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const canSend = !picker && (text.trim().length > 0 || attachments.length > 0 || chips.chips.length > 0)
   const submitBlocked = Boolean(extracting) || (Boolean(isStreaming) && !sendWhileStreaming)
   const showStop = Boolean(isStreaming) && !(sendWhileStreaming && canSend)
-  const hintText = hint?.(text, attachments.length) ?? null
+  const hintText = hint ?? null
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
     ...attachMenuItems,
     { label: "Drawing", icon: Pencil, onClick: () => setDrawing("attach") },

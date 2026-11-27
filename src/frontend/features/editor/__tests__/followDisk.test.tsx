@@ -5,7 +5,7 @@ import { TextDocumentEditor } from "../TextDocumentEditor"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
-  readFileRootRendered: vi.fn(),
+  readFileRootRendered: vi.fn(() => new Promise<string>(() => {})),
   writeRootFile: vi.fn(),
   writeDocument: vi.fn(),
   writeArchitectureSource: vi.fn(),
@@ -124,7 +124,6 @@ it("a dirty plain editor keeps its text, and follows again once saved", async ()
 
   fireEvent.keyDown(document, { key: "s", ctrlKey: true })
   await waitFor(() => expect(api.writeRootFile).toHaveBeenCalledWith(PATH, "mine"))
-  await waitFor(() => expect(screen.queryByText(/modified/)).toBeNull())
   await changeOnDisk(PATH, "theirs again")
   expect(textbox).toHaveValue("theirs again")
 })

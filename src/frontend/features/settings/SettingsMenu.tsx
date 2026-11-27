@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Blend, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket, RotateCcw } from "lucide-react"
+import { Blend, Waves, Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket, RotateCcw, type LucideIcon } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -22,7 +22,7 @@ interface SettingsMenuProps {
   prompts: Record<string, string>
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
-  onEditPrompts?: () => void
+  onEditPrompts: () => void
   /** Populates the research model-tier selects; the chat model picker owns
    *  its own copy and stays in the topbar. */
   models: ModelsResponse | null
@@ -47,6 +47,18 @@ function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open:
 const ROW_CLASS = "flex h-7 items-center justify-between"
 const ROW_LABEL_CLASS = "flex items-center gap-2 text-xs font-medium text-ink-subtle"
 const SECTION_CLASS = "border-t border-divider/50 pt-2"
+
+function SwitchRow({ icon: Icon, label, checked, onToggle }: { icon: LucideIcon; label: string; checked: boolean; onToggle: () => void }) {
+  return (
+    <div className={ROW_CLASS}>
+      <div className={ROW_LABEL_CLASS}>
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <Switch label={label} checked={checked} onToggle={onToggle} />
+    </div>
+  )
+}
 
 export function SettingsMenu({
   prompts,
@@ -105,11 +117,9 @@ export function SettingsMenu({
                   System Prompt
                   <ChevronToggle ariaLabel="System Prompt" open={promptOpen} onToggle={() => setPromptOpen((o) => !o)} />
                 </div>
-                {onEditPrompts && (
-                  <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                )}
+                <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
+                  <Pencil className="h-3 w-3" />
+                </button>
               </div>
               {promptOpen && (
                 <div role="listbox" aria-label="System Prompt" className="mt-1 mb-1 flex flex-col gap-0.5">
@@ -148,7 +158,6 @@ export function SettingsMenu({
                       onChange={(v) => onConfigChange({ researchDepth: v })}
                       min={1}
                       max={4}
-                      step={1}
                     />
                     <ParamSlider
                       label="Breadth"
@@ -156,7 +165,6 @@ export function SettingsMenu({
                       onChange={(v) => onConfigChange({ researchBreadth: v })}
                       min={2}
                       max={6}
-                      step={1}
                     />
                     <Field label="Reasoning effort" compact>
                       <StyledSelect
@@ -213,50 +221,20 @@ export function SettingsMenu({
             )}
 
             <div className={cn(SECTION_CLASS, "flex flex-col")}>
-              <div className={ROW_CLASS}>
-                <div className={ROW_LABEL_CLASS}>
-                  <ImageDown className="h-3.5 w-3.5" />
-                  Downscale images
-                </div>
-                <Switch label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
-              </div>
+              <SwitchRow icon={ImageDown} label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
 
-              <div className={ROW_CLASS}>
-                <div className={ROW_LABEL_CLASS}>
-                  <Blend className="h-3.5 w-3.5" />
-                  Glass
-                </div>
-                <Switch label="Glass" checked={glass} onToggle={() => setGlassMode(!glass)} />
-              </div>
+              <SwitchRow icon={Blend} label="Glass" checked={glass} onToggle={() => setGlassMode(!glass)} />
 
               {animatedBackground !== null && (
-                <div className={ROW_CLASS}>
-                  <div className={ROW_LABEL_CLASS}>
-                    <Waves className="h-3.5 w-3.5" />
-                    Animated background
-                  </div>
-                  <Switch label="Animated background" checked={animatedBackground} onToggle={() => setAnimatedBackground(!animatedBackground)} />
-                </div>
+                <SwitchRow icon={Waves} label="Animated background" checked={animatedBackground} onToggle={() => setAnimatedBackground(!animatedBackground)} />
               )}
 
               {piAutoResume !== null && (
-                <div className={ROW_CLASS}>
-                  <div className={ROW_LABEL_CLASS}>
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Resume interrupted sessions
-                  </div>
-                  <Switch label="Resume interrupted sessions" checked={piAutoResume} onToggle={() => setPiAutoResume(!piAutoResume)} />
-                </div>
+                <SwitchRow icon={RotateCcw} label="Resume interrupted sessions" checked={piAutoResume} onToggle={() => setPiAutoResume(!piAutoResume)} />
               )}
 
               {neovim.available && (
-                <div className={ROW_CLASS}>
-                  <div className={ROW_LABEL_CLASS}>
-                    <SquareTerminal className="h-3.5 w-3.5" />
-                    Neovim editor
-                  </div>
-                  <Switch label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
-                </div>
+                <SwitchRow icon={SquareTerminal} label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
               )}
             </div>
 

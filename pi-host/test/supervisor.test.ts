@@ -301,11 +301,10 @@ describe("live sessions", () => {
     const locked = await startSession({ cwd, resume: { sessionPath } });
     expect(locked.status).toBe(409);
     expect(await locked.json()).toEqual({ error: "locked" });
-    expect((await startSession({ cwd, resume: "continue" })).status).toBe(409);
     holder.kill();
     await holder.exited;
 
-    const resumed = await (await startSession({ cwd, resume: "continue" })).json();
+    const resumed = await (await startSession({ cwd, resume: { sessionPath } })).json();
     expect(resumed.session).toMatchObject({ sessionId, sessionPath, messageCount: 4 });
     const again = await (await startSession({ cwd, resume: { sessionPath } })).json();
     expect(again.session.live).toEqual({ running: false, waiting: false, attached: 0 });
@@ -600,11 +599,9 @@ test("a session started under a symlinked agent dir resumes as the same live chi
     await driver.attach(session.sessionId);
     driver.command(session.sessionId, { type: "prompt", message: "hello" });
     await driver.pi((record) => record.type === "agent_settled");
-    for (const resume of ["continue", { sessionPath: session.sessionPath }]) {
-      const answer = await startSession({ cwd, resume });
-      expect(answer.status).toBe(200);
-      expect((await answer.json()).session.sessionId).toBe(session.sessionId);
-    }
+    const answer = await startSession({ cwd, resume: { sessionPath: session.sessionPath } });
+    expect(answer.status).toBe(200);
+    expect((await answer.json()).session.sessionId).toBe(session.sessionId);
   } finally {
     process.env.PI_CODING_AGENT_DIR = agentDir;
   }
@@ -936,23 +933,12 @@ describe("profiles (G1, G5, G6)", () => {
     }
   });
 
-  test("continue and the profile filter keep coding and document sessions apart", async () => {
+  test("a coding session keeps its profile and writes no marker", async () => {
     const coding = (await (await startSession({ cwd })).json()).session;
     expect(coding.profile).toBe("coding");
     await settle(coding.sessionId, "code");
     await api(`/sessions/${coding.sessionId}/close`, { method: "POST" });
     expect(existsSync(`${coding.sessionPath}.gigachad.json`)).toBe(false);
-
-    const continued = async (body: object) => (await (await startSession({ cwd, ...body, resume: "continue" })).json()).session;
-    expect((await continued({})).sessionId).toBe(coding.sessionId);
-    expect((await continued(DOC)).sessionId).toBe(document.sessionId);
-
-    const listed = async (profile: string) =>
-      (await (await api(`/sessions?cwd=${encodeURIComponent(cwd)}&profile=${profile}`)).json()).sessions.map(
-        (session: { sessionId: string }) => session.sessionId,
-      );
-    expect(await listed("document")).toEqual([document.sessionId]);
-    expect(await listed("coding")).toEqual([coding.sessionId]);
   });
 });
 
@@ -1011,7 +997,7 @@ test("the gateway token opens /v1/* only, the full token every route (C1)", asyn
   expect((await fetch(`${base}/sessions?cwd=/`, { headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/health`, { headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/usage`, { headers: gateway })).status).toBe(401);
-  expect((await fetch(`${base}/sessions/any/prompt`, { method: "POST", headers: gateway, body: '{"message":"hi"}' })).status).toBe(401);
+  expect((await fetch(`${base}/sessions/any/close`, { method: "POST", headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/sessions/any`, { method: "DELETE", headers: gateway })).status).toBe(401);
   expect((await fetch(`${base}/ws`, { headers: { ...gateway, upgrade: "websocket" } })).status).toBe(401);
 });
@@ -1164,64 +1150,6 @@ describe("spawn strategies (C5, C6)", () => {
       ANTHROPIC_API_KEY: "secret",
     });
     expect(env).toEqual({ PATH: "/bin", HOME: "/home/someone", XDG_RUNTIME_DIR: "/run/user/1000", PI_GATEWAY_TOKEN: "gw" });
-  });
-});
-
-describe("POST /sessions/:id/prompt", () => {
-  async function prompt(sessionId: string, body: unknown): Promise<{ status: number; body: unknown }> {
-    const response = await api(`/sessions/${sessionId}/prompt`, { method: "POST", body: JSON.stringify(body) });
-    return { status: response.status, body: await response.json() };
-  }
-
-  test("a live session takes the prompt without a client and answers Pi's disposition, the response reaches no client", async () => {
-    const { session } = await (await startSession({ cwd: workdir("prompt-live") })).json();
-    expect(await prompt(session.sessionId, { message: "hello" })).toEqual({ status: 200, body: { disposition: "started" } });
-    await until(() => (existsSync(session.sessionPath) && !supervisor.liveStatus(session.sessionPath)?.running ? true : undefined));
-    expect(readFileSync(session.sessionPath, "utf8")).toContain("echo: hello");
-
-    const viewer = await client();
-    await viewer.attach(session.sessionId);
-    expect(await prompt(session.sessionId, { message: "status build busy" })).toEqual({ status: 200, body: { disposition: "handled" } });
-    expect((await viewer.pi((record) => record.method === "setStatus")).record).toMatchObject({ statusKey: "build", statusText: "busy" });
-    expect(await prompt(session.sessionId, { message: "again" })).toEqual({ status: 200, body: { disposition: "started" } });
-    await viewer.pi((record) => record.type === "agent_settled");
-    expect(viewer.frames.filter((frame) => frame.type === "pi" && frame.record.type === "response")).toEqual([]);
-    expect(viewer.sequenceGaps).toEqual([]);
-  });
-
-  test("409 not_live without a child, 400 for a body without a message", async () => {
-    const { sessionId } = writeSessionFile(workdir("prompt-idle"), [messageEntry("u1", null, "user", "hi")]);
-    expect(await prompt(sessionId, { message: "hello" })).toEqual({ status: 409, body: { error: "not_live" } });
-    expect(await prompt("no-such-session", { message: "hello" })).toEqual({ status: 409, body: { error: "not_live" } });
-    for (const body of [{}, { message: 1 }, { message: "" }, "hello", { message: "hi", streamingBehavior: "queue" }, { message: "hi", streamingBehavior: null }]) {
-      expect(await prompt(sessionId, body)).toEqual({ status: 400, body: { error: "invalid_body" } });
-    }
-    expect((await api(`/sessions/${sessionId}/prompt`)).status).toBe(404);
-  });
-
-  test("502 prompt_failed with Pi's error when Pi refuses the prompt", async () => {
-    const { session } = await (await startSession({ cwd: workdir("prompt-refused") })).json();
-    expect((await prompt(session.sessionId, { message: "hold" })).status).toBe(200);
-    expect(await prompt(session.sessionId, { message: "more" })).toEqual({
-      status: 502,
-      body: { error: "prompt_failed", message: "Agent is streaming" },
-    });
-    expect((await api(`/sessions/${session.sessionId}/close`, { method: "POST" })).status).toBe(204);
-  });
-
-  test("streamingBehavior reaches Pi, which queues the prompt of a running session instead of refusing it", async () => {
-    const { session } = await (await startSession({ cwd: workdir("prompt-queued") })).json();
-    const viewer = await client();
-    await viewer.attach(session.sessionId);
-    expect((await prompt(session.sessionId, { message: "hold" })).status).toBe(200);
-    expect(await prompt(session.sessionId, { message: "later", streamingBehavior: "followUp" })).toEqual({ status: 200, body: { disposition: "queued" } });
-    expect((await viewer.pi((record) => record.type === "queue_update")).record).toMatchObject({ steering: [], followUp: ["later"] });
-    expect(await prompt(session.sessionId, { message: "now", streamingBehavior: "steer" })).toEqual({ status: 200, body: { disposition: "queued" } });
-    expect((await viewer.pi((record) => record.type === "queue_update" && record.steering.length > 0)).record).toMatchObject({
-      steering: ["now"],
-      followUp: ["later"],
-    });
-    expect((await api(`/sessions/${session.sessionId}/close`, { method: "POST" })).status).toBe(204);
   });
 });
 

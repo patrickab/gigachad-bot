@@ -1,6 +1,6 @@
 /**
  * The Providers settings section stays hidden: provider keys live in gigachad-bot and reach LearnHarness through the
- * LiteLLM proxy only. `custom/theme/settings.css` hides its nav item and content, this moves the dialog off it.
+ * pi-host's completion gateway only. `custom/theme/settings.css` hides its nav item and content, this moves the dialog off it.
  *
  * Upstream's settings dialog opens on Providers by default and some callers deep-link to it (setup flow, dictation
  * error). Its section state is private, so whenever the hidden nav item becomes the current one, the visible

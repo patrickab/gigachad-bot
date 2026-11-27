@@ -15,7 +15,7 @@ function itemName(item: WorkspaceItem, shownName: ShownName): string {
 
 /** A fresh chat tab with `config` over the default tab config. */
 export function nextTab(config?: Partial<TabConfig>): Tab {
-  return { id: `tab-${crypto.randomUUID()}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
+  return { id: `tab-${crypto.randomUUID()}`, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
 }
 
 /** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. A file in the project's workbench folder moves with it. */
@@ -84,19 +84,7 @@ export function tabShowingItem(tabs: Tab[], item: WorkspaceItem, activeId: strin
 /** Open tabs saved across a reload of this browser tab. */
 export interface SavedTabs { tabs: Tab[]; activeId: string }
 
-/** `item` as saved by an older build: a workbench or notebook item held its chat as an omp view, which no Pi chat can open, so it is dropped. */
-function savedItem(item: WorkspaceItem | null): WorkspaceItem | null {
-  if (!item || !("omp" in item)) return item
-  const kept: WorkspaceItem & { omp?: unknown } = { ...item }
-  delete kept.omp
-  return kept
-}
-
-/**
- * The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed.
- *
- * Saved omp tabs are dropped, other items drop the omp chat they were saved with.
- */
+/** The tabs `raw` (a `JSON.stringify(SavedTabs)`) holds with current config defaults, or null when it holds none or is malformed. */
 export function parseSavedTabs(raw: string | null): SavedTabs | null {
   if (!raw) return null
   try {
@@ -104,7 +92,7 @@ export function parseSavedTabs(raw: string | null): SavedTabs | null {
     if (!Array.isArray(saved.tabs)) return null
     // An older build's omp tab: omp-web is gone, nothing shows it any more
     const kept = saved.tabs.filter((tab) => (tab.appMode as string) !== "omp" && (tab.workspaceItem?.kind as string | undefined) !== "omp")
-    const tabs = kept.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: savedItem(tab.workspaceItem) }))
+    const tabs = kept.map((tab) => ({ ...tab, config: { ...DEFAULT_TAB_CONFIG, ...tab.config }, workspaceItem: tab.workspaceItem }))
     if (tabs.length === 0) return null
     return { tabs, activeId: tabs.some((tab) => tab.id === saved.activeId) ? saved.activeId! : tabs[0].id }
   } catch {
@@ -160,43 +148,43 @@ export function piSessionOf(tab: Tab): string | null {
 /** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */
 export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "pi") {
-    return { category: "code", file: tab.name ?? tab.title ?? (tab.workspaceItem?.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi") }
+    return { category: "code", file: tab.title ?? (tab.workspaceItem?.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi") }
   }
   if (tab.appMode === "workbench") {
     const kind = tab.workspaceItem ? workbenchKindOf(tab.workspaceItem.path) : null
-    return { category: kind ?? "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File") }
+    return { category: kind ?? "files", file: tab.workspaceItem ? baseName(tab.workspaceItem.path) : "File" }
   }
   if (tab.appMode === "factory") {
     const factory = tab.workspaceItem ? parseFactoryPath(tab.workspaceItem.path) : null
-    return { category: "factory", file: tab.name ?? (factory ? factory.taskId ? "task" : baseName(factory.repo) : "board") }
+    return { category: "factory", file: factory ? factory.taskId ? "task" : baseName(factory.repo) : "board" }
   }
   if (tab.appMode === "learn") {
-    return { category: "learn", file: tab.name ?? tab.title ?? "Learn" }
+    return { category: "learn", file: tab.title ?? "Learn" }
   }
   if (tab.appMode === "canvas") {
     return tab.workspaceItem?.kind === "architecture"
-      ? { category: "architecture", file: tab.name ?? "System overview" }
-      : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? itemName(tab.workspaceItem, shownName) : "new.canvas") }
+      ? { category: "architecture", file: "System overview" }
+      : { category: "canvases", file: tab.workspaceItem?.kind === "canvas" ? itemName(tab.workspaceItem, shownName) : "new.canvas" }
   }
   if (tab.appMode === "document" && tab.workspaceItem?.kind === "diff") {
-    return { category: "diff", file: tab.name ?? baseName(tab.workspaceItem.path) }
+    return { category: "diff", file: baseName(tab.workspaceItem.path) }
   }
   if (tab.appMode === "document") {
-    return { category: "files", file: tab.name ?? (tab.workspaceItem ? itemName(tab.workspaceItem, shownName) : "New file") }
+    return { category: "files", file: tab.workspaceItem ? itemName(tab.workspaceItem, shownName) : "New file" }
   }
-  return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
+  return { category: "chats", file: tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
 /** Activity description of `tab` for screen readers; a chat shows its latest mode label. */
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
-    if (tab.appMode === "pi") return tab.name ?? tab.title ?? (tab.workspaceItem.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi")
-    if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
-    if (tab.appMode === "workbench") return tab.name ?? baseName(tab.workspaceItem.path)
-    if (tab.appMode === "factory") return tab.name ?? "Factory"
-    return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName))
+    if (tab.appMode === "pi") return tab.title ?? (tab.workspaceItem.pi ? baseName(tab.workspaceItem.pi.repo) : "Pi")
+    if (tab.appMode === "learn") return tab.title ?? "Learn"
+    if (tab.appMode === "workbench") return baseName(tab.workspaceItem.path)
+    if (tab.appMode === "factory") return "Factory"
+    return tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName)
   }
-  return tab.name ?? (modeLabel || "Chat")
+  return modeLabel || "Chat"
 }
 
 /** The tab the tab picker previews and the box in its card the tab is scaled into. */

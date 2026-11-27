@@ -4,7 +4,7 @@
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through
 """
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 import os
 
@@ -75,30 +75,8 @@ def validate_answer[Result](result: type[Result], content: bytes, *, label: str,
         raise UpstreamContractError(f"{label} {path}: field `{field}` {first['msg'].lower()}") from exc
 
 
-async def request_json[Result](
-    base_url: str,
-    method: str,
-    path: str,
-    result: type[Result],
-    *,
-    label: str,
-    headers: dict[str, str] | None = None,
-    json: object = None,
-    params: dict[str, str | int] | None = None,
-    timeout: float | httpx.Timeout = TIMEOUT_SECONDS,
-    transport: httpx.AsyncBaseTransport | None = None,
-) -> Result:
-    """Send one request and validate the JSON answer as *result*. *label* names the service in errors, *transport* is for tests."""
-    with unreachable(f"{label} at {base_url}"):
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers, transport=transport) as client:
-            response = await client.request(method, path, json=json, params=params)
-    if response.is_error:
-        raise UpstreamRequestFailed(response.status_code, error_message(response))
-    return validate_answer(result, response.content, label=label, path=path)
-
-
 class UpstreamClient:
-    """One upstream service: its URL (from *env*, else *default*), its *label* in errors, its headers and default timeout."""
+    """One upstream service: its URL (from *env*, else *default*), its *label* in errors and its default timeout."""
 
     def __init__(
         self,
@@ -106,13 +84,11 @@ class UpstreamClient:
         env: str,
         default: str,
         label: str,
-        headers: Callable[[], dict[str, str]] | None = None,
         timeout: float | httpx.Timeout = TIMEOUT_SECONDS,
     ) -> None:
         self._env = env
         self._default = default
         self._label = label
-        self._headers = headers
         self._timeout = timeout
         # Tests swap in an `httpx.MockTransport`, None is the real network.
         self.transport: httpx.AsyncBaseTransport | None = None
@@ -133,15 +109,11 @@ class UpstreamClient:
         timeout: float | httpx.Timeout | None = None,
     ) -> Result:
         """Send one request and validate the JSON answer as *result*, *timeout* overriding the client's default."""
-        return await request_json(
-            self.url,
-            method,
-            path,
-            result,
-            label=self._label,
-            headers=self._headers() if self._headers else None,
-            json=json,
-            params=params,
-            timeout=self._timeout if timeout is None else timeout,
-            transport=self.transport,
-        )
+        url = self.url
+        with unreachable(f"{self._label} at {url}"):
+            timeout = self._timeout if timeout is None else timeout
+            async with httpx.AsyncClient(base_url=url, timeout=timeout, transport=self.transport) as client:
+                response = await client.request(method, path, json=json, params=params)
+        if response.is_error:
+            raise UpstreamRequestFailed(response.status_code, error_message(response))
+        return validate_answer(result, response.content, label=self._label, path=path)

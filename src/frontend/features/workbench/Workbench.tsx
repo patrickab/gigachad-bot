@@ -11,7 +11,6 @@ import type { NeovimCommand } from "@/features/editor/neovimProtocol"
 import { fileLead, projectLead } from "./fileLead"
 import { EDITOR_PAGE } from "./pages"
 import { quoteSelection } from "./quote"
-import { useFollowBuffers } from "./useFollowBuffers"
 import { WorkbenchChat, useWorkbenchChat, type WorkbenchChatProps } from "./WorkbenchChat"
 import { useWorkbenchEditor } from "./useWorkbenchEditor"
 import type { WorkbenchNoticeChannel } from "./useWorkbenchNotice"
@@ -104,7 +103,6 @@ export function Workbench({ path, project, onPathChange, onClose, renderPane, st
     onNotice: (text) => report(EDITOR_NOTICE, text),
   })
   const { content, loadError } = editor
-  useFollowBuffers({ synced: editor.synced, paths: editor.openPaths, setContent: editor.setContent })
 
   const actions: WorkbenchEditorActions | null = neovim.enabled ? {
     reveal: (target, line, column, { focus = false } = {}) => {

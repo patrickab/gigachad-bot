@@ -98,16 +98,16 @@ api.fetchPiRepositories.mockResolvedValue([{ name: "alpha", path: "/home/u/git/a
 api.fetchPiSessions.mockImplementation(async () => api.sessions)
 
 describe("usePiSessions", () => {
-  it("filters every repo's sessions by repo and refreshes on sessions_changed", async () => {
+  it("lists every repo's sessions and refreshes on sessions_changed", async () => {
     api.sessions = [session("a1", "/home/u/git/alpha"), session("b1", "/home/u/git/beta"), session("a2", "/home/u/git/alpha/sub")]
-    const { result, unmount } = renderHook(() => usePiSessions({ repo: "alpha" }), { wrapper })
+    const { result, unmount } = renderHook(() => usePiSessions(), { wrapper })
     cleanups.push(unmount)
-    await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a1", "a2"]))
-    expect(api.fetchPiSessions).toHaveBeenCalledWith(undefined, { archived: false })
+    await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a1", "b1", "a2"]))
+    expect(api.fetchPiSessions).toHaveBeenCalledWith()
 
     api.sessions = [session("a3", "/home/u/git/alpha"), ...api.sessions]
     socket().emit({ type: "sessions_changed", sessionPaths: ["/sessions/a3.jsonl"] })
-    await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a3", "a1", "a2"]))
+    await waitFor(() => expect(result.current.sessions.map((listed) => listed.sessionId)).toEqual(["a3", "a1", "b1", "a2"]))
   })
 
   it("lists only coding sessions for profile coding, counting a session without a profile as coding (G5)", async () => {

@@ -120,7 +120,7 @@ def test_neovim_ends_when_the_backend_is_killed(backend_process, tmp_path, monke
                 return text
 
             await session.connect(save, lambda text: None)
-            terminal = session._process.pid
+            terminal = session._terminal._process.pid
             tasks = Path(f"/proc/{{terminal}}/task").iterdir()
             children = [int(pid) for task in tasks for pid in (task / "children").read_text().split()]
             print(json.dumps({{"pids": [terminal, *children], "workdir": str(session._workdir)}}), flush=True)

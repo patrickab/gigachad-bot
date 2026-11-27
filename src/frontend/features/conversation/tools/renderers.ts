@@ -4,7 +4,6 @@
  * - A tool renderer replaces the default tool row, wraps it (`next()`), or passes per call by returning `next()`
  * - Renderers of one tool chain newest first: `next()` is the one registered before, the last `next()` the default row (`ToolCallRow.tsx`)
  * - `placement: "standalone"` keeps the tool's calls outside the folded "Process details" (todos, plans, questions), the newest registration decides
- * - A display resolver names a source's tools (label and icon) for its rows and preview chips; Pi's own rows have none and show the raw tool name
  * - Registrations are side effects of importing the registering module; a feature registers its own tools, the app shell loads the ones another feature's rows need
  *
  * After pi-web.dev's `resolve(toolName, next)` chain.
@@ -20,7 +19,6 @@ export interface ToolDisplay {
   label: string
   icon: LucideIcon
 }
-export type ToolDisplayResolver = (toolName: string) => ToolDisplay | undefined
 
 interface ToolRegistration {
   render: ToolRenderer
@@ -28,7 +26,6 @@ interface ToolRegistration {
 }
 
 const toolRenderers = new Map<string, ToolRegistration[]>()
-const toolDisplays = new Map<string, ToolDisplayResolver[]>()
 
 /** Add `registration` to `name`'s chain; the returned function removes exactly it. */
 export function register<T>(registry: Map<string, T[]>, name: string, registration: T): () => void {
@@ -43,16 +40,6 @@ export function register<T>(registry: Map<string, T[]>, name: string, registrati
 /** Render `toolName`'s calls with `render`; returns the unregister function. */
 export function registerToolRenderer(toolName: string, render: ToolRenderer, options: { placement?: ToolPlacement } = {}): () => void {
   return register(toolRenderers, toolName, { render, placement: options.placement ?? "inline" })
-}
-
-/** Name the tools of `source` (e.g. the chat) with `resolve`; the newest registration decides. Returns the unregister function. */
-export function registerToolDisplay(source: string, resolve: ToolDisplayResolver): () => void {
-  return register(toolDisplays, source, resolve)
-}
-
-/** `toolName`'s display in `source`, undefined when the row shows the raw name. */
-export function toolDisplayOf(source: string, toolName: string): ToolDisplay | undefined {
-  return toolDisplays.get(source)?.at(-1)?.(toolName)
 }
 
 /** Where `toolName`'s calls render: inside the folded activity (`inline`) or between the texts (`standalone`). */

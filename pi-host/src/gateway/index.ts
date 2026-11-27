@@ -1,5 +1,5 @@
 /**
- * Completion gateway and quota: `GET /v1/models`, `POST /v1/chat/completions`, `GET /usage` (plan "Gateway details").
+ * Completion gateway and quota: `GET /v1/models`, `POST /v1/chat/completions`, `GET /usage` (.docs/pi-migration.md "Gateway").
  *
  * - Consumes: Pi's `ModelRuntime` (created once, lazily, reloading `models.json`, see `runtime.ts` for what it may write),
  *   optionally the OMP gateway (`omp.ts`), which takes the Anthropic chat completions

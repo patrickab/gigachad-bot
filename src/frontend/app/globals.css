@@ -668,27 +668,10 @@ code, pre, .font-mono {
   font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
-}
-
 @media (prefers-reduced-motion: no-preference) {
   button:not(:disabled):active {
     transform: scale(0.98);
   }
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9998;
-  background: none;
-}
-
-.light body::before {
-  background: none;
 }
 
 body::after {

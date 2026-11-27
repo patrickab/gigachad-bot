@@ -30,7 +30,9 @@ import { writeRootFile } from "@/lib/backend/api"
 import { TabSidebar } from "./TabSidebar"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
-import "./toolRenderers"
+// The tool renderers a feature's rows need from another feature, loaded where both are known: a chat memory call
+// renders as Pi's memory row (`features/pi/MemoryTool.tsx`), without the chat importing Pi.
+import "@/features/pi/MemoryTool"
 
 interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
@@ -57,19 +59,6 @@ function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
   observer.observe(main)
   observer.observe(tab)
   return () => observer.disconnect()
-}
-
-/**
- * The checkout an empty chat's first message starts a Pi session in, picked by path.
- *
- * Any folder may hold a Pi session. `folderError` stays for callers, it is always null.
- */
-export function usePiFolder(): { folder: string | null; folderError: string | null; pickFolder: (picked: string | null) => void } {
-  const [folder, setFolder] = useState<string | null>(null)
-  const pickFolder = useCallback((picked: string | null) => {
-    setFolder(picked === null ? null : picked.replace(/\/+$/, "") || "/")
-  }, [])
-  return { folder, folderError: null, pickFolder }
 }
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
@@ -118,7 +107,8 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
 
   // A folder picked in an empty chat makes its first message start a Pi session there, the Pi tab sends it once the session is ready.
   // The picker shows only in an empty chat, so a folder left over from one never redirects another chat's message
-  const { folder, folderError, pickFolder } = usePiFolder()
+  const [folder, setFolder] = useState<string | null>(null)
+  const pickFolder = (picked: string | null) => setFolder(picked === null ? null : picked.replace(/\/+$/, "") || "/")
   const [launch, setLaunch] = useState<PiLaunch | null>(null)
   const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
   // With a folder picked the model and thinking pickers offer Pi's catalog, the first message starts the session on them
@@ -165,7 +155,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       attachmentActions={attachmentActions}
       attachMenuItems={attachMenuItems}
       composerLeading={isEmptyChat ? <PiWorkspacePicker folder={folder} onChange={pickFolder} onOpenSession={(session, repo) => onOpenItem(piSessionItem(session, repo ?? newPiItem(session.cwd, projectSlug).pi!.repo, projectSlug))} /> : undefined}
-      composerNotice={turns.turnError || (isEmptyChat && folderError) || docs.architectureError || undefined}
+      composerNotice={turns.turnError || docs.architectureError || undefined}
     />
   )
 
@@ -204,7 +194,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
                 <DocumentEditor
                   path={standaloneFile.path}
                   slug=""
-                  overlay
                   persistOverride={(content) => writeRootFile(standaloneFile.path, content)}
                   onClose={() => filePicker.setStandaloneFile(null)}
                   onModeLabel={setModeLabel}
@@ -232,7 +221,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
           files={(filePicker.rootFiles.files ?? []).map((f) => f.path)}
           onSelect={filePicker.handleFileSelect}
           onClose={() => filePicker.setFilePickerOpen(false)}
-          placeholder="Search files…"
           emptyLabel={filePicker.rootFiles.files ? "No files" : "Loading…"}
         />
       )}

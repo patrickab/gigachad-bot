@@ -72,11 +72,7 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
     fileRootsEnabledResource.invalidate()
   }
 
-  const removeMount = (mount: string, name: string) => schedule(`root:${mount}`, name, async () => {
-    await removeFileRoot(mount)
-    await refreshRootTree()
-    fileRootsEnabledResource.invalidate()
-  })
+  const removeMount = (mount: string, name: string) => schedule(`root:${mount}`, name, () => mountThen(() => removeFileRoot(mount)))
 
   const unmounted = sessions.unmountedWorkspaces(mounts)
   // Neither mounted nor holding a session: reachable only by mounting

@@ -15,7 +15,6 @@ export interface ChatToolRun {
 // Streaming replaces a record whose call changed and keeps the others (`lib/backend/streaming.ts`), so the record's
 // identity covers its status: a streamed frame builds no new run for a settled call.
 const adapted = new WeakMap<ToolCallRecord, ChatToolRun>()
-const records = new WeakSet<object>()
 
 /** `record` as a Pi tool call and run, built once per record. */
 export function chatToolRun(record: ToolCallRecord): ChatToolRun {
@@ -23,7 +22,6 @@ export function chatToolRun(record: ToolCallRecord): ChatToolRun {
   if (!built) {
     // A legacy saved record has no status: it keeps its summary
     const text = record.status === "error" ? record.error || record.summary || "" : record.status === "running" ? "" : record.summary ?? ""
-    records.add(record)
     built = {
       call: { type: "toolCall", id: record.id, name: record.name, arguments: record.arguments },
       run: {
@@ -36,12 +34,6 @@ export function chatToolRun(record: ToolCallRecord): ChatToolRun {
     adapted.set(record, built)
   }
   return built
-}
-
-/** The chat record behind `run`, undefined for a run of a Pi session. */
-export function chatRecordOf(run: ToolRun | undefined): ToolCallRecord | undefined {
-  const details = run?.result?.details
-  return typeof details === "object" && details !== null && records.has(details) ? details as ToolCallRecord : undefined
 }
 
 type Stage = NonNullable<ToolCallRecord["stages"]>[number]

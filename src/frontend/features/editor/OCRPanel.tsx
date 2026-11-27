@@ -64,10 +64,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
 
   useEscapeLayer(onClose)
 
-  const handleSidebarApply = useCallback((newContent: string) => {
-    setOutput(newContent)
-  }, [setOutput])
-
   return (
     <AnimatePresence>
       <motion.div
@@ -158,7 +154,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
             model={model}
             width={sidebarWidth}
             onWidthChange={setSidebarWidth}
-            onApply={handleSidebarApply}
+            onApply={setOutput}
           />
         </div>
       </motion.div>

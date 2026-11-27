@@ -19,6 +19,13 @@ vi.mock("@/lib/backend/syncStream", () => ({
     return () => { feed.listener = null }
   },
 }))
+const follow = vi.hoisted(() => ({ files: [] as readonly string[], changed: null as ((path: string) => void) | null }))
+vi.mock("@/hooks/useFollowFiles", () => ({
+  useFollowFiles: (files: readonly string[], onChange: (path: string) => void) => {
+    follow.files = files
+    follow.changed = onChange
+  },
+}))
 
 /** What the hook handed `useNeovimTerminal` on its latest render. */
 interface Session {
@@ -107,6 +114,19 @@ describe("useWorkbenchEditor", () => {
     act(() => feed.listener?.(moved(MAIN, "/home/me/thesis/thesis.tex")))
     expect(editor.ops.renameFile).toHaveBeenLastCalledWith(MAIN, "/home/me/thesis/thesis.tex")
     expect(synced().get("/home/me/thesis/thesis.tex")).toBe(textOf(MAIN))
+  })
+
+  it("pushes an outside change of an open file into Neovim, unless it matches the synced text", async () => {
+    const { synced } = await openEditor()
+    expect(follow.files).toEqual([MAIN])
+
+    await act(async () => follow.changed?.(MAIN))
+    expect(editor.ops.setContent).not.toHaveBeenCalled()
+
+    api.loadFileViewerText.mockResolvedValueOnce("agent edit")
+    await act(async () => follow.changed?.(MAIN))
+    expect(editor.ops.setContent).toHaveBeenCalledExactlyOnceWith("agent edit", MAIN)
+    expect(synced().get(MAIN)).toBe("agent edit")
   })
 
   it("saves each file under the path Neovim names, one write at a time", async () => {

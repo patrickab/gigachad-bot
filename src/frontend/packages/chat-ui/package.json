@@ -16,14 +16,7 @@
       "types": "./dist/learn-protocol.d.ts",
       "default": "./dist/learn-protocol.js"
     },
-    "./hints": {
-      "types": "./dist/hints.d.ts",
-      "default": "./dist/hints.js"
-    },
-    "./code.css": "./dist/code.css",
     "./markdown.css": "./dist/markdown.css",
-    "./turn.css": "./dist/turn.css",
-    "./hints.css": "./dist/hints.css",
     "./palette.css": "./dist/palette.css",
     "./fonts.css": "./dist/fonts.css"
   },

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useRef } from "react"
-import { cn, isModKey } from "@/lib/utils"
+import { isModKey } from "@/lib/utils"
 import { useHighlightedHtml } from "@gigachad/chat-ui"
 
 export const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
@@ -20,10 +20,9 @@ export interface InlineEditRequest {
 interface ConsoleEditorProps {
   value: string
   onChange: (value: string) => void
-  language?: string
+  language: string
   placeholder?: string
   readOnly?: boolean
-  className?: string
   startLineNumber?: number
   /** Fired on Ctrl/Cmd+I with a non-empty selection. */
   onInlineEdit?: (request: InlineEditRequest) => void
@@ -33,10 +32,9 @@ interface ConsoleEditorProps {
 export function ConsoleEditor({
   value,
   onChange,
-  language = "latex",
+  language,
   placeholder = "Waiting for output...",
   readOnly = false,
-  className,
   startLineNumber = 1,
   onInlineEdit,
 }: ConsoleEditorProps) {
@@ -60,7 +58,7 @@ export function ConsoleEditor({
   const leftPad = `calc(${gutterWidth}px + ${PADDING_PX}px)`
 
   return (
-    <div className={cn("relative flex-1 min-h-0", className)}>
+    <div className="relative flex-1 min-h-0">
       {/* Gutter: pinned to the left, scrolls with the textarea */}
       <div
         ref={gutterRef}

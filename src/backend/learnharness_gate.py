@@ -22,7 +22,7 @@ from starlette.routing import Route
 
 from backend.identity import host_denied
 from backend.reverse_proxy import METHODS, forward, is_tailnet_host
-from lib.learnharness import learnharness_url
+from lib import learnharness
 
 # Tests swap in an `httpx.MockTransport`, None is the real network.
 _transport: httpx.AsyncBaseTransport | None = None
@@ -60,7 +60,9 @@ async def proxy(request: Request) -> Response:
 @asynccontextmanager
 async def lifespan(app: Starlette) -> AsyncIterator[None]:
     # No read timeout: a learning turn streams for as long as the model works.
-    async with httpx.AsyncClient(base_url=learnharness_url(), timeout=httpx.Timeout(10.0, read=None), transport=_transport) as client:
+    async with httpx.AsyncClient(
+        base_url=learnharness.client.url, timeout=httpx.Timeout(10.0, read=None), transport=_transport
+    ) as client:
         app.state.client = client
         yield
 

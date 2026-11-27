@@ -1,28 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useEventListener } from "@/hooks/useEventListener"
-import { useThemeName } from "@/hooks/useThemeName"
 import { tabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import { terminalSessionUrl } from "@/lib/backend/urls"
 import { isEditableTarget } from "@/lib/utils"
-import { NERD_FONTS, TERMINAL_FONT_SIZE, shellTheme } from "./terminalTheme"
+import { TERMINAL_FONT_SIZE, shellTheme } from "./terminalTheme"
+import { POLICY_VIOLATION, openWhenVisible, useTerminalSlot, type TerminalHandle } from "./terminalSlot"
 
-const POLICY_VIOLATION = 1008
 /** A second Esc this soon hides the window even while a program (vim, less) took the first one. */
 const DOUBLE_ESCAPE_MS = 400
-
-/** A running shell whose xterm host survives the window closing. */
-interface ShellTerminal {
-  attach: (parent: HTMLElement) => void
-  detach: () => void
-  fit: () => void
-  focus: () => void
-  restyle: () => void
-}
 
 /** A bare `t` typed outside text fields (composers, inputs, terminals) that nothing else took. */
 function isOpenTerminalKey(event: KeyboardEvent): boolean {
@@ -41,7 +31,7 @@ function isLeaveKey(event: KeyboardEvent): boolean {
  * - `onLeave` follows an Esc at the shell's prompt, or a double Esc while a program runs (the program gets the first one)
  */
 function useShellSession(tabId: string, sessionKey: number, onExit: () => void, onLeave: () => void) {
-  const [terminal, setTerminal] = useState<ShellTerminal | null>(null)
+  const [terminal, setTerminal] = useState<TerminalHandle | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const exit = useEffectEvent(onExit)
   const leave = useEffectEvent(onLeave)
@@ -58,7 +48,6 @@ function useShellSession(tabId: string, sessionKey: number, onExit: () => void, 
       const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: shellTheme(window.document.body) })
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
-      let isOpen = false
       let exited = false
 
       const socket = new WebSocket(terminalSessionUrl())
@@ -93,21 +82,7 @@ function useShellSession(tabId: string, sessionKey: number, onExit: () => void, 
         return false
       })
 
-      // xterm measures cells on open, so open only once the host is visible. Canvas cannot resolve CSS variables, so the app font is the computed one.
-      const fit = () => {
-        if (host.clientWidth === 0 || host.clientHeight === 0) return
-        if (!isOpen) {
-          xterm.options.fontFamily = `${NERD_FONTS}, ${getComputedStyle(host).fontFamily}`
-          xterm.open(host)
-          isOpen = true
-          try {
-            const webgl = new WebglAddon()
-            webgl.onContextLoss(() => webgl.dispose())
-            xterm.loadAddon(webgl)
-          } catch { /* no WebGL2, the DOM renderer stays */ }
-        }
-        fitAddon.fit()
-      }
+      const fit = () => { if (openWhenVisible(xterm, host, WebglAddon) !== "hidden") fitAddon.fit() }
       const restyle = () => { if (host.parentElement) xterm.options.theme = shellTheme(host.parentElement) }
 
       setFailure(null)
@@ -132,26 +107,8 @@ function useShellSession(tabId: string, sessionKey: number, onExit: () => void, 
 }
 
 /** Show `terminal` here. Keys stop at this element, so app shortcuts never steal them. */
-function ShellTerminalSlot({ terminal, failure, onRestart }: { terminal: ShellTerminal | null; failure: string | null; onRestart: () => void }) {
-  const slotRef = useRef<HTMLDivElement>(null)
-  const theme = useThemeName()
-
-  useEventListener(slotRef, "keydown", (event) => event.stopPropagation())
-
-  useEffect(() => {
-    const slot = slotRef.current
-    if (!slot || !terminal) return
-    terminal.attach(slot)
-    const observer = new ResizeObserver(() => terminal.fit())
-    observer.observe(slot)
-    terminal.focus()
-    return () => {
-      observer.disconnect()
-      terminal.detach()
-    }
-  }, [terminal])
-
-  useEffect(() => { terminal?.restyle() }, [terminal, theme])
+function ShellTerminalSlot({ terminal, failure, onRestart }: { terminal: TerminalHandle | null; failure: string | null; onRestart: () => void }) {
+  const slotRef = useTerminalSlot(terminal)
 
   return (
     <div ref={slotRef} data-terminal className="relative min-h-0 flex-1 overflow-hidden">

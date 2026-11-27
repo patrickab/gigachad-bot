@@ -6,9 +6,8 @@ import { fileViewerRawUrl } from "@/lib/backend/urls"
 const api = vi.hoisted(() => ({
   canvasEndpoint: (key: string) => key,
   loadFileViewerText: vi.fn(),
-  readFileRootRendered: vi.fn(),
+  readFileRootRendered: vi.fn(() => new Promise<string>(() => {})),
   writeDocument: vi.fn(),
-  writeBinaryDocument: vi.fn(),
   storeDrawing: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number
@@ -69,7 +68,7 @@ describe("DocumentEditor canvas collaboration", () => {
   it("keeps file root canvases on the file-viewer load and persistOverride save path", async () => {
     api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["root"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
     const persistOverride = vi.fn().mockResolvedValue(undefined)
-    const { unmount } = render(<DocumentEditor path="notes/sketch.canvas" slug="" overlay persistOverride={persistOverride} onClose={vi.fn()} />)
+    const { unmount } = render(<DocumentEditor path="notes/sketch.canvas" slug="" persistOverride={persistOverride} onClose={vi.fn()} />)
 
     expect(await screen.findByTestId("canvas")).toHaveTextContent("root")
     expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalledWith("notes/sketch.canvas")
@@ -144,7 +143,7 @@ describe("DocumentEditor tool artifacts", () => {
 describe("DocumentEditor files without text", () => {
   it("shows an image from its raw URL, not in the editor", () => {
     api.loadFileViewerText.mockClear()
-    render(<DocumentEditor path="/repo/paper/imgs/plot.PNG" slug="" overlay onClose={vi.fn()} />)
+    render(<DocumentEditor path="/repo/paper/imgs/plot.PNG" slug="" onClose={vi.fn()} />)
 
     expect(screen.getByRole("img", { name: "plot.PNG" })).toHaveAttribute("src", fileViewerRawUrl("/repo/paper/imgs/plot.PNG"))
     expect(api.loadFileViewerText).not.toHaveBeenCalled()

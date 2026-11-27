@@ -23,11 +23,11 @@ export interface LatexBuildState {
   failure: LatexFailure | null
   /** Raw URL of the latest good PDF. Null while there is none. */
   pdfUrl: string | null
-  /** The PDF's path, a new one for every build with new content, so its bytes never change under a reader. */
-  pdfPath: string | null
 }
 
 interface InternalState extends Omit<LatexBuildState, "pdfUrl"> {
+  /** The PDF's path, a new one for every build with new content, so its bytes never change under a reader. */
+  pdfPath: string | null
   /** The root this state belongs to. */
   root: string | null
 }
@@ -69,5 +69,5 @@ export function useLatexBuild(root: string | null, { folder }: { folder: string 
   useFollowFiles([], () => { void trigger() }, root === null ? [] : [folder])
 
   const pdfUrl = state.pdfPath ? fileViewerRawUrl(state.pdfPath) : null
-  return { building: state.building, result: state.result, failure: state.failure, pdfPath: state.pdfPath, pdfUrl, trigger }
+  return { building: state.building, result: state.result, failure: state.failure, pdfUrl, trigger }
 }

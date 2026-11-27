@@ -10,7 +10,7 @@ import { notifySettingsSaved, useSettingsSaved } from "../../components/settings
 import { selectedModelUnavailable } from "../../components/setup-cta";
 import { defaultOrderLevel, populateLevel } from "../../components/thinking-default";
 import { onShellMessage, postToFrameShell } from "./bridge";
-import { onModelOpen, sessionModelUnavailable, type ModelUnavailable } from "./freeze";
+import { onModelOpen, readJson, sessionModelUnavailable, type ModelUnavailable } from "./freeze";
 import { isEmbedded } from "./mode";
 
 /**
@@ -76,12 +76,6 @@ let lastModel: ModelMessage | null = null;
 function postModel(message: ModelMessage): void {
   lastModel = message;
   postToFrameShell(message);
-}
-
-async function readJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${path}: ${response.status}`);
-  return (await response.json()) as T;
 }
 
 async function put(path: string, body: unknown): Promise<PickResult> {

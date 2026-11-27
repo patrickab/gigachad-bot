@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect } from "react"
-import { motion } from "framer-motion"
 import { CanvasEditor } from "./CanvasEditor"
+import { EditorShell } from "@/features/editor/EditorShell"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { baseName } from "@/lib/paths"
 import { useDisplayName } from "@/contexts/ProjectContext"
@@ -25,17 +25,16 @@ interface FileCanvasEditorProps {
   path: string
   slug: string
   onClose: () => void
-  onSaved?: () => void
   /** Writes the serialized canvas to its storage. */
   persistOverride: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
 }
 
 /** Full-screen overlay for a file-root canvas: loads through the file viewer, autosaves through `persistOverride`. */
-export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride, onModeLabel }: FileCanvasEditorProps) {
+export function FileCanvasEditor({ path, slug, onClose, persistOverride, onModeLabel }: FileCanvasEditorProps) {
   // A confirmed-missing document legitimately starts blank.
   const { value: canvasDoc, loadError, reload, setValue, persist } = useRootFileDocument({
-    path, codec: CANVAS_CODEC, write: persistOverride, blankWhenMissing: true, onSaved,
+    path, codec: CANVAS_CODEC, write: persistOverride, blankWhenMissing: true,
   })
   useEffect(() => { reload() }, [reload])
   const shownName = useDisplayName()(slug, path) ?? baseName(path)
@@ -56,15 +55,8 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride
   if (!canvasDoc) return <LoadingPlaceholder />
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.15 }}
-      className="absolute inset-0 z-30 flex flex-row bg-paper"
-    >
-      <div className="flex-1 min-w-0 flex flex-col relative">
-        <CanvasEditor doc={canvasDoc} onChange={setValue} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} />
-      </div>
-    </motion.div>
+    <EditorShell>
+      <CanvasEditor doc={canvasDoc} onChange={setValue} slug={slug} docPath={path} />
+    </EditorShell>
   )
 }

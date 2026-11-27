@@ -29,7 +29,6 @@ export interface FrameSink {
 export type PiRecord = { type?: unknown; id?: unknown; [field: string]: unknown };
 export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
 export type SessionEntry = { id: string; parentId: string | null; type: string; [field: string]: unknown };
-export type Resync = { mode: "append" | "replace"; entries: SessionEntry[]; leafId: string | null };
 
 /** Ids of commands pi-host sends itself; their responses never reach clients. */
 const INTERNAL_ID_PREFIX = "pi-host:";

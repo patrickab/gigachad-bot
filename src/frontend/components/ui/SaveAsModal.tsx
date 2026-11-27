@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, type ElementType, type ReactNode } from "react"
+import { useState, useRef, type ElementType } from "react"
 import { Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog } from "./Dialog"
@@ -13,13 +13,10 @@ interface SaveAsModalProps {
   onSave: (name: string) => void
   title?: string
   icon?: ElementType
-  placeholder?: string
-  /** Rendered between the header and the input. */
-  beforeInput?: ReactNode
 }
 
 /** Modal with one text input; Enter submits the trimmed value. */
-export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput }: SaveAsModalProps) {
+export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save }: SaveAsModalProps) {
   const [name, setName] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -28,7 +25,6 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
 
   return (
     <Dialog open={open} onClose={onClose} icon={icon} title={title} initialFocusRef={inputRef}>
-      {beforeInput}
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -42,7 +38,6 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
           aria-label={title}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={placeholder}
           className={cn(
             "w-full rounded-lg border border-divider bg-surface/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
             "outline-none transition-all duration-200",

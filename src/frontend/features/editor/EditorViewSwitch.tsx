@@ -1,25 +1,28 @@
 import { cn } from "@/lib/utils"
 import type { EditorView } from "./useEditorView"
 
-function ViewSwitch({ view, onViewChange, options, className, buttonClass, inactiveClass }: {
-  view: EditorView
-  onViewChange: (v: EditorView) => void
-  options: readonly (readonly [EditorView, string])[]
+/** A segmented switch: one `aria-pressed` button per option, the one matching `value` styled `activeClass`. */
+export function ViewSwitch<T extends string | boolean>({ label = "Show as", value, onChange, options, className, buttonClass, activeClass = "bg-surface-elevated text-ink", inactiveClass }: {
+  label?: string
+  value: T
+  onChange: (value: T) => void
+  options: readonly (readonly [T, string])[]
   className: string
   buttonClass: string
+  activeClass?: string
   inactiveClass: string
 }) {
   return (
-    <div role="group" aria-label="Show as" className={className}>
-      {options.map(([option, label]) => (
+    <div role="group" aria-label={label} className={className}>
+      {options.map(([option, optionLabel]) => (
         <button
-          key={option}
+          key={optionLabel}
           type="button"
-          aria-pressed={view === option}
-          onClick={() => onViewChange(option)}
-          className={cn(buttonClass, view === option ? "bg-surface-elevated text-ink" : inactiveClass)}
+          aria-pressed={value === option}
+          onClick={() => onChange(option)}
+          className={cn(buttonClass, value === option ? activeClass : inactiveClass)}
         >
-          {label}
+          {optionLabel}
         </button>
       ))}
     </div>
@@ -29,8 +32,8 @@ function ViewSwitch({ view, onViewChange, options, className, buttonClass, inact
 export function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
     <ViewSwitch
-      view={view}
-      onViewChange={onViewChange}
+      value={view}
+      onChange={onViewChange}
       options={[["edit", "Edit"], ["preview", "Preview"]]}
       className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity"
       buttonClass="px-2 py-0.5 rounded text-[10px] font-medium transition-colors"
@@ -43,8 +46,8 @@ export function ViewPills({ view, onViewChange }: { view: EditorView; onViewChan
 export function ShowAsToggle({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
     <ViewSwitch
-      view={view}
-      onViewChange={onViewChange}
+      value={view}
+      onChange={onViewChange}
       options={[["preview", "Render"], ["edit", "Text"]]}
       className="flex gap-px rounded bg-surface p-px"
       buttonClass="rounded px-1.5 py-px transition-colors"

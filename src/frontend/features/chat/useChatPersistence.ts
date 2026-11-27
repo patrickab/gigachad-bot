@@ -33,10 +33,10 @@ export function useChatPersistence({
   const saveHistory = useCallback(async (messagesToSave: Message[], usageToSave: Usage | undefined) => {
     if (!tab.historyFile) return
     const title = tab.title ?? parseHistoryFile(tab.historyFile).filename.replace(".json", "")
-    await saveChat(tab.historyFile, projectSlug, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
+    await saveChat(tab.historyFile, projectSlug, messagesToSave, { chatId, title, usage: usageToSave })
     // The file is written: a failed refresh of the lists must not read as a failed save
     await refreshAll().catch(() => {})
-  }, [tab.historyFile, tab.title, tab.name, projectSlug, chatId, refreshAll])
+  }, [tab.historyFile, tab.title, projectSlug, chatId, refreshAll])
 
   const handleQuickSave = useCallback(async () => {
     await saveHistory(messages, usage)
@@ -57,11 +57,11 @@ export function useChatPersistence({
   const handleSaveSubmit = useCallback(async (name: string) => {
     const historyFile = buildHistoryFile(name + ".json", projectSlug)
     // A failed save is swallowed so the tab still adopts the new history file.
-    await saveChat(historyFile, projectSlug, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage }).catch(() => {})
+    await saveChat(historyFile, projectSlug, messages, { chatId, title: name, usage }).catch(() => {})
     setHistoryFile(historyFile)
     await refreshAll()
     setSaveModalOpen(false)
-  }, [messages, chatId, tab.name, projectSlug, usage, setHistoryFile, refreshAll])
+  }, [messages, chatId, projectSlug, usage, setHistoryFile, refreshAll])
 
   return {
     isTitled,

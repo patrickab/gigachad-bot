@@ -98,14 +98,15 @@ export function createIncrementalHighlighter(lang: string): IncrementalHighlight
         const hast = hl.codeToHast(text, { lang: safeLang, ...SHIKI_OPTIONS, grammarState })
         return { html: hastToHtml(hast), state: hl.getLastGrammarState(hast) }
       }
+      const startOver = () => {
+        settledCode = null
+        settled = ""
+        state = undefined
+      }
       const run = (): HighlightedLines => {
         const lastBreak = code.lastIndexOf("\n")
         const complete = lastBreak < 0 ? null : code.slice(0, lastBreak)
-        if (settledCode !== null && (complete === null || !(complete === settledCode || complete.startsWith(`${settledCode}\n`)))) {
-          settledCode = null
-          settled = ""
-          state = undefined
-        }
+        if (settledCode !== null && (complete === null || !(complete === settledCode || complete.startsWith(`${settledCode}\n`)))) startOver()
         if (complete !== null && complete !== settledCode) {
           const added = chunk(settledCode === null ? complete : complete.slice(settledCode.length + 1), state)
           settled = settledCode === null ? lineMarkup(added.html) : `${settled}\n${lineMarkup(added.html)}`
@@ -114,11 +115,6 @@ export function createIncrementalHighlighter(lang: string): IncrementalHighlight
         }
         const last = chunk(code.slice(lastBreak + 1), state).html
         return { ...preAttributes(last), settled, tail: lineMarkup(last) }
-      }
-      const startOver = () => {
-        settledCode = null
-        settled = ""
-        state = undefined
       }
       try {
         return run()

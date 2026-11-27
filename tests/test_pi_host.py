@@ -241,25 +241,6 @@ async def test_factory_entries_are_filtered_by_custom_type_and_since(monkeypatch
     assert dict(host.requests[1].url.params) == {"customType": "factory-"}
 
 
-async def test_a_prompt_reaches_the_session_and_answers_its_disposition(monkeypatch):
-    host = _serve(monkeypatch, {f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"})})
-
-    assert await pi_host.prompt_session(SESSION_ID, "/factory approve") == "handled"
-    assert await pi_host.prompt_session(SESSION_ID, "Also the icon", "followUp") == "handled"
-
-    assert json.loads(host.requests[0].content) == {"message": "/factory approve"}
-    assert json.loads(host.requests[1].content) == {"message": "Also the icon", "streamingBehavior": "followUp"}
-
-
-async def test_a_prompt_to_a_stopped_session_is_refused_with_pi_hosts_status(monkeypatch):
-    _serve(monkeypatch, {f"POST /sessions/{SESSION_ID}/prompt": (409, {"error": "not_live"})})
-
-    with pytest.raises(pi_host.PiHostRejected) as refused:
-        await pi_host.prompt_session(SESSION_ID, "/factory approve")
-
-    assert (refused.value.status, refused.value.body) == (409, {"error": "not_live"})
-
-
 async def test_a_missing_factory_plugin_is_reported_with_where_it_comes_from(monkeypatch):
     message = f"The factory is not installed. Install it from {pi_host.FACTORY_PLUGIN_SOURCE}"
     _serve(monkeypatch, {"POST /factory/call": (503, {"error": "factory_plugin_missing", "message": message})})
@@ -331,23 +312,21 @@ async def test_calls_that_wait_on_a_pi_child_outlast_pi_hosts_own_limit_reads_ke
         monkeypatch,
         {
             "POST /sessions": (200, {"session": SESSION}),
-            f"POST /sessions/{SESSION_ID}/prompt": (200, {"disposition": "handled"}),
             f"POST /sessions/{SESSION_ID}/close": (204, None),
             "GET /health": (200, {"ok": True}),
         },
     )
 
     await pi_host.open_session("/tmp", None)
-    await pi_host.prompt_session(SESSION_ID, "/factory start {}")
     await pi_host.close_session(SESSION_ID)
     with suppress(pi_host.PiHostBadResponse):
         await pi_host.health()
 
     limits = [request.extensions["timeout"]["read"] for request in host.requests]
     # pi-host gives each RPC to a child 30 s, a start runs several.
-    assert limits[0] == limits[1] == pi_host.CHILD_TIMEOUT_SECONDS > 30
-    assert limits[2] == pi_host.CLOSE_TIMEOUT_SECONDS
-    assert limits[3] == pi_host.TIMEOUT_SECONDS
+    assert limits[0] == pi_host.CHILD_TIMEOUT_SECONDS > 30
+    assert limits[1] == pi_host.CLOSE_TIMEOUT_SECONDS
+    assert limits[2] == pi_host.TIMEOUT_SECONDS
 
 
 async def test_a_pi_host_that_does_not_answer_is_logged_with_the_call_and_the_exception(monkeypatch, caplog):
@@ -467,7 +446,7 @@ def test_a_refusal_keeps_its_status_and_body(monkeypatch, repositories):
     _serve(monkeypatch, {"POST /sessions": (409, {"error": "locked"}), f"PUT /sessions/{SESSION_ID}/state": (409, current)})
     client = _client()
 
-    locked = client.post("/api/pi/sessions", json={"repo": "app", "resume": "continue"})
+    locked = client.post("/api/pi/sessions", json={"repo": "app", "resume": None})
     stale = client.put(f"/api/pi/sessions/{SESSION_ID}/state", json={"revision": 2, "data": {"title": "mine"}})
 
     assert (locked.status_code, locked.json()) == (409, {"detail": "locked", "body": {"error": "locked"}})

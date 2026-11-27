@@ -227,7 +227,6 @@ export interface BackendConfig {
   small_model: string
   vision_model: string
   default_model: string
-  downscale_images: boolean
   neovim_available: boolean
   /** This user's animated app background setting. */
   animated_background: boolean

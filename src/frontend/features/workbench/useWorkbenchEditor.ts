@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react"
 import { useNeovimTerminal, type NeovimSelection, type NeovimStatus, type NeovimTerminal } from "@/features/editor/NeovimEditor"
 import type { NeovimCommand } from "@/features/editor/neovimProtocol"
+import { useFollowFiles } from "@/hooks/useFollowFiles"
 import { loadFailureOf, type FileLoadFailure } from "@/hooks/useRootFileDocument"
 import { loadFileViewerText, writeRootFile } from "@/lib/backend/api"
 import { onFileMove } from "@/lib/backend/fileEvents"
@@ -43,10 +44,6 @@ interface WorkbenchEditor {
   shownText: string | null
   /** Every file open in Neovim and the text Neovim and the disk last agreed on. */
   synced: RefObject<ReadonlyMap<string, string>>
-  /** The paths of the files open in Neovim. */
-  openPaths: readonly string[]
-  /** Hand text of the file at `path`, already on disk, to Neovim. False while it cannot take it. */
-  setContent: (text: string, path: string) => boolean
   /** Hand `command` to Neovim. False while the session is not open, `onNotice` then gets `refusal`. */
   send: (command: NeovimCommand, refusal: string) => boolean
   /** Put Neovim's cursor on 1-based `line` and 0-based UTF-8 byte `column` of the file at `path`, switching to its buffer through `onPathChange` when Neovim shows another file. A refusal while the session is not open goes to `onNotice`. */
@@ -62,6 +59,9 @@ interface WorkbenchEditor {
  * - Saves go to the path Neovim names, one write at a time
  * - A file this device renames (`onFileMove`) or any device does (a change event with `moved_to`) is renamed in Neovim, unsaved edits stay
  * - A restart keeps the first file and the shown one, the other buffers are gone
+ * - Every change of an open file from outside Neovim (the agent, a terminal, another device) is read and pushed into Neovim when it differs from its synced text, the backend merges it into unsaved edits
+ * - A file closed or renamed while it was read is not pushed
+ * - A failed read or a push Neovim could not take yet is left to the file's next change
  */
 export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClose, onSelection, onForwardSearch, onNotice }: WorkbenchEditorOptions): WorkbenchEditor {
   // The session is named after its first file for good, its Neovim buffer follows the file's renames
@@ -121,8 +121,6 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     onPathChange(shown.current)
   }
 
-  const openPaths = [...synced.keys()]
-
   const startText = synced.get(startPath)
   const opening = enabled && startText !== undefined ? { key: sessionKey, path: startPath, filename: baseName(startPath), content: startText } : null
   const editor = useNeovimTerminal(opening, save, onClose, {
@@ -143,6 +141,19 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     if (taken) updateSynced((next) => { if (next.has(bufferPath)) next.set(bufferPath, text) })
     return taken
   }, [enabled, sendCommand, updateSynced])
+
+  const pull = async (changedPath: string) => {
+    let text: string
+    try {
+      text = await loadFileViewerText(changedPath)
+    } catch {
+      // A missing file mid-write is normal, the write that completes it reports again
+      return
+    }
+    if (!syncedRef.current.has(changedPath) || text === syncedRef.current.get(changedPath)) return
+    setContent(text, changedPath)
+  }
+  useFollowFiles([...synced.keys()], (changedPath) => { void pull(changedPath) })
 
   const send = (command: NeovimCommand, refusal: string) => {
     const taken = sendCommand(command)
@@ -234,8 +245,6 @@ export function useWorkbenchEditor({ path, enabled, onPathChange, onSaved, onClo
     loadError,
     shownText: synced.get(path) ?? null,
     synced: syncedRef,
-    openPaths,
-    setContent,
     send,
     reveal,
   }

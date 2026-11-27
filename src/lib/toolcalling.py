@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import asdict, dataclass, field
 import json
 import time
@@ -285,13 +285,6 @@ def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> ToolCall | Non
     return ToolCall(f"text_{name}_{uuid4().hex[:8]}", name, args if isinstance(args, dict) else {})
 
 
-def _start_stream(
-    model: str, messages: list[dict[str, Any]], specs: list[dict[str, Any]] | None, kwargs: dict[str, Any]
-) -> Iterator[Any]:
-    """Open the round's raw chunk stream, so tool deltas and signed thinking blocks survive."""
-    return completions.stream(model, messages, tools=specs, **kwargs)
-
-
 @dataclass
 class _Round:
     text: str = ""
@@ -310,7 +303,7 @@ async def _run_round(
     out: _Round,
 ) -> AsyncIterator[tuple[str, Any]]:
     """Stream one completion, yielding `token` events and filling *out* with text, call and usage."""
-    stream = await asyncio.to_thread(_start_stream, model, messages, specs, kwargs)
+    stream = await asyncio.to_thread(completions.stream, model, messages, tools=specs, **kwargs)
     pending: dict[int, dict[str, Any]] = {}
     in_reasoning = False
     # Buffer leading text only when tools are offered, to detect text-mode calls before streaming.
@@ -374,12 +367,12 @@ async def stream_tool_turn[ContextT](
     user_msg: str,
     history: list[dict[str, Any]],
     system_prompt: str,
-    img: Any = None,
+    img: completions.ImageInput | list[completions.ImageInput] | tuple[completions.ImageInput, ...] | None = None,
     enabled: list[str],
     catalog: ToolCatalog[ContextT],
     context_for_call: Callable[[str], ContextT],
     guidance: str,
-    **kwargs: Any,
+    **kwargs: Any,  # noqa: ANN401 - completion options pass through to the provider
 ) -> AsyncIterator[tuple[str, Any]]:
     """Offer tools once, dispatch at most one call, then force an answer."""
     specs = catalog.specs(enabled)

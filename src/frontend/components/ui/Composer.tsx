@@ -1,6 +1,6 @@
 "use client"
 
-import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react"
 import { ArrowUp, Loader2, Mic, Square } from "lucide-react"
 import { useSpeechInput } from "@/hooks/useSpeechInput"
 import { cn } from "@/lib/utils"
@@ -21,15 +21,15 @@ const MAX_TEXTAREA_HEIGHT_PX = 200
 /**
  * Message card: growing textarea over an action row with dictation and send/stop.
  *
- * - Enter submits, Shift+Enter adds a line. An `onKeyDown` that calls `preventDefault` takes the key instead
- * - `leading` / `trailing` add action-row controls left / before the mic
+ * - Enter submits, Shift+Enter adds a line
+ * - `leading` adds action-row controls on the left
  * - `busy` shows a spinner instead of send, e.g. while an attachment is extracted
  * - `canSend` defaults to a non-blank `value`
  * - `children` render at the card's top, for overlays like a completion menu
  */
 export function Composer({
   value, onValueChange, onSubmit, onStop, label, placeholder, disabled = false, isStreaming = false, busy = false,
-  canSend = value.trim().length > 0, textareaRef, onKeyDown, onPaste, onBlur, hint, leading, trailing, children,
+  canSend = value.trim().length > 0, onPaste, leading, children,
 }: {
   value: string
   onValueChange: (value: string) => void
@@ -41,17 +41,11 @@ export function Composer({
   isStreaming?: boolean
   busy?: boolean
   canSend?: boolean
-  textareaRef?: RefObject<HTMLTextAreaElement | null>
-  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void
-  onBlur?: () => void
-  hint?: string | null
   leading?: ReactNode
-  trailing?: ReactNode
   children?: ReactNode
 }) {
-  const ownTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const textarea = textareaRef ?? ownTextareaRef
+  const textarea = useRef<HTMLTextAreaElement>(null)
   const { isListening, toggleListening } = useSpeechInput(value, onValueChange)
   const sendable = canSend && !disabled
 
@@ -73,8 +67,7 @@ export function Composer({
   }, [value, textarea])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    onKeyDown?.(event)
-    if (event.defaultPrevented || event.key !== "Enter" || event.shiftKey || isStreaming || busy) return
+    if (event.key !== "Enter" || event.shiftKey || isStreaming || busy) return
     event.preventDefault()
     if (sendable) onSubmit()
   }
@@ -89,7 +82,6 @@ export function Composer({
         value={value}
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        onBlur={onBlur}
         onPaste={onPaste}
         disabled={disabled && !isStreaming}
         placeholder={placeholder}
@@ -101,11 +93,9 @@ export function Composer({
         data-enable-grammarly="false"
         className="w-full resize-none bg-transparent text-sm leading-6 text-ink placeholder:text-ink-faint outline-none"
       />
-      {hint && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
       <div className="mt-2 flex items-center justify-between">
         <div className="-ml-1.5 flex min-w-0 items-center gap-0.5">{leading}</div>
         <div className="flex items-center gap-0.5">
-          {trailing}
           <button aria-label={isListening ? "Stop listening" : "Start listening"}
             onClick={toggleListening}
             disabled={disabled}

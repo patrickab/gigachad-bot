@@ -3,7 +3,7 @@
 import { HeldMessages } from "./HeldMessages"
 import type { HeldMessage } from "./outbox"
 import { createContext, Fragment, memo, useCallback, useContext, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
-import { Brain, ChevronRight, FoldVertical, Sparkles, TerminalSquare } from "lucide-react"
+import { Brain, ChevronRight, FoldVertical, Sparkles, TerminalSquare, type LucideIcon } from "lucide-react"
 import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
@@ -23,8 +23,8 @@ import { PiSearchBar } from "./PiSearchBar"
 import { clearPiSearchHit, stepPiSearchHit, type PiSearchFocus } from "./searchFocus"
 import { currentRange, ENTRY_TEXT, useSearchHighlights } from "./useSearchHighlights"
 import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
-import { ProcessDetails } from "./tools/ProcessDetails"
-import { ToolCallRow } from "./tools/ToolCallRow"
+import { ProcessDetails } from "@/features/conversation/tools/ProcessDetails"
+import { ToolCallRow } from "@/features/conversation/tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
 import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ImageContent, ToolCall, ToolRun } from "./types"
@@ -115,19 +115,24 @@ function answerPieces(messages: AgentMessage[], turn: Turn, streaming: Assistant
   return pieces
 }
 
-/** Memoized like the tool rows: a live turn re-renders on each streamed frame, its settled pieces must not. */
-const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
+/** A folded block: its icon and label, `children` on expand. */
+function Fold({ icon: Icon, label, children }: { icon: LucideIcon; label: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="my-1 text-xs text-ink-muted">
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:text-ink focus-visible:outline focus-visible:outline-1">
-        <Brain size={12} aria-hidden="true" />
+        <Icon size={12} aria-hidden="true" />
         <ChevronRight size={12} aria-hidden="true" className={open ? "rotate-90 transition-transform" : "transition-transform"} />
-        Thinking
+        {label}
       </button>
-      {open && <p className="mt-1 whitespace-pre-wrap pl-5 leading-5">{text}</p>}
+      {open && children}
     </div>
   )
+}
+
+/** Memoized like the tool rows: a live turn re-renders on each streamed frame, its settled pieces must not. */
+const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
+  return <Fold icon={Brain} label="Thinking"><p className="mt-1 whitespace-pre-wrap pl-5 leading-5">{text}</p></Fold>
 })
 
 const PreviewContext = createContext<(attachment: Attachment) => void>(() => {})
@@ -180,7 +185,7 @@ function renderPiece(piece: Piece, runs: Record<string, ToolRun>, live: boolean,
     case "thinking": return <ThinkingBlock key={piece.key} text={piece.text} />
     case "tool": {
       const run = runs[piece.call.id]
-      const row = () => <ToolCallRow call={piece.call} run={run} streaming={live} defaultCollapsed onOpenFile={fileOpener(fileLinks)} />
+      const row = () => <ToolCallRow call={piece.call} run={run} streaming={live} onOpenFile={fileOpener(fileLinks)} />
       return <Fragment key={piece.key}>{renderToolCall(piece.call, run, row)}</Fragment>
     }
     case "images": return <ToolImages key={piece.key} attachments={piece.attachments} />
@@ -286,17 +291,7 @@ function promptImageBlocks(message: AgentMessage): ImageContent[] {
 
 /** The skill a prompt loaded, folded like "Thinking": its name, the skill file on expand. */
 function SkillFold({ skill, fileLinks }: { skill: SkillBlock; fileLinks: FileLinks }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="my-1 text-xs text-ink-muted">
-      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:text-ink focus-visible:outline focus-visible:outline-1">
-        <Sparkles size={12} aria-hidden="true" />
-        <ChevronRight size={12} aria-hidden="true" className={open ? "rotate-90 transition-transform" : "transition-transform"} />
-        Skill · {skill.name}
-      </button>
-      {open && <div className="mt-1 pl-5"><LaTeXMarkdown content={skill.body} fileLinks={fileLinks} /></div>}
-    </div>
-  )
+  return <Fold icon={Sparkles} label={<>Skill · {skill.name}</>}><div className="mt-1 pl-5"><LaTeXMarkdown content={skill.body} fileLinks={fileLinks} /></div></Fold>
 }
 
 /**

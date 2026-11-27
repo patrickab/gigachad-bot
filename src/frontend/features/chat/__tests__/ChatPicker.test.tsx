@@ -23,7 +23,7 @@ function chat(historyFile: string, title: string, ageHours: number, projectSlug:
   return { historyFile, projectSlug, title, updatedAt: new Date(Date.now() - ageHours * HOUR).toISOString() }
 }
 
-const TAB: Tab = { id: "tab", name: null, chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
+const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], appMode: "chat", projectSlug: null, workspaceItem: null }
 
 function renderPicker({ isActive = true, open = true } = {}) {
   const onOpenChat = vi.fn()

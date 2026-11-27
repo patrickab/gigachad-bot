@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { fileViewerRawUrl } from "@/lib/backend/urls"
 import type { LatexBuild } from "@/lib/domain/latex"
 
 const api = vi.hoisted(() => ({
@@ -40,17 +41,16 @@ describe("useLatexBuild", () => {
     api.buildLatex.mockResolvedValueOnce(built("/pdf/paper.pdf"))
     const { result, rerender } = renderHook(({ root }) => useLatexBuild(root, options), { initialProps: { root: OLD as string | null } })
     await act(() => result.current.trigger())
-    expect(result.current.pdfPath).toBe("/pdf/paper.pdf")
+    expect(result.current.pdfUrl).toBe(fileViewerRawUrl("/pdf/paper.pdf"))
 
     rerender({ root: NEW })
-    expect(result.current.pdfPath).toBeNull()
     expect(result.current.pdfUrl).toBeNull()
     expect(result.current.result).toBeNull()
 
     api.buildLatex.mockResolvedValueOnce(built("/pdf/thesis.pdf"))
     await act(() => result.current.trigger())
     expect(api.buildLatex).toHaveBeenLastCalledWith(NEW)
-    await waitFor(() => expect(result.current.pdfPath).toBe("/pdf/thesis.pdf"))
+    await waitFor(() => expect(result.current.pdfUrl).toBe(fileViewerRawUrl("/pdf/thesis.pdf")))
   })
 
   it("drops the answer of a build of the old root that finishes after the root changed", async () => {
@@ -64,7 +64,7 @@ describe("useLatexBuild", () => {
       slow.resolve(built("/pdf/paper.pdf"))
       await finished
     })
-    expect(result.current.pdfPath).toBeNull()
+    expect(result.current.pdfUrl).toBeNull()
     expect(result.current.building).toBe(false)
   })
 })

@@ -16,26 +16,15 @@ const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
 const PLUGINS = { math: mathPlugin }
 const LINK_SAFETY_OFF = { enabled: false }
 const DEFAULT_REMARK_PLUGINS: PluginList = [...Object.values(defaultRemarkPlugins), remarkBreaks, remarkHtmlMath]
-
-/** How the host's hrefs pass Streamdown's sanitizer. Omit it to keep Streamdown's defaults. */
-export interface LinkPolicy {
-  /** Href protocols kept in addition to the sanitizer's own, e.g. `agent` for in-app handles. */
-  extraHrefProtocols?: readonly string[]
-  /**
-   * Streamdown's URL hardening drops relative paths without a leading `./` and `file:` links.
-   * A host that resolves those hrefs itself turns it off. Defaults to on.
-   */
-  harden?: boolean
-}
+/** Streamdown's default rehype chain without its URL hardening. */
+const UNHARDENED: RehypePlugin[] = Object.entries(defaultRehypePlugins).flatMap(([name, plugin]) => name === "harden" ? [] : [plugin])
 
 export interface MarkdownRendererProps {
   content: string
   /** Final markdown is rendered block by block while it streams in. */
   streaming?: boolean
-  /** Tighter headings, lists, tables and spacing for dense surfaces. Selects the root class, so it is not inferred from `className`. */
+  /** Tighter headings, lists, tables and spacing for dense surfaces. */
   compact?: boolean
-  /** Extra classes of the root element, which always carries `data-markdown-root` and its own `gc-markdown` / `gc-markdown-compact` class. */
-  className?: string
   style?: CSSProperties
   /** Fenced code, diagrams: the host owns every renderer so the package carries no host styling or backend. */
   codeRenderers: CodeRenderers
@@ -43,37 +32,26 @@ export interface MarkdownRendererProps {
   components?: Components
   /** Remark plugins run after the defaults (GFM, soft line breaks), in order. Keep the array stable. */
   remarkPlugins?: PluginList
-  linkPolicy?: LinkPolicy
+  /**
+   * Streamdown's URL hardening drops relative paths without a leading `./` and `file:` links.
+   * A host that resolves those hrefs itself turns it off. Defaults to on.
+   */
+  hardenLinks?: boolean
   /** Enables checkbox toggling: receives the markdown with the clicked task item flipped. */
   onContentChange?: (newContent: string) => void
   /** Classes of toggleable checkboxes. */
   checkboxClassName?: string
 }
 
-/** Streamdown's default rehype chain, with the link policy applied to its sanitizer and hardener. */
-function rehypePluginsFor(extraHrefProtocols: readonly string[], harden: boolean): RehypePlugin[] {
-  return Object.entries(defaultRehypePlugins).flatMap(([name, plugin]): RehypePlugin[] => {
-    if (name === "harden" && !harden) return []
-    if (name !== "sanitize" || extraHrefProtocols.length === 0) return [plugin]
-    if (!Array.isArray(plugin) || typeof plugin[1] !== "object" || plugin[1] === null) {
-      throw new Error("streamdown changed the shape of its sanitize plugin, update rehypePluginsFor")
-    }
-    const [sanitize, schema] = plugin as [unknown, { protocols?: { href?: readonly string[] } }]
-    const protocols = { ...schema.protocols, href: [...(schema.protocols?.href ?? []), ...extraHrefProtocols] }
-    return [[sanitize, { ...schema, protocols }] as RehypePlugin]
-  })
-}
-
 function MarkdownRendererInner({
   content,
   streaming,
   compact,
-  className,
   style,
   codeRenderers,
   components: hostComponents,
   remarkPlugins: extraRemarkPlugins,
-  linkPolicy,
+  hardenLinks = true,
   onContentChange,
   checkboxClassName,
 }: MarkdownRendererProps) {
@@ -131,14 +109,6 @@ function MarkdownRendererInner({
     () => (extraRemarkPlugins?.length ? [...DEFAULT_REMARK_PLUGINS, ...extraRemarkPlugins] : DEFAULT_REMARK_PLUGINS),
     [extraRemarkPlugins],
   )
-  // The policy is plain data: compare it by value, so an inline object does not rebuild the chain.
-  const hasLinkPolicy = linkPolicy !== undefined
-  const harden = linkPolicy?.harden !== false
-  const extraProtocols = linkPolicy?.extraHrefProtocols?.join(" ") ?? ""
-  const rehypePlugins = useMemo(
-    () => (hasLinkPolicy ? rehypePluginsFor(extraProtocols ? extraProtocols.split(" ") : [], harden) : undefined),
-    [hasLinkPolicy, extraProtocols, harden],
-  )
 
   // Copy the underlying markdown (headings, math, code fences) instead of the rendered text, the exact source when all of it is selected.
   const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -155,7 +125,7 @@ function MarkdownRendererInner({
   const rootClass = compact ? "gc-markdown-compact" : "gc-markdown"
 
   return (
-    <div data-markdown-root className={className ? `${rootClass} ${className}` : rootClass} style={style} onCopy={handleCopy}>
+    <div data-markdown-root className={rootClass} style={style} onCopy={handleCopy}>
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={false}
@@ -164,7 +134,7 @@ function MarkdownRendererInner({
         controls={{ code: false, table: { copy: true, download: true }, mermaid: false }}
         plugins={PLUGINS}
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={hardenLinks ? undefined : UNHARDENED}
         linkSafety={LINK_SAFETY_OFF}
         components={components}
       >

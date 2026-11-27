@@ -1,17 +1,12 @@
 /**
- * Supervisor configuration from the environment, and the Pi SDK version pi-host is built against.
+ * Supervisor configuration from the environment.
  *
  * - Consumes: `PI_HOST_PI_BIN`, `PI_HOST_IDLE_MINUTES`, `PI_HOST_CHILD_ENV`, `PI_HOST_PORT`, `PI_HOST_EXTENSIONS_DIR`,
- *   `PI_HOST_AGENT_SANDBOX_BIN`, `PI_HOST_SANDBOX_PROFILE`, the gateway token path (`auth.ts`),
- *   the `@earendil-works/pi-coding-agent` pin in `package.json`
- * - Provides: `SupervisorConfig`, `loadConfig`, `PINNED_PI_VERSION`
+ *   `PI_HOST_AGENT_SANDBOX_BIN`, `PI_HOST_SANDBOX_PROFILE`, the gateway token path (`auth.ts`)
+ * - Provides: `SupervisorConfig`, `loadConfig`
  */
 import { resolve } from "node:path";
-import packageJson from "../../package.json";
 import { gatewayTokenPath } from "../auth.ts";
-
-/** The version of the Pi SDK dependency. The installed Pi binary may be newer: pi-host runs whatever the host has. */
-export const PINNED_PI_VERSION: string = packageJson.dependencies["@earendil-works/pi-coding-agent"];
 
 const DEFAULT_IDLE_MINUTES = 15;
 const DEFAULT_PORT = 8300;

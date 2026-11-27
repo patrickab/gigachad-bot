@@ -1,11 +1,12 @@
+from dataclasses import asdict
+
 from agent_sandbox import SandboxManifest, manifest_to_dict
-from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Artifact, Execution, Outputs, PiSessionState, WorkspaceRef, to_yaml
+from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Artifact, Execution, Outputs, PiSessionState, WorkspaceRef
 import pytest
-import yaml
 
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.json_docs import JsonDocs
-from lib.sandbox_store import AssetRef, RunRecord, SandboxStore
+from lib.sandbox_store import RunRecord, SandboxStore
 from lib.storage_namespace import (
     DEFAULT_SANDBOX_SCOPE,
     sandbox_asset,
@@ -54,7 +55,7 @@ def test_new_writes_use_native_manifest_mapping(sandbox_store: SandboxStore, dat
     manifest = _manifest("native-write", "a" * 64)
     record = RunRecord(tool_call_id="call-1", status="completed", started_at=1.0)
 
-    sandbox_store.checkpoint(chat_id, profile="gigachad", manifest=manifest, runs={"call-1": record}, latest_run_id="call-1")
+    sandbox_store.checkpoint(chat_id, manifest=manifest, runs={"call-1": record}, latest_run_id="call-1")
     persisted = JsonDocs(data_store).read(sandbox_manifest(chat_id, manifest.manifest_id))
 
     assert sandbox_store.read_active(chat_id).manifest_id == manifest.manifest_id
@@ -72,111 +73,17 @@ def test_native_manifest_id_must_match_its_storage_path(sandbox_store: SandboxSt
         sandbox_store.read_manifest(chat_id, "native-path-id")
 
 
-def test_reads_legacy_wrapper_with_embedded_aib_manifest_despite_path_id_difference(
-    sandbox_store: SandboxStore, data_store: DataStore
-) -> None:
-    chat_id = "chat-legacy-read"
-    manifest_id = "legacy-wrapper"
-    manifest = _manifest("legacy-native", "a" * 64)
-    legacy = {
-        "version": 1,
-        "workspace": AssetRef("a" * 64, "application/x-tar", 100).to_json(),
-        "omp_session": None,
-        "extra": {"agent_sandbox_manifest": to_yaml(manifest)},
-    }
-    key = sandbox_manifest(chat_id, manifest_id)
-    JsonDocs(data_store).write(key, legacy)
-
-    assert sandbox_store.read_manifest(chat_id, manifest_id) == manifest
-    assert JsonDocs(data_store).read(key) == legacy
-
-
-def test_invalid_legacy_wrapper_does_not_fabricate_manifest(sandbox_store: SandboxStore, data_store: DataStore) -> None:
-    chat_id = "chat-invalid-legacy"
-    manifest_id = "invalid-wrapper"
-    JsonDocs(data_store).write(
-        sandbox_manifest(chat_id, manifest_id),
-        {
-            "version": 1,
-            "workspace": AssetRef("a" * 64, "application/x-tar", 100).to_json(),
-            "omp_session": None,
-            "extra": {},
-        },
-    )
-
-    with pytest.raises(ValueError, match="embedded AIB manifest"):
-        sandbox_store.read_manifest(chat_id, manifest_id)
-
-
-def _omp_manifest_mapping(manifest: SandboxManifest, session_sha256: str) -> dict:
-    """*manifest* as a version-1 (OMP) record holding one OMP session."""
-    mapping = {key: value for key, value in manifest_to_dict(manifest).items() if key != "pi_sessions"}
-    omp_sessions = {"main": {"session_id": "main", "state_asset_id": sandbox_asset(session_sha256)}}
-    return {**mapping, "schema_version": 1, "omp_sessions": omp_sessions}
-
-
-def test_version_one_manifest_reads_without_a_session(sandbox_store: SandboxStore, data_store: DataStore) -> None:
-    """An OMP-era manifest keeps its workspace and outputs, its OMP session is dropped."""
-    chat_id = "chat-omp-manifest"
-    manifest = _manifest("omp-native", "a" * 64, events_sha256="c" * 64)
-    JsonDocs(data_store).write(sandbox_manifest(chat_id, manifest.manifest_id), _omp_manifest_mapping(manifest, "b" * 64))
-
-    assert sandbox_store.read_manifest(chat_id, manifest.manifest_id) == manifest
-    assert sandbox_store.referenced_chat_shas(chat_id) == {"a" * 64, "c" * 64}
-
-
-def test_legacy_wrapper_with_a_version_one_manifest_reads_without_a_session(
-    sandbox_store: SandboxStore, data_store: DataStore
-) -> None:
-    chat_id = "chat-omp-wrapper"
-    manifest = _manifest("omp-wrapped", "a" * 64)
-    legacy = {
-        "version": 1,
-        "workspace": AssetRef("a" * 64, "application/x-tar", 100).to_json(),
-        "omp_session": None,
-        "extra": {"agent_sandbox_manifest": yaml.safe_dump(_omp_manifest_mapping(manifest, "b" * 64), sort_keys=False)},
-    }
-    JsonDocs(data_store).write(sandbox_manifest(chat_id, "omp-wrapper"), legacy)
-
-    assert sandbox_store.read_manifest(chat_id, "omp-wrapper") == manifest
-
-
-def test_recover_completed_run_rebuilds_missing_run_history(sandbox_store: SandboxStore, data_store: DataStore):
-    manifest = _manifest("recover-manifest", "a" * 64)
-    result = {
-        "status": "completed",
-        "summary": "done",
-        "manifest_id": manifest.manifest_id,
-        "workspace_changed": True,
-        "outputs": [],
-        "error": None,
-    }
-    record = RunRecord(tool_call_id="call-1", status="completed", started_at=1.0, finished_at=2.0, result=result)
-    sandbox_store.checkpoint(
-        "chat-recover", profile="gigachad", manifest=manifest, runs={record.tool_call_id: record}, latest_run_id=record.tool_call_id
-    )
-    data_store.delete(sandbox_run("chat-recover", "call-1"))
-
-    recovered = sandbox_store.recover_completed_run("chat-recover", "call-1")
-
-    assert recovered is not None
-    assert recovered.result == result
-    assert sandbox_store.read_run("chat-recover", "call-1") == recovered
-
-
 def test_checkpoint_without_latest_run_writes_only_other_runs(sandbox_store: SandboxStore):
     other = RunRecord(tool_call_id="other", status="completed", started_at=2.0)
 
     sandbox_store.checkpoint(
         "chat-no-latest",
-        profile="gigachad",
         manifest=_manifest("no-latest", "a" * 64),
         runs={other.tool_call_id: other},
         latest_run_id="missing",
     )
 
     assert sandbox_store.read_run("chat-no-latest", "other") == other
-    assert sandbox_store.read_slot("chat-no-latest") is None
     assert sandbox_store.read_active("chat-no-latest") is None
 
 
@@ -194,27 +101,36 @@ def test_referenced_chat_shas_collects_manifest_categories_and_older_run_outputs
     _put_manifest(data_store, chat_id, manifest1)
     _put_manifest(data_store, chat_id, _manifest("assets-two", "e" * 64))
 
-    output_ref = AssetRef(sha256="f" * 64, media_type="image/png", size_bytes=300)
-    sandbox_store.write_run(
-        chat_id,
-        RunRecord(
-            tool_call_id="older-run-only-output",
-            status="completed",
-            started_at=1000.0,
-            finished_at=1010.0,
-            manifest_id=manifest1.manifest_id,
-            result={
-                "outputs": [
-                    {
-                        "display_id": "img-1",
-                        "title": "Image",
-                        "text": None,
-                        "mime_bundle": {"image/png": {**output_ref.to_json(), "asset_path": sandbox_asset(output_ref.sha256)}},
-                    }
-                ]
-            },
+    JsonDocs(data_store).write(
+        sandbox_run(chat_id, "older-run-only-output"),
+        asdict(
+            RunRecord(
+                tool_call_id="older-run-only-output",
+                status="completed",
+                started_at=1000.0,
+                finished_at=1010.0,
+                manifest_id=manifest1.manifest_id,
+                result={
+                    "outputs": [
+                        {
+                            "display_id": "img-1",
+                            "title": "Image",
+                            "text": None,
+                            "mime_bundle": {
+                                "image/png": {
+                                    "sha256": "f" * 64,
+                                    "media_type": "image/png",
+                                    "size_bytes": 300,
+                                    "asset_path": sandbox_asset("f" * 64),
+                                }
+                            },
+                        }
+                    ]
+                },
+            )
         ),
     )
+
 
     shas = sandbox_store.referenced_chat_shas(chat_id)
 
@@ -248,12 +164,11 @@ def test_delete_chat_state_removes_all_records_and_returns_shas(sandbox_store: S
     manifest = _manifest("delete-manifest", "a" * 64)
     manifest_id = manifest.manifest_id
     record = RunRecord(tool_call_id="run-1", status="completed", started_at=1000.0, finished_at=1010.0)
-    sandbox_store.checkpoint(chat_id, profile="default", manifest=manifest, runs={"run-1": record}, latest_run_id="run-1")
+    sandbox_store.checkpoint(chat_id, manifest=manifest, runs={"run-1": record}, latest_run_id="run-1")
 
     shas = sandbox_store.delete_chat_state(chat_id)
     assert shas == {"a" * 64}
 
-    assert sandbox_store.read_slot(chat_id) is None
     assert sandbox_store.read_active(chat_id) is None
     with pytest.raises(StorageNotFoundError):
         sandbox_store.read_manifest(chat_id, manifest_id)

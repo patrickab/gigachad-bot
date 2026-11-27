@@ -4,7 +4,7 @@ import { CodeBlock } from "@gigachad/chat-ui"
 import { memo, useState, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { registerToolDisplay, registerToolRenderer, renderToolCall, toolDisplayOf, type ToolRenderer } from "@/features/conversation/tools/renderers"
+import { renderToolCall } from "@/features/conversation/tools/renderers"
 import { ToolCallRow } from "@/features/conversation/tools/ToolCallRow"
 import { toolPayload } from "@/features/chat/toolCalls"
 import { toolDisplay } from "@/features/chat/tools"
@@ -14,13 +14,8 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { PlotElement } from "@/components/content/PlotElement"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { SandboxOutputElement } from "./messages/SandboxOutputElement"
-import { chatRecordOf, chatToolRun } from "./toolRun"
+import { chatToolRun } from "./toolRun"
 import "@gigachad/chat-ui/code.css"
-
-/** The source the chat's tool rows and preview chips name their tools under (`toolDisplayOf`). */
-export const CHAT_TOOL_SOURCE = "chat"
-
-registerToolDisplay(CHAT_TOOL_SOURCE, toolDisplay)
 
 /** A text-button toggle that reveals `children` below it. */
 function Disclosure({ label, children }: { label: string; children: ReactNode }) {
@@ -107,28 +102,12 @@ function chatToolBody(record: ToolCallRecord): ReactNode {
   }
 }
 
-/** The row, then the family's result under it. A Pi session's call of the same name passes to the next renderer. */
-const renderRich: ToolRenderer = (_call, run, next) => {
-  const record = chatRecordOf(run)
-  if (!record) return next()
-  const body = chatToolBody(record)
-  return <>
-    {next()}
-    {body ? <div className="space-y-3 py-2 pl-7">{body}</div> : null}
-  </>
-}
-
-/**
- * The tools whose results show under their row. Registered inline: the chat has no fold, and a placement by tool name in
- * the shared registry would change which of a Pi session's calls fold into "Process details".
- */
-const RICH_TOOLS = ["web_search", "deep_research", "sandbox_plot", "diagram", "mindmap", "workspace_agent", "start_learn_session"]
-for (const name of RICH_TOOLS) registerToolRenderer(name, renderRich)
-
-/** One chat tool call as Pi's tool row, through the registered renderers. Re-renders only when its record is replaced. */
+/** One chat tool call as Pi's tool row, through the registered renderers, then the family's result under it. Re-renders only when its record is replaced. */
 export const ChatToolCall = memo(function ChatToolCall({ record }: { record: ToolCallRecord }) {
   const { call, run, stages } = chatToolRun(record)
-  return renderToolCall(call, run, () => (
-    <ToolCallRow call={call} run={run} display={toolDisplayOf(CHAT_TOOL_SOURCE, call.name)} stages={stages} />
-  ))
+  const body = chatToolBody(record)
+  return <>
+    {renderToolCall(call, run, () => <ToolCallRow call={call} run={run} display={toolDisplay(call.name)} stages={stages} />)}
+    {body ? <div className="space-y-3 py-2 pl-7">{body}</div> : null}
+  </>
 })

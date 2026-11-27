@@ -89,13 +89,13 @@ export function useAnimatedBackground(): boolean | null {
   return useContext(SettingsContext)?.animatedBackground ?? null
 }
 
-/** Stores the animated background setting, a no-op outside a `SettingsProvider`. */
 /** pi-host's auto-resume setting and its setter, null outside a `SettingsProvider` and until it loaded. */
 export function usePiAutoResume(): [boolean | null, (enabled: boolean) => void] {
   const settings = useContext(SettingsContext)
   return [settings?.piAutoResume ?? null, settings?.setPiAutoResume ?? (() => {})]
 }
 
+/** Stores the animated background setting, a no-op outside a `SettingsProvider`. */
 export function useSetAnimatedBackground(): (enabled: boolean) => void {
   return useContext(SettingsContext)?.setAnimatedBackground ?? (() => {})
 }
@@ -119,8 +119,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setTabDefaults((prev) => ({
       ...prev,
       selectedModel: prev.selectedModel || cfg.default_model,
-      // Backend value applies only while the flag is still the `true` default.
-      downscaleImages: prev.downscaleImages ? cfg.downscale_images : prev.downscaleImages,
     }))
     setOCRModel((prev) => prev || cfg.vision_model)
     setNeovimAvailable(cfg.neovim_available)

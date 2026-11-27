@@ -47,20 +47,18 @@ export async function deleteProjectCard(name: string, cardId: string): Promise<v
 /** Omitting a field leaves it unchanged server-side; passing null clears it. */
 interface SaveProjectTabOptions {
   chatId?: string
-  tabName?: string
   title?: string
   usage?: Usage
 }
 
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
-  const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
+  const body: Record<string, unknown> = { messages, chat_id: opts.chatId ?? null, tab_name: null, title: opts.title ?? null, usage: opts.usage ?? null }
   return put(`${projectPath(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 
 /** Save a chat to `historyFile`: through its project's tab when it belongs to `projectSlug`, as a plain history otherwise. */
-export async function saveChat(historyFile: string, projectSlug: string | null, messages: Message[], opts: { chatId: string; title: string; tabName?: string; usage?: Usage }): Promise<void> {
+export async function saveChat(historyFile: string, projectSlug: string | null, messages: Message[], opts: { chatId: string; title: string; usage?: Usage }): Promise<void> {
   const { slug, filename } = parseHistoryFile(historyFile)
-  const { tabName, ...historyOpts } = opts
-  if (slug && slug === projectSlug) await saveProjectTab(slug, filename, messages, { ...historyOpts, tabName })
-  else await saveChatHistory(historyFile, messages, historyOpts)
+  if (slug && slug === projectSlug) await saveProjectTab(slug, filename, messages, opts)
+  else await saveChatHistory(historyFile, messages, opts)
 }

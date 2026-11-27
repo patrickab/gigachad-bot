@@ -42,8 +42,8 @@ def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str,
 
 @router.get("/branch-meta")
 # Registered before `/{filename:path}` so the literal path is not captured as a filename
-def get_branch_meta(dirs: str | None = None, store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
-    return store.get_branch_meta(dirs)
+def get_branch_meta(store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
+    return store.get_branch_meta()
 
 
 @router.get("/all")

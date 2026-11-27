@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import hashlib
 
-from agent_sandbox import SandboxManifest
-from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, PiSessionState, WorkspaceRef, to_yaml
 import pytest
 
 from config import TEST_MODEL
@@ -14,7 +11,7 @@ from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_service import PROMPT_MAX_LEN, SandboxRuntimeState, SandboxService
-from lib.sandbox_store import ActivePointer, AssetRef, SandboxStore
+from lib.sandbox_store import ActivePointer, SandboxStore
 from lib.storage_namespace import sandbox_active, sandbox_asset, sandbox_manifest
 from tests.conftest import create_user
 
@@ -94,44 +91,10 @@ async def test_workspace_is_staged_until_checkpoint_while_outputs_are_durable(
     assert resumed.manifest_id != result.manifest_id
 
 
-async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_service, asset_store, data_store, runner):
-    chat_id = "chat-legacy-resume"
-    workspace_bytes = b"> legacy workspace\n"
-    workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
-    manifest = SandboxManifest(
-        schema_version=MANIFEST_SCHEMA_VERSION,
-        manifest_id="legacy-native-manifest",
-        profile="gigachad",
-        runtime_fingerprint="test",
-        workspace=WorkspaceRef(snapshot_asset_id=sandbox_asset(workspace_sha256), sha256=workspace_sha256),
-        outputs=Outputs(events_asset_id=None, artifacts=()),
-        pi_sessions={"main": PiSessionState(session_id="main", state_asset_id=None)},
-        execution=Execution(run_id="legacy-run", status="completed", exit_code=0, created_at=""),
-    )
-    legacy_manifest_id = "legacy-wrapper-id"
-    JsonDocs(data_store).write(
-        sandbox_manifest(chat_id, legacy_manifest_id),
-        {
-            "version": 1,
-            "workspace": AssetRef(workspace_sha256, "application/x-tar", len(workspace_bytes)).to_json(),
-            "omp_session": None,
-            "extra": {"agent_sandbox_manifest": to_yaml(manifest)},
-        },
-    )
-    asset_store.write("sandbox", sandbox_asset(workspace_sha256), workspace_bytes, mime="application/x-tar")
-    JsonDocs(data_store).write(sandbox_active(chat_id), asdict(ActivePointer(manifest_id=legacy_manifest_id, updated_at=1.0)))
-
-    result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="legacy-call", prompt="Resume it")
-
-    assert runner.calls[-1].active_manifest == manifest
-    assert result.manifest_id is not None
-
-
-async def test_omp_era_manifest_restores_its_workspace_without_resuming(sandbox_service, asset_store, data_store, runner):
-    """A version-1 manifest holds an OMP session Pi cannot continue: the run starts fresh on its workspace."""
+async def test_retired_omp_manifest_fails_as_an_invalid_manifest(sandbox_service, data_store):
+    """Version-1 (OMP) manifests are no longer read: the run fails as for any invalid manifest."""
     chat_id = "chat-omp-era"
-    workspace_bytes = b"> omp workspace\n"
-    workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
+    workspace_sha256 = "a" * 64
     manifest_id = "omp-era-manifest"
     JsonDocs(data_store).write(
         sandbox_manifest(chat_id, manifest_id),
@@ -146,15 +109,12 @@ async def test_omp_era_manifest_restores_its_workspace_without_resuming(sandbox_
             "execution": {"run_id": "omp-run", "status": "completed", "exit_code": 0, "created_at": ""},
         },
     )
-    asset_store.write("sandbox", sandbox_asset(workspace_sha256), workspace_bytes, mime="application/x-tar")
     JsonDocs(data_store).write(sandbox_active(chat_id), asdict(ActivePointer(manifest_id=manifest_id, updated_at=1.0)))
 
     result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="pi-call", prompt="Continue")
 
-    assert result.status == "completed"
-    assert runner.calls[-1].active_manifest is None
-    assert runner.calls[-1].workspace is not None
-    assert runner.calls[-1].workspace.sha256 == workspace_sha256
+    assert result.status == "failed"
+    assert result.error == "invalid_manifest"
 
 
 async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sandbox_service, data_store, runner):

@@ -1,14 +1,13 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
-import { ErrorText } from "@/components/ui/ErrorText"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { cn } from "@/lib/utils"
 
 /**
  * Text that turns into an input on click: Enter saves, Shift+Enter adds a line when `multiline`, Esc cancels.
  *
- * - `onCommit` runs only for a changed, non-empty value, a returned string is shown as the error and keeps editing
+ * - `onCommit` runs only for a changed, non-empty value
  * - `onDone` runs whenever editing ends, `startEditing` opens it in edit mode (new entries)
  */
 export function EditableText({ value, label, multiline = false, startEditing = false, className, onCommit, onDone }: {
@@ -17,12 +16,11 @@ export function EditableText({ value, label, multiline = false, startEditing = f
   multiline?: boolean
   startEditing?: boolean
   className?: string
-  onCommit: (next: string) => string | void
+  onCommit: (next: string) => void
   onDone?: () => void
 }) {
   const [editing, setEditing] = useState(startEditing)
   const [draft, setDraft] = useState(value)
-  const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Grow with wrapped lines, not only explicit newlines.
@@ -35,17 +33,13 @@ export function EditableText({ value, label, multiline = false, startEditing = f
 
   const stop = useCallback(() => {
     setEditing(false)
-    setError(null)
     onDone?.()
   }, [onDone])
   useEscapeLayer(stop, editing)
 
   const commit = () => {
     const next = draft.trim()
-    if (next && next !== value) {
-      const failure = onCommit(next)
-      if (failure) { setError(failure); return }
-    }
+    if (next && next !== value) onCommit(next)
     stop()
   }
 
@@ -62,7 +56,7 @@ export function EditableText({ value, label, multiline = false, startEditing = f
     <div className={className}>
       <textarea
         ref={textareaRef} autoFocus aria-label={label} value={draft} rows={1}
-        onChange={(e) => { setDraft(e.target.value); setError(null) }}
+        onChange={(e) => setDraft(e.target.value)}
         onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
         onBlur={commit}
         onKeyDown={(e) => {
@@ -70,7 +64,6 @@ export function EditableText({ value, label, multiline = false, startEditing = f
         }}
         className="block w-full resize-none overflow-hidden rounded bg-transparent outline-none ring-1 ring-divider focus:ring-divider-strong"
       />
-      <ErrorText className="mt-1">{error}</ErrorText>
     </div>
   )
 }

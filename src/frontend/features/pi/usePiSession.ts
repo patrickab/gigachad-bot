@@ -57,12 +57,6 @@ function isDialogRequest(record: PiRecord): boolean {
   return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method as string)
 }
 
-/** `get_entries` data, tolerating a bare entry array (leaf = last entry). */
-function entriesOf(data: unknown): SessionEntries {
-  if (Array.isArray(data)) return { entries: data, leafId: data.length > 0 ? data[data.length - 1].id : null }
-  return data as SessionEntries
-}
-
 /**
  * One Pi session on the page's shared pi-host socket (`piSocket.ts`), the whole RPC protocol in the browser.
  *
@@ -225,7 +219,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
           const piState = frame.state as PiState
           const ui = frame.ui as AttachedUi
           setState(piState)
-          dispatch({ kind: "snapshot", entries: entriesOf(frame.entries), running: piState.isStreaming, queue: ui.queue ?? EMPTY_QUEUE })
+          dispatch({ kind: "snapshot", entries: frame.entries as SessionEntries, running: piState.isStreaming, queue: ui.queue ?? EMPTY_QUEUE })
           applyUi(ui)
           setStatus({ kind: "ready" })
           void command("get_commands").then((response) => {

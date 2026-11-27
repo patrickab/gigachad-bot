@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Production pi-host (run-pi-host.sh): the Pi sessions, completion gateway and usage service of the production backend and
-# the LiteLLM proxy, on 127.0.0.1:$PI_HOST_PORT (gigachad-bot-pi-host.service sets 8301, development's pi-host holds
+# Production pi-host (run-pi-host.sh): the Pi sessions, completion gateway and usage service of the production backend,
+# on 127.0.0.1:$PI_HOST_PORT (gigachad-bot-pi-host.service sets 8301, development's pi-host holds
 # 8300). It shares development's token file and ~/.pi/agent: one host user, and pi-host's session-file lock (M1) keeps
 # one writer per session across both instances.
 set -euo pipefail

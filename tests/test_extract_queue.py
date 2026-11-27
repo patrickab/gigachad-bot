@@ -20,7 +20,7 @@ pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
 async def test_worker_persists_a_finished_parse_into_postgres(tmp_path, asset_store, monkeypatch):
     """The worker spools its own temp file — no disk file needs to exist beforehand."""
 
-    async def fake_parse_pdf(pdf_path: Path, output_dir: Path, backend: str = "pipeline"):
+    async def fake_parse_pdf(pdf_path: Path, output_dir: Path):
         assert pdf_path.read_bytes() == b"%PDF body"
         output_dir.mkdir(parents=True, exist_ok=True)
         images_dir = output_dir / "images"
@@ -41,7 +41,7 @@ async def test_worker_persists_a_finished_parse_into_postgres(tmp_path, asset_st
 
 
 async def test_worker_survives_a_failed_parse(asset_store, monkeypatch):
-    async def failing_parse_pdf(pdf_path: Path, output_dir: Path, backend: str = "pipeline"):
+    async def failing_parse_pdf(pdf_path: Path, output_dir: Path):
         raise RuntimeError("MinerU exploded")
 
     monkeypatch.setattr(extract_queue.mineru, "parse_pdf", failing_parse_pdf)

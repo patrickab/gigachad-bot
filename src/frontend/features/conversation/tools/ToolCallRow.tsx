@@ -1,7 +1,7 @@
 // Ported from kahme247/ompweb components/MessageView.tsx (MIT, Copyright (c) 2026 agegr).
 "use client"
 
-import { memo, useId, useState, type JSX, type MouseEvent, type ReactNode } from "react"
+import { memo, useId, useState, type MouseEvent, type ReactNode } from "react"
 import { Bot, Check, CheckSquare, ChevronDown, CircleAlert, CircleSlash, Code2, FileEdit, FileText, Globe, LoaderCircle, Search, Terminal, Wrench, type LucideIcon } from "lucide-react"
 import type { ToolDisplay } from "./renderers"
 import type { TextContent, ToolCall, ToolRun } from "./types"
@@ -24,9 +24,8 @@ interface ToolCallRowProps {
   call: ToolCall
   run?: ToolRun
   streaming?: boolean
-  defaultCollapsed?: boolean
   onOpenFile?: (path: string) => void
-  /** Label and icon in place of the raw tool name and category icon (`toolDisplayOf`); Pi's own tools have none. */
+  /** Label and icon in place of the raw tool name and category icon; Pi's own tools have none. */
   display?: ToolDisplay
   /** Stage timeline beside the name, e.g. the chat's ticking stages. Compared by identity: keep it stable while the call's run is. */
   stages?: ReactNode
@@ -59,24 +58,18 @@ function getPreviewTarget(call: ToolCall, canOpenFile: boolean): PreviewTarget {
   return canOpenFile ? { kind: "file", path: rawPath.replace(/:\d+$/, "") } : null
 }
 
-/** One collapsible activity row for a Pi tool call: status, tool, preview, duration; expanded shows input and output. */
-export function ToolCallRow(props: ToolCallRowProps): JSX.Element {
-  return <MemoToolCallRow {...props} />
-}
-
 // Streaming re-parses tool call arguments every frame, so compare the small argument objects shallowly.
-const MemoToolCallRow = memo(ToolCallRowView, (prev, next) => (
-  prev.call.id === next.call.id
+function sameRow(prev: ToolCallRowProps, next: ToolCallRowProps): boolean {
+  return prev.call.id === next.call.id
   && prev.call.name === next.call.name
   && argumentsShallowEqual(prev.call.arguments, next.call.arguments)
   && prev.run === next.run
   && prev.streaming === next.streaming
-  && prev.defaultCollapsed === next.defaultCollapsed
   && prev.onOpenFile === next.onOpenFile
   && prev.display?.label === next.display?.label
   && prev.display?.icon === next.display?.icon
   && prev.stages === next.stages
-))
+}
 
 /** Whether two argument objects hold the same values by identity. */
 function argumentsShallowEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
@@ -85,17 +78,11 @@ function argumentsShallowEqual(a: Record<string, unknown>, b: Record<string, unk
   return keysA.length === Object.keys(b).length && keysA.every((key) => a[key] === b[key])
 }
 
-function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true, onOpenFile, display, stages }: ToolCallRowProps) {
+/** One collapsible activity row for a Pi tool call: status, tool, preview, duration; expanded shows input and output. */
+export const ToolCallRow = memo(function ToolCallRow({ call, run, streaming = false, onOpenFile, display, stages }: ToolCallRowProps) {
   const isRunning = run?.running === true
   const isError = run?.isError === true
   const isDone = run !== undefined && !isRunning
-  // A running row opens when tool calls are not kept collapsed, so its output is watchable live. It never auto-collapses.
-  const [expanded, setExpanded] = useState((streaming || isRunning) && !defaultCollapsed)
-  const [wasRunning, setWasRunning] = useState(isRunning)
-  if (wasRunning !== isRunning) {
-    setWasRunning(isRunning)
-    if (isRunning && !defaultCollapsed) setExpanded(true)
-  }
   // Edits and tool images are always shown; a click on the header overrides that.
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const [inputExpanded, setInputExpanded] = useState(false)
@@ -109,7 +96,7 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
   const hasImages = content.some((block) => block.type === "image")
   const resultIsEmpty = resultText !== null && (resultText.trim() === "" || resultText.trim() === "(no output)")
   const alwaysOpen = getToolCategory(call.name) === "edit"
-  const isOpen = userToggled ?? (alwaysOpen || expanded)
+  const isOpen = userToggled ?? alwaysOpen
   const resultDiff = isOpen && isDone && !isError ? getResultDiff(run.result?.details) : null
 
   const category = getToolCategory(call.name)
@@ -217,4 +204,4 @@ function ToolCallRowView({ call, run, streaming = false, defaultCollapsed = true
       )}
     </div>
   )
-}
+}, sameRow)

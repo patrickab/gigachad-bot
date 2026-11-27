@@ -1,8 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PiTranscript } from "../PiTranscript"
-// The chat's tool renderers register under names Pi sessions use too: they must not change what folds
-import "@/features/chat/toolRenderers"
 import { clearPiSearchHit, focusPiSearchHit, usePiSearchFocus } from "../searchFocus"
 import type { Attachment } from "@/lib/domain/types"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type SessionEntry, type Transcript } from "../transcript"

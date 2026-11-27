@@ -70,7 +70,6 @@ const RANGE_LOADING = { disableStream: true, disableAutoFetch: true }
  */
 export function PdfViewer({
   url,
-  fitWidth,
   onPageAspect,
   initialPage = 1,
   onPageChange,
@@ -84,9 +83,6 @@ export function PdfViewer({
   reveal,
 }: {
   url: string
-  // when set, the parent controls width and the viewer sizes its own height to
-  // fit exactly one page. Otherwise it fills its parent in both dimensions.
-  fitWidth?: boolean
   onPageAspect?: (ratio: number) => void
   initialPage?: number
   onPageChange?: (page: number) => void
@@ -156,7 +152,6 @@ export function PdfViewer({
     onScrollerChangeRef.current?.(scroller)
   }, [])
   const devicePixelRatio = useDevicePixelRatio()
-  const pageAspect = pageAspects?.[0] ?? null
   const ready = numPages != null && availWidth != null && pageAspects != null
   const { nearPages, keepPages, slotsRef, registerSlot, onPlaceholderChange, activePlaceholderTarget, markScrolled } = usePdfPageWindow(scrollRef, ready, pageRef)
 
@@ -250,15 +245,8 @@ export function PdfViewer({
   }, [identity])
 
   // Page is rendered at the available width (minus scrollbar gutter), capped at
-  // RENDER_WIDTH. In fitWidth mode the box height is derived to show one page.
-  let renderWidth = RENDER_WIDTH
-  let boxHeight: number | undefined
-  if (availWidth != null) {
-    renderWidth = Math.round(Math.min(pageBox?.width ?? RENDER_WIDTH, availWidth - scrollbarGutters - 2 * PAGE_SIDE_GAP))
-    if (fitWidth && pageAspect != null) {
-      boxHeight = Math.round(renderWidth * pageAspect)
-    }
-  }
+  // RENDER_WIDTH.
+  const renderWidth = availWidth == null ? RENDER_WIDTH : Math.round(Math.min(pageBox?.width ?? RENDER_WIDTH, availWidth - scrollbarGutters - 2 * PAGE_SIDE_GAP))
 
   const pageWidth = Math.round(renderWidth * zoom)
   const rasterPageWidth = Math.round(renderWidth * rasterZoom)
@@ -381,16 +369,11 @@ export function PdfViewer({
     </>
   ), [renderPageOverlay, revealMark, numPages])
 
-  // fitWidth: fill parent width, self-size height to one page. Otherwise fill parent.
-  const rootStyle: React.CSSProperties = fitWidth
-    ? { width: "100%", height: boxHeight ?? "auto" }
-    : { width: "100%", height: "100%", minHeight: 0 }
-
   return (
     <div
       ref={rootRef}
       className={`relative flex flex-col${lightPaper ? " pdf-light-paper" : ""}`}
-      style={rootStyle}
+      style={{ width: "100%", height: "100%", minHeight: 0 }}
     >
       <PdfZoomControls
         hostRef={rootRef}
@@ -417,7 +400,6 @@ export function PdfViewer({
           overflowAnchor: "none",
           paddingTop: pageBox?.top ?? topInset,
           paddingBottom: pageBox && Math.max(0, pageBox.bottom - PAGE_GAP),
-          ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined),
         }}
       >
         {/* Each url gets its own Document: pages kept across a url change would render against the destroyed old one */}
@@ -453,7 +435,6 @@ export function PdfViewer({
                         rendersPlaceholder={!incomingLayer && activePlaceholderTarget === index + 1}
                         pdf={loaded.pdf}
                         onPlaceholderChange={incomingLayer ? ignore : onPlaceholderChange}
-                        snap={!!fitWidth}
                         registerSlot={incomingLayer ? ignore : registerSlot}
                         renderPageOverlay={pageOverlay}
                         onRendered={incomingLayer ? onIncomingPageRendered : notifyPageRendered}

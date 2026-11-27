@@ -149,7 +149,7 @@ async def get_sessions(repo: str | None = None, archived: bool = False) -> pi_ho
 
 @http_router.post("/sessions")
 async def post_session(body: OpenSessionBody) -> pi_host.SessionAnswer:
-    """Open a coding session in *repo*: new (`resume` null), the newest (`"continue"`), a given file (`{sessionPath}`)
+    """Open a coding session in *repo*: new (`resume` null), a given file (`{sessionPath}`)
     or a fork of one up to an entry (`{forkOf: {sessionPath, entryId}}`)."""
     cwd = await asyncio.to_thread(_cwd, body.repo)
     session = await _call(pi_host.open_session(cwd, body.resume, model=body.model, thinking=body.thinking))

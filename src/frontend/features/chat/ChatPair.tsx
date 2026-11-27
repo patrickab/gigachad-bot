@@ -5,8 +5,8 @@ import type { Attachment, Message } from "@/lib/domain/types"
 import { previewHead, TurnPreview, TurnSurface, usePreviewInteraction } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
-import { toolDisplayOf } from "@/features/conversation/tools/renderers"
-import { CHAT_TOOL_SOURCE, ChatToolCall } from "@/features/chat/toolRenderers"
+import { ChatToolCall } from "@/features/chat/toolRenderers"
+import { toolDisplay } from "./tools"
 
 const MAX_LABEL_LENGTH = 80
 
@@ -31,9 +31,8 @@ export function chatPairPreview(assistant: Message): ReactNode {
 
 export function ChatPairPreview({ assistant }: { assistant: Message }) {
   const tools = (assistant.tool_calls ?? []).map((call) => {
-    const display = toolDisplayOf(CHAT_TOOL_SOURCE, call.name)
-    const Icon = display?.icon
-    return { key: call.id, label: display?.label ?? call.name, icon: Icon ? <Icon size={14} aria-hidden="true" /> : null }
+    const { icon: Icon, label } = toolDisplay(call.name)
+    return { key: call.id, label, icon: <Icon size={14} aria-hidden="true" /> }
   })
   return (
     <TurnPreview tools={tools}>

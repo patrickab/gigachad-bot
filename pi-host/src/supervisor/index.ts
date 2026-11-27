@@ -3,7 +3,7 @@
  *
  * - Consumes: a `Host` (spawn, session lock, session metadata; Pi version checked at start, M13), Catalog's helpers
  * - Provides: `createSupervisor()`, the `Supervisor` HTTP rows (`GET /health` with live sessions, `POST /sessions`,
- *   `POST /sessions/:id/close`, `POST /sessions/:id/prompt`, `DELETE /sessions/:id`), the multiplexed `/ws` handler
+ *   `POST /sessions/:id/close`, `DELETE /sessions/:id`), the multiplexed `/ws` handler
  *   (M16, M18, resync M2), `GET|PUT /settings` and `resumeInterrupted()` (auto-resume, `resume.ts`) and `LiveSessions` (live status, closing an idle child before archive) for the catalog
  *
  * Liveness (M17): Pi exposes no liveness registry over RPC, so an extension with background work keeps its session

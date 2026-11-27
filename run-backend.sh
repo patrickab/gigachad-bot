@@ -62,37 +62,20 @@ stop_postgres() {
     fi
 }
 
-# A process and everything it started, children before parents.
-tree() {
-    local child
-    for child in $(pgrep -P "$1"); do
-        tree "$child"
-    done
-    printf '%s\n' "$1"
-}
-
-# Asks each child to stop, and kills whatever is left of its tree after 10s. uvicorn's
-# worker holds the port itself, and one hung in shutdown would otherwise keep it, with
-# or without its reloader, until killed by hand.
+# Asks each child to stop, then stops whatever is left of its tree. uvicorn's worker holds
+# the port itself, and one hung in shutdown would otherwise keep it, with or without its
+# reloader, until killed by hand.
 stop_children() {
-    local pid alive
-    local -a pids
+    local pid tree_pid
+    local -a tree left
     for pid in "$backend_pid" "$c4_pid" "$jupyter_pid"; do
-        if [[ -n "$pid" ]]; then
-            mapfile -t pids < <(tree "$pid")
-            kill -TERM "$pid" 2>/dev/null || true
-            for _ in {1..20}; do
-                # `ps` fails once every process is gone, which would end the script here under `set -e`
-                alive=$(ps -o stat=,pid= -p "$(IFS=,; echo "${pids[*]}")" 2>/dev/null | awk '$1 !~ /^Z/ { print $2 }') || true
-                [[ -z "$alive" ]] && break
-                sleep 0.5
-            done
-            if [[ -n "$alive" ]]; then
-                printf 'warning: %s did not stop within 10s, killing it\n' "$(tr '\n' ' ' <<<"$alive")" >&2
-                kill -KILL "${pids[@]}" 2>/dev/null || true
-            fi
-            wait "$pid" 2>/dev/null || true
-        fi
+        [[ -n "$pid" ]] || continue
+        mapfile -t tree < <(descendants "$pid")
+        stop_processes 10 "$pid"
+        left=()
+        for tree_pid in "${tree[@]}"; do running "$tree_pid" && left+=("$tree_pid"); done
+        stop_processes 5 "${left[@]}"
+        wait "$pid" 2>/dev/null || true
     done
     backend_pid=''
     c4_pid=''

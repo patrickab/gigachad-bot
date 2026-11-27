@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 from typing import Literal
 
-from lib.git import GitError, git_ok, git_text, run_git
+from lib.git import GitError, git_ok, git_text, repository_top, run_git
 
 MAX_DIFF_BYTES = 1_000_000
 
@@ -24,13 +24,6 @@ class ChangedFile:
     path: str
     status: ChangeStatus
     original_path: str | None = None
-
-
-def _repository_root(directory: Path) -> Path | None:
-    try:
-        return Path(git_text(directory, "rev-parse", "--show-toplevel").strip())
-    except GitError:
-        return None
 
 
 def _classify(pair: str) -> ChangeStatus:
@@ -76,7 +69,7 @@ def changed_files(directory: Path, only: str | None = None, repository: Path | N
     - *only* limits the scan to one file below *directory*, but then git cannot pair a staged rename
     - *repository* is the already known top level of *directory*'s repository, saving the git call that finds it
     """
-    repository = repository or _repository_root(directory)
+    repository = repository or repository_top(directory)
     if repository is None:
         return None
     pathspec = ["--", str(directory / only)] if only else []
@@ -113,7 +106,7 @@ def _added_file_patch(path: str, content: str) -> str:
 
 def _find_change(directory: Path, relative_path: str, repository: Path | None = None) -> ChangedFile | None:
     """Change of one file, scanning the whole tree only when it may be the new side of a staged rename."""
-    repository = repository or _repository_root(directory)
+    repository = repository or repository_top(directory)
     if repository is None:
         return None
     change = next(iter(changed_files(directory, relative_path, repository) or []), None)
@@ -290,7 +283,7 @@ def file_contents(directory: Path, relative_path: str) -> tuple[str, str]:
         content = _decode(target.read_bytes())
     except OSError as exc:
         raise UnsupportedDiffContent(str(exc)) from exc
-    repository = _repository_root(directory)
+    repository = repository_top(directory)
     if repository is None:
         return "", content
     repository = repository.resolve()

@@ -59,11 +59,6 @@ def project_json(slug: str) -> str:
     return f"{CHAT}/{_part(slug, 'project slug')}/{PROJECT_JSON}"
 
 
-def chat_root() -> str:
-    """Root of every chat file, project directories included."""
-    return CHAT
-
-
 def project_dir(slug: str) -> str:
     """A project's directory of chats in the chat namespace. Rejects empty slugs and anything with a path separator."""
     if PurePosixPath(slug).name != slug or not slug:
@@ -119,10 +114,6 @@ def sandbox_scope(scope: str) -> str:
 
 def sandbox_prefix(chat_id: str, scope: str = DEFAULT_SANDBOX_SCOPE) -> str:
     return f"{SANDBOX}/{_part(chat_id, 'chat ID')}/{sandbox_scope(scope)}"
-
-
-def sandbox_slot(chat_id: str, scope: str = DEFAULT_SANDBOX_SCOPE) -> str:
-    return f"{sandbox_prefix(chat_id, scope)}/slot.json"
 
 
 def sandbox_active(chat_id: str, scope: str = DEFAULT_SANDBOX_SCOPE) -> str:

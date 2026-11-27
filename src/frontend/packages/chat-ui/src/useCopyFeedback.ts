@@ -14,7 +14,7 @@ export function useCopyFeedback(text: string): { copied: boolean; copy: () => vo
       setCopied(true)
       clearTimeout(timer.current)
       timer.current = setTimeout(() => setCopied(false), COPIED_MS)
-    })
+    }, () => {})
   }, [text])
   return { copied, copy }
 }

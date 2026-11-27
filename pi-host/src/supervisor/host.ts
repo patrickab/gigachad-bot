@@ -6,16 +6,16 @@
  *   Catalog's `sessionInfo`, `copyPrivateState` and the profile marker (G5), `profiles.ts` for each profile's Pi
  *   arguments
  * - Provides: `SupervisorHost`, the `Supervisor` implementation (HTTP rows owned by Supervisor, WS `/ws`, M18). The
- *   HTTP rows: `POST /sessions`, `POST /sessions/:id/close`, `POST /sessions/:id/prompt` (a prompt without an attached
- *   client), `DELETE /sessions/:id` (it must stop the child first, which only the supervisor can) and
- *   `POST /sessions/:id/turns/:entryId/delete` (stop the child, rewrite the file, start it again)
+ *   HTTP rows: `POST /sessions`, `POST /sessions/:id/close`, `DELETE /sessions/:id` (it must stop the child first,
+ *   which only the supervisor can) and `POST /sessions/:id/turns/:entryId/delete` (stop the child, rewrite the file,
+ *   start it again)
  */
 import { isAbsolute, resolve } from "node:path";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { forgetEntries } from "../catalog/entries.ts";
 import { copyPrivateState, markCacheRetention, markProfile, profileOf, sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import { isPlainObject as isRecord } from "../catalog/state.ts";
-import type { DeleteTurnRequest, DeleteTurnResult, Host, Profile, SessionMeta } from "../host/index.ts";
+import type { DeleteTurnRequest, DeleteTurnResult, Host, SessionMeta } from "../host/index.ts";
 import { forgetMedia } from "../media.ts";
 import type { SupervisorConfig } from "./config.ts";
 import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
@@ -25,7 +25,7 @@ import { childModels, parseProfileSpec, profileArgs, sameProfile, type ModelRef,
 import { envelope, LiveSession, stamp, type FrameSink, type LiveStatus } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
-type Resume = null | "continue" | { sessionPath: string } | { sessionId: string } | { forkOf: ForkOf };
+type Resume = null | { sessionPath: string } | { sessionId: string } | { forkOf: ForkOf };
 type StartRequest = {
   cwd: string;
   spec: ProfileSpec;
@@ -38,7 +38,6 @@ type StartOutcome = { session: LiveSession } | Failure;
 type DeleteTurnAnswer = Extract<DeleteTurnResult, { ok: true }>;
 
 const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
-const SESSION_PROMPT = /^\/sessions\/([^/]+)\/prompt$/;
 const SESSION = /^\/sessions\/([^/]+)$/;
 const TURN_DELETE = /^\/sessions\/([^/]+)\/turns\/([^/]+)\/delete$/;
 /** HTTP answer of each `Host.deleteTurn` refusal. */
@@ -94,7 +93,6 @@ async function parseStartRequest(body: unknown, host: Host): Promise<StartReques
   const validResume =
     resume === null ||
     resume === undefined ||
-    resume === "continue" ||
     (isRecord(resume) && typeof resume.sessionPath === "string" && isAbsolute(resume.sessionPath)) ||
     (isRecord(resume) && typeof resume.sessionId === "string" && resume.sessionId !== "") ||
     (isRecord(resume) &&
@@ -213,12 +211,6 @@ export class SupervisorHost implements Supervisor {
       await this.byId.get(decodeURIComponent(close[1]!))?.close();
       return new Response(null, { status: 204 });
     }
-    const prompt = SESSION_PROMPT.exec(url.pathname);
-    if (prompt && request.method === "POST") {
-      const sessionId = sessionIdOf(prompt[1]!);
-      if (sessionId === undefined) return respond(fail(400, "invalid_session_id"));
-      return this.prompt(sessionId, await request.json().catch(() => undefined));
-    }
     const turn = TURN_DELETE.exec(url.pathname);
     if (turn && request.method === "POST") {
       const sessionId = sessionIdOf(turn[1]!);
@@ -237,28 +229,6 @@ export class SupervisorHost implements Supervisor {
       return refused ? respond(refused) : new Response(null, { status: 204 });
     }
     return undefined;
-  }
-
-  /**
-   * `POST /sessions/:id/prompt` with `{message, streamingBehavior?}`: a Pi `prompt` for a live session from a caller
-   * that is not attached, answered with Pi's `{disposition}`. Sent as a pi-host request, so the response reaches no
-   * client; the run it starts reaches them like any other. Pi refuses a prompt during a run unless
-   * `streamingBehavior` (`steer` or `followUp`) says how to queue it.
-   */
-  private async prompt(sessionId: string, body: unknown): Promise<Response> {
-    if (!isRecord(body) || typeof body.message !== "string" || body.message === "") return respond(fail(400, "invalid_body"));
-    const { message, streamingBehavior } = body;
-    if (streamingBehavior !== undefined && streamingBehavior !== "steer" && streamingBehavior !== "followUp") {
-      return respond(fail(400, "invalid_body"));
-    }
-    const session = this.byId.get(sessionId);
-    if (!session || session.closing) return respond(fail(409, "not_live"));
-    const response = await session.requestAsync({ type: "prompt", message, ...(streamingBehavior && { streamingBehavior }) });
-    const disposition = isRecord(response.data) ? response.data.disposition : undefined;
-    if (response.success !== true || typeof disposition !== "string") {
-      return respond(fail(502, "prompt_failed", { message: String(response.error ?? "pi answered no disposition") }));
-    }
-    return Response.json({ disposition });
   }
 
   /**
@@ -452,9 +422,7 @@ export class SupervisorHost implements Supervisor {
     const { resume, spec } = request;
     let meta: SessionMeta | undefined;
     let cwd = request.cwd;
-    if (resume === "continue") {
-      meta = await this.newestOf(cwd, spec.profile);
-    } else if (resume && "forkOf" in resume) {
+    if (resume && "forkOf" in resume) {
       const { forkOf } = resume;
       if ((await profileOf(this.host, forkOf.sessionPath)) !== spec.profile) return fail(409, "profile_mismatch");
       const forked = await this.host.forkSession(forkOf);
@@ -509,14 +477,6 @@ export class SupervisorHost implements Supervisor {
     // The client's attach follows; an eviction tick in between must not take the child.
     live.lastActivity = Date.now();
     return { session: live };
-  }
-
-  /** Newest live-root session of `cwd` started with `profile` (`continue`). */
-  private async newestOf(cwd: string, profile: Profile): Promise<SessionMeta | undefined> {
-    for (const meta of await this.host.listSessions(cwd, false)) {
-      if ((await profileOf(this.host, meta.sessionPath)) === profile) return meta;
-    }
-    return undefined;
   }
 
   /** Lock (M1, before the child starts, which excludes a concurrent archive), spawn, identify, register. */

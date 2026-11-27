@@ -12,7 +12,7 @@ import { StyledSelect } from "@/components/ui/StyledSelect"
 type SettingsTab = "providers" | "defaults"
 
 /** State of the model admin view, kept for the whole dropdown lifetime so the tab, draft defaults and Pi catalog survive closing it. */
-export function useModelSettings(onProvidersChange: (providers: ModelProvider[]) => Promise<void>, onDefaultsChange: (defaults: ModelDefaults) => Promise<void>): ModelSettings {
+export function useModelSettings(onProvidersChange: (providers: ModelProvider[]) => Promise<void>, onDefaultsChange: (defaults: ModelDefaults) => Promise<void>) {
   const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers")
   const [error, setError] = useState<string | null>(null)
@@ -20,6 +20,7 @@ export function useModelSettings(onProvidersChange: (providers: ModelProvider[])
   const [piCatalog, setPiCatalog] = useState<PiCatalog | null>(null)
   // Default-model edits are buffered and flushed once on close, not saved per keystroke.
   const pendingDefaults = useRef<ModelDefaults | null>(null)
+  /** Leave the admin view and flush buffered default-model edits. */
   const close = useCallback(() => {
     setConfiguring(false)
     const defaults = pendingDefaults.current
@@ -45,20 +46,7 @@ export function useModelSettings(onProvidersChange: (providers: ModelProvider[])
 }
 
 /** Admin view state shared by the dropdown (open/close, error line) and the panel. */
-export interface ModelSettings {
-  configuring: boolean
-  setConfiguring: (configuring: boolean) => void
-  settingsTab: SettingsTab
-  setSettingsTab: (tab: SettingsTab) => void
-  error: string | null
-  setError: (error: string | null) => void
-  draftDefaults: ModelDefaults | null
-  piCatalog: PiCatalog | null
-  persist: (next: ModelProvider[]) => Promise<boolean>
-  updateDefaults: (defaults: ModelDefaults) => void
-  /** Leave the admin view and flush buffered default-model edits. */
-  close: () => void
-}
+export type ModelSettings = ReturnType<typeof useModelSettings>
 
 /** Provider/model admin view of the model dropdown: providers, Pi picks and default models. */
 export function ModelSettingsPanel({ settings, models, choices }: { settings: ModelSettings; models: ModelsResponse; choices: string[] }) {

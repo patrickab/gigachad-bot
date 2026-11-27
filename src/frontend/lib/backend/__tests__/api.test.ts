@@ -82,18 +82,18 @@ describe("api.ts — saveChat", () => {
     const calls: Call[] = []
     vi.stubGlobal("fetch", fetchRecorder(calls))
 
-    await api.saveChat("proj/notes.json", "proj", [], { chatId: "c", tabName: "Tab", title: "notes" })
+    await api.saveChat("proj/notes.json", "proj", [], { chatId: "c", title: "notes" })
 
     const { url, init } = lastCall(calls)
     expect(url).toContain("/projects/proj/tabs/notes.json")
-    expect(JSON.parse(init.body as string)).toMatchObject({ filename: "notes.json", tab_name: "Tab", title: "notes" })
+    expect(JSON.parse(init.body as string)).toMatchObject({ tab_name: null, title: "notes" })
   })
 
   it("saves any other chat as a plain history without a tab name", async () => {
     const calls: Call[] = []
     vi.stubGlobal("fetch", fetchRecorder(calls))
 
-    await api.saveChat("other/notes.json", "proj", [], { chatId: "c", tabName: "Tab", title: "notes" })
+    await api.saveChat("other/notes.json", "proj", [], { chatId: "c", title: "notes" })
 
     const { url, init } = lastCall(calls)
     expect(url).toContain("/chat-histories/other/notes.json")

@@ -33,13 +33,7 @@ class MoveCardRequest(BaseModel):
     state: str
 
 
-class UpdateCardRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None
-
-
 class SaveTabRequest(ChatSnapshot):
-    filename: str
     tab_name: str | None = None
 
 
@@ -102,21 +96,11 @@ def add_card(slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_p
 def move_card(
     slug: str,
     card_id: str,
-    req: MoveCardRequest | UpdateCardRequest | None = None,
+    req: MoveCardRequest,
     store: ProjectStore = Depends(get_project_store),
 ) -> dict[str, Any]:
-    """Move a card (body `state`) or edit it (body `title`/`description`), omitted fields stay unchanged."""
     with http_errors((FileNotFoundError, 404, None)):
-        updates: dict[str, Any] = {}
-        if req is not None:
-            if isinstance(req, MoveCardRequest):
-                updates["state"] = req.state
-            elif isinstance(req, UpdateCardRequest):
-                if req.title is not None:
-                    updates["title"] = req.title
-                if req.description is not None:
-                    updates["description"] = req.description
-        return store.update_card(slug, card_id, updates)
+        return store.update_card(slug, card_id, {"state": req.state})
 
 
 @router.delete("/{slug}/cards/{card_id}")

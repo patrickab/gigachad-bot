@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
 import { FilePanel } from "@/features/editor/FilePanel"
+import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
 import { SelectionBubble } from "@/components/ui/SelectionBubble"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -110,7 +111,10 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
         </FilePanel>
       ))}
       {/* No scrollbar between the pages and the open chat, wheel and keys still scroll. Important: the global `* { scrollbar-width }` is unlayered */}
-      {pdfText.status === "ready" && <InTopBar name="pdf"><PdfTextSwitch showText={showText} onChange={setShowText} /></InTopBar>}
+      {pdfText.status === "ready" && <InTopBar name="pdf">
+        {/* Switch between the PDF pages and their extracted Markdown, rendered with its images */}
+        <ViewSwitch label="Show" value={showText} onChange={setShowText} options={[[false, "PDF"], [true, "Text"]]} className="flex items-center gap-px rounded-md p-0.5" buttonClass="rounded px-2 py-0.5 text-[10px] font-medium transition-colors" activeClass="bg-hover text-ink" inactiveClass="text-ink-subtle hover:text-ink" />
+      </InTopBar>}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
         {showText && pdfText.status === "ready"
           ? <div role="region" aria-label="Extracted text" className="h-full overflow-auto px-6 pb-6 pt-14"><div className={cn("mx-auto max-w-3xl", TEXT_PAGE)}><LaTeXMarkdown content={rewriteImages(pdfText.markdown, baseName(path))} /></div></div>
@@ -136,18 +140,6 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, renderCh
       )}
     </div>
   )
-}
-
-/** Switch between the PDF pages and their extracted Markdown, rendered with its images. */
-function PdfTextSwitch({ showText, onChange }: { showText: boolean; onChange: (showText: boolean) => void }) {
-  return <div role="group" aria-label="Show" className="flex items-center gap-px rounded-md p-0.5">
-    {([[false, "PDF"], [true, "Text"]] as const).map(([value, label]) => (
-      <button key={label} type="button" aria-pressed={showText === value} onClick={() => onChange(value)}
-        className={cn("rounded px-2 py-0.5 text-[10px] font-medium transition-colors", showText === value ? "bg-hover text-ink" : "text-ink-subtle hover:text-ink")}>
-        {label}
-      </button>
-    ))}
-  </div>
 }
 
 interface PdfSelection {

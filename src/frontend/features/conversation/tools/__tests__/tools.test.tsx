@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { ToolCall, ToolRun } from "../../types"
+import type { ToolCall, ToolRun } from "../types"
 import { getResultDiff } from "../DiffView"
 import { parsePiDisplayDiff, parseUnifiedPatch } from "../patch"
 import { ToolCallRow } from "../ToolCallRow"

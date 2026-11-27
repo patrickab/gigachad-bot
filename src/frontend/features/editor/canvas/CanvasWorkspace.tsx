@@ -84,7 +84,6 @@ export function CanvasWorkspace({ selected, slug, onCloseEditor, onCreated, onMo
         key={selected.path}
         path={selected.path}
         slug={selected.scope}
-        overlay
         onClose={onCloseEditor}
         onModeLabel={onModeLabel}
         model={editorModel}

@@ -138,15 +138,13 @@ class ChatStore:
             return None
         return {**Chat.from_raw(raw).as_dict(), "revision": revision.token}
 
-    def save(
-        self, filename: str, data: dict[str, Any] | None = None, *, title: str | None = None, expected_revision: str | None = None
-    ) -> dict[str, str]:
+    def save(self, filename: str, data: dict[str, Any] | None = None, *, expected_revision: str | None = None) -> dict[str, str]:
         """Write a chat file, merging *data* over the stored chat. A given *expected_revision* makes the write conflict-checked."""
         key = self._key(filename)
         existing = self._read(key)
         if existing and existing.chat_id and data and data.get("chat_id") and existing.chat_id != data["chat_id"]:
             raise ValueError("Chat ID mismatch")
-        payload = _build_payload(data, existing.as_dict() if existing else None, title=title)
+        payload = _build_payload(data, existing.as_dict() if existing else None)
         expected = None if expected_revision is None else Revision(expected_revision)
         meta = _tree_meta(payload) if _is_chat_key(key) else None
         revision = self._docs.write(key, payload, expected=expected, meta=meta)
@@ -451,30 +449,20 @@ class ChatStore:
         """Tree meta of the chats under *prefix* that *select* accepts. Meta stored without the field *require* is derived again."""
         return self._docs.list_meta(prefix, select, _tree_meta, require=require)
 
-    def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
-        """Tree metadata for each chat file. *dirs* is comma-separated project dirs (empty entry for root), None scans all."""
-        if dirs is None:
-            return self._scan_dir_for_meta(CHAT)
-        result: dict[str, dict[str, Any]] = {}
-        for d in dirs.split(","):
-            d = d.strip()
-            result.update(self._scan_dir_for_meta(self._key(d) if d else CHAT, f"{d}/" if d else ""))
-        return result
-
-    def _scan_dir_for_meta(self, root: str, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
+    def get_branch_meta(self) -> dict[str, dict[str, Any]]:
         """Per-chat tree metadata keyed by path. Prunes dead children from chat files as a side effect."""
         # One query for the metadata stored beside each chat, no chat bodies. Chat IDs read here vouch
         # for their own existence, so pruning only falls back to the full index for genuinely missing children.
-        root_prefix = f"{root}/"
+        root_prefix = f"{CHAT}/"
 
         def listed(key: str) -> bool:
             rel = PurePosixPath(key.removeprefix(root_prefix))
             return _is_chat_file(rel.name) and not rel.name.startswith("_") and not _in_hidden_dir(rel.parts[:-1])
 
-        metas = self._metas(root, listed)
+        metas = self._metas(CHAT, listed)
         known = {meta["chat_id"] for meta in metas.values() if meta and meta["chat_id"]}
         return {
-            f"{rel_prefix}{PurePosixPath(key.removeprefix(root_prefix))}": self._extract_meta(key, metas[key], known)
+            str(PurePosixPath(key.removeprefix(root_prefix))): self._extract_meta(key, metas[key], known)
             for key in sorted(metas)
         }
 
@@ -652,12 +640,8 @@ def _snippet(text: str, found: re.Match[str]) -> str:
     return f"{'…' if start > 0 else ''}{snippet}{'…' if end < len(text) else ''}"
 
 
-def _build_payload(
-    data: dict[str, Any] | None = None,
-    existing: dict[str, Any] | None = None,
-    title: str | None = None,
-) -> dict[str, Any]:
-    """Merge chat fields, preferring *data*, then *existing*. *title* overrides both."""
+def _build_payload(data: dict[str, Any] | None = None, existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Merge chat fields, preferring *data*, then *existing*."""
     data = data or {}
     existing = existing or {}
     if data.get("messages"):
@@ -668,9 +652,9 @@ def _build_payload(
         messages = data.get("messages", [])
     payload: dict[str, Any] = {"messages": messages}
 
-    # Falsy values never win: the first truthy of override, data, existing is kept.
-    for key, override in (("chat_id", None), ("title", title), ("usage", None)):
-        value = override or data.get(key) or existing.get(key)
+    # Falsy values never win: the first truthy of data, existing is kept.
+    for key in ("chat_id", "title", "usage"):
+        value = data.get(key) or existing.get(key)
         if value:
             payload[key] = value
 

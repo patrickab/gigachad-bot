@@ -191,7 +191,7 @@ class SandboxServiceStub:
             raise SandboxScriptError("ModuleNotFoundError: no such module")
         return self.script_stdout
 
-    def output_texts(self, _result: SandboxToolResult, *, media_type: str = "text/plain") -> tuple[str, ...]:
+    def output_texts(self, _result: SandboxToolResult, media_type: str) -> tuple[str, ...]:
         assert media_type == sandbox_plot.PLOTLY_MEDIA_TYPE
         return (self.stdout,)
 

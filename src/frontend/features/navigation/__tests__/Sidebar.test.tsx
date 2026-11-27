@@ -205,7 +205,7 @@ function openSection(scope: Pick<RenderResult, "getByRole">, name: string) {
 
 function WorkspaceDraft() {
   const { tab } = useTab()
-  return <div data-workspace-surface><input aria-label={`Draft ${tab.name ?? "Initial"}`} defaultValue="" /></div>
+  return <div data-workspace-surface><input aria-label={`Draft ${tab.title ?? "Initial"}`} defaultValue="" /></div>
 }
 
 describe("Project navigation", () => {
@@ -1020,8 +1020,8 @@ describe("Project navigation", () => {
     const view = render(<BranchProvider onFileClick={vi.fn()} onHistoriesMoved={(moves) => manager.current!.relocateHistories(moves)}>
       <TabManager ref={manager}><Sidebar appMode="chat" /><WorkspaceDraft /></TabManager>
     </BranchProvider>)
-    const rootTab = { ...nextTab(), name: "Root", historyFile: "loose.json" }
-    const childTab = { ...nextTab(), name: "Branch", historyFile: "child.json" }
+    const rootTab = { ...nextTab(), title: "Root", historyFile: "loose.json" }
+    const childTab = { ...nextTab(), title: "Branch", historyFile: "child.json" }
     act(() => {
       manager.current!.openTab(rootTab)
       manager.current!.openTab(childTab)
@@ -1107,7 +1107,7 @@ describe("Tab picker", () => {
   it("closes the highlighted background tab with Delete or Alt+W and opens one with Alt+T, the picker stays open, the current tab stays", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
-    act(() => { for (const name of ["Alpha", "Beta", "Gamma"]) manager.current!.openTab({ ...nextTab(), name }) })
+    act(() => { for (const name of ["Alpha", "Beta", "Gamma"]) manager.current!.openTab({ ...nextTab(), title: name }) })
     const search = () => view.getByRole("combobox", { name: "Search tabs…" })
     tapSpace()
     const highlightedRow = () => tabRows(view).find((row) => row.option.getAttribute("aria-selected") === "true")?.crumb
@@ -1141,7 +1141,7 @@ describe("Tab picker", () => {
     const view = render(<TabManager ref={manager}><TabPicker /></TabManager>)
     tabRows(view)
     expect(view.queryByRole("button", { name: /^Close / })).not.toBeInTheDocument()
-    act(() => manager.current!.openTab({ ...nextTab(), name: "Other" }))
+    act(() => manager.current!.openTab({ ...nextTab(), title: "Other" }))
     expect(activeRow(view)).toBe("general / chats / Other")
 
     fireEvent.click(tabRow(view, "general / chats / New chat"))
@@ -1225,8 +1225,8 @@ describe("Tab picker", () => {
     const view = render(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
     const initial = manager.current!.getTabs()[0]
     fireEvent.change(view.getByRole("textbox", { name: "Draft Initial" }), { target: { value: "Keep my draft" } })
-    const second = { ...nextTab(), name: "Second" }
-    const third = { ...nextTab(), name: "Third" }
+    const second = { ...nextTab(), title: "Second" }
+    const third = { ...nextTab(), title: "Third" }
     act(() => manager.current!.openTab(second))
     act(() => manager.current!.openTab(third))
     fireEvent.change(view.getByRole("textbox", { name: "Draft Third" }), { target: { value: "Another draft" } })

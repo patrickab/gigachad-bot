@@ -17,7 +17,6 @@ export type Operation =
   | { op: 'setDescription', element: string, description: string }
   | { op: 'setKind', element: string, kind: string }
   | { op: 'setLabel', relation: string, label: string }
-  | { op: 'rename', element: string, id: string }
   | { op: 'reparent', element: string, parent: string | null }
   | { op: 'includeInView', view: string, elements: string[], descendants?: boolean }
   | { op: 'removeFromView', view: string, elements: string[] }

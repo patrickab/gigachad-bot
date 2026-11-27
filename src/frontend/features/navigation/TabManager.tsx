@@ -147,7 +147,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
         appMode: "chat",
         projectSlug: parseHistoryFile(historyFile).slug,
         ...(tab.historyFile !== historyFile ? {
-          historyFile, chatId: crypto.randomUUID(), title: null, name: null, workspaceItem: null,
+          historyFile, chatId: crypto.randomUUID(), title: null, workspaceItem: null,
         } : {}),
       }))
     },
@@ -280,7 +280,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     tabs,
     activeTabId: activeTab,
     labelOf: (tab) => tabLabel(tab, modes[tab.id]?.label, shownName),
-    isLoading: (tab) => tab.name == null && (modes[tab.id]?.loading ?? false),
+    isLoading: (tab) => modes[tab.id]?.loading ?? false,
     select: setActiveTab,
     close: closeTab,
     add: addTab,

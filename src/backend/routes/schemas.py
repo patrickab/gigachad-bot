@@ -16,9 +16,6 @@ class ChatSnapshot(BaseModel):
     chat_id: str | None = None
     title: str | None = None
     usage: dict[str, int] | None = None
-    parent_id: str | None = None
-    branch_message_idx: int | None = None
-    children: list[dict[str, Any]] | None = None
 
 
 class FileMeta(BaseModel):

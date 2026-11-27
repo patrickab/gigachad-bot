@@ -1,7 +1,6 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
-import { cn } from "@/lib/utils"
 
 /** Horizontal distance in px from a containing block's edges to the content area's edges. */
 export interface ContentInsets {
@@ -75,13 +74,4 @@ export function useContentInsets(anchor: HTMLElement | null): ContentInsets | un
     }
   }, [areas, anchor])
   return areas?.length && anchor ? insets : undefined
-}
-
-/** Absolute row whose center sits over the content area's center. Set its vertical position via `className`. */
-export function ContentCentered({ className, children }: { className?: string; children: ReactNode }) {
-  const [row, setRow] = useState<HTMLDivElement | null>(null)
-  const insets = useContentInsets(row)
-  return <div ref={setRow} className={cn("absolute flex justify-center", className)} style={{ left: insets?.left ?? 0, right: insets?.right ?? 0 }}>
-    {children}
-  </div>
 }

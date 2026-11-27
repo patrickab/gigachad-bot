@@ -19,7 +19,6 @@ import type {
   SpawnRequest,
 } from "../src/host/index.ts";
 import { startServer } from "../src/server.ts";
-import { PINNED_PI_VERSION } from "../src/supervisor/config.ts";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 
 const TOKEN = "test-token";
@@ -72,7 +71,7 @@ class FakeHost implements Host {
   readonly states = new Map<string, PrivateState>();
 
   async piVersion(): Promise<string> {
-    return PINNED_PI_VERSION;
+    return "1.5.2";
   }
 
   async spawn(request: SpawnRequest): Promise<PiChild> {
@@ -245,7 +244,7 @@ test("supervisor and catalog run every machine action through the Host", async (
   const files = await api(`/files?cwd=${encodeURIComponent(CWD)}&q=main`);
   expect(files.body.files[0].path).toBe("src/main.ts");
   expect((await api("/files?cwd=/not/on/the/host")).status).toBe(400);
-  expect((await api("/health")).body).toMatchObject({ ok: true, piVersion: PINNED_PI_VERSION, sessions: [] });
+  expect((await api("/health")).body).toMatchObject({ ok: true, piVersion: "1.5.2", sessions: [] });
 });
 
 test("a new session is identified from the child and carries the host's machine id", async () => {
@@ -359,8 +358,9 @@ test("a document fork carries the source's profile marker and refuses a coding s
     cwd: CWD,
     piArgs: ["--mode", "rpc", "--append-system-prompt", "Answer only with DOC", "--session", forkPath],
   });
-  const listed = await api(`/sessions?cwd=${encodeURIComponent(CWD)}&profile=document`);
-  expect(listed.body.sessions.map((session: { sessionPath: string }) => session.sessionPath).sort()).toEqual([sourcePath, forkPath].sort());
+  const listed = await api(`/sessions?cwd=${encodeURIComponent(CWD)}`);
+  const documents = listed.body.sessions.filter((session: { profile: string }) => session.profile === "document");
+  expect(documents.map((session: { sessionPath: string }) => session.sessionPath).sort()).toEqual([sourcePath, forkPath].sort());
 });
 
 test("a delete stops the session's child, then removes file and private state through the Host", async () => {

@@ -83,7 +83,7 @@ function ProjectWorkbench({ project, reload, choose, ...props }: ProjectWorkbenc
       ) : (
         <LatexPdfPane
           url={build.pdfUrl}
-          documentKey={build.pdfPath === null ? null : project.root}
+          documentKey={project.root}
           building={build.building}
           emptyMessage={pdfFailure ?? (project.root === null ? NO_ROOT : null)}
           pageBox={layout}

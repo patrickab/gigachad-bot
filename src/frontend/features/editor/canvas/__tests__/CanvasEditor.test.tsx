@@ -24,7 +24,7 @@ const noop = () => {}
 /** Provides a tab whose frontmost state is `value`. */
 function TabActiveProvider({ value, children }: { value: boolean; children: React.ReactNode }) {
   const tab: TabContextValue = {
-    tab: { id: "t1", name: null, chatId: "c1", historyFile: null, title: null, config: DEFAULT_TAB_CONFIG, appMode: "canvas", projectSlug: null, workspaceItem: null },
+    tab: { id: "t1", chatId: "c1", historyFile: null, title: null, config: DEFAULT_TAB_CONFIG, appMode: "canvas", projectSlug: null, workspaceItem: null },
     isActive: value,
     setModeLabel: noop,
     updateConfig: noop,

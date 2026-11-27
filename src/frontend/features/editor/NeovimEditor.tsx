@@ -6,13 +6,11 @@ import { cn, errorMessage } from "@/lib/utils"
 import { retryImport } from "@/lib/retryImport"
 import { neovimSessionUrl } from "@/lib/backend/urls"
 import { readClipboardForPaste, storeClipboardImage } from "./clipboardPaste"
-import { useEventListener } from "@/hooks/useEventListener"
-import { useThemeName } from "@/hooks/useThemeName"
-import { NERD_FONTS, TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
+import { TERMINAL_FONT_SIZE, terminalTheme } from "./terminalTheme"
+import { POLICY_VIOLATION, openWhenVisible, useTerminalSlot, type TerminalHandle } from "./terminalSlot"
 import { QUEUES_WHILE_CONNECTING, dispatchNeovimEvent, wireFrame, type NeovimCommand, type NeovimEvent, type NeovimEventHandlers, type NeovimSessionFrame } from "./neovimProtocol"
 
-const POLICY_VIOLATION = 1008
-/** Quiet time after the last size change before the terminal refits. */
+/** Quiet time after the last size change before the terminal refits: a resize redraws all of Neovim, so fitting during a drag or panel animation flickers. Meanwhile the terminal keeps its size, clipped or padded by the slot. */
 const FIT_SETTLE_MS = 150
 /** Longest wait for Neovim's redraw after a resize before xterm resizes anyway. */
 const REDRAW_TIMEOUT_MS = 500
@@ -25,15 +23,7 @@ const CTRL_ENTER = "\x1b[13;5u"
 // One char per byte, so the ASCII marker can be found in raw PTY output
 const BYTE_DECODER = new TextDecoder("latin1")
 
-/** A running terminal whose host element survives React remounts (fullscreen, overlay). */
-export interface NeovimTerminal {
-  attach: (parent: HTMLElement) => void
-  detach: () => void
-  fit: () => void
-  focus: () => void
-  /** Repaint with the colors of the current app theme. */
-  restyle: () => void
-}
+export type NeovimTerminal = TerminalHandle
 
 export type NeovimStatus =
   | { state: "running" }
@@ -151,7 +141,6 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       const xterm = new Terminal({ fontSize: TERMINAL_FONT_SIZE, cursorBlink: true, theme: terminalTheme(window.document.body).theme })
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
-      let isOpen = false
 
       const socket = new WebSocket(neovimSessionUrl())
       socket.binaryType = "arraybuffer"
@@ -262,23 +251,10 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       xterm.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0))))
       xterm.onResize(({ rows, cols }) => sendSize(rows, cols))
 
-      // xterm measures cells on open, so open only once the host is visible. Canvas cannot
-      // resolve CSS variables, so the app font is the computed one.
       const fit = () => {
-        if (host.clientWidth === 0 || host.clientHeight === 0) return
-        if (!isOpen) {
-          xterm.options.fontFamily = `${NERD_FONTS}, ${getComputedStyle(host).fontFamily}`
-          xterm.open(host)
-          isOpen = true
-          // WebGL draws box-drawing and block glyphs itself, so borders join like in kitty. Without it the DOM renderer stays.
-          try {
-            const webgl = new WebglAddon()
-            webgl.onContextLoss(() => webgl.dispose())
-            xterm.loadAddon(webgl)
-          } catch { /* no WebGL2 */ }
-          fitAddon.fit()
-          return
-        }
+        const state = openWhenVisible(xterm, host, WebglAddon)
+        if (state === "hidden") return
+        if (state === "opened") { fitAddon.fit(); return }
         const size = fitAddon.proposeDimensions()
         if (!size || Number.isNaN(size.cols) || Number.isNaN(size.rows) || pendingResize) return
         if (size.cols === xterm.cols && size.rows === xterm.rows) return
@@ -335,32 +311,7 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
   onRestart: () => void
   className?: string
 }) {
-  const slotRef = useRef<HTMLDivElement>(null)
-  const theme = useThemeName()
-
-  useEventListener(slotRef, "keydown", (event) => event.stopPropagation())
-
-  useEffect(() => {
-    const slot = slotRef.current
-    if (!slot || !terminal) return
-    terminal.attach(slot)
-    // Fit once the size settles: a resize redraws all of Neovim, so fitting during a drag or panel animation flickers.
-    // Meanwhile the terminal keeps its size, clipped or padded by the slot.
-    let fitTimer: ReturnType<typeof setTimeout> | undefined
-    const observer = new ResizeObserver(() => {
-      clearTimeout(fitTimer)
-      fitTimer = setTimeout(() => terminal.fit(), FIT_SETTLE_MS)
-    })
-    observer.observe(slot)
-    terminal.focus()
-    return () => {
-      clearTimeout(fitTimer)
-      observer.disconnect()
-      terminal.detach()
-    }
-  }, [terminal])
-
-  useEffect(() => { terminal?.restyle() }, [terminal, theme])
+  const slotRef = useTerminalSlot(terminal, FIT_SETTLE_MS)
 
   return (
     <div ref={slotRef} data-terminal className={cn("relative min-h-0 flex-1 overflow-hidden bg-page px-2 pt-1", className)}>

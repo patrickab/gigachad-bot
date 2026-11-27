@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25.
+Generated from bd63559a on 2026-11-25. Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run).
 Reduced by hand on 2026-11-25.
 
 # System overview

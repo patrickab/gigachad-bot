@@ -3,7 +3,7 @@
  *
  * - Consumes: the pinned `pi` binary, ~/.pi/agent (auth, sessions, extensions), `PI_HOST_BIND_HOST`, `PI_HOST_PORT`,
  *   the full and gateway token files (`auth.ts`)
- * - Provides: the HTTP + WS contract in .docs/pi-migration-contracts.md, loopback only, bearer token (C1: the gateway
+ * - Provides: the HTTP + WS contract in .docs/pi-migration.md "Architecture", loopback only, bearer token (C1: the gateway
  *   token opens `/v1/*` only)
  *
  * One `Host` (M23, `LocalHost` for this machine) serves the supervisor and the catalog. The factory routes only call

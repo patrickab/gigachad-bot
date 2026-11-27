@@ -13,37 +13,42 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.http_plumbing import TransferMiddleware
-from backend.routes.architecture import router as architecture_router
-from backend.routes.assets import router as assets_router
-from backend.routes.canvases import router as canvases_router
-from backend.routes.chat import router as chat_router
-from backend.routes.config import router as config_router
-from backend.routes.deploy import router as deploy_router
-from backend.routes.documents import router as documents_router
-from backend.routes.factory import router as factory_router
-from backend.routes.factory_preview import router as factory_preview_router
-from backend.routes.file_attach import router as file_attach_router
-from backend.routes.file_git import router as file_git_router
-from backend.routes.file_roots import router as file_roots_router
-from backend.routes.file_watch import router as file_watch_router
-from backend.routes.files import router as files_router
-from backend.routes.fileviewer import router as fileviewer_router
-from backend.routes.histories import router as histories_router
-from backend.routes.jupyter import router as jupyter_router
-from backend.routes.latex import router as latex_router
-from backend.routes.learn import router as learn_router
-from backend.routes.memory import router as memory_router
-from backend.routes.models import router as models_router
-from backend.routes.neovim import router as neovim_router
-from backend.routes.ocr import router as ocr_router
-from backend.routes.pi import router as pi_router
-from backend.routes.projects import router as projects_router
-from backend.routes.share_links import guest_router as share_guest_router
-from backend.routes.share_links import owner_router as share_owner_router
-from backend.routes.sync import router as sync_router
-from backend.routes.terminal import router as terminal_router
-from backend.routes.theme import router as theme_router
-from backend.routes.workbench import router as workbench_router
+from backend.routes import (
+    architecture,
+    assets,
+    canvases,
+    chat,
+    deploy,
+    documents,
+    factory,
+    factory_preview,
+    file_attach,
+    file_git,
+    file_roots,
+    file_watch,
+    files,
+    fileviewer,
+    histories,
+    jupyter,
+    latex,
+    learn,
+    memory,
+    models,
+    neovim,
+    ocr,
+    pi,
+    projects,
+    share_links,
+    terminal,
+    theme,
+    workbench,
+)
+from backend.routes import (
+    config as config_routes,
+)
+from backend.routes import (
+    sync as sync_routes,
+)
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
 from lib import factory_migration, jupyter_service, ollama_models, repository_index
@@ -172,35 +177,37 @@ for _exception, _status in (
     app.add_exception_handler(_exception, _json_error(_status))
 
 
-app.include_router(chat_router)
-app.include_router(architecture_router)
-app.include_router(config_router)
-app.include_router(theme_router)
-app.include_router(documents_router)
-app.include_router(files_router)
-app.include_router(file_watch_router)
-app.include_router(assets_router)
-app.include_router(fileviewer_router)
-app.include_router(histories_router)
-app.include_router(memory_router)
-app.include_router(models_router)
-app.include_router(neovim_router)
-app.include_router(terminal_router)
-app.include_router(jupyter_router)
-app.include_router(latex_router)
-app.include_router(workbench_router)
-app.include_router(deploy_router)
-app.include_router(file_roots_router)
-app.include_router(file_attach_router)
-app.include_router(file_git_router)
-app.include_router(ocr_router)
-app.include_router(projects_router)
-app.include_router(sync_router)
-app.include_router(canvases_router)
-app.include_router(share_owner_router)
-app.include_router(share_guest_router)
-app.include_router(pi_router)
-app.include_router(learn_router)
-app.include_router(factory_router)
-app.include_router(factory_preview_router)
-
+for router in (
+    chat.router,
+    architecture.router,
+    config_routes.router,
+    theme.router,
+    documents.router,
+    files.router,
+    file_watch.router,
+    assets.router,
+    fileviewer.router,
+    histories.router,
+    memory.router,
+    models.router,
+    neovim.router,
+    terminal.router,
+    jupyter.router,
+    latex.router,
+    workbench.router,
+    deploy.router,
+    file_roots.router,
+    file_attach.router,
+    file_git.router,
+    ocr.router,
+    projects.router,
+    sync_routes.router,
+    canvases.router,
+    share_links.owner_router,
+    share_links.guest_router,
+    pi.router,
+    learn.router,
+    factory.router,
+    factory_preview.router,
+):
+    app.include_router(router)

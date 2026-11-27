@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Maximize2, Minimize2, X } from "lucide-react"
 import { cn, isModKey } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
@@ -29,7 +28,6 @@ export interface DocumentEditorProps {
   slug: string
   onClose: () => void
   onSaved?: () => void
-  overlay?: boolean
   persistOverride?: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
   onNavigate?: (path: string) => void
@@ -50,11 +48,10 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 }
 
 /** Text document editor; `persistOverride` replaces the default document write. */
-export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
+export function TextDocumentEditor({ path, slug, onClose, onSaved, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isActive = useTabActive()
   const neovim = useNeovimSetting()
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(!!overlay)
 
   const filename = baseName(path)
   const shownName = useDisplayName()(slug, path) ?? filename
@@ -66,7 +63,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   }, [slug, filename, path, persistOverride])
   // A confirmed-missing document legitimately starts blank. The server prunes uses of removed elements
   // from a hand-edited `.c4`, so its saves read back what it stored.
-  const { value: content, loadedPath, loadError, dirty, reload: loadFromServer, setValue: handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
+  const { value: content, loadedPath, loadError, reload: loadFromServer, setValue: handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
     path, codec: TEXT_CODEC, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
     // While Neovim runs it holds the text, so a change on disk is merged into its buffer
     onFollowed: (text, changed) => { neovimSession.send({ type: "set_content", content: text, path: changed }) },
@@ -78,15 +75,15 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const isPlot = path.endsWith(".plot.json") || plotFigure !== null
   const isArtifact = isPlot || isMarkdownArtifact(content ?? "")
 
-  useModeLabel(shownName, !!overlay, onModeLabel)
+  useModeLabel(shownName, true, onModeLabel)
 
   // Drop the rendered preview of the previous document or mode
-  useResetOnChange(overlay ? path : null, () => setRenderedContent(null))
+  useResetOnChange(path, () => setRenderedContent(null))
 
   useEffect(() => {
     loadFromServer()
-    if (overlay) readFileRootRendered(path).then(setRenderedContent).catch(() => {})
-  }, [path, overlay, loadFromServer])
+    readFileRootRendered(path).then(setRenderedContent).catch(() => {})
+  }, [path, loadFromServer])
 
   const neovimSession = useNeovimTerminal(
     neovim.enabled && content !== null && loadedPath === path ? { key: path, path, filename, content } : null,
@@ -107,7 +104,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
     }
   })
 
-  useEscapeLayer(() => { if (overlay) onClose(); else setIsFullscreen(false) }, !!overlay || isFullscreen)
+  useEscapeLayer(onClose)
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => followFileLink(e, onNavigate), [onNavigate])
 
@@ -152,32 +149,13 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
     </div>
   )
 
-  // Overlays float their controls over the editor; sidebar documents get a C4-style header with filename, view switch and window controls.
   return (
-    <EditorShell overlay={!!overlay} fullscreen={isFullscreen}>
-      {overlay ? (
-        <>
-          {editorBody}
-          <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
-            {saveError && <span role="alert" className="max-w-[min(60ch,60vw)] text-right text-[10px] leading-snug text-danger">{saveError}</span>}
-            {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
-            <span className="min-w-0 flex-1 truncate">{shownName}{dirty && " (modified)"}</span>
-            {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
-            <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-0.5 hover:text-ink">
-              {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-            </button>
-            <button aria-label="Close document" onClick={onClose} className="rounded p-0.5 hover:text-danger">
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-          {editorBody}
-        </>
-      )}
+    <EditorShell>
+      {editorBody}
+      <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
+        {saveError && <span role="alert" className="max-w-[min(60ch,60vw)] text-right text-[10px] leading-snug text-danger">{saveError}</span>}
+        {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
+      </div>
     </EditorShell>
   )
 }

@@ -1,6 +1,5 @@
 "use client"
 
-import { CHAT_COLUMN_MAX_PX } from "@/components/ui/columnResize"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
@@ -13,9 +12,6 @@ import { ChatPairBody, chatPairPreview, pairLabel } from "./ChatPair"
 import { findAttachment } from "@/features/chat/attachments"
 import { keyPairs, pairMessages, type Pair } from "@/lib/domain/pairs"
 import { ComposerDock, useComposerDock } from "./ComposerDock"
-
-/** Max width of a chat's Q&A column outside wide mode, shared with the Pi transcript. */
-export { CHAT_COLUMN_MAX_PX }
 
 /** A search hit in a pair: the `ordinal`-th match of `query` in its question or answer text, as the chat search counts it. */
 export interface ChatRevealHit {
@@ -284,7 +280,7 @@ export function ChatContainer({
             context={context}
             attachMenuItems={attachMenuItems}
             leading={composerLeading}
-            hint={composerNotice ? () => composerNotice : undefined}
+            hint={composerNotice}
           />
         </ComposerDock>
       </div>

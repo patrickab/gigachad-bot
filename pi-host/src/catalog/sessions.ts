@@ -67,16 +67,7 @@ export async function sessionInfo(host: Host, sessionPath: string, live: LiveSes
   return meta && infoOf(host, meta, live);
 }
 
-/**
- * Sessions of `cwd` (every cwd when null), newest first, only those of `profile` when given.
- */
-export async function listSessions(
-  host: Host,
-  cwd: string | null,
-  archived: boolean,
-  live: LiveSessions,
-  profile?: Profile,
-): Promise<SessionInfo[]> {
-  const sessions = await Promise.all((await host.listSessions(cwd, archived)).map((meta) => infoOf(host, meta, live)));
-  return profile ? sessions.filter((session) => session.profile === profile) : sessions;
+/** Sessions of `cwd` (every cwd when null), newest first. */
+export async function listSessions(host: Host, cwd: string | null, archived: boolean, live: LiveSessions): Promise<SessionInfo[]> {
+  return Promise.all((await host.listSessions(cwd, archived)).map((meta) => infoOf(host, meta, live)));
 }

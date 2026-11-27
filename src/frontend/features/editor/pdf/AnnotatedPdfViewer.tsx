@@ -183,21 +183,10 @@ const PdfInk = memo(function PdfInk({ canvasKey, scroller, pen, clipToPages, onP
     const onPointerOver = (event: PointerEvent) => { if (event.pointerType === "pen") scroller.style.touchAction = "none" }
     const onPointerLeave = (event: PointerEvent) => { if (event.pointerType === "pen" && !gesture) scroller.style.touchAction = "" }
 
-    scroller.addEventListener("pointerdown", onPointerDown)
-    scroller.addEventListener("pointermove", onPointerMove)
-    scroller.addEventListener("pointerup", onPointerEnd)
-    scroller.addEventListener("pointercancel", onPointerEnd)
-    scroller.addEventListener("lostpointercapture", onPointerEnd)
-    scroller.addEventListener("pointerover", onPointerOver)
-    scroller.addEventListener("pointerleave", onPointerLeave)
+    const listeners = [["pointerdown", onPointerDown], ["pointermove", onPointerMove], ["pointerup", onPointerEnd], ["pointercancel", onPointerEnd], ["lostpointercapture", onPointerEnd], ["pointerover", onPointerOver], ["pointerleave", onPointerLeave]] as const
+    for (const [type, listener] of listeners) scroller.addEventListener(type, listener)
     return () => {
-      scroller.removeEventListener("pointerdown", onPointerDown)
-      scroller.removeEventListener("pointermove", onPointerMove)
-      scroller.removeEventListener("pointerup", onPointerEnd)
-      scroller.removeEventListener("pointercancel", onPointerEnd)
-      scroller.removeEventListener("lostpointercapture", onPointerEnd)
-      scroller.removeEventListener("pointerover", onPointerOver)
-      scroller.removeEventListener("pointerleave", onPointerLeave)
+      for (const [type, listener] of listeners) scroller.removeEventListener(type, listener)
       scroller.style.touchAction = ""
     }
   }, [scroller, clipToPages, liveRef, applyChange, commit, snapshotOnce, endGesture])

@@ -21,11 +21,10 @@ interface CanvasInsertOptions {
   depth: number
   /** Gates the window paste listener to the frontmost tab. */
   active: boolean
-  onImageAdded?: (path: string) => void
 }
 
 /** Everything that puts new content on a canvas: pages, image frames, attachment windows and pasted images. */
-export function useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active, onImageAdded }: CanvasInsertOptions) {
+export function useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active }: CanvasInsertOptions) {
   const addPage = useCallback(() => {
     const doc = liveRef.current.doc
     const pages = doc.frames.filter((f) => f.kind === "page")
@@ -77,8 +76,7 @@ export function useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, a
     const name = `pasted-${Date.now()}.${mime.split("/")[1] || "png"}`
     const res = await writeBinaryDocument(slug, name, blob)
     addImageFrameAt(res.path, x, y)
-    onImageAdded?.(res.path)
-  }, [slug, addImageFrameAt, onImageAdded])
+  }, [slug, addImageFrameAt])
 
   // Paste via the long-press menu: read the image off the async clipboard.
   const pasteImageAtPoint = useCallback(async (canvasX: number, canvasY: number) => {

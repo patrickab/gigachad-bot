@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { PiTranscript } from "../PiTranscript"
-import { EMPTY_TRANSCRIPT, messagesOfEntries, type SessionEntry } from "../transcript"
+import { EMPTY_TRANSCRIPT, transcriptOfEntries, type SessionEntry } from "../transcript"
 import type { CustomMessage, UserMessage } from "../types"
 
 const fileLinks = { base: "/repo", open: () => {} }
@@ -21,7 +21,7 @@ describe("video-preview card", () => {
       entry("a", null, { type: "message", message: prompt }),
       entry("b", "a", { type: "custom_message", customType: "video-preview", content: "Video preview: clip", display: true, details: { videos: [video] } }),
     ]
-    const messages = messagesOfEntries({ entries, leafId: "b" })
+    const messages = transcriptOfEntries({ entries, leafId: "b" }).messages
     expect((messages[1] as CustomMessage).details).toEqual({ videos: [video] })
 
     render(<PiTranscript transcript={{ ...EMPTY_TRANSCRIPT, messages, entryIds: ["a", "b"] }} fileLinks={fileLinks} />)

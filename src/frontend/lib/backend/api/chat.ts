@@ -31,9 +31,8 @@ export async function listChatHistories(signal?: AbortSignal): Promise<ChatHisto
   return request<ChatHistoriesResponse>("/chat-histories", { signal })
 }
 
-export async function fetchBranchMeta(dirs?: string[], signal?: AbortSignal): Promise<Record<string, BranchMeta>> {
-  const params = dirs && dirs.length > 0 ? `?dirs=${dirs.map(encodeURIComponent).join(",")}` : ""
-  return request(`/chat-histories/branch-meta${params}`, { signal })
+export async function fetchBranchMeta(signal?: AbortSignal): Promise<Record<string, BranchMeta>> {
+  return request("/chat-histories/branch-meta", { signal })
 }
 
 export async function loadChatHistory(filename: string): Promise<ChatHistory> {
@@ -45,16 +44,10 @@ interface SaveChatHistoryOptions {
   chatId?: string
   title?: string
   usage?: Usage
-  parentId?: string | null
-  branchMessageIdx?: number | null
-  children?: BranchMeta["children"] | null
 }
 
 export async function saveChatHistory(filename: string, messages: Message[] = [], opts: SaveChatHistoryOptions = {}): Promise<{ status: string; filename: string }> {
   const body: Record<string, unknown> = { messages, chat_id: opts.chatId ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
-  if (opts.parentId !== undefined) body.parent_id = opts.parentId
-  if (opts.branchMessageIdx !== undefined) body.branch_message_idx = opts.branchMessageIdx
-  if (opts.children !== undefined) body.children = opts.children
   return put(`/chat-histories/${filename}`, body)
 }
 

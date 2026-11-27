@@ -118,11 +118,6 @@ export function transcriptOfEntries(entries: SessionEntries): Transcript {
   return transcriptReducer(EMPTY_TRANSCRIPT, { kind: "snapshot", entries, running: false, queue: { steering: [], followUp: [] } })
 }
 
-/** The active branch's messages, root to leaf, including what compactions summarized (the transcript shows the whole history). */
-export function messagesOfEntries(entries: SessionEntries): AgentMessage[] {
-  return appendEntries(NO_CONFIRMED, branchEntries(entries)).messages
-}
-
 /** Identity of a message across live events and persisted entries: `role:timestamp[:toolCallId]`. */
 function messageKey(message: AgentMessage): string {
   return `${message.role}:${message.timestamp}:${message.role === "toolResult" ? (message as ToolResultMessage).toolCallId : ""}`

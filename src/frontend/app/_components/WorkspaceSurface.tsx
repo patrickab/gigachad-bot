@@ -104,12 +104,12 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
   onClose: () => void
   modelProps: ModelProps
 }) {
-  const { prepared, error, retry } = usePreparedWorkbench(item.path, (path) => onItemChange({ ...item, path }), item.sessionKey)
+  const { ready, error, retry } = usePreparedWorkbench(item.path, (path) => onItemChange({ ...item, path }), item.sessionKey)
   if (error) return <div className="pt-11"><LoadFailure message={error} onRetry={retry} /></div>
-  if (!prepared) return <div className="pt-11"><LoadingPlaceholder /></div>
-  const sessionKey = item.sessionKey ?? prepared.path
+  if (!ready) return <div className="pt-11"><LoadingPlaceholder /></div>
+  const sessionKey = item.sessionKey ?? item.path
   const props = {
-    path: prepared.path,
+    path: item.path,
     chatSessionId: item.chat?.sessionId,
     onChatSessionChange: (sessionId: string) => onItemChange({ ...item, chat: { sessionId } }),
     onPathChange: (path: string) => onItemChange({ ...item, path, sessionKey }),
@@ -119,7 +119,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
     modelProps,
   }
   const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
-  return workbenchKindOf(prepared.path) === "latex"
+  return workbenchKindOf(item.path) === "latex"
     ? <LatexWorkbench key={sessionKey} {...props} texFolder={item.texFolder} onTexFolder={(texFolder) => onItemChange({ ...item, texFolder })} />
     : <MarkdownWorkbench key={sessionKey} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />
 }
@@ -134,6 +134,13 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
   const { config, projectSlug, appMode } = tab
   const piSlots = { thinking: useTopBarSlot("reasoning"), model: useTopBarSlot("model"), usage: useTopBarSlot("usage") }
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
+  const closeFile = <TopBarTransparent>
+    <ThemeToggle />
+    <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+      <X className="h-4 w-4" />
+    </button>
+  </TopBarTransparent>
+  const openChat = (open: () => void) => <TopBarTransparent><PanelToggleButton open={false} onClick={open} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>
   // A conversation's bar, a chat's and a Pi tab's: reasoning, model and wide mode at the left, the context readout and theme toggle at the right
   const conversationBar = ({ reasoning, model, usage }: { reasoning: ReactNode; model: ReactNode; usage: ReactNode }) => ({
     left: <>
@@ -158,13 +165,8 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       <TopBarSlot name="center">{(ref) => <div ref={ref} className="contents" />}</TopBarSlot>
     </>,
     right: <>
-      <TopBarTransparent>
-        <ThemeToggle />
-        <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
-          <X className="h-4 w-4" />
-        </button>
-      </TopBarTransparent>
-      {!workbenchDrawerOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setWorkbenchDrawerOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>}
+      {closeFile}
+      {!workbenchDrawerOpen && openChat(() => setWorkbenchDrawerOpen(true))}
     </>,
   }
   const workbenchChatProps = { drawerOpen: workbenchDrawerOpen, onDrawerOpenChange: setWorkbenchDrawerOpen, modelProps }
@@ -204,7 +206,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           <ThemeToggle />
         </TopBarPill>
         {canvasChatPath
-          ? !canvasChatOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setCanvasChatOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>
+          ? !canvasChatOpen && openChat(() => setCanvasChatOpen(true))
           : filePanelToggle}
       </>,
       runsUnderTopBar: canvas.view.kind !== "architecture",
@@ -258,14 +260,9 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           <TopBarSlot name="pdf">{(ref) => <TopBarPill ref={ref} />}</TopBarSlot>
         </div> : undefined,
         right: <>
-          <TopBarTransparent>
-            <ThemeToggle />
-            <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
-              <X className="h-4 w-4" />
-            </button>
-          </TopBarTransparent>
+          {closeFile}
           {isPdfDocument
-            ? !pdfChatOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setPdfChatOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>
+            ? !pdfChatOpen && openChat(() => setPdfChatOpen(true))
             : filePanelToggle}
         </>,
         runsUnderTopBar: isPdfDocument,
@@ -289,7 +286,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
             <DocumentEditor
               path={documentItem.path}
               slug={documentItem.projectSlug ?? ""}
-              overlay
               persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
               onClose={() => setAppMode("chat")}
               onModeLabel={setModeLabel}

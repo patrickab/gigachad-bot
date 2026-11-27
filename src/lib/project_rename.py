@@ -182,13 +182,12 @@ def renamed_documents(
 class PostgresProjectRenamer:
     """Renames projects of one user in a single Postgres transaction over documents, assets and canvas mutations.
 
-    Workbench folders under *workbench_root* (`config.WORKBENCH` by default) move first and move back when the transaction fails.
+    Workbench folders under `config.WORKBENCH` move first and move back when the transaction fails.
     The project's memory_store in *memory_root* (the login's memory root) follows after the transaction commits.
     """
 
-    def __init__(self, scope: UserScope, workbench_root: Path | None = None, memory_root: Path | None = None) -> None:
+    def __init__(self, scope: UserScope, memory_root: Path | None = None) -> None:
         self._scope = scope
-        self._workbench_root = workbench_root
         self._memory_root = memory_root
 
     def rename(self, slug: str, new_slug: str, name: str) -> None:
@@ -196,7 +195,7 @@ class PostgresProjectRenamer:
 
         - A folder that cannot move aborts the rename before the database changes, a taken one with StorageConflictError
         """
-        root = self._workbench_root or config.WORKBENCH
+        root = config.WORKBENCH
         refs = ProjectReferences(slug, new_slug, workbench.directory_moves(root, slug, new_slug))
         try:
             moves = workbench.move_project_directories(root, slug, new_slug)

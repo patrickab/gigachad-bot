@@ -8,7 +8,7 @@ import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 interface FloatingWindowProps {
   children: ReactNode
-  onClose?: () => void
+  onClose: () => void
   /** Accessible name of the dialog. */
   label?: string
   overlayClassName?: string
@@ -17,9 +17,6 @@ interface FloatingWindowProps {
 
 /** Look of a floating window's panel, shared by `FloatingWindow` and the picker preview. */
 export const FLOATING_PANEL_CLASS = "flex flex-col overflow-hidden rounded-3xl border border-divider/50 bg-paper shadow-[var(--shadow-xl)] outline-none"
-
-/** Corner radius of `FLOATING_PANEL_CLASS` (rounded-3xl). */
-export const FLOATING_PANEL_RADIUS_PX = 24
 
 /** A floating window's panel: fades and grows in, instantly under reduced motion. */
 export function FloatingPanel({ children, className, style, ref, onClick, ...aria }: {
@@ -60,7 +57,7 @@ export function FloatingPanel({ children, className, style, ref, onClick, ...ari
  */
 export function FloatingWindow({ children, onClose, label, overlayClassName, panelClassName }: FloatingWindowProps) {
   const panelRef = useRef<HTMLDivElement>(null)
-  useEscapeLayer(() => onClose?.(), onClose !== undefined)
+  useEscapeLayer(onClose)
   useEffect(() => {
     const panel = panelRef.current
     if (panel && !panel.contains(document.activeElement)) panel.focus()

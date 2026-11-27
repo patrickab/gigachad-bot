@@ -55,7 +55,7 @@ const shellDrive: FreezeDrive = {
 
 type ModelRef = { provider?: string; id?: string };
 
-async function readJson<T>(path: string): Promise<T> {
+export async function readJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { cache: "no-store" });
   if (!response.ok) throw new Error(`${path}: ${response.status}`);
   return (await response.json()) as T;

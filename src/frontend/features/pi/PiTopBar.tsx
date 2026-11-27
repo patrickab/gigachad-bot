@@ -173,11 +173,9 @@ export function PiRepoLabel({ repo, tone, mark }: { repo: string; tone?: StatusT
 /**
  * The header of a session in a side panel (a workbench chat), ordered like a chat's top bar: live dot, thinking, model and session name, then
  * the context readout and `actions`.
- *
- * Before the session runs it shows `controls` (what a new session starts on) instead.
  */
-export function PiPanelBar({ header, controls, modelProps, actions }: { header: PiSessionHeader | null; controls?: PiModelControls; modelProps: PiCatalogProps; actions?: ReactNode }) {
-  const shown = header?.controls ?? controls
+export function PiPanelBar({ header, modelProps, actions }: { header: PiSessionHeader | null; modelProps: PiCatalogProps; actions?: ReactNode }) {
+  const shown = header?.controls
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1">
       {header && <span className="flex shrink-0 px-1"><StatusDot tone={header.tone} /></span>}

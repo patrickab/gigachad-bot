@@ -7,6 +7,7 @@ import { cn, isModKey } from "@/lib/utils"
 import { useSelectionAction } from "@/hooks/useSelectionAction"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor } from "@/features/editor/NeovimEditor"
+import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
 import { ChangedFiles, ChangeSummary } from "./diffTree"
 import { selectedComment } from "./diffSelection"
 import { FileSection } from "./FileSection"
@@ -87,15 +88,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-7 shrink-0 items-center gap-3 px-3 text-[10px] text-ink-faint">
         <span className="min-w-0 flex-1 truncate">{activePath ?? ""}</span>
-        {editing ? <span>HEAD · working file · :w saves · :qa returns</span> : <div role="group" aria-label="Diff layout" className="flex shrink-0 gap-0.5">
-          {LAYOUTS.map((option) => <button
-            key={option}
-            type="button"
-            aria-pressed={layout === option}
-            onClick={() => chooseLayout(option)}
-            className={cn("rounded px-1.5 py-0.5 capitalize", FOCUS_RING, layout === option ? "text-ink" : "hover:text-ink")}
-          >{option}</button>)}
-        </div>}
+        {editing ? <span>HEAD · working file · :w saves · :qa returns</span> : <ViewSwitch label="Diff layout" value={layout} onChange={chooseLayout} options={LAYOUTS.map((option) => [option, option] as const)} className="flex shrink-0 gap-0.5" buttonClass={cn("rounded px-1.5 py-0.5 capitalize", FOCUS_RING)} activeClass="text-ink" inactiveClass="hover:text-ink" />}
       </div>
       <ErrorText className="px-3 py-1">{editError}</ErrorText>
       {editing && <div className="min-h-0 flex-1 overflow-hidden"><NeovimEditor terminal={session.terminal} status={session.status} onRestart={session.restart} className="h-full" /></div>}

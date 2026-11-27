@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useRef, useState, type ElementType, type ReactNode, type Ref } from "react"
+import { createContext, useContext, useRef, useState, type ElementType, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { Pencil, Trash2 } from "lucide-react"
 import { CopyAction, ForkAction, TurnAction, TurnRegion } from "@gigachad/chat-ui"
@@ -89,7 +89,7 @@ function QuestionEditor({ initial, paused, onSubmit, onCancel }: { initial: stri
  * - Inside `TurnEditsPaused` neither edit nor delete is offered, and an open editor or confirmation closes
  * - The editor's draft lives in this component, which the column keys by the turn's key: a deleted turn's draft goes with it
  */
-export function TurnQuestion({ text, live = false, onEdit: edit, onDelete: remove, laterTurns, icon, onCollapse, collapseRef, children }: {
+export function TurnQuestion({ text, live = false, onEdit: edit, onDelete: remove, laterTurns, icon, onCollapse, children }: {
   /** The prompt: what copy copies and the editor starts from. */
   text: string
   live?: boolean
@@ -102,7 +102,6 @@ export function TurnQuestion({ text, live = false, onEdit: edit, onDelete: remov
   laterTurns?: () => number
   icon?: ReactNode
   onCollapse?: () => void
-  collapseRef?: Ref<HTMLButtonElement>
   children: ReactNode
 }) {
   const paused = useContext(TurnEditsPaused)
@@ -143,7 +142,7 @@ export function TurnQuestion({ text, live = false, onEdit: edit, onDelete: remov
 
   return (
     <>
-      <TurnRegion role="question" icon={icon} onCollapse={onCollapse} collapseRef={collapseRef} actions={actions.length > 0 ? actions : undefined}>
+      <TurnRegion role="question" icon={icon} onCollapse={onCollapse} actions={actions.length > 0 ? actions : undefined}>
         {editing && onEdit ? <QuestionEditor initial={text} paused={pendingEdit !== null} onSubmit={submit} onCancel={() => setEditing(false)} /> : children}
       </TurnRegion>
       {onEdit && (

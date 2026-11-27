@@ -42,8 +42,8 @@ export type PiProfile = "coding" | "document"
 /** Where `@` completion finds files: a checkout under `~/git` by name, or an absolute folder (a workbench chat's cwd). */
 export type PiFileScope = { repo: string } | { cwd: string }
 
-/** How a session opens: a fresh one, the repo's newest, a given session file, or a fork of a file at an entry (D11). */
-export type PiResume = null | "continue" | { sessionPath: string } | { forkOf: { sessionPath: string; entryId: string } }
+/** How a session opens: a fresh one, a given session file, or a fork of a file at an entry (D11). */
+export type PiResume = null | { sessionPath: string } | { forkOf: { sessionPath: string; entryId: string } }
 
 /** Model and thinking level a new session starts with, Pi's defaults when omitted. */
 export interface PiSessionOptions {
@@ -129,12 +129,10 @@ export function deletePiSession(sessionId: string): Promise<void> {
   return requestVoid(`/pi/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" })
 }
 
-export type PiTurnRefusal = "running" | "compacted" | "locked" | "changed"
-
 /**
  * Delete the turn that `entryId` (a user prompt) starts for good: `through: "turn"` that turn, `"end"` it and every later one.
  * `notRemoved`: the pastes and media files a cleanup after the rewrite could not remove, still on disk.
- * A 409 rejects with an ApiError whose `code` and `message` are the reason (`PiTurnRefusal`).
+ * A 409 rejects with an ApiError whose `code` and `message` are the reason: `"running" | "compacted" | "locked" | "changed"`.
  */
 export async function deletePiTurn(sessionId: string, entryId: string, through: "turn" | "end"): Promise<{ removedEntries: number; notRemoved: string[] }> {
   try {

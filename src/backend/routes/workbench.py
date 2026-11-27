@@ -5,7 +5,6 @@
 """
 
 import asyncio
-from collections.abc import Awaitable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -26,6 +25,7 @@ from backend.routes.deps import (
     get_relocate,
 )
 from backend.routes.fileviewer import resolve_allowed
+from backend.routes.upstream import call_upstream
 import config
 from lib import document_service, latex, latex_templates, pi_host
 from lib.asset_store import AssetStore
@@ -83,7 +83,8 @@ class PromotedFolder(BaseModel):
 
 
 class StoredImage(BaseModel):
-    """Where a pasted image went, its path relative to the folder it is stored under (the project folder for LaTeX) and the text that references it from the file it was pasted into."""
+    """Where a pasted image went, its path relative to the folder it is stored under (the project folder for LaTeX)
+    and the text that references it from the file it was pasted into."""
 
     path: str
     placeholder_path: str
@@ -188,8 +189,9 @@ def post_prepare(
     if not roots.contains(folder / name):
         raise HTTPException(status_code=403, detail="The workbench folder is outside the allowed file roots")
     conflict = "A document with that name already exists"
-    with new_folder(folder), http_errors(
-        (DocumentNotFound, 404, "Document not found"), ((DocumentNameConflict, StorageConflictError), 409, conflict)
+    with (
+        new_folder(folder),
+        http_errors((DocumentNotFound, 404, "Document not found"), ((DocumentNameConflict, StorageConflictError), 409, conflict)),
     ):
         return _prepared(document_service.move_to_folder(store, docs, relocate, key, folder), kind)
 
@@ -198,7 +200,8 @@ def post_prepare(
 def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_store)) -> FilePath:
     """Create the document `name` of project `slug` in its workbench folder and list it in the project's files.
 
-    - With `template` the document is a LaTeX project folder, listed as such: `main.tex` from the set's skeleton, its theme `.sty` and `imgs/`
+    - With `template` the document is a LaTeX project folder, listed as such: `main.tex` from the set's skeleton,
+      its theme `.sty` and `imgs/`
     - A template for a Markdown document or one that is no template set answers 400
     - A folder that exists already answers 409 even without a file of that name, a leftover is never adopted
     - A failure to list it removes the new folder with everything written into it
@@ -231,7 +234,8 @@ def post_create(body: NewDocument, store: ProjectStore = Depends(get_project_sto
 
 @router.post("/promote")
 def post_promote(body: Promotion, store: ProjectStore = Depends(get_project_store)) -> PromotedFolder:
-    """Replace the listed `.tex` directly inside `<slug>/<folder>/` of a project by that folder, where it was in the list. There is no way back.
+    """Replace the listed `.tex` directly inside `<slug>/<folder>/` of a project by that folder, where it was in the list.
+    There is no way back.
 
     - A file the project does not list answers 404, any other path 400, a folder that is listed already 409
     - A display name `X.tex` becomes `X`, other display names stay
@@ -254,8 +258,8 @@ def post_promote(body: Promotion, store: ProjectStore = Depends(get_project_stor
 
 @router.post("/image")
 def post_image(
+    file: Annotated[UploadFile, File()],
     path: str = Query(...),
-    file: UploadFile = File(...),
     roots: FileRoots = Depends(get_file_roots),
     files: DiskFiles = Depends(get_disk_files),
 ) -> StoredImage:
@@ -292,7 +296,8 @@ def post_image(
 
 
 def _image_reference(kind: Kind, theme: latex_templates.TemplateSet | None, image: str) -> str:
-    """The text that shows *image* in a *kind* document: Markdown `![]()`, the presentation *theme*'s image macro, else `\\includegraphics`."""
+    """The text that shows *image* in a *kind* document: Markdown `![]()`, the presentation *theme*'s image macro,
+    else `\\includegraphics`."""
     if kind == "markdown":
         return f"![]({image})"
     themed = None if theme is None else theme.image_reference(image)
@@ -343,18 +348,6 @@ class Chat(BaseModel):
     file: str
     kind: ChatKind
     cwd: Path
-
-
-async def _pi[Result](request: Awaitable[Result]) -> Result:
-    """Await a `pi_host` call: unreachable 503, unknown shape 502, a refusal keeps its status and error text."""
-    try:
-        return await request
-    except pi_host.PiHostUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except pi_host.PiHostBadResponse as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except pi_host.PiHostRejected as exc:
-        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 def _chat(path: str, docs: DataStore, roots: FileRoots) -> Chat:
@@ -436,7 +429,12 @@ async def post_chat(
     async def open_chat(session_id: str | None) -> pi_host.SessionInfo:
         if session_id is None:
             return await pi_host.open_session(
-                str(chat.cwd), None, model=body.model, thinking=body.thinking, profile="document", system_prompt=prompt,
+                str(chat.cwd),
+                None,
+                model=body.model,
+                thinking=body.thinking,
+                profile="document",
+                system_prompt=prompt,
             )
         resume = pi_host.ResumeById(session_id=session_id)
         return await pi_host.open_session(str(chat.cwd), resume, profile="document", system_prompt=prompt)
@@ -445,14 +443,14 @@ async def post_chat(
         link = await asyncio.to_thread(links.of, key, roots)
         wanted = None if body.new else body.session_id or link.active
         try:
-            session = await _pi(open_chat(wanted))
+            session = await call_upstream(open_chat(wanted))
         except HTTPException as exc:
             lost = exc.status_code == 404
             if not (lost or _spawn_failed(exc)) or wanted is None or body.session_id is not None:
                 raise
             if lost:
                 await asyncio.to_thread(links.discard, key, wanted)
-            session = await _pi(open_chat(None))
+            session = await call_upstream(open_chat(None))
         link = await asyncio.to_thread(links.activate, key, session.session_id)
     return OpenedChat(session=session, link=_linked_session(link), kind=chat.kind, cwd=str(chat.cwd), pdf_text=pdf_text)
 
@@ -473,11 +471,13 @@ def _spawn_failed(exc: HTTPException) -> bool:
 
 @router.get("/chats")
 async def get_chats(
-    path: str, docs: Annotated[DataStore, Depends(get_document_store)], roots: Annotated[FileRoots, Depends(get_file_roots)],
+    path: str,
+    docs: Annotated[DataStore, Depends(get_document_store)],
+    roots: Annotated[FileRoots, Depends(get_file_roots)],
 ) -> ChatList:
     """The Pi sessions linked to the absolute file, LaTeX project folder or canvas key `path` (`SessionLinks.of`)."""
     link = await asyncio.to_thread(SessionLinks(docs).of, _link_key(path), roots)
-    known = {session.session_id: session for session in await _pi(pi_host.list_sessions(None, archived=False))}
+    known = {session.session_id: session for session in await call_upstream(pi_host.list_sessions(None, archived=False))}
     return ChatList(link=_linked_session(link), sessions=[known[id_] for id_ in link.sessions if id_ in known])
 
 

@@ -2,8 +2,6 @@
 import { describe, expect, test } from "bun:test";
 import { removeTurn, type TurnEntry } from "../src/host/local/turns.ts";
 
-const header = { type: "session", version: 3, id: "s1", cwd: "/tmp/x", timestamp: "t" };
-
 const user = (id: string, parentId: string | null): TurnEntry => ({ type: "message", id, parentId, message: { role: "user", content: `ask ${id}` } });
 const answer = (id: string, parentId: string): TurnEntry => ({ type: "message", id, parentId, message: { role: "assistant", content: `answer ${id}` } });
 const tool = (id: string, parentId: string): TurnEntry => ({ type: "message", id, parentId, message: { role: "toolResult", content: `output ${id}` } });
@@ -29,7 +27,7 @@ function threeTurns(): TurnEntry[] {
 }
 
 function removed(entries: TurnEntry[], id: string, through: "turn" | "end" = "turn") {
-  const result = removeTurn(header, entries, id, through);
+  const result = removeTurn(entries, id, through);
   if (!result.ok) throw new Error(`refused: ${result.reason}`);
   return result;
 }
@@ -44,7 +42,6 @@ describe("removeTurn", () => {
     expect(parents(result.entries).u3).toBe("a1");
     expect(ids(result.removed)).toEqual(["u2", "t2", "a2"]);
     expect(result.leafId).toBe("a3");
-    expect(result.header).toBe(header);
   });
 
   test("turn: the last turn leaves its parent as leaf", () => {
@@ -183,17 +180,17 @@ describe("removeTurn", () => {
 
   describe("refuses", () => {
     test("an unknown id", () => {
-      expect(removeTurn(header, threeTurns(), "nope", "turn")).toEqual({ ok: false, reason: "unknown" });
+      expect(removeTurn(threeTurns(), "nope", "turn")).toEqual({ ok: false, reason: "unknown" });
     });
 
     test("an entry that is no user prompt", () => {
-      expect(removeTurn(header, threeTurns(), "a2", "turn")).toEqual({ ok: false, reason: "not_prompt" });
-      expect(removeTurn(header, threeTurns(), "m", "end")).toEqual({ ok: false, reason: "not_prompt" });
+      expect(removeTurn(threeTurns(), "a2", "turn")).toEqual({ ok: false, reason: "not_prompt" });
+      expect(removeTurn(threeTurns(), "m", "end")).toEqual({ ok: false, reason: "not_prompt" });
     });
 
     test("a prompt off the active path", () => {
       const entries = [user("u1", null), answer("a1", "u1"), user("u2x", "a1"), user("u2", "a1"), answer("a2", "u2")];
-      expect(removeTurn(header, entries, "u2x", "turn")).toEqual({ ok: false, reason: "off_branch" });
+      expect(removeTurn(entries, "u2x", "turn")).toEqual({ ok: false, reason: "off_branch" });
     });
 
     test("a turn a surviving compaction summarized", () => {
@@ -202,11 +199,11 @@ describe("removeTurn", () => {
         entry("compaction", "c", "a3", { firstKeptEntryId: "u3", summary: "u1 and u2" }),
         user("u4", "c"),
       ];
-      expect(removeTurn(header, entries, "u2", "turn")).toEqual({ ok: false, reason: "compacted" });
-      expect(removeTurn(header, entries, "u1", "turn")).toEqual({ ok: false, reason: "compacted" });
+      expect(removeTurn(entries, "u2", "turn")).toEqual({ ok: false, reason: "compacted" });
+      expect(removeTurn(entries, "u1", "turn")).toEqual({ ok: false, reason: "compacted" });
       // the kept turn and the turn after the compaction can go
-      expect(removeTurn(header, entries, "u3", "turn").ok).toBe(true);
-      expect(removeTurn(header, entries, "u4", "turn").ok).toBe(true);
+      expect(removeTurn(entries, "u3", "turn").ok).toBe(true);
+      expect(removeTurn(entries, "u4", "turn").ok).toBe(true);
     });
 
     test("not when the compaction goes with the edit", () => {

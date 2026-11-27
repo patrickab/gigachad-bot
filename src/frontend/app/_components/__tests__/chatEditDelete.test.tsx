@@ -80,7 +80,7 @@ async function renderChat(historyFile: string | null) {
   } satisfies ChatHistory
   const tab: TabContextValue = {
     tab: {
-      id: "t1", name: null, chatId: "c1", historyFile, title: null,
+      id: "t1", chatId: "c1", historyFile, title: null,
       config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, appMode: "chat", projectSlug: null, workspaceItem: null,
     },
     isActive: true,

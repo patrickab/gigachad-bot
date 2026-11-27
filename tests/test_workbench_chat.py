@@ -182,7 +182,9 @@ def _stored(docs, key):
 @pytest.mark.parametrize("kind", prompts.CHAT_KINDS)
 def test_every_kind_has_a_pi_prompt_without_omp_tools(kind):
     prompt = prompts.render(kind)
-    assert not any(word in prompt for word in OMP_TOOL_WORDS)
+    # The checkout's path is substituted in and may contain a word like `sed` ("unused").
+    text = prompt.replace(str(latex_templates.TEMPLATE_SETS), "")
+    assert not any(word in text for word in OMP_TOOL_WORDS)
     assert "{{" not in prompt
 
 

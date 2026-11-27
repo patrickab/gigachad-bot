@@ -75,15 +75,13 @@ function useFlipUp(ref: RefObject<HTMLDivElement | null>, open: boolean) {
  * - `trigger` renders the button, `children` the menu; both get the open state, so the menu decides how it appears (conditionally, or inside `AnimatePresence`)
  * - The menu, the element after the trigger, fades and rises from the trigger on mount (`motion-popover` in globals.css): up from a `bottom-full` menu, down otherwise
  * - A downward menu without room below in its scroll container or the viewport opens upward instead
- * - `escape={false}` leaves Escape alone
  */
-export function MenuPopover({ trigger, children, className, escape }: {
+export function MenuPopover({ trigger, children, className }: {
   trigger: (open: boolean, toggle: () => void) => ReactNode
   children: (open: boolean, close: () => void) => ReactNode
   className?: string
-  escape?: boolean
 }) {
-  const { ref, open, toggle, close } = useMenuPopover({ escape })
+  const { ref, open, toggle, close } = useMenuPopover()
   useFlipUp(ref, open)
   return (
     <div ref={ref} data-menu-popover className={cn("relative", className)}>

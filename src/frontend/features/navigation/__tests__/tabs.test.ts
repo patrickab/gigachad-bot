@@ -197,15 +197,6 @@ describe("parseSavedTabs", () => {
     expect(parseSavedTabs(JSON.stringify({ tabs: [omp], activeId: omp.id }))).toBeNull()
   })
 
-  it("drops the omp chat old builds saved on workbench and notebook items, keeps their Pi chat", () => {
-    const workbench = { ...nextTab(), ...showingItem({ kind: "workbench", path: "/notes/a.md", projectSlug: null, chat: { sessionId: "p1" } }) }
-    const notebook = { ...nextTab(), ...showingItem({ kind: "document", path: "/nb/a.ipynb", projectSlug: null }) }
-    const legacy = [
-      { ...workbench, workspaceItem: { ...workbench.workspaceItem, omp: { kind: "session", sessionId: "o1" } } },
-      { ...notebook, workspaceItem: { ...notebook.workspaceItem, omp: { kind: "new", cwd: "/nb" } } },
-    ]
-    expect(parseSavedTabs(JSON.stringify({ tabs: legacy, activeId: workbench.id }))).toEqual({ tabs: [workbench, notebook], activeId: workbench.id })
-  })
 })
 
 describe("Pi tabs", () => {
@@ -226,6 +217,5 @@ describe("factory tabs", () => {
     expect(tabLocation(board, () => undefined)).toEqual({ category: "factory", file: "app" })
     const task = { ...nextTab(), ...showingItem(factoryItem("/home/me/git/app", "0123456789abcdef0123456789abcdef")) }
     expect(tabLocation(task, () => undefined)).toEqual({ category: "factory", file: "task" })
-    expect(tabLocation({ ...task, name: "Fix header" }, () => undefined)).toEqual({ category: "factory", file: "Fix header" })
   })
 })

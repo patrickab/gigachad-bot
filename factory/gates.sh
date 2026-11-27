@@ -178,16 +178,11 @@ fill_submodules() {
 fill_submodules || exit "$INFRA"
 
 python_bin() {
-    local common
     if [[ -x .venv/bin/python3 ]]; then
         echo "$root/.venv/bin/python3"
         return
     fi
-    common="$(cd -- "$(git rev-parse --git-common-dir)" && pwd)"
-    if [[ -x "$(dirname -- "$common")/.venv/bin/python3" ]]; then
-        echo "$(dirname -- "$common")/.venv/bin/python3"
-        return
-    fi
+    [[ -x $primary/.venv/bin/python3 ]] && { echo "$primary/.venv/bin/python3"; return; }
     echo "no .venv here or in the main checkout, run uv sync there" >&2
     exit 1
 }

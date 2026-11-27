@@ -49,12 +49,11 @@ from functools import partial
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import tempfile
 
 from lib.neovim_rpc import SETUP_LUA, NeovimRpc, NeovimRpcError
 from lib.process_owner import owned_environment
-from lib.pty_process import claim_controlling_terminal, set_terminal_size, terminal_environment
+from lib.pty_process import PtyProcess, terminal_environment
 from lib.tex_source import fill_placeholder, frame_insertion
 from lib.text_merge import TextMergeError, merge_theirs
 
@@ -76,8 +75,6 @@ _KEYMAPS = (
 
 _STARTUP_SECONDS = 15
 _RPC_SECONDS = 10
-_SHUTDOWN_SECONDS = 2
-_READ_CHUNK = 65536
 # `set_text` retries while keystrokes change the buffer between reading and merging it.
 _SET_TEXT_ATTEMPTS = 5
 # An insert at the cursor works out its edit once more when keystrokes changed the buffer meanwhile, then fails.
@@ -207,31 +204,20 @@ class NeovimSession:
     >>> await session.close()
     """
 
-    def __init__(
-        self,
-        process: subprocess.Popen,
-        terminal_fd: int,
-        workdir: Path,
-        first: _Document,
-        *,
-        baseline: Path | None = None,
-    ) -> None:
+    def __init__(self, terminal: PtyProcess, workdir: Path, first: _Document, *, baseline: Path | None = None) -> None:
         self._documents = {first.path: first}
         self._copies = 1
         # Serializes `open_file`, which looks a document up and then adds it
         self._opening = asyncio.Lock()
         self._baseline = baseline
-        self._process = process
-        self._terminal_fd = terminal_fd
+        self._terminal = terminal
         self._workdir = workdir
-        self._output: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._rpc: NeovimRpc | None = None
         # 'background' the browser asked for, applied once setup finished, so the user's config cannot override it
         self._background: str | None = None
         # Set once the save hook is installed, requests that change documents wait for it
         self._ready = asyncio.Event()
         self._loop = asyncio.get_running_loop()
-        self._loop.add_reader(terminal_fd, self._read_terminal)
 
     @classmethod
     def spawn(
@@ -268,26 +254,18 @@ class NeovimSession:
             (workdir / "base").mkdir()
             baseline = workdir / "base" / _document_name(filename)
             baseline.write_text(base_content, encoding="utf-8", newline="")
-        terminal_fd, child_fd = os.openpty()
-        set_terminal_size(terminal_fd, rows, cols)
         try:
-            process = subprocess.Popen(
+            terminal = PtyProcess.spawn(
                 ["nvim", "-n", "--listen", str(workdir / "rpc.sock"), str(start)],
-                stdin=child_fd,
-                stdout=child_fd,
-                stderr=child_fd,
                 cwd=cwd,
+                rows=rows,
+                cols=cols,
                 env=owned_environment(terminal_environment()),
-                start_new_session=True,
-                preexec_fn=claim_controlling_terminal,
             )
         except BaseException:
-            os.close(terminal_fd)
             shutil.rmtree(workdir, ignore_errors=True)
             raise
-        finally:
-            os.close(child_fd)
-        return cls(process, terminal_fd, workdir, first, baseline=baseline)
+        return cls(terminal, workdir, first, baseline=baseline)
 
     async def connect(
         self,
@@ -349,8 +327,8 @@ class NeovimSession:
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
         while not socket_path.exists():
-            if self._process.poll() is not None:
-                raise RuntimeError(f"Neovim exited during startup with code {self._process.returncode}")
+            if (code := self._terminal.returncode) is not None:
+                raise RuntimeError(f"Neovim exited during startup with code {code}")
             if self._loop.time() > deadline:
                 raise TimeoutError("Neovim did not open its RPC socket")
             await asyncio.sleep(0.02)
@@ -536,51 +514,21 @@ class NeovimSession:
 
     async def read_output(self) -> bytes | None:
         """Next terminal output chunk, None once the terminal has closed."""
-        return await self._output.get()
+        return await self._terminal.read_output()
 
     def write_input(self, data: bytes) -> None:
-        """Forward keystrokes, dropped once the terminal has closed."""
-        view = memoryview(data)
-        while view and self._terminal_fd >= 0:
-            view = view[os.write(self._terminal_fd, view) :]
+        self._terminal.write_input(data)
 
     def resize(self, rows: int, cols: int) -> None:
-        if self._terminal_fd >= 0:
-            set_terminal_size(self._terminal_fd, rows, cols)
+        self._terminal.resize(rows, cols)
 
     async def wait(self) -> int:
         """Exit code of `nvim`."""
-        return await asyncio.to_thread(self._process.wait)
+        return await self._terminal.wait()
 
     async def close(self) -> None:
-        """Stop `nvim` and delete the private copies, discarding unsaved edits."""
+        """Stop `nvim` and its process group (language servers) and delete the private copies, discarding unsaved edits."""
         if self._rpc is not None:
             await self._rpc.close()
-        # Closing the terminal first: on SIGTERM alone Neovim's TUI waits a second for terminal replies nobody sends
-        self._stop_reading()
-        if self._process.poll() is None:
-            self._process.terminate()
-            try:
-                await asyncio.to_thread(self._process.wait, _SHUTDOWN_SECONDS)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                await asyncio.to_thread(self._process.wait)
+        await self._terminal.close()
         shutil.rmtree(self._workdir, ignore_errors=True)
-
-    def _read_terminal(self) -> None:
-        try:
-            data = os.read(self._terminal_fd, _READ_CHUNK)
-        except OSError:  # EIO once the child side of the PTY is closed
-            data = b""
-        if data:
-            self._output.put_nowait(data)
-        else:
-            self._stop_reading()
-
-    def _stop_reading(self) -> None:
-        if self._terminal_fd < 0:
-            return
-        self._loop.remove_reader(self._terminal_fd)
-        os.close(self._terminal_fd)
-        self._terminal_fd = -1
-        self._output.put_nowait(None)

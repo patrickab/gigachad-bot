@@ -6,11 +6,15 @@ import asyncio
 import contextlib
 import fcntl
 import os
-from pathlib import Path
 import signal
 import struct
 import subprocess
 import termios
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
 _READ_CHUNK = 65536
 _SHUTDOWN_SECONDS = 2
@@ -51,8 +55,8 @@ class PtyProcess:
         self._loop.add_reader(terminal_fd, self._read_terminal)
 
     @classmethod
-    def spawn(cls, argv: list[str], *, cwd: Path, rows: int, cols: int) -> PtyProcess:
-        """Start *argv* in *cwd* on a new PTY of *rows* x *cols*. Call from a running event loop."""
+    def spawn(cls, argv: list[str], *, cwd: Path, rows: int, cols: int, env: Mapping[str, str] | None = None) -> PtyProcess:
+        """Start *argv* in *cwd* on a new PTY of *rows* x *cols*, *env* default `terminal_environment()`. Call from a running loop."""
         terminal_fd, child_fd = os.openpty()
         set_terminal_size(terminal_fd, rows, cols)
         try:
@@ -62,7 +66,7 @@ class PtyProcess:
                 stdout=child_fd,
                 stderr=child_fd,
                 cwd=cwd,
-                env=terminal_environment(),
+                env=terminal_environment() if env is None else env,
                 start_new_session=True,
                 preexec_fn=claim_controlling_terminal,
             )
@@ -94,11 +98,17 @@ class PtyProcess:
         except OSError:
             return False
 
+    @property
+    def returncode(self) -> int | None:
+        return self._process.poll()
+
     async def wait(self) -> int:
         return await asyncio.to_thread(self._process.wait)
 
     async def close(self) -> None:
-        """Hang up the process group (an interactive shell ignores SIGTERM), kill it when it outlives the grace period."""
+        """Hang up the terminal and the process group (an interactive shell ignores SIGTERM), kill the group when it
+        outlives the grace period. The terminal goes first: a TUI on a live terminal waits for replies nobody sends."""
+        self._stop_reading()
         if self._process.poll() is None:
             self._signal_group(signal.SIGHUP)
             try:
@@ -106,7 +116,6 @@ class PtyProcess:
             except subprocess.TimeoutExpired:
                 self._signal_group(signal.SIGKILL)
                 await asyncio.to_thread(self._process.wait)
-        self._stop_reading()
 
     def _signal_group(self, signal_number: signal.Signals) -> None:
         with contextlib.suppress(ProcessLookupError):

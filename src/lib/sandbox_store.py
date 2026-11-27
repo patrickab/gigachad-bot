@@ -12,8 +12,6 @@ import time
 from typing import Any
 
 from agent_sandbox import SandboxManifest, manifest_from_dict, manifest_to_dict
-from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION
-import yaml
 
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.json_docs import JsonDocs
@@ -22,42 +20,13 @@ from lib.storage_namespace import (
     SANDBOX,
     parse_sandbox_key,
     sandbox_active,
-    sandbox_asset,
     sandbox_manifest,
     sandbox_manifest_prefix,
     sandbox_prefix,
     sandbox_run,
     sandbox_run_prefix,
     sandbox_scope,
-    sandbox_slot,
 )
-
-SCHEMA_VERSION = 1
-
-
-@dataclass(frozen=True)
-class AssetRef:
-    """Reference Gigachad-owned content-addressed asset bytes."""
-
-    sha256: str
-    media_type: str
-    size_bytes: int
-
-    def to_json(self) -> dict[str, Any]:
-        return {"sha256": self.sha256, "media_type": self.media_type, "size_bytes": self.size_bytes}
-
-    @staticmethod
-    def from_json(data: dict[str, Any]) -> "AssetRef":
-        return AssetRef(sha256=data["sha256"], media_type=data["media_type"], size_bytes=data["size_bytes"])
-
-
-@dataclass(frozen=True)
-class SlotRecord:
-    version: int
-    chat_id: str
-    profile: str
-    created_at: float
-    last_activity_at: float
 
 
 @dataclass(frozen=True)
@@ -71,7 +40,7 @@ class ActivePointer:
 @dataclass(frozen=True)
 class RunRecord:
     tool_call_id: str
-    status: str  # "running" | "completed" | "failed" | "cancelled"
+    status: str  # "completed" | "failed" | "cancelled"
     started_at: float
     finished_at: float | None = None
     manifest_id: str | None = None
@@ -108,67 +77,16 @@ def manifest_asset_shas(manifest: SandboxManifest) -> set[str]:
     return {sha256 for asset_id in asset_ids if (sha256 := _asset_sha(asset_id)) is not None}
 
 
-# Version-1 manifests held OMP sessions, which Pi cannot resume. They decode without a session, so a run
-# restores only their workspace.
-OMP_MANIFEST_SCHEMA_VERSION = 1
-
-
-def _native_manifest(data: object) -> SandboxManifest:
-    """Decode a native manifest mapping, dropping the OMP sessions of a version-1 one."""
-    if isinstance(data, dict) and data.get("schema_version") == OMP_MANIFEST_SCHEMA_VERSION and "omp_sessions" in data:
-        sessionless = {key: value for key, value in data.items() if key != "omp_sessions"}
-        data = {**sessionless, "schema_version": MANIFEST_SCHEMA_VERSION, "pi_sessions": {}}
-    return manifest_from_dict(data)
-
-
-# Older records embedded the native manifest as YAML under `extra`.
-def _legacy_manifest(data: dict[str, Any]) -> SandboxManifest:
-    try:
-        serialized = data["extra"]["agent_sandbox_manifest"]
-        legacy_workspace = AssetRef.from_json(data["workspace"])
-    except (KeyError, TypeError) as exc:
-        raise ValueError("legacy sandbox record lacks an embedded AIB manifest") from exc
-    if not isinstance(serialized, str):
-        raise ValueError("legacy sandbox record lacks an embedded AIB manifest")
-    try:
-        embedded = yaml.safe_load(serialized)
-    except yaml.YAMLError as exc:
-        raise ValueError("legacy sandbox record embeds invalid AIB manifest YAML") from exc
-    manifest = _native_manifest(embedded)
-    expected_asset_id = sandbox_asset(legacy_workspace.sha256)
-    if manifest.workspace.snapshot_asset_id != expected_asset_id or manifest.workspace.sha256 != legacy_workspace.sha256:
-        raise ValueError("legacy sandbox record disagrees with its embedded AIB workspace manifest")
-    return manifest
-
-
-def _decode_manifest(data: dict[str, Any]) -> tuple[SandboxManifest, bool]:
-    try:
-        manifest = _native_manifest(data)
-    except ValueError:
-        manifest = _legacy_manifest(data)
-        legacy = True
-    else:
-        legacy = False
+def _decode_manifest(data: dict[str, Any]) -> SandboxManifest:
+    manifest = manifest_from_dict(data)
     manifest_asset_shas(manifest)
-    return manifest, legacy
+    return manifest
 
 
 class SandboxStore:
     def __init__(self, data_store: DataStore, *, scope: str = DEFAULT_SANDBOX_SCOPE) -> None:
         self._docs = JsonDocs(data_store)
         self._scope = sandbox_scope(scope)
-
-    def read_slot(self, chat_id: str) -> SlotRecord | None:
-        data = self._docs.read(sandbox_slot(chat_id, self._scope))
-        return SlotRecord(**data) if isinstance(data, dict) else None
-
-    def _touched_slot(self, chat_id: str, profile: str) -> SlotRecord:
-        """The existing slot with fresh activity, or a new one."""
-        existing = self.read_slot(chat_id)
-        now = time.time()
-        if existing is not None:
-            return replace(existing, last_activity_at=now)
-        return SlotRecord(version=SCHEMA_VERSION, chat_id=chat_id, profile=profile, created_at=now, last_activity_at=now)
 
     def read_active(self, chat_id: str) -> ActivePointer | None:
         data = self._docs.read(sandbox_active(chat_id, self._scope))
@@ -178,17 +96,15 @@ class SandboxStore:
         self,
         chat_id: str,
         *,
-        profile: str,
         manifest: SandboxManifest,
         runs: dict[str, RunRecord],
         latest_run_id: str | None,
     ) -> None:
-        """Write the slot, the newest run's manifest and active pointer, and every run record in one transaction."""
+        """Write the newest run's manifest and active pointer, and every run record in one transaction."""
         writes: list[tuple[str, dict[str, Any]]] = []
         records = [record for run_id, record in runs.items() if run_id != latest_run_id]
         latest = runs.get(latest_run_id or "")
         if latest is not None:
-            writes.append((sandbox_slot(chat_id, self._scope), asdict(self._touched_slot(chat_id, profile))))
             manifest_asset_shas(manifest)
             manifest_id = manifest.manifest_id
             manifest_key = sandbox_manifest(chat_id, manifest_id, self._scope)
@@ -203,38 +119,16 @@ class SandboxStore:
         writes.extend((sandbox_run(chat_id, record.tool_call_id, self._scope), asdict(record)) for record in records)
         self._docs.apply(writes)
 
-    # Heal a run record lost before checkpoints were atomic: the active pointer still names its result.
-    def recover_completed_run(self, chat_id: str, tool_call_id: str) -> RunRecord | None:
-        active = self.read_active(chat_id)
-        if active is None or active.last_completed_run_id != tool_call_id or active.result is None:
-            return None
-        status = active.result.get("status")
-        if status not in {"completed", "failed", "cancelled"}:
-            return None
-        recovered = RunRecord(
-            tool_call_id=tool_call_id,
-            status=status,
-            started_at=active.updated_at,
-            finished_at=active.updated_at,
-            manifest_id=active.manifest_id,
-            result=active.result,
-        )
-        self.write_run(chat_id, recovered)
-        return recovered
-
     def read_run(self, chat_id: str, tool_call_id: str) -> RunRecord | None:
         data = self._docs.read(sandbox_run(chat_id, tool_call_id, self._scope))
         return RunRecord(**data) if isinstance(data, dict) else None
-
-    def write_run(self, chat_id: str, record: RunRecord) -> None:
-        self._docs.write(sandbox_run(chat_id, record.tool_call_id, self._scope), asdict(record))
 
     def read_manifest(self, chat_id: str, manifest_id: str) -> SandboxManifest:
         data = self._docs.read(sandbox_manifest(chat_id, manifest_id, self._scope))
         if not isinstance(data, dict):
             raise StorageNotFoundError(sandbox_manifest(chat_id, manifest_id, self._scope))
-        manifest, legacy = _decode_manifest(data)
-        if not legacy and manifest.manifest_id != manifest_id:
+        manifest = _decode_manifest(data)
+        if manifest.manifest_id != manifest_id:
             raise ValueError("native sandbox manifest ID does not match its storage path")
         return manifest
 
@@ -247,7 +141,7 @@ class SandboxStore:
             outputs = (data.get("result") or {}).get("outputs", [])
             return {ref["sha256"] for output in outputs for ref in output.get("mime_bundle", {}).values()}
         try:
-            manifest, _ = _decode_manifest(data)
+            manifest = _decode_manifest(data)
         except ValueError:
             return set()
         return manifest_asset_shas(manifest)

@@ -20,8 +20,6 @@ const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** Live tool output resends the whole result on each update: remember which base64 strings were stored already. */
 const RECENT_MAX_CHARS = 16 * 1024 * 1024;
 
-export type MediaImage = { type: "image"; mimeType: string; hash: string };
-
 let dirOverride: string | undefined;
 let sweptAt = 0;
 const recent = new Map<string, string>();

@@ -2,7 +2,8 @@
 
 import { Check, ChevronDown } from "lucide-react"
 import { useRef, useState } from "react"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useEventListener } from "@/hooks/useEventListener"
+import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { cn } from "@/lib/utils"
 
 interface StyledSelectProps {
@@ -24,7 +25,9 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value)
-  useClickOutside(ref, () => setOpen(false))
+  const close = () => setOpen(false)
+  useOutsidePress(ref, close)
+  useEventListener("document", "keydown", (e) => { if (e.key === "Escape") close() })
 
   const select = (next: string) => { onChange(next); setOpen(false) }
   const move = (direction: 1 | -1) => {

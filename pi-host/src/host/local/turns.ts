@@ -24,8 +24,8 @@ export type RemoveThrough = "turn" | "end";
  */
 export type RemoveTurnRefusal = "unknown" | "not_prompt" | "off_branch" | "compacted";
 
-export type RemoveTurnResult<Header> =
-  | { ok: true; header: Header; entries: TurnEntry[]; removed: TurnEntry[]; leafId: string | null }
+export type RemoveTurnResult =
+  | { ok: true; entries: TurnEntry[]; removed: TurnEntry[]; leafId: string | null }
   | { ok: false; reason: RemoveTurnRefusal };
 
 /** Kept and re-linked when a `turn` range holds them: they set the session's state, not the turn's content. */
@@ -51,7 +51,7 @@ function pathTo(byId: Map<string, TurnEntry>, leafId: string | null): TurnEntry[
 
 /**
  * `entries` without the turn of `promptEntryId` (`through: "turn"`) or without it and everything after it
- * (`through: "end"`, the entry before the prompt becomes the leaf). The header is passed back as it is.
+ * (`through: "end"`, the entry before the prompt becomes the leaf).
  *
  * - Side branches rooted in the range go with it, the first surviving entry after it takes the range's parent
  * - `model_change`, `thinking_level_change` and `session_info` entries in a `turn` range stay, re-linked; so do
@@ -59,12 +59,7 @@ function pathTo(byId: Map<string, TurnEntry>, leafId: string | null): TurnEntry[
  * - `label` and `context_edit` entries whose target is gone go too
  * - A `compaction.firstKeptEntryId` in the range moves to the next surviving entry on the path
  */
-export function removeTurn<Header>(
-  header: Header,
-  entries: TurnEntry[],
-  promptEntryId: string,
-  through: RemoveThrough,
-): RemoveTurnResult<Header> {
+export function removeTurn(entries: TurnEntry[], promptEntryId: string, through: RemoveThrough): RemoveTurnResult {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const prompt = byId.get(promptEntryId);
   if (!prompt) return { ok: false, reason: "unknown" };
@@ -149,5 +144,5 @@ export function removeTurn<Header>(
   const leafId = survivor(through === "end" ? prompt.parentId : path.at(-1)!.id);
   const leafIndex = kept.findIndex((entry) => entry.id === leafId);
   if (leafIndex >= 0 && leafIndex !== kept.length - 1) kept.push(...kept.splice(leafIndex, 1));
-  return { ok: true, header, entries: kept, removed: entries.filter((entry) => removed.has(entry.id)), leafId };
+  return { ok: true, entries: kept, removed: entries.filter((entry) => removed.has(entry.id)), leafId };
 }

@@ -36,7 +36,6 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   rendersPlaceholder,
   pdf,
   onPlaceholderChange,
-  snap,
   registerSlot,
   renderPageOverlay,
   onRendered,
@@ -51,7 +50,6 @@ export const PdfPageSlot = memo(function PdfPageSlot({
   rendersPlaceholder: boolean
   pdf: PdfDocument
   onPlaceholderChange: (pageNumber: number, settled: boolean) => void
-  snap: boolean
   registerSlot: (pageNumber: number, slot: HTMLDivElement | null) => void
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
   /** Called with the page number each time this page's live canvas finished drawing, or failed to. */
@@ -162,7 +160,7 @@ export const PdfPageSlot = memo(function PdfPageSlot({
     <div
       ref={slotRef}
       className="pdf-page relative"
-      style={{ width, height, marginBottom: PAGE_GAP, scrollSnapAlign: snap ? "start" : undefined }}
+      style={{ width, height, marginBottom: PAGE_GAP }}
       data-page-number={pageNumber}
     >
       <div className="pdf-page-surface">

@@ -76,7 +76,7 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
   const { loading: historiesLoading } = useStartupRead("Chat histories", listChatHistories, (histData) => {
     setRootFiles(sortedHistoryFiles(histData))
   })
-  const loadBranchMeta = useCallback((signal: AbortSignal) => fetchBranchMeta(undefined, signal), [])
+  const loadBranchMeta = useCallback((signal: AbortSignal) => fetchBranchMeta(signal), [])
   useStartupRead("Branch metadata", loadBranchMeta, setBranchMeta)
 
   const chatIdMap = useMemo(() => buildChatIdMap(branchMeta), [branchMeta])

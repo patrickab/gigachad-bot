@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { SEPARATOR, ToolButton, toolButton } from "@/features/editor/canvas/CanvasToolbar"
 import { TopBarSlot, TopBarSlotProvider, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { ArchitectureSourceEditor } from "@/features/editor/TextDocumentEditor"
+import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { ArchitectureTree } from "./ArchitectureTree"
 import { ArchitectureViewPicker } from "./ArchitectureViewPicker"
@@ -64,7 +65,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   else if (mode === "text") body = (
     <div className="relative min-h-0 flex-1">
       {/* Saved text is this device's own write, which the change feed skips, so reread explicitly. */}
-      <ArchitectureSourceEditor key={file} path={`graph/${slug}/${file}`} slug={slug} overlay onClose={() => setMode("diagram")} onSaved={refresh} />
+      <ArchitectureSourceEditor key={file} path={`graph/${slug}/${file}`} slug={slug} onClose={() => setMode("diagram")} onSaved={refresh} />
     </div>
   )
   else if (!view || !graph) body = notice(`${file} declares no view yet.`, (
@@ -101,13 +102,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
     <ToolButton icon={ListTree} label={treeOpen ? "Hide files" : "Show files"} active={treeOpen} aria-expanded={treeOpen} onClick={() => setTreeOpen((current) => !current)} />
   )
   const modeToggle = entry && (
-    <div role="group" aria-label="Show as" className="flex gap-px rounded-md bg-surface p-0.5">
-      {(["diagram", "text"] as const).map((option) => (
-        <button key={option} type="button" aria-pressed={mode === option} onClick={() => setMode(option)} className={cn("rounded px-2 py-0.5 text-xs transition-colors", mode === option ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink")}>
-          {option === "diagram" ? "Diagram" : "Text"}
-        </button>
-      ))}
-    </div>
+    <ViewSwitch value={mode} onChange={setMode} options={[["diagram", "Diagram"], ["text", "Text"]]} className="flex gap-px rounded-md bg-surface p-0.5" buttonClass="rounded px-2 py-0.5 text-xs transition-colors" inactiveClass="text-ink-subtle hover:text-ink" />
   )
   return (
     // The surface's own slot scope: the window's mounting points inside the top-bar slots, so its controls keep a fixed order.

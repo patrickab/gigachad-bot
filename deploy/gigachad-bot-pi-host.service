@@ -9,7 +9,7 @@ WorkingDirectory=%h/git/gigachad-bot-prod
 Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
 # bun (linuxbrew) runs pi-host, pi comes from mise's shims. Pi sessions inherit this PATH
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
-# Development's pi-host (run.sh) holds 8300. The backend and LiteLLM proxy units name this port in GIGACHAD_PI_HOST_URL
+# Development's pi-host (run.sh) holds 8300. The backend unit names this port in GIGACHAD_PI_HOST_URL
 Environment=PI_HOST_PORT=8301
 ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-pi-host.sh
 Restart=on-failure

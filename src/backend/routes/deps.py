@@ -8,7 +8,6 @@ from uuid import UUID
 from fastapi import Depends
 
 from backend.identity import RequestIdentity, get_request_identity
-from config import env_flag
 from lib import document_service, pi_models
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, SandboxRunner
 from lib.architecture_workspace import ArchitectureStore
@@ -20,7 +19,6 @@ from lib.chat_store import ChatStore
 from lib.data_store import DataStore
 from lib.disk_files import DiskFiles
 from lib.document_service import Relocate
-from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.file_roots import FileRoots
 from lib.file_roots_repository import PostgresFileRootRepository
 from lib.memory_context import memory_root
@@ -74,9 +72,7 @@ _sandbox_runtime = SandboxRuntimeState()
 def get_sandbox_runner() -> SandboxRunner:
     global _sandbox_runner
     if _sandbox_runner is None:
-        # Fake runner when execution is disabled (EXECUTION=0) or explicitly requested (FAKE=1).
-        use_fake = not env_flag("GIGACHAD_SANDBOX_EXECUTION", True) or env_flag("GIGACHAD_SANDBOX_FAKE", False)
-        _sandbox_runner = FakeSandboxRunner() if use_fake else AgentSandboxRunnerAdapter()
+        _sandbox_runner = AgentSandboxRunnerAdapter()
     return _sandbox_runner
 
 

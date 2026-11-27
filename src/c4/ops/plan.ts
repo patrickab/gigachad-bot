@@ -5,7 +5,7 @@ import { patchPins } from './pins.ts'
 import { deleteElements, pruneDangling } from './plan-delete.ts'
 import { addElement, addRelation, setDescription, setKind, setLabel, setTitle } from './plan-elements.ts'
 import { addFileView, createModule, createSystem, createView } from './plan-files.ts'
-import { rename, reparent } from './plan-move.ts'
+import { reparent } from './plan-move.ts'
 import { includeInView, removeFromView } from './plan-views.ts'
 
 type Planner<K extends OperationName> = (c: PlanContext, op: Op<K>) => Plan | Promise<Plan>
@@ -23,7 +23,6 @@ const planners: { [K in OperationName]: Planner<K> } = {
   setDescription,
   setKind,
   setLabel,
-  rename,
   reparent,
   includeInView,
   removeFromView,

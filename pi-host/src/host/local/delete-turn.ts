@@ -29,9 +29,9 @@ const PASTE_MENTION = /\.pi\/pastes\/([\w.-]+)/g;
  * The file's lines (without the final newline) and where its entries sit: `slots[i]` is the line of `entries[i]`.
  * Lines that do not parse, entries without an id and blank lines are no entries: a rewrite keeps them byte for byte.
  */
-type Parsed = { headerLine: string; cwd: string; lines: string[]; entries: TurnEntry[]; slots: number[]; raw: Map<TurnEntry, string> };
+type Parsed = { cwd: string; lines: string[]; entries: TurnEntry[]; slots: number[]; raw: Map<TurnEntry, string> };
 
-/** Header line, cwd, lines and entries of a session file's text; undefined without a session header. */
+/** Cwd, lines and entries of a session file's text; undefined without a session header. */
 function parseSession(text: string): Parsed | undefined {
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -61,7 +61,7 @@ function parseSession(text: string): Parsed | undefined {
     slots.push(index);
     raw.set(entry, line);
   }
-  return { headerLine, cwd: typeof cwd === "string" ? cwd : "", lines, entries, slots, raw };
+  return { cwd: typeof cwd === "string" ? cwd : "", lines, entries, slots, raw };
 }
 
 /**
@@ -179,7 +179,7 @@ export async function deleteTurn(
     const before = await stat(filePath);
     const parsed = parseSession(await readFile(filePath, "utf8"));
     if (!parsed) return { ok: false, error: "not_found" };
-    const result = removeTurn(parsed.headerLine, parsed.entries, entryId, through);
+    const result = removeTurn(parsed.entries, entryId, through);
     if (!result.ok) return { ok: false, error: result.reason };
     if (dryRun) return { ok: true, removedEntries: result.removed.length, removedMedia: [] };
 

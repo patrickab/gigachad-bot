@@ -715,7 +715,7 @@ describe("private state", () => {
     expect(JSON.parse(await readFile(`${newPath}.gigachad.json`, "utf8"))).toEqual({ revision: 0, pinned: false, data: {}, profile: "document" });
   });
 
-  test("the profile marker shows in SessionInfo, filters the listing and survives state and pin writes", async () => {
+  test("the profile marker shows in SessionInfo and survives state and pin writes", async () => {
     const { oldPath } = await writeFixtures();
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
     await call("PUT", `/sessions/${OLD_ID}/state`, { revision: 0, data: { draft: "a" } });
@@ -728,12 +728,6 @@ describe("private state", () => {
       [NEW_ID, "coding"],
       [OLD_ID, "document"],
     ]);
-    expect((await listed("&profile=document")).map((session) => session.sessionId)).toEqual([OLD_ID]);
-    expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID]);
-    expect((await call("GET", `/sessions?cwd=${cwd}&profile=remote`)).json.error).toBe("invalid_profile");
-
-    await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "other" }));
-    expect((await listed("&profile=coding")).map((session) => session.sessionId)).toEqual([NEW_ID, OLD_ID]);
   });
 });
 

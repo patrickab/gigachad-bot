@@ -102,7 +102,6 @@ export type ArchitectureOperation =
   | { op: "setDescription", element: string, description: string }
   | { op: "setKind", element: string, kind: string }
   | { op: "setLabel", relation: string, label: string }
-  | { op: "rename", element: string, id: string }
   | { op: "reparent", element: string, parent: string | null }
   /** With `descendants`, writes `include x, x.**`: the element framing everything inside it. */
   | { op: "includeInView", view: string, elements: string[], descendants?: boolean }

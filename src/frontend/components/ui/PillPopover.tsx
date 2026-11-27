@@ -63,15 +63,13 @@ export function usePillPopover(onClose: () => void = closeNothing): PillPopoverS
  *     Extra panel classes, e.g. a width.
  * onKeyDown : ((event: KeyboardEvent<HTMLDivElement>) => void) | undefined
  *     Keys pressed on the trigger or inside the panel.
- * onAnimationComplete : (() => void) | undefined
- *     Runs whenever the panel finishes animating in or out.
  * portal : "trigger" | "docked" | undefined
  *     Set -> the panel renders in `document.body` (`fixed`, z-60), above layers the top bar sits under, e.g. a picker's dimmed page.
  *     "trigger" -> placed at the trigger.
  *     "docked" -> placed by `panelClassName` alone.
  */
 export function PillPopover({
-  popover, triggerLabel, triggerContent, triggerClassName, label, placement = "above", panelClassName, onKeyDown, onAnimationComplete, portal, children,
+  popover, triggerLabel, triggerContent, triggerClassName, label, placement = "above", panelClassName, onKeyDown, portal, children,
 }: {
   popover: PillPopoverState
   triggerLabel: string
@@ -81,7 +79,6 @@ export function PillPopover({
   placement?: "above" | "below"
   panelClassName?: string
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void
-  onAnimationComplete?: () => void
   portal?: "trigger" | "docked"
   children: ReactNode
 }) {
@@ -108,7 +105,6 @@ export function PillPopover({
     animate={{ opacity: 1, y: 0, scale: 1 }}
     exit={{ ...hidden, transition: reduceMotion ? INSTANT : POPOVER_EXIT }}
     transition={reduceMotion ? INSTANT : POPOVER_ENTER}
-    onAnimationComplete={onAnimationComplete}
     style={atTrigger ? anchor ?? undefined : undefined}
     className={cn(
       "flex w-64 flex-col",

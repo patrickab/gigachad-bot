@@ -202,8 +202,9 @@ test("deleting through the end keeps what came before and the child continues fr
   await start(cwd, sessionPath);
   const response = await deleteRequest(sessionId, "u2", { through: "end" });
   expect(await response.json()).toEqual({ ok: true, removedEntries: 4, removedMedia: [] });
-  const prompted = await api(`/sessions/${sessionId}/prompt`, { method: "POST", body: JSON.stringify({ message: "edited" }) });
-  expect(await prompted.json()).toEqual({ disposition: "started" });
+  const driver = await client();
+  driver.send({ type: "attach", sessionId });
+  driver.send({ type: "command", sessionId, command: { type: "prompt", message: "edited" } });
   await until(() => (readFileSync(sessionPath, "utf8").includes("echo: edited") ? true : undefined));
   const entries = readFileSync(sessionPath, "utf8").trim().split("\n").slice(1).map((line) => JSON.parse(line));
   expect(entries.map((entry) => entry.message.content[0]?.text ?? entry.message.content)).toEqual(["first", "one", "edited", "echo: edited"]);
