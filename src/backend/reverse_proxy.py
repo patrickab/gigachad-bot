@@ -24,6 +24,12 @@ from lib.upstream import forwardable_headers
 
 LOGIN_HEADER = "tailscale-user-login"
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+PROXIED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
+
+
+def has_body(request: Request) -> bool:
+    """Whether the browser sent a request body, an empty one is not forwarded as a chunked stream."""
+    return "transfer-encoding" in request.headers or request.headers.get("content-length", "0") != "0"
 
 
 def is_tailnet_host(request: Request) -> bool:

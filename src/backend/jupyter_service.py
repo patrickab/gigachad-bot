@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel
+from starlette import status
 
-from backend.reverse_proxy import relay_websocket, streaming_response
+from backend.reverse_proxy import PROXIED_METHODS, has_body, relay_websocket, streaming_response
 from backend.routes.upstream import call_upstream
 from lib import jupyter
 from lib.jupyter import KernelRef, KernelSpecList
@@ -31,10 +32,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 log = logging.getLogger(__name__)
-
-_TRY_AGAIN_LATER = 1013
-_PROXIED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
-
 
 class StartKernel(BaseModel):
     path: str
@@ -101,15 +98,11 @@ async def check_session(request: Request, method: str = Query(...)) -> Response:
     return Response(status_code=204)
 
 
-def _has_body(request: Request) -> bool:
-    return "transfer-encoding" in request.headers or request.headers.get("content-length", "0") != "0"
-
-
-@app.api_route("/server/{path:path}", methods=_PROXIED_METHODS)
+@app.api_route("/server/{path:path}", methods=PROXIED_METHODS)
 async def proxy_http(path: str, request: Request) -> Response:
     if not (jupyter.is_proxied_path(path) and jupyter.allows_method(request.method, path)):
         raise HTTPException(status_code=404, detail="Not found")
-    body = request.stream() if _has_body(request) else None
+    body = request.stream() if has_body(request) else None
     upstream = await call_upstream(
         jupyter.host().open_http(request.method, path, request.query_params.multi_items(), request.headers.items(), body)
     )
@@ -127,6 +120,6 @@ async def proxy_websocket(websocket: WebSocket, path: str) -> None:
         )
     except UpstreamUnavailable as exc:
         log.warning("%s", exc)
-        await websocket.close(code=_TRY_AGAIN_LATER)
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
     await relay_websocket(websocket, upstream)

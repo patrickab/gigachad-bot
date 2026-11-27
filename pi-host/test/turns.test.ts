@@ -1,5 +1,6 @@
 /** `removeTurn` on small literal entry lists: one test per rule of the tree. */
 import { describe, expect, test } from "bun:test";
+import { pathToRoot } from "../src/host/entries.ts";
 import { removeTurn, type TurnEntry } from "../src/host/local/turns.ts";
 
 const user = (id: string, parentId: string | null): TurnEntry => ({ type: "message", id, parentId, message: { role: "user", content: `ask ${id}` } });
@@ -216,4 +217,10 @@ describe("removeTurn", () => {
       expect(ids(result.entries)).toEqual(["m", "u1", "a1", "u2", "t2", "a2"]);
     });
   });
+});
+
+test("pathToRoot ends at a repeated id on a cyclic parent chain", () => {
+  const entries = [user("u1", "a1"), answer("a1", "u1")];
+  const path = pathToRoot(new Map(entries.map((e) => [e.id, e])), "a1");
+  expect(ids(path)).toEqual(["u1", "a1"]);
 });

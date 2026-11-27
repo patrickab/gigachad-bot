@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, assignLearnSession, deleteLearnSession, fetchLearnSessions, renameLearnSession, type LearnDeleteMode } from "@/lib/backend/api"
 import type { LearnSession } from "@/lib/domain/types"
+import { errorMessage } from "@/lib/utils"
 
 const SESSIONS_POLL_MS = 15_000
 
@@ -24,10 +25,6 @@ export interface LearnSessions {
   retitle: (sessionId: string, title: string) => void
 }
 
-function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
-}
-
 /**
  * The learn sessions, read while `enabled` (host logins with a LearnHarness): on start and on focus, and every 15 s
  * while it is useful: the page is visible, LearnHarness answered the last read, and the user is `watching` the learn
@@ -49,7 +46,7 @@ export function useLearnSessions(enabled: boolean, watching: boolean): LearnSess
       setReachable(true)
       return next
     } catch (cause) {
-      setError(cause instanceof ApiError && cause.status === 503 ? null : messageOf(cause))
+      setError(cause instanceof ApiError && cause.status === 503 ? null : errorMessage(cause, String(cause)))
       setReachable(false)
       return null
     }
@@ -85,7 +82,7 @@ export function useLearnSessions(enabled: boolean, watching: boolean): LearnSess
     try {
       await assignLearnSession(sessionId, projectSlug)
     } catch (cause) {
-      setError(messageOf(cause))
+      setError(errorMessage(cause, String(cause)))
       return
     }
     await read()

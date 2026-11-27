@@ -1,6 +1,8 @@
 // The text of a memory tool call's row (`list_memories`, `read_memories`, `apply_memory_ops`), shared by the chat's
 // tool element and the Pi tab's row: one summary line and one line per op.
 
+import { isRecord } from "@/lib/utils"
+
 /** The memory tools' names; the backend expands the chat's `memory` toggle into these. */
 export const MEMORY_TOOL_NAMES = ["list_memories", "read_memories", "apply_memory_ops"] as const
 
@@ -30,7 +32,6 @@ export function memoryToolKind(name: string): MemoryToolKind | null {
   return KINDS[bare] ?? null
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 const optionalString = (value: unknown): value is string | undefined => value === undefined || typeof value === "string"
 const str = (value: unknown): string => (typeof value === "string" ? value : "")
 

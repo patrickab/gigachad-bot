@@ -6,7 +6,7 @@ import { TabManager, type TabManagerHandle } from "@/features/navigation/TabMana
 import { TabPicker } from "@/features/navigation/TabPicker"
 import { nextTab } from "@/features/navigation/tabs"
 import { TabContext, useTab } from "@/contexts/TabContext"
-import { onFileChange } from "@/lib/backend/fileEvents"
+import { onFileChange, onFileMove, type FileMove } from "@/lib/backend/fileEvents"
 import { removeDocument } from "@/lib/backend/api"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import type { BranchMeta } from "@/lib/domain/histories"
@@ -263,12 +263,13 @@ describe("Project navigation", () => {
 
   it("opens a file on click and renames it on double-click, then follows it in tabs and lists", async () => {
     fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: [] })
-    const onDocumentSelect = vi.fn()
-    const onDocumentRenamed = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} onDocumentRenamed={onDocumentRenamed} />)
+    const onItemOpen = vi.fn()
+    const moves: FileMove[] = []
+    const stop = onFileMove((move) => moves.push(move))
+    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
     const file = await openedProject(view).findByRole("button", { name: "notes.md" })
     fireEvent.click(file)
-    expect(onDocumentSelect).toHaveBeenCalledWith("project/proj/document/notes.md", "proj")
+    expect(onItemOpen).toHaveBeenCalledWith({ kind: "document", path: "project/proj/document/notes.md", projectSlug: "proj" })
     expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
     expect(view.getByRole("button", { name: "Delete notes.md" })).toBeInTheDocument()
 
@@ -282,7 +283,8 @@ describe("Project navigation", () => {
       : [])
     fireEvent.keyDown(input, { key: "Enter" })
 
-    await waitFor(() => expect(onDocumentRenamed).toHaveBeenCalledWith("project/proj/document/notes.md", "project/proj/document/ideas.md"))
+    await waitFor(() => expect(moves).toEqual([{ from: "project/proj/document/notes.md", to: "project/proj/document/ideas.md" }]))
+    stop()
     expect(fixtures.renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/notes.md", "ideas")
     await waitFor(() => expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument())
     const project = within(view.getByLabelText("Proj contents"))
@@ -295,7 +297,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: ["/work/paper.tex", "/work/intro.tex"] })
     const changed: string[] = []
     const stop = onFileChange(() => true, (path) => changed.push(path))
-    const view = render(<Sidebar appMode="chat" onDocumentRenamed={vi.fn()} />)
+    const view = render(<Sidebar appMode="chat" />)
     fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
     fireEvent.change(view.getByRole("textbox", { name: "Rename notes.md" }), { target: { value: "ideas" } })
     fireEvent.keyDown(view.getByRole("textbox", { name: "Rename notes.md" }), { key: "Enter" })
@@ -306,8 +308,9 @@ describe("Project navigation", () => {
 
   it("keeps the input open with the reason when the name is taken, and leaving or Escape keeps the old name", async () => {
     fixtures.renameDocument.mockRejectedValueOnce(new Error("A document with that name already exists there"))
-    const onDocumentRenamed = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
+    const moves: FileMove[] = []
+    const stop = onFileMove((move) => moves.push(move))
+    const view = render(<Sidebar appMode="chat" />)
     fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
     const input = view.getByRole("textbox", { name: "Rename notes.md" })
     fireEvent.change(input, { target: { value: "board.md" } })
@@ -325,13 +328,15 @@ describe("Project navigation", () => {
     fireEvent.keyDown(document, { key: "Escape" })
     expect(view.queryByRole("textbox", { name: "Rename notes.md" })).not.toBeInTheDocument()
     expect(fixtures.renameDocument).toHaveBeenCalledTimes(1)
-    expect(onDocumentRenamed).not.toHaveBeenCalled()
+    expect(moves).toEqual([])
+    stop()
   })
 
   it("renames a mounted file of the Code section outside any project when leaving the input", async () => {
     fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown", changed: [] })
-    const onDocumentRenamed = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentRenamed={onDocumentRenamed} />)
+    const moves: FileMove[] = []
+    const stop = onFileMove((move) => moves.push(move))
+    const view = render(<Sidebar appMode="chat" />)
     const code = within(view.getByLabelText("Projects"))
     fireEvent.click(await code.findByRole("button", { name: "source" }))
     fireEvent.doubleClick(code.getByRole("button", { name: "first.md" }))
@@ -339,7 +344,8 @@ describe("Project navigation", () => {
     fireEvent.change(input, { target: { value: "renamed.md" } })
     fireEvent.blur(input)
 
-    await waitFor(() => expect(onDocumentRenamed).toHaveBeenCalledWith("/source/first.md", "/source/renamed.md"))
+    await waitFor(() => expect(moves).toEqual([{ from: "/source/first.md", to: "/source/renamed.md" }]))
+    stop()
     expect(fixtures.renameDocument).toHaveBeenCalledWith("", "/source/first.md", "renamed.md")
   })
 
@@ -422,8 +428,8 @@ describe("Project navigation", () => {
       { path: "/source", name: "source", type: "root", children: [] },
     ] })
     api.createTexProjectFile.mockResolvedValue(`${folder}/chapters/two.tex`)
-    const onFileSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onFileSelect={onFileSelect} />)
+    const onItemOpen = vi.fn()
+    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
     const code = within(view.getByLabelText("Projects"))
     expect(await code.findByRole("button", { name: "Open diff for paper" })).toBeInTheDocument()
     expect(code.queryByRole("button", { name: /New file in (paper|source)/ })).not.toBeInTheDocument()
@@ -436,7 +442,7 @@ describe("Project navigation", () => {
     fireEvent.click(project.getByRole("button", { name: "New file in chapters" }))
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "two" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onFileSelect).toHaveBeenLastCalledWith(`${folder}/chapters/two.tex`, "proj"))
+    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "document", path: `${folder}/chapters/two.tex`, projectSlug: "proj", rootFile: true }))
     expect(api.createTexProjectFile).toHaveBeenCalledWith(`${folder}/chapters`, "two.tex")
   })
 
@@ -506,14 +512,14 @@ describe("Project navigation", () => {
     api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
       ? [{ path: "project/proj/document/plan.md", name: "Roadmap.md", mime: "text/markdown" }]
       : [])
-    const onDocumentSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} />)
+    const onItemOpen = vi.fn()
+    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Files")
     fireEvent.click(await project.findByText("Roadmap.md"))
-    expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/plan.md", "proj")
+    expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "document", path: "project/proj/document/plan.md", projectSlug: "proj" })
     expect(project.queryByText("plan.md")).not.toBeInTheDocument()
   })
 
@@ -541,8 +547,8 @@ describe("Project navigation", () => {
   })
 
   it("creates a blank LaTeX file and a LaTeX file from a template on disk and a Markdown file in the project, all opening in the workbench", async () => {
-    const onWorkbenchSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onWorkbenchSelect={onWorkbenchSelect} />)
+    const onItemOpen = vi.fn()
+    const view = render(<Sidebar appMode="chat" workbench onItemOpen={onItemOpen} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Files")
@@ -560,7 +566,7 @@ describe("Project navigation", () => {
     fireEvent.keyDown(view.getByRole("listbox", { name: "Template" }), { key: "Enter" })
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "paper" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/paper/paper.tex", "proj"))
+    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "workbench", path: "/data/workbench/latex/proj/paper/paper.tex", projectSlug: "proj" }))
     expect(api.createWorkbenchDocument).toHaveBeenCalledWith("proj", "paper.tex", undefined)
 
     fireEvent.click(project.getByRole("button", { name: "New file in Proj" }))
@@ -568,7 +574,7 @@ describe("Project navigation", () => {
     fireEvent.click(within(await view.findByRole("listbox", { name: "Template" })).getByRole("option", { name: "Deck" }))
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "deck" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("/data/workbench/latex/proj/deck/main.tex", "proj"))
+    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "workbench", path: "/data/workbench/latex/proj/deck/main.tex", projectSlug: "proj" }))
     expect(api.createWorkbenchDocument).toHaveBeenLastCalledWith("proj", "deck.tex", "deck-set")
 
     fireEvent.click(project.getByRole("button", { name: "New file in Proj" }))
@@ -576,7 +582,7 @@ describe("Project navigation", () => {
     expect(view.queryByRole("listbox", { name: "Template" })).not.toBeInTheDocument()
     fireEvent.change(project.getByLabelText("File name"), { target: { value: "draft" } })
     fireEvent.keyDown(project.getByLabelText("File name"), { key: "Enter" })
-    await waitFor(() => expect(onWorkbenchSelect).toHaveBeenLastCalledWith("project/proj/document/draft.md", "proj"))
+    await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "workbench", path: "project/proj/document/draft.md", projectSlug: "proj" }))
     expect(api.writeDocument).toHaveBeenCalledWith("proj", "draft.md")
   })
 
@@ -953,8 +959,8 @@ describe("Project navigation", () => {
 
   it("keeps a failed creation editable and navigates only after a successful retry", async () => {
     api.writeDocument.mockRejectedValueOnce(new Error("Storage unavailable"))
-    const onCanvasSelect = vi.fn()
-    const view = render(<Sidebar appMode="chat" onCanvasSelect={onCanvasSelect} />)
+    const onItemOpen = vi.fn()
+    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Canvases")
@@ -964,11 +970,11 @@ describe("Project navigation", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(await project.findByRole("alert")).toHaveTextContent("Storage unavailable")
     expect(input).toHaveValue("draft")
-    expect(onCanvasSelect).not.toHaveBeenCalled()
+    expect(onItemOpen).not.toHaveBeenCalled()
     fireEvent.keyDown(input, { key: "Enter" })
     await waitFor(() => expect(project.queryByRole("textbox", { name: "Canvas name" })).not.toBeInTheDocument())
-    expect(onCanvasSelect).toHaveBeenCalledTimes(1)
-    expect(onCanvasSelect).toHaveBeenCalledWith("project/proj/document/draft.canvas", "proj")
+    expect(onItemOpen).toHaveBeenCalledTimes(1)
+    expect(onItemOpen).toHaveBeenCalledWith({ kind: "canvas", path: "project/proj/document/draft.canvas", projectSlug: "proj" })
   })
 
   it("imports a multi-file selection into the targeted project's files category", async () => {

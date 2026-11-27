@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { FileText, FileType, Image as ImageIcon, Folder, ChevronRight } from "lucide-react"
 import { loadFileViewerText } from "@/lib/backend/api"
 import { RawFileView } from "./RawFileView"
@@ -10,6 +10,7 @@ import { fuzzyPathScore, rankByScore } from "@/lib/fuzzy"
 import { baseName, dirName, extOf, kindOf, type FileKind } from "@/lib/paths"
 import { buildPathTree, relativeName, type PathTreeNode } from "@/lib/pathTree"
 import { cn } from "@/lib/utils"
+import { useLoaded } from "@/hooks/useLoaded"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 
 // Max rows rendered for a search.
@@ -45,18 +46,12 @@ function FilePreview({ path, cache }: { path: string; cache: Map<string, string>
   }, [path])
   const kind = shownPath ? kindOf(shownPath) : null
   const textPath = shownPath && (kind === "markdown" || kind === "text") ? shownPath : null
-  const [loaded, setLoaded] = useState<{ path: string; content: string } | null>(null)
-  useEffect(() => {
-    if (textPath === null) return
-    let cancelled = false
-    const cached = cache.get(textPath)
-    const request = cached !== undefined ? Promise.resolve(cached) : loadFileViewerText(textPath)
-    request
-      .then((content) => { if (!cancelled) { cache.set(textPath, content); setLoaded({ path: textPath, content }) } })
-      .catch(() => { if (!cancelled) setLoaded({ path: textPath, content: "" }) })
-    return () => { cancelled = true }
-  }, [textPath, cache])
-  const text = loaded?.path === textPath ? loaded.content : null
+  const loadCached = useCallback((textFile: string) => {
+    const cached = cache.get(textFile)
+    if (cached !== undefined) return Promise.resolve(cached)
+    return loadFileViewerText(textFile).then((content) => { cache.set(textFile, content); return content }, () => "")
+  }, [cache])
+  const text = useLoaded(textPath, loadCached).value ?? null
 
   return <div className="flex h-full min-h-0 flex-col">
     <div className="truncate border-b border-divider/30 px-4 py-2 text-[11px] text-ink-subtle">{path}</div>

@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import sys
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
@@ -8,11 +7,10 @@ REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).exp
 DOCUMENTS = REMOTE_ROOT / "Documents"
 # File-first workbench documents (Markdown, LaTeX) and the Pi session directory of each kind, `lib.workbench`.
 WORKBENCH = REMOTE_ROOT / "workbench"
-# Shipped prompt and template sources (`templates/`), bundled beside the code in a frozen build.
-TEMPLATES = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])) / "templates"
+# Shipped prompt and template sources (`templates/`).
+TEMPLATES = Path(__file__).resolve().parents[1] / "templates"
 
-# Browser origins allowed to call the API. Defaults to the pre-desktop wildcard; the Tauri
-# shell narrows it to its own webview origins, and server deployments can do the same.
+# Browser origins allowed to call the API. Defaults to the wildcard; server deployments narrow it.
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 
 
@@ -42,6 +40,5 @@ TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # External MinerU OCR server (mineru.cli.fast_api). When unset, the backend
-# spawns one per parse from its own environment. The frozen desktop sidecar
-# excludes the ML stack, so there it must be set.
+# spawns one per parse from its own environment.
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")

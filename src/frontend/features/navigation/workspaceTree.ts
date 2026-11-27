@@ -2,7 +2,7 @@ import { Archive, FileText, FolderPlus, GitCompare, MessageSquare, Shapes, Uploa
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { DEFAULT_DRAG_KIND, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
-import type { AppSurface } from "@/contexts/TabContext"
+import type { AppSurface, WorkspaceItem } from "@/contexts/TabContext"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { mountOf, type FileTreeNode } from "@/lib/domain/files"
 import type { BranchMeta } from "@/lib/domain/histories"
@@ -45,8 +45,7 @@ type ProjectTreeContext =
     activeProjectSlug: string | null
     onNewChat?: (slug: string | null) => void
     deleteChat: (path: string) => void
-    onCanvasSelect?: (path: string, scope: string) => void
-    onDocumentSelect?: (path: string, scope: string) => void
+    onItemOpen?: (item: WorkspaceItem) => void
     onProjectSelect?: (slug: string) => void
   }
 
@@ -58,7 +57,7 @@ type CodeTreeContext =
     sessions: Pick<CodeMounts["sessions"], "directoryCode" | "directoryActions">
     projects: ProjectListItem[]
     pending: (key: string) => boolean
-    onDiffSelect?: (path: string) => void
+    onItemOpen?: (item: WorkspaceItem) => void
   }
 
 /** Drag kind of a stored project file: it moves into another project's files or a Code folder, never among chats or canvases. */
@@ -78,12 +77,15 @@ function projectMount(slug: string, mounts: readonly string[]): string | null {
   return mounts.find((mount) => baseName(trimSlash(mount)) === slug) ?? null
 }
 
+/** The folder on disk of `project`: its linked root, else its mount. */
+const projectFolder = (project: ProjectListItem, mounts: readonly string[]) => project.linked_root ?? projectMount(project.slug, mounts)
+
 /** Slug of the project the file `path` belongs to: the one listing it (as an entry or inside a folder entry), else the one whose linked folder holds it, null when none does. */
 export function owningProject(path: string, documents: Record<string, ProjectDocument[]>, projects: ProjectListItem[], mounts: readonly string[]): string | null {
   const lister = projects.find((project) => documents[project.slug]?.some((doc) => isInside(path, doc.path)))
   if (lister) return lister.slug
   return projects.find((project) => {
-    const folder = project.linked_root ?? projectMount(project.slug, mounts)
+    const folder = projectFolder(project, mounts)
     return folder !== null && isInside(path, folder)
   })?.slug ?? null
 }
@@ -120,8 +122,9 @@ export function projectItems(context: ProjectTreeContext): FileTreeItem<string>[
 
 /** The chats, canvases and (for a project) files folders of `project`, or of the general scope when null. */
 function categoryItems(context: ProjectTreeContext, project: ProjectListItem | null): FileTreeItem<string>[] {
-  const { branchMeta, pending, appMode, move, createAndOpen, remove, onCanvasSelect } = context
+  const { branchMeta, pending, appMode, move, createAndOpen, remove } = context
   const scope = project?.slug ?? ""
+  const openCanvas = (path: string) => context.onItemOpen?.({ kind: "canvas", path, projectSlug: scope || null })
   const owner = project?.name ?? "general"
   const prefix = project ? `project:${scope}` : "shared"
   const docs = (project ? context.documents[scope] ?? [] : context.notes)
@@ -156,12 +159,12 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
       onMoveHere: (path) => move(path, scope),
       create: {
         label: `New canvas in ${owner}`, placeholder: "Canvas name",
-        onSubmit: (name) => createAndOpen(scope, name.endsWith(".canvas") ? name : `${name}.canvas`, (path) => onCanvasSelect?.(path, scope)),
+        onSubmit: (name) => createAndOpen(scope, name.endsWith(".canvas") ? name : `${name}.canvas`, openCanvas),
       },
       children: docs.filter((doc) => doc.path.endsWith(".canvas")).map((doc) => ({
         id: doc.path, label: doc.name.replace(/\.canvas$/, ""), type: "element", draggable: true,
         isActive: appMode === "canvas" && context.activeCanvasPath === doc.path,
-        onSelect: () => onCanvasSelect?.(doc.path, scope),
+        onSelect: () => openCanvas(doc.path),
         onDelete: () => remove(doc, scope),
       })),
     },
@@ -236,7 +239,7 @@ export function workspaceItems(projectRoots: FileTreeItem<string>[], context: Co
   const linked = new Set<string>()
   const roots = projectRoots.map((root) => {
     const project = context.projects.find((candidate) => candidate.slug === root.id)
-    const folder = project && (project.linked_root ?? projectMount(project.slug, context.mounts))
+    const folder = project && projectFolder(project, context.mounts)
     const mount = folder ? mountRoots.get(folder) : undefined
     if (!mount) return root
     linked.add(mount.id)
@@ -260,7 +263,7 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
     .filter((node) => !context.pending(`root:${mountOf(node)}`) && !archived.has(mountOf(node)))
     .map((node) => {
       const mount = mountOf(node)
-      const code = sessions.directoryCode(mount, node.name, projects.find((project) => (project.linked_root ?? projectMount(project.slug, mounts)) === mount)?.slug ?? null)
+      const code = sessions.directoryCode(mount, node.name, projects.find((project) => projectFolder(project, mounts) === mount)?.slug ?? null)
       return {
         id: mount,
         label: node.name,
@@ -268,7 +271,7 @@ function mountItems(context: CodeTreeContext): FileTreeItem<string>[] {
         // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
         multiSelect: node.path === mount,
         actions: [
-          { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, inline: true, onClick: () => context.onDiffSelect?.(node.path) },
+          { label: `Open diff for ${node.name}`, menuLabel: "Open diff", icon: GitCompare, inline: true, onClick: () => context.onItemOpen?.({ kind: "diff", path: node.path, projectSlug: null }) },
           { label: `Archive ${node.name}`, menuLabel: "Archive", icon: Archive, onClick: () => context.setArchived(mount, true) },
           ...sessions.directoryActions(mount, node.name),
         ],

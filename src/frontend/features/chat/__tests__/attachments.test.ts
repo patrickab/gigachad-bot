@@ -1,17 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-import { getApiBase, setApiBase } from "@/lib/backend/config"
 import { applyReferenceReads, liveReferencePaths, normalizeAttachment, readReferences, withAttachments, type AttachReference } from "@/features/chat/attachments"
 import { ApiError } from "@/lib/backend/api"
 import type { Attachment, Message } from "@/lib/domain/types"
 
-const originalApiBase = getApiBase()
-
-afterEach(() => setApiBase(originalApiBase))
+vi.mock("@/lib/backend/config", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getApiBase: () => "https://gigachad-backend.tail8cc40f.ts.net/api",
+}))
 
 describe("normalizeAttachment", () => {
   it("rebases a stale persisted upload URL onto the current API origin, keeping its path", () => {
-    setApiBase("https://gigachad-backend.tail8cc40f.ts.net/api")
     const stale: Attachment = {
       name: "image.png",
       mime: "image/png",
@@ -30,7 +29,6 @@ describe("normalizeAttachment", () => {
   })
 
   it("rebases a file root attachment's fileviewer URL, preserving its query", () => {
-    setApiBase("https://gigachad-backend.tail8cc40f.ts.net/api")
     const stale: Attachment = {
       name: "doc.pdf",
       mime: "application/pdf",
@@ -47,7 +45,6 @@ describe("normalizeAttachment", () => {
   })
 
   it("falls back to (chatId, slug) reconstruction only when there is no stored URL", () => {
-    setApiBase("https://gigachad-backend.tail8cc40f.ts.net/api")
     const bare: Attachment = { name: "image.png", mime: "image/png", url: "", active: true }
 
     const fresh = normalizeAttachment(bare, "chat-123", "my-project")

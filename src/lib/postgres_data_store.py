@@ -296,33 +296,6 @@ class PostgresDataStore:
         with self._scope.connection() as connection, connection.transaction():
             self._delete(connection, key, recursive)
 
-    def move(self, source: str, destination: str) -> None:
-        source, destination = validate_key(source), validate_key(destination)
-        with self._scope.connection() as connection, connection.transaction():
-            rows = connection.execute(
-                "SELECT key FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\') FOR UPDATE",
-                (self._scope.user_id, source, like_prefix(source)),
-            ).fetchall()
-            if not rows:
-                raise StorageNotFoundError(source)
-            collision = connection.execute(
-                "SELECT 1 FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\') LIMIT 1",
-                (self._scope.user_id, destination, like_prefix(destination)),
-            ).fetchone()
-            if collision is not None:
-                raise StorageConflictError(f"Destination already exists: {destination}")
-            # Rekey the source and every descendant under the destination.
-            for (key,) in rows:
-                suffix = key.removeprefix(source).lstrip("/")
-                replacement = f"{destination}/{suffix}" if suffix else destination
-                connection.execute(
-                    "UPDATE documents SET key = %s, updated_at = now() WHERE user_id = %s AND key = %s",
-                    (replacement, self._scope.user_id, key),
-                )
-            self._scope.record(connection, kind="document", key=source, operation="move")
-            self._scope.record(connection, kind="document", key=destination, operation="move")
-
-
 def _jsonb(meta: Meta | None) -> Jsonb | None:
     """*meta* as a jsonb parameter, None when absent or when jsonb would not hand its values back unchanged."""
     # Top-level key order is free (readers pick fields by name), nested values must survive exactly.

@@ -9,8 +9,7 @@ from pydantic import BaseModel, Field
 
 from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
-from backend.routes.deps import get_disk_files, get_file_roots
-from backend.routes.fileviewer import resolve_allowed
+from backend.routes.deps import get_disk_files, get_file_roots, resolve_allowed
 from lib import latex, latex_templates, naming, synctex
 from lib.disk_files import DiskFiles
 from lib.file_roots import FileRoots
@@ -64,7 +63,10 @@ class TemplateSetEntry(BaseModel):
 
 
 class SynctexPoint(BaseModel):
-    """A point of the PDF of the root document *path*: 1-based *page*, PDF points from its top-left corner, the clicked *word*, the clicked character's 0-based *offset* in it and the word's 0-based *occurrence* among equal words of its rendered line."""
+    """A point of the PDF of the root document *path*: 1-based *page*, PDF points from its top-left corner, the clicked *word*.
+
+    The clicked character's 0-based *offset* in it and the word's 0-based *occurrence* among equal words of its rendered line.
+    """
 
     path: str
     page: int = Field(ge=1)
@@ -83,7 +85,7 @@ class SynctexSource(BaseModel):
 
 
 class SynctexClickedSource(SynctexSource):
-    """The source spot of a double-clicked PDF point, with the 0-based UTF-8 byte *column* of the clicked character (0 when unknown)."""
+    """The source spot of a double-clicked PDF point, with the 0-based UTF-8 byte *column* of the clicked character (0 if unknown)."""
 
     column: int
 
@@ -218,7 +220,7 @@ class SynctexPage(BaseModel):
 
 @router.post("/synctex/slide")
 def post_synctex_slide(body: SynctexPage, roots: FileRoots = Depends(get_file_roots)) -> SynctexSource:
-    """The source line after the slide on a page of the last build of the root document *path*, where a new frame goes, 404 without one."""
+    """The source line after the slide on a page of the last build of the root document *path*: where a new frame goes, else 404."""
     root = _resolve_tex_file(body.path, roots)
     end = synctex.slide_end(root, body.page)
     if end is None:

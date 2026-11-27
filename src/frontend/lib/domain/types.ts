@@ -138,9 +138,6 @@ export interface Message {
   hiddenContent?: string
   tool_call_id?: string
   tool_calls?: ToolCallRecord[]
-  search_result?: WebSearchResult
-  research_steps?: ResearchTraceStep[]
-  research_progress?: ResearchTraceProgress
 }
 
 export interface ChatRequest {
@@ -252,46 +249,6 @@ export interface ProviderUsageReport {
 }
 
 export interface PromptMeta { slug: string; name: string; includes: string[] }
-
-export interface ResearchTraceStep {
-  step: string
-  event_type: string
-  details: Record<string, unknown>
-  timestamp: number
-}
-
-export interface ResearchTraceProgress {
-  current_depth: number
-  total_depth: number
-  current_breadth: number
-  total_breadth: number
-  current_query: string | null
-  completed_queries: number
-  total_queries: number
-}
-
-interface WebSearchResultItem {
-  label?: string
-  title: string
-  url: string
-  content: string
-}
-
-/** Retained to render media from existing saved chats. New Brave searches do not fetch media. */
-interface WebSearchVideo {
-  title: string
-  url: string
-  thumbnail: string
-  iframe?: string
-}
-
-export interface WebSearchResult {
-  query: string
-  sources: WebSearchResultItem[]
-  images: string[]
-  videos: WebSearchVideo[]
-  citationMap?: Record<string, WebSearchResultItem>
-}
 
 /** What a Pi tab shows: a session in `repo` (a checkout name under `~/git`, as `/api/pi/repos` lists it), `sessionId` null until its first message creates one. */
 export interface PiView {

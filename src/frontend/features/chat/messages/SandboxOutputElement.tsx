@@ -48,7 +48,7 @@ function SandboxOutputElementInner({ output }: SandboxOutputElementProps) {
   if (image) {
     const ref = output.mime_bundle[image]
     // Sandbox assets are served by the backend at runtime, so next/image optimization does not apply.
-    // eslint-disable-next-line @next/next/no-img-element -- dynamic backend asset URL under Tauri static export
+    // eslint-disable-next-line @next/next/no-img-element -- dynamic backend asset URL
     return <img src={sandboxAssetUrl(ref.asset_path)} alt={output.title ?? "Sandbox output"} className="max-w-full rounded-lg" />
   }
 

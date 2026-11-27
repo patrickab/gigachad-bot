@@ -7,6 +7,7 @@
  * - On demand: the `/subagents-inspect-rpc` reply (`PI_SUBAGENT_INSPECT_JSON:` on the transient `subagent-inspect` widget) for a background child's task, transcript and output
  * - Every field is optional and read leniently, unknown ones are ignored
  */
+import { isRecord } from "@/lib/utils"
 import type { ToolRun } from "./types"
 
 export const ASYNC_WIDGET_KEY = "subagent-async"
@@ -48,8 +49,7 @@ export interface InspectReply {
 
 type Json = Record<string, unknown>
 
-const isRecord = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value)
-const str = (value: unknown): string | undefined => typeof value === "string" && value ? value : undefined
+export const str = (value: unknown): string | undefined => typeof value === "string" && value ? value : undefined
 const num = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) ? value : undefined
 
 function parsePrefixed(lines: readonly string[] | undefined, prefix: string): Json | null {

@@ -1,17 +1,14 @@
 "use client"
 
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type ElementType, type ReactNode } from "react"
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType, type ReactNode } from "react"
 import { motion } from "framer-motion"
-import { Mic, Pencil } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { useSpeechInput } from "@/hooks/useSpeechInput"
+import { Pencil } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
-import { useElementSize } from "@/hooks/useElementSize"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, InactiveAttachments, type ContextAttachment } from "./AttachmentChip"
 import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
-import { COMPOSER_ICON_BUTTON } from "@/components/ui/Composer"
-import { AttachMenu, SendButton, ToolsMenu } from "./ComposerControls"
+import { COMPOSER_CARD_CLASS, ComposerMicButton, ComposerSendButton, ComposerTextarea } from "@/components/ui/Composer"
+import { AttachMenu, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
 import { useDraftAttachments } from "./useDraftAttachments"
 import { useComposerDraft } from "./useComposerDraft"
@@ -105,20 +102,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [drawing, setDrawing] = useState<DrawingMode | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Fit every text and width change: a restored draft, a panel springing open from zero width. Reset first so scrollHeight can shrink
-  const { width: textareaWidth } = useElementSize(textareaRef)
-  useLayoutEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = "0"
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [text, textareaWidth])
-
   const completions = useCompletions(complete, textareaRef, setText)
   const focusDraft = useCallback(() => textareaRef.current?.focus(), [])
   const clearDraft = useCallback(() => setText(""), [setText])
   const draftPicker = useDraftPicker(picker, text, focusDraft, clearDraft)
-  const { isListening, toggleListening } = useSpeechInput(text, setText)
 
   /** Videos go to `onVideo` when given, other files upload as attachments. */
   const takeFiles = useCallback((files: File[]) => {
@@ -253,7 +240,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>
       )}
 
-      <div onDragOver={handleDragOver} onDrop={handleDrop} className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
+      <div onDragOver={handleDragOver} onDrop={handleDrop} className={COMPOSER_CARD_CLASS}>
           {picker ? (
             <CompletionMenu
               label={picker.label}
@@ -271,9 +258,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onApply={(item) => completions.apply(text, item)}
             />
           )}
-          <textarea
+          <ComposerTextarea
             ref={textareaRef}
-            rows={1}
             value={text}
             onChange={(e) => { setText(e.target.value); if (!picker) completions.request(e.target.value, e.target.selectionStart) }}
             onKeyDown={handleKeyDown}
@@ -281,13 +267,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
             placeholder={placeholder}
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-            data-gramm="false"
-            data-gramm_editor="false"
-            data-enable-grammarly="false"
-            className="w-full resize-none bg-transparent text-sm leading-6 text-ink placeholder:text-ink-faint outline-none"
           />
           {hintText && <p className="mt-1 text-xs text-ink-muted">{hintText}</p>}
           <div className="mt-2 flex items-center justify-between">
@@ -297,14 +276,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </div>
             <div className="flex items-center gap-0.5">
               {toolsMenu && <ToolsMenu disabled={disabled} />}
-              <button aria-label={isListening ? "Stop listening" : "Start listening"}
-                onClick={toggleListening}
-                disabled={disabled}
-                className={cn(COMPOSER_ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
-              >
-                <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
-              </button>
-              <SendButton isStreaming={showStop} extracting={extracting} ready={canSend} disabled={disabled} onCancel={onCancel} onSend={handleSubmit} />
+              <ComposerMicButton value={text} onValueChange={setText} disabled={disabled} />
+              <ComposerSendButton isStreaming={showStop} busy={extracting} ready={canSend && !disabled} onStop={onCancel} onSend={handleSubmit} />
             </div>
           </div>
         </div>

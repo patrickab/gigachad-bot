@@ -1,6 +1,6 @@
 "use client"
 
-import { useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react"
+import { useLayoutEffect, useRef, type ClipboardEvent, type ComponentProps, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { ArrowUp, Loader2, Mic, Square } from "lucide-react"
 import { useSpeechInput } from "@/hooks/useSpeechInput"
 import { cn } from "@/lib/utils"
@@ -12,8 +12,11 @@ const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-ful
 const SEND_READY = "border-divider bg-surface-elevated text-ink hover:border-divider-strong active:scale-[0.96]"
 const SEND_IDLE = "border-divider/50 text-ink-faint"
 
+/** The composer's card around its textarea and action row. */
+export const COMPOSER_CARD_CLASS = "relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]"
+
 /** Class of the composer's send/stop circle, raised when `ready`. */
-export function composerSendButton(ready: boolean): string {
+function composerSendButton(ready: boolean): string {
   return cn(SEND_BUTTON, ready ? SEND_READY : SEND_IDLE)
 }
 const MAX_TEXTAREA_HEIGHT_PX = 200
@@ -46,25 +49,7 @@ export function Composer({
   children?: ReactNode
 }) {
   const textarea = useRef<HTMLTextAreaElement>(null)
-  const { isListening, toggleListening } = useSpeechInput(value, onValueChange)
   const sendable = canSend && !disabled
-
-  // Fit the textarea to its text, reset first so scrollHeight can shrink. Width changes rewrap it, e.g. a side panel springing open
-  useLayoutEffect(() => {
-    const element = textarea.current
-    if (!element) return
-    let fittedWidth = -1
-    const fit = () => {
-      fittedWidth = element.clientWidth
-      element.style.height = "0"
-      element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
-    }
-    fit()
-    // Height changes from `fit` itself must not refit
-    const observer = new ResizeObserver(() => { if (element.clientWidth !== fittedWidth) fit() })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [value, textarea])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey || isStreaming || busy) return
@@ -73,51 +58,98 @@ export function Composer({
   }
 
   return (
-    <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-md),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-md),var(--inner-highlight-strong)]">
+    <div className={COMPOSER_CARD_CLASS}>
       {children}
-      <textarea
+      <ComposerTextarea
         ref={textarea}
         aria-label={label}
-        rows={1}
         value={value}
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={handleKeyDown}
         onPaste={onPaste}
         disabled={disabled && !isStreaming}
         placeholder={placeholder}
-        spellCheck={false}
-        autoCorrect="off"
-        autoCapitalize="off"
-        data-gramm="false"
-        data-gramm_editor="false"
-        data-enable-grammarly="false"
-        className="w-full resize-none bg-transparent text-sm leading-6 text-ink placeholder:text-ink-faint outline-none"
       />
       <div className="mt-2 flex items-center justify-between">
         <div className="-ml-1.5 flex min-w-0 items-center gap-0.5">{leading}</div>
         <div className="flex items-center gap-0.5">
-          <button aria-label={isListening ? "Stop listening" : "Start listening"}
-            onClick={toggleListening}
-            disabled={disabled}
-            className={cn(COMPOSER_ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
-          >
-            <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
-          </button>
-          {isStreaming ? (
-            <button aria-label="Stop generating" onClick={onStop} className={composerSendButton(true)}>
-              <Square className="h-3 w-3 fill-current" />
-            </button>
-          ) : busy ? (
-            <button aria-label="Extracting attachment" disabled className={composerSendButton(false)}>
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </button>
-          ) : (
-            <button aria-label="Send message" onClick={onSubmit} disabled={!sendable} className={composerSendButton(sendable)}>
-              <ArrowUp className="h-4 w-4" />
-            </button>
-          )}
+          <ComposerMicButton value={value} onValueChange={onValueChange} disabled={disabled} />
+          <ComposerSendButton isStreaming={isStreaming} busy={busy} ready={sendable} onStop={onStop} onSend={onSubmit} />
         </div>
       </div>
     </div>
+  )
+}
+
+/** One-line textarea that grows with its text up to a cap and refits when its width changes, e.g. a side panel springing open. */
+export function ComposerTextarea({ ref, ...props }: ComponentProps<"textarea"> & { ref: RefObject<HTMLTextAreaElement | null> }) {
+  // Reset first so scrollHeight can shrink
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    let fittedWidth = -1
+    const fit = () => {
+      fittedWidth = element.clientWidth
+      element.style.height = "0"
+      element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
+    }
+    fit()
+    if (typeof ResizeObserver === "undefined") return
+    // Height changes from `fit` itself must not refit
+    const observer = new ResizeObserver(() => { if (element.clientWidth !== fittedWidth) fit() })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [props.value, ref])
+
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      {...props}
+      spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
+      data-gramm="false"
+      data-gramm_editor="false"
+      data-enable-grammarly="false"
+      className="w-full resize-none bg-transparent text-sm leading-6 text-ink placeholder:text-ink-faint outline-none"
+    />
+  )
+}
+
+/** Dictation toggle that writes into `value`. */
+export function ComposerMicButton({ value, onValueChange, disabled }: { value: string; onValueChange: (value: string) => void; disabled?: boolean }) {
+  const { isListening, toggleListening } = useSpeechInput(value, onValueChange)
+  return (
+    <button aria-label={isListening ? "Stop listening" : "Start listening"}
+      onClick={toggleListening}
+      disabled={disabled}
+      className={cn(COMPOSER_ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
+    >
+      <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
+    </button>
+  )
+}
+
+/** Stop while streaming, a spinner while `busy`, send otherwise; `ready` already includes "not disabled". */
+export function ComposerSendButton({ isStreaming, busy, ready, onStop, onSend }: { isStreaming?: boolean; busy?: boolean; ready: boolean; onStop?: () => void; onSend: () => void }) {
+  if (isStreaming) {
+    return (
+      <button aria-label="Stop generating" onClick={onStop} className={composerSendButton(true)}>
+        <Square className="h-3 w-3 fill-current" />
+      </button>
+    )
+  }
+  if (busy) {
+    return (
+      <button aria-label="Extracting attachment" disabled className={composerSendButton(false)}>
+        <Loader2 className="h-4 w-4 animate-spin" />
+      </button>
+    )
+  }
+  return (
+    <button aria-label="Send message" onClick={onSend} disabled={!ready} className={composerSendButton(ready)}>
+      <ArrowUp className="h-4 w-4" />
+    </button>
   )
 }

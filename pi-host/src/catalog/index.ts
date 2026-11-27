@@ -7,13 +7,15 @@
  */
 import { isAbsolute, resolve } from "node:path";
 import type { Host, SessionMatch } from "../host/index.ts";
+import { isRecord } from "../json.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
 import { rankFiles } from "./files.ts";
 import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
-import { isPlainObject, updateState } from "./state.ts";
+import { updateState } from "./state.ts";
 
-export { listSessions, sessionInfo, type LiveStatus, type SessionInfo } from "./sessions.ts";
+export { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
+export type { LiveStatus } from "../supervisor/session.ts";
 export { copyPrivateState, isPinned, markCacheRetention, markProfile, profileOf } from "./state.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
@@ -47,15 +49,6 @@ async function validCwd(host: Host, raw: string | null): Promise<string | undefi
   if (!raw || !isAbsolute(raw)) return undefined;
   const cwd = resolve(raw);
   return (await host.isDirectory(cwd)) ? cwd : undefined;
-}
-
-/** Request JSON body, undefined when it is not valid JSON. */
-async function jsonBody(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return undefined;
-  }
 }
 
 /** Integer `limit` query parameter clamped to `1..max`, `fallback` when absent or not an integer. */
@@ -139,8 +132,8 @@ async function handleMove(sessionPath: string, toArchive: boolean, live: LiveSes
 
 /** `PUT /sessions/:id/pin` with `{pinned}`. */
 async function handlePin(request: Request, sessionPath: string, live: LiveSessions, host: Host): Promise<Response> {
-  const body = await jsonBody(request);
-  if (!isPlainObject(body) || typeof body.pinned !== "boolean") return fail(400, "invalid_body");
+  const body = await request.json().catch(() => undefined);
+  if (!isRecord(body) || typeof body.pinned !== "boolean") return fail(400, "invalid_body");
   const pinned = body.pinned;
   await updateState(host, sessionPath, (state) => ({ next: { ...state, pinned }, result: undefined }));
   const session = await sessionInfo(host, sessionPath, live);
@@ -149,8 +142,8 @@ async function handlePin(request: Request, sessionPath: string, live: LiveSessio
 
 /** `PUT /sessions/:id/state` with `{revision, data}`, 409 `{revision, data}` on a stale revision. */
 async function handlePutState(request: Request, sessionPath: string, host: Host): Promise<Response> {
-  const body = await jsonBody(request);
-  if (!isPlainObject(body) || !Number.isInteger(body.revision) || !isPlainObject(body.data)) {
+  const body = await request.json().catch(() => undefined);
+  if (!isRecord(body) || !Number.isInteger(body.revision) || !isRecord(body.data)) {
     return fail(400, "invalid_body");
   }
   const revision = body.revision as number;

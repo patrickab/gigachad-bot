@@ -366,3 +366,11 @@ export function textOf(content: string | { type: string; text?: string }[]): str
   if (typeof content === "string") return content
   return content.flatMap((block) => (block.type === "text" && block.text ? [block.text] : [])).join("\n")
 }
+
+export interface SkillBlock { name: string; body: string }
+
+/** Pi's expansion of `/skill:<name> <args>`: the skill's file in a `<skill>` block, then the args. */
+export function splitSkill(text: string): { skill?: SkillBlock; text: string } {
+  const match = /^<skill name="([^"]*)"[^>]*>\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]*))?$/.exec(text)
+  return match ? { skill: { name: match[1], body: match[2] }, text: match[3] ?? "" } : { text }
+}

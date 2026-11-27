@@ -24,9 +24,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel
+from starlette import status
 
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
-from backend.reverse_proxy import relay_websocket, streaming_response
+from backend.reverse_proxy import PROXIED_METHODS, has_body, relay_websocket, streaming_response
 from backend.routes.deps import get_file_roots
 from backend.routes.upstream import call_upstream
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket, require_trusted_request
@@ -45,8 +46,6 @@ router = APIRouter(prefix="/api/jupyter", tags=["jupyter"])
 _host_only = host_access_only("Jupyter")
 _trusted = Depends(require_trusted_request)
 
-_TRY_AGAIN_LATER = 1013
-_PROXIED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
 _MAX_SESSION_BODY = 64 * 1024
 
 
@@ -105,11 +104,6 @@ def _denied(path: str) -> HTTPException:
     return HTTPException(status_code=404, detail="Not found")
 
 
-def _has_body(request: Request) -> bool:
-    """Whether the browser sent a request body, an empty one is not forwarded as a chunked stream."""
-    return "transfer-encoding" in request.headers or request.headers.get("content-length", "0") != "0"
-
-
 async def _session_body(request: Request) -> bytes:
     """The whole body of a session request, which is read to be checked before it is forwarded."""
     body = b""
@@ -124,14 +118,14 @@ async def _replay(body: bytes) -> AsyncIterator[bytes]:
     yield body
 
 
-@router.api_route("/server/{path:path}", methods=_PROXIED_METHODS, dependencies=[_host_only, _trusted])
+@router.api_route("/server/{path:path}", methods=PROXIED_METHODS, dependencies=[_host_only, _trusted])
 async def proxy_http(path: str, request: Request, host: RemoteJupyterHost = Depends(get_jupyter_host)) -> Response:
     if not jupyter.is_proxied_path(path):
         raise _denied(path)
     if not jupyter.allows_method(request.method, path):
         log.debug("Jupyter proxy denied %s %s", request.method, path)
         raise HTTPException(status_code=405, detail="Method not allowed")
-    body = request.stream() if _has_body(request) else None
+    body = request.stream() if has_body(request) else None
     if request.method in {"POST", "PATCH"} and path.startswith("api/sessions"):
         content = await _session_body(request)
         await call_upstream(asyncio.to_thread(host.check_session, request.method, content))
@@ -160,6 +154,6 @@ async def proxy_websocket(
         upstream = await host.open_websocket(path, websocket.query_params.multi_items(), websocket.scope.get("subprotocols", []))
     except UpstreamUnavailable as exc:
         log.warning("%s", exc)
-        await websocket.close(code=_TRY_AGAIN_LATER)
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
     await relay_websocket(websocket, upstream)

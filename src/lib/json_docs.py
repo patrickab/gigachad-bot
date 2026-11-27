@@ -84,9 +84,6 @@ class JsonDocs:
     def mkdir(self, key: str) -> None:
         self._store.mkdir(key)
 
-    def is_file(self, key: str) -> bool:
-        return self._store.is_file(key)
-
     def is_dir(self, key: str) -> bool:
         return self._store.is_dir(key)
 

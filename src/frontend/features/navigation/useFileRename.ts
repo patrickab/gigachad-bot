@@ -13,8 +13,8 @@ export interface RenameTarget {
 interface FileRenameOptions {
   /** The path `target` has now, when opening it moved the file since the row showed it. */
   currentPath: (target: RenameTarget) => string
-  /** Called once the backend renamed `oldPath` to `newPath` and every reference followed. */
-  onRenamed: (oldPath: string, newPath: string) => Promise<void> | void
+  /** Called once the backend renamed the file and every reference followed. */
+  onRenamed: () => Promise<void>
 }
 
 /** Rename of sidebar files: project files (stored or on disk) and mounted files. Rejects with the reason, e.g. a taken name. */
@@ -26,7 +26,7 @@ export function useFileRename({ currentPath, onRenamed }: FileRenameOptions) {
     if (renamed.path === path) return
     announceFileMove({ from: path, to: renamed.path })
     for (const changed of renamed.changed) announceFileChange(changed)
-    await onRenamed(path, renamed.path)
+    await onRenamed()
   }
   return { renameFile }
 }

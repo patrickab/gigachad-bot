@@ -4,6 +4,7 @@ import { createContext, useContext } from "react"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import type { LearnView, PiView } from "@/lib/domain/types"
+import { opensInWorkbench } from "@/lib/domain/workbench"
 
 /** Top-level workspace mode of a tab. */
 export type AppSurface = "chat" | "canvas" | "document" | "pi" | "workbench" | "factory" | "learn"
@@ -39,6 +40,11 @@ function surfaceOf(item: WorkspaceItem): AppSurface {
 export function newPiItem(directory: string, projectSlug: string | null): WorkspaceItem {
   const repo = directory.replace(/\/+$/, "") || "/"
   return { kind: "pi", path: repo.split("/").pop() || repo, projectSlug, pi: { sessionId: null, repo } }
+}
+
+/** The item that shows the file `path`: in the workbench when it is available and the file is one of its kinds, else in the document editor. */
+export function fileItem(path: string, projectSlug: string | null, workbench: boolean): WorkspaceItem {
+  return { kind: workbench && opensInWorkbench(path) ? "workbench" : "document", path, projectSlug }
 }
 
 export interface Tab {

@@ -7,6 +7,7 @@ import type { DraftPicker } from "@/features/chat/composer/CompletionMenu"
 import { stageChip, useComposerChips } from "@/features/chat/composer/composerChips"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useLoaded } from "@/hooks/useLoaded"
 import { fetchPiFiles, pastePiVideo, type PiFileScope } from "@/lib/backend/api"
 import type { Attachment } from "@/lib/domain/types"
 import { composerAction, piCompletions, type ComposerAction } from "./composerInput"
@@ -53,17 +54,10 @@ export async function imageOf(attachment: Attachment): Promise<ImageContent> {
 
 /** The files of `scope` for `@` completion, unranked (the composer ranks them), empty until loaded or when the list fails. */
 function useScopeFiles(scope: PiFileScope): string[] {
-  const key = JSON.stringify(scope)
-  const [files, setFiles] = useState<{ key: string; paths: string[] } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    fetchPiFiles(JSON.parse(key) as PiFileScope).then((paths) => cancelled || setFiles({ key, paths }), () => cancelled || setFiles({ key, paths: [] }))
-    return () => {
-      cancelled = true
-    }
-  }, [key])
-  return files?.key === key ? files.paths : []
+  return useLoaded(JSON.stringify(scope), loadScopeFiles).value ?? []
 }
+
+const loadScopeFiles = (key: string) => fetchPiFiles(JSON.parse(key) as PiFileScope)
 
 /**
  * Text or files put into the composer from outside (a quoted selection, a canvas screenshot), `id` tells one request from the next.

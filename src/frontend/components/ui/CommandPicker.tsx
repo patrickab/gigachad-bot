@@ -1,14 +1,15 @@
 "use client"
 
 import { Search } from "lucide-react"
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useIsPresent } from "framer-motion"
 import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useOutsidePress } from "@/hooks/useOutsidePress"
-import { cn } from "@/lib/utils"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { cn, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
 import { FLOATING_PANEL_CLASS, FloatingPanel } from "./FloatingWindow"
 import { ModalBackdrop } from "./ModalBackdrop"
 import { AmbientCopy } from "./AmbientCopy"
@@ -347,6 +348,21 @@ export function CommandPicker<T>({ triggerLabel, triggerContent, triggerClassNam
     {/* PillPopover mounts its panel only while open, its exit animation keeps the last list */}
     <PickerList {...list} close={popover.close} />
   </PillPopover>
+}
+
+/** Open state of a `FloatingPicker`: Alt+`key` (only modifier, not from a terminal) toggles it in the active tab while `enabled`, a tab sent to the background closes it. */
+export function useAltKeyPicker(key: string, enabled = true): { open: boolean; close: () => void } {
+  const tabActive = useTabActive()
+  const [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
+  useEventListener("window", "keydown", (event) => {
+    if (!isAltOnly(event) || event.key.toLowerCase() !== key || isTerminalKeyEvent(event)) return
+    event.preventDefault()
+    setOpen((current) => !current)
+  }, { active: tabActive && enabled, capture: true })
+  // The list lies in a portal, a tab sent to the background takes its open list along
+  useResetOnChange(tabActive, (active) => { if (!active) close() })
+  return { open, close }
 }
 
 /** Picker opened without a trigger (a shortcut): the list docks under the top bar's left end, `onClose` ends it. See `PickerList`. */

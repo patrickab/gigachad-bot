@@ -78,9 +78,7 @@ async function renderWorkspace(openTabs = true) {
     <UndoDeleteProvider>
       <TabManager ref={manager}>
         <TabPicker />
-        <Sidebar appMode="chat" onFileSelect={(path, scope) => manager.current!.showItem({
-          kind: path.endsWith(".tex") ? "workbench" : "document", path, projectSlug: scope, rootFile: true,
-        })} />
+        <Sidebar appMode="chat" workbench onItemOpen={(item) => manager.current!.showItem(item)} />
       </TabManager>
     </UndoDeleteProvider>,
   )

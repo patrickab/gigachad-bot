@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useTabActive } from "@/contexts/TabContext"
+import { fileItem, useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { FileTreeCreateChoice } from "@/components/ui/file-tree/FileTree"
 import { useResource, useResourceFamily } from "@/hooks/useResource"
@@ -10,7 +10,6 @@ import { announceFileRemoval } from "@/lib/backend/fileEvents"
 import { notesResource, projectDocumentsResource, refreshDocumentLists, refreshProjectDocuments, templateSetsResource } from "@/lib/backend/resources"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
-import { opensInWorkbench } from "@/lib/domain/workbench"
 import { errorMessage } from "@/lib/utils"
 
 /** The notes while they load. */
@@ -46,16 +45,15 @@ const markdownName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
   moveHistory: (path: string, scope: string) => Promise<void>
-  onDocumentSelect?: (path: string, scope: string) => void
-  /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
-  onWorkbenchSelect?: (path: string, scope: string) => void
+  /** Whether files of the workbench's kinds open in it. */
+  workbench?: boolean
+  onItemOpen?: (item: WorkspaceItem) => void
   onCanvasDeleted?: (path: string) => void
-  onArchitectureSelect?: (slug: string) => void
 }
 
 /** Loose notes and project documents of the sidebar, with the actions that change them. Every tab shares the lists, `watchDocumentLists` keeps them current. */
 export function useWorkspaceDocuments({
-  projects, moveHistory, onDocumentSelect, onWorkbenchSelect, onCanvasDeleted, onArchitectureSelect,
+  projects, moveHistory, workbench = false, onItemOpen, onCanvasDeleted,
 }: WorkspaceDocumentsOptions) {
   const { schedule } = useUndoDelete()
   const isActive = useTabActive()
@@ -64,14 +62,14 @@ export function useWorkspaceDocuments({
   const [fileError, setFileError] = useState("")
 
   // The LaTeX templates come from the template sets on the server, none when they fail to load. The tab's next activation tries again.
-  const templateSets = useResource(null, templateSetsResource, onWorkbenchSelect !== undefined && isActive)
+  const templateSets = useResource(null, templateSetsResource, workbench && isActive)
   const templateNames = useMemo(() => new Map((templateSets ?? []).map((set) => [set.label, set.name])), [templateSets])
   /** The `+` choice of the files folder: the file type, then the template for LaTeX. Absent without the workbench, files are Markdown then. */
   const newFileChoice = useMemo((): FileTreeCreateChoice | undefined => {
-    if (!onWorkbenchSelect) return undefined
+    if (!workbench) return undefined
     const templates = { label: "Template", options: [BLANK_TEMPLATE, ...templateNames.keys()], initial: BLANK_TEMPLATE, floating: true }
     return { label: "File type", options: FILE_KINDS, initial: "Markdown", floating: true, then: templateNames.size ? { LaTeX: templates } : undefined }
-  }, [onWorkbenchSelect, templateNames])
+  }, [workbench, templateNames])
 
   /** Create `name` in `scope`, read its list again and hand the new path to `open`. */
   const createAndOpen = async (scope: string, name: string, open: (path: string) => void) => {
@@ -81,10 +79,7 @@ export function useWorkspaceDocuments({
   }
 
   /** Open project file `path`: a workbench file (`.tex .bib .sty .cls`, `.md`) in the workbench where available, notes and the rest in the document editor. */
-  const selectDocument = (path: string, scope: string) => {
-    if (onWorkbenchSelect && opensInWorkbench(path)) onWorkbenchSelect(path, scope)
-    else onDocumentSelect?.(path, scope)
-  }
+  const selectDocument = (path: string, scope: string) => onItemOpen?.(fileItem(path, scope || null, workbench))
 
   /**
    * Create a `kind` file `name` in project `scope` and open it, a LaTeX file from the template set labelled `template`.
@@ -93,10 +88,10 @@ export function useWorkspaceDocuments({
    * - Markdown and unknown kinds live in the project until the workbench opens them
    */
   const createFile = async (scope: string, name: string, kind: string, template?: string) => {
-    if (onWorkbenchSelect && kind === "LaTeX") {
+    if (workbench && kind === "LaTeX") {
       const path = await createWorkbenchDocument(scope, latexName(name), template && templateNames.get(template))
       await refreshProjectDocuments(scope)
-      onWorkbenchSelect(path, scope)
+      selectDocument(path, scope)
     } else {
       await createAndOpen(scope, markdownName(name), (path) => selectDocument(path, scope))
     }
@@ -171,7 +166,7 @@ export function useWorkspaceDocuments({
       await createArchitectureSource(slug, "system.c4")
       await refreshProjectDocuments(slug)
     }
-    onArchitectureSelect?.(slug)
+    onItemOpen?.({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })
   }
 
   return {

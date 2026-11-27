@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { inOwnAttachment } from "@/features/editor/canvas/attachments/canvasTransfer"
@@ -167,11 +168,7 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
   // bitmaps via CSS transform, and once the zoom settles the layout width snaps
   // to the true screen size for one sharp re-render — PdfViewer preserves the
   // reading position across that width change.
-  const [settledScale, setSettledScale] = useState(scale)
-  useEffect(() => {
-    const t = setTimeout(() => setSettledScale(scale), ZOOM_SETTLE_MS)
-    return () => clearTimeout(t)
-  }, [scale])
+  const settledScale = useDebouncedValue(scale, ZOOM_SETTLE_MS)
 
   // Client px to canvas units, inverting the current pan/zoom.
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {

@@ -16,6 +16,7 @@ import { LocalHost } from "../host/local/index.ts";
 import { loadConfig, type SupervisorConfig } from "./config.ts";
 import { SupervisorHost, type ResumeOutcome } from "./host.ts";
 import type { ResumeState } from "./resume.ts";
+import type { LiveStatus } from "./session.ts";
 
 export type SocketData = { clientId: string };
 
@@ -26,7 +27,7 @@ export type Health = { ok: true; piVersion: string; sessions: LiveSessionHealth[
 /** What the catalog needs to know about running sessions. */
 export interface LiveSessions {
   /** Live status of a session file, undefined when no child holds it. */
-  liveStatus(sessionPath: string): { running: boolean; waiting: boolean; attached: number } | undefined;
+  liveStatus(sessionPath: string): LiveStatus | undefined;
   /** Close the child holding a session file when nothing needs it now (no run, client, dialog or liveness status). True once no child holds it. */
   closeIfIdle(sessionPath: string): Promise<boolean>;
 }

@@ -81,3 +81,10 @@ export type ExtensionDialog =
   | { id: string; method: "confirm"; title: string; message?: string }
   | { id: string; method: "input"; title: string; placeholder?: string }
   | { id: string; method: "editor"; title: string; prefill?: string }
+
+const DIALOG_METHODS: ReadonlySet<unknown> = new Set(["select", "confirm", "input", "editor"])
+
+/** Whether `record` is an `extension_ui_request` that opens a dialog. */
+export function isDialogRequest(record: { type: string; method?: unknown }): record is { type: "extension_ui_request" } & ExtensionDialog {
+  return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method)
+}

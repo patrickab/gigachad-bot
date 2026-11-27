@@ -7,21 +7,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import io
+import json
 from pathlib import Path
 import tarfile
 from types import SimpleNamespace
 from typing import Any
 
-from agent_sandbox import SandboxManifest
+from agent_sandbox import SandboxInvocation, SandboxManifest, SandboxRun, StreamEvent, WorkspaceArchive
 from agent_sandbox.manifest import MANIFEST_SCHEMA_VERSION, Execution, Outputs, PiSessionState, WorkspaceRef
 
 from config import TEST_MODEL
 from lib import sandbox_plot, tools
 from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.data_store import Entry, Revision, StorageNotFoundError
-from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.pi_host import Repository
-from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult
+from lib.sandbox_service import SandboxRuntimeState, SandboxService, SandboxToolResult, write_temp_tar
 from lib.tool_context import ToolContext, ToolOptions
 
 
@@ -92,10 +92,6 @@ class MemoryDataStore:
         del recursive
         for existing in [k for k in self._documents if k == key or k.startswith(f"{key}/")]:
             del self._documents[existing]
-
-    def move(self, source: str, destination: str) -> None:
-        self._documents[destination] = self._documents.pop(source)
-        self._modified[destination] = self._modified.pop(source, datetime.now(UTC))
 
 
 class MemoryRepositoryStore:
@@ -197,6 +193,40 @@ class SandboxServiceStub:
 
     async def checkpoint(self, *, chat_id: str) -> None:
         self.events.append(("checkpoint", chat_id))
+
+
+class FakeSandboxRunner:
+    """Produce native sandbox leases without requiring Docker."""
+
+    def __init__(self) -> None:
+        self.calls: list[SandboxInvocation] = []
+        self.scripts: list[str] = []
+
+    async def run_script(self, script: str, *, profile: str, interpreter: str, timeout: float) -> str:
+        """Echo a minimal Plotly figure so plot flows work without Docker."""
+        del profile, interpreter, timeout
+        self.scripts.append(script)
+        return json.dumps({"data": [{"type": "scatter", "x": [1, 2], "y": [1, 2]}], "layout": {}})
+
+    async def run(self, invocation: SandboxInvocation) -> SandboxRun:
+        self.calls.append(invocation)
+        prompt = invocation.task.prompt
+        workspace_bytes = tar_archive(f"> {prompt}\n".encode())
+        workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
+        summary = f"Updated the workspace for: {prompt[:200]}"
+        return SandboxRun(
+            status="completed",
+            summary=summary,
+            next_manifest=native_manifest(
+                f"{invocation.run_id}-{workspace_sha256[:16]}",
+                workspace_sha256,
+                run_id=invocation.run_id,
+                profile=invocation.profile_name,
+            ),
+            outputs=(StreamEvent(name="stdout", text=summary),),
+            workspace_changed=invocation.workspace is None or invocation.workspace.sha256 != workspace_sha256,
+            workspace=WorkspaceArchive(write_temp_tar(workspace_bytes, "gigachad-sandbox-fake-"), workspace_sha256),
+        )
 
 
 def memory_sandbox_service(

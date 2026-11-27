@@ -19,9 +19,9 @@ export function pairLabel(user: Message): string {
 }
 
 /** The head of a collapsed answer until the reader scrolls or focuses the preview: a collapsed card then holds a fraction of its elements. */
-function CollapsedAnswer({ content, search_result }: { content: string; search_result: Message["search_result"] }) {
+function CollapsedAnswer({ content }: { content: string }) {
   const { full, attach } = usePreviewInteraction()
-  return <div ref={attach} className="contents"><AssistantMessageContent content={full ? content : previewHead(content)} search_result={search_result} compact /></div>
+  return <div ref={attach} className="contents"><AssistantMessageContent content={full ? content : previewHead(content)} compact /></div>
 }
 
 /** A collapsed pair's preview: the tools its answer used and the answer's head, null for an empty answer without tools. The column renders it near the viewport only. */
@@ -36,7 +36,7 @@ export function ChatPairPreview({ assistant }: { assistant: Message }) {
   })
   return (
     <TurnPreview tools={tools}>
-      {assistant.content ? <CollapsedAnswer content={assistant.content} search_result={assistant.search_result} /> : null}
+      {assistant.content ? <CollapsedAnswer content={assistant.content} /> : null}
     </TurnPreview>
   )
 }
@@ -89,9 +89,6 @@ export function ChatPairBody({ user, assistant, globalIndex, qaIndex, isStreamin
         <ChatMessage
           role="assistant"
           content={assistant.content}
-          search_result={assistant.search_result}
-          research_steps={assistant.research_steps}
-          research_progress={assistant.research_progress}
           toolRunning={assistant.tool_calls?.some((c) => c.status === "running")}
           isStreaming={isStreaming}
           index={globalIndex}

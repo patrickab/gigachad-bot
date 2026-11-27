@@ -3,10 +3,7 @@
 import { useEffect, useEffectEvent } from "react"
 import { onFileChange } from "@/lib/backend/fileEvents"
 import { watchFiles } from "@/lib/backend/fileWatch"
-import { isInside } from "@/lib/paths"
-
-/** Disk paths are absolute, a stored key like `project/notes.md` is not and gets its change events from the sync feed. */
-const isDiskPath = (path: string) => path.startsWith("/")
+import { isDiskPath, isInside } from "@/lib/paths"
 
 /**
  * Call `onChange` with the path of every file in `files`, or inside `folders`, that changes, whoever wrote it.

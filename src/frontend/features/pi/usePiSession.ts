@@ -8,7 +8,7 @@ import { sendPiCommand, sendPiFrame, subscribePiSession, type HostFrame } from "
 import { SessionResync } from "./resync"
 import { INSPECT_WIDGET_KEY, inspectCommand, parseInspectReply, type InspectReply, type SubagentRow } from "./subagents"
 import { EMPTY_TRANSCRIPT, textOf, transcriptReducer, type ResyncEntries, type SessionEntries, type Transcript } from "./transcript"
-import type { ExtensionDialog, ImageContent, PiCommand, PiModel, PiState, UserMessage } from "./types"
+import { isDialogRequest, type ExtensionDialog, type ImageContent, type PiCommand, type PiModel, type PiState, type UserMessage } from "./types"
 
 export type ConnectionStatus = { kind: "connecting" } | { kind: "ready" } | { kind: "closed"; reason: string }
 
@@ -46,16 +46,11 @@ interface AttachedUi {
 const NOTICE_LIFETIME_MS = 6_000
 const INSPECT_TIMEOUT_MS = 15_000
 const NO_WIDGETS: Record<string, string[]> = {}
-const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
 const EMPTY_QUEUE: Queue = { steering: [], followUp: [] }
 /** Distinguishes this tab's command ids from other clients' on the same session, their responses reach every attached client. */
 const CLIENT_ID = crypto.randomUUID().slice(0, 8)
 /** An extension's `notify` asking the GUI to open the path that follows instead of showing a notice (C7, `pi-extensions/files.ts`). */
 export const OPEN_FILE_NOTICE_PREFIX = "Open file: "
-
-function isDialogRequest(record: PiRecord): boolean {
-  return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method as string)
-}
 
 /**
  * One Pi session on the page's shared pi-host socket (`piSocket.ts`), the whole RPC protocol in the browser.
@@ -136,9 +131,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
 
     const handleExtensionRequest = (record: PiRecord) => {
       if (isDialogRequest(record)) {
-        // SAFETY: isDialogRequest passed, so the record is a dialog request in the shape of ExtensionDialog
-        const dialog = record as unknown as ExtensionDialog
-        setDialogs((current) => current.some((open) => open.id === dialog.id) ? current : [...current, dialog])
+        setDialogs((current) => current.some((open) => open.id === record.id) ? current : [...current, record])
         return
       }
       switch (record.method) {
@@ -204,8 +197,7 @@ export function usePiSession(sessionId: string, onOpenFile: (path: string) => vo
     }
 
     const applyUi = (ui: AttachedUi) => {
-        // SAFETY: isDialogRequest keeps only records whose method is a dialog method, which is the shape of ExtensionDialog
-      setDialogs(ui.dialogs.filter(isDialogRequest) as unknown as ExtensionDialog[])
+      setDialogs(ui.dialogs.filter(isDialogRequest))
       setStatusLines(ui.statuses)
       setWidgets(ui.widgets ?? NO_WIDGETS)
     }

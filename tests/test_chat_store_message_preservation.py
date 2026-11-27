@@ -61,3 +61,22 @@ def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projec
     assert store.list_histories() == {"files": []}
     assert store.move(moved, "")["new_path"] == "loose.json"
     assert store.list_histories() == {"files": ["loose.json"]}
+
+
+def test_pre_tool_search_and_research_fields_round_trip(chat_store: ChatStore) -> None:
+    """Chats saved before web search and research became tool calls keep their fields although no renderer reads them."""
+    source = {"title": "T", "url": "https://example.com", "content": "c"}
+    answer = {
+        "role": "assistant",
+        "content": "Answer [1]",
+        "search_result": {"query": "q", "sources": [source], "images": [], "videos": [], "citationMap": {"1": source}},
+        "research_steps": [{"step": "s", "event_type": "e", "details": {}, "timestamp": 1}],
+        "research_progress": {"current_depth": 1, "total_depth": 1, "current_breadth": 1, "total_breadth": 1,
+                              "current_query": None, "completed_queries": 1, "total_queries": 1},
+    }
+    messages = [{"role": "user", "content": "q"}, answer]
+    chat_store.save("old.json", {"messages": messages, "chat_id": "old"})
+
+    chat_store.save("old.json", {"messages": chat_store.load("old.json")["messages"], "chat_id": "old"})
+
+    assert chat_store.load("old.json")["messages"] == messages

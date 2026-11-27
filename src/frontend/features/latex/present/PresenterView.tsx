@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useLoaded } from "@/hooks/useLoaded"
 import type { PdfDocument } from "@/components/content/pdf/pdfLayout"
 import { cn } from "@/lib/utils"
 import { slideNotes } from "./slideNotes"
@@ -11,20 +12,8 @@ const AUDIENCE_BUTTON_CLASS = "rounded px-1 font-sans text-ink-muted hover:bg-ho
 
 /** The speaker notes of page `pageNumber`, empty while they load or when it has none. */
 function usePageNotes(pdf: PdfDocument, pageNumber: number): string {
-  const [notes, setNotes] = useState<{ pageNumber: number; text: string } | null>(null)
-  useEffect(() => {
-    let current = true
-    pdf.getPage(pageNumber)
-      .then((page) => page.getAnnotations())
-      .then((annotations) => slideNotes(annotations), () => "")
-      .then((text) => {
-        if (current) setNotes({ pageNumber, text })
-      })
-    return () => {
-      current = false
-    }
-  }, [pdf, pageNumber])
-  return notes?.pageNumber === pageNumber ? notes.text : ""
+  const loadNotes = useCallback((page: number) => pdf.getPage(page).then((loaded) => loaded.getAnnotations()).then(slideNotes), [pdf])
+  return useLoaded(pageNumber, loadNotes).value ?? ""
 }
 
 /** `m:ss`, or `h:mm:ss` from one hour on. */

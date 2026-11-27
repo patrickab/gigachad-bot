@@ -41,7 +41,7 @@ export function AddSlide({ theme, primitives, onInsert }: { theme: string; primi
       if (primitive.preview === null) return null
       const src = latexPreviewUrl(theme, primitive.id, primitive.preview)
       if (failed.has(src)) return null
-      // eslint-disable-next-line @next/next/no-img-element -- dynamic backend preview URL in a Tauri static export, next/image cannot optimize it
+      // eslint-disable-next-line @next/next/no-img-element -- dynamic backend preview URL, next/image cannot optimize it
       return <img key={src} src={src} alt="" draggable={false} onError={() => setFailed((current) => new Set(current).add(src))} className="block h-full w-full object-contain" />
     }}
     previewAspect={16 / 9}

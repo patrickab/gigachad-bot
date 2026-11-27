@@ -3,16 +3,11 @@
  *
  * - Consumes: `Host.readState` / `Host.writeState`
  * - Provides: revisioned, per-session serialized `updateState`, `isPinned`, `copyPrivateState`, `profileOf`,
- *   `markProfile`, `isPlainObject`
+ *   `markProfile`
  */
 import type { Host, PrivateState, Profile } from "../host/index.ts";
 
 const sidecarLocks = new Map<string, Promise<unknown>>();
-
-/** True for a plain JSON object (not null, not an array). */
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Read-modify-write the state, serialized per session so concurrent requests cannot lose updates. */
 export async function updateState<T>(

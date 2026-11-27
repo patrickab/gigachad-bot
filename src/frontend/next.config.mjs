@@ -7,11 +7,6 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 const frontendDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-// Tauri v2 sets TAURI_ENV_* in beforeBuildCommand's environment, so the build
-// auto-detects its target: desktop embeds a static export, web keeps a real
-// Node server (`npm run start`, SSR/API routes remain possible).
-const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM;
-
 // Files the browser loads by URL, copied from node_modules into public/ (git-ignored) whenever Next loads this config:
 // Vercel and the factory preview start Next directly, an npm pre-script would not run there.
 const PUBLIC_RUNTIME_FILES = {
@@ -26,7 +21,7 @@ const jupyterLoader = (name) => require.resolve(`./features/notebook/turbopack/$
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: isTauriBuild ? "export" : "standalone",
+  output: "standalone",
   outputFileTracingRoot: frontendDir,
   // A factory preview is served under a path of the preview gate (factory.yaml sets it), `appPath` reads the same variable.
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,

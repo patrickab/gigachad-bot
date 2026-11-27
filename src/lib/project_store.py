@@ -10,7 +10,7 @@ from lib.chat_store import ChatStore
 from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.naming import slugify
-from lib.storage_namespace import CHAT, META_JSON, PROJECT_JSON, project_dir, project_document_prefix
+from lib.storage_namespace import PROJECTS_META, project_dir, project_document_prefix, project_json
 
 if TYPE_CHECKING:
     from lib.references import Released
@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 # Moves a project to a new slug: `(slug, new_slug, name)`.
 Rename = Callable[[str, str, str], None]
 
-_META_KEY = f"{CHAT}/{META_JSON}"
 # The project.json field holding the ids of the project's learn sessions (LearnHarness chats).
 LEARN_SESSIONS = "learn_sessions"
 # Tries of a guarded read-modify-write of `project.json` before it gives up, one per concurrent writer (parallel uploads).
@@ -55,10 +54,6 @@ def _sorted_by_name(files: dict[str, str | None]) -> list[tuple[str, str]]:
     return sorted(named, key=lambda item: item[1].lower())
 
 
-def _project_key(slug: str) -> str:
-    return f"{project_dir(slug)}/{PROJECT_JSON}"
-
-
 class ProjectStore:
     """Owns all project-catalog reads/writes, slug generation, kanban CRUD, and tab management."""
 
@@ -77,10 +72,10 @@ class ProjectStore:
         self._docs.overwrite(key, data)
 
     def _read_meta(self) -> dict[str, Any]:
-        return self._read_json(_META_KEY, {"projects": []})
+        return self._read_json(PROJECTS_META, {"projects": []})
 
     def _write_meta(self, meta: dict[str, Any]) -> None:
-        self._write_json(_META_KEY, meta)
+        self._write_json(PROJECTS_META, meta)
 
     @staticmethod
     def _find_entry(meta: dict[str, Any], slug: str) -> dict[str, Any] | None:
@@ -114,15 +109,15 @@ class ProjectStore:
         return {"name": slug, "kanban": [], "tabs": [], "files": []}
 
     def _read_project(self, slug: str) -> dict[str, Any]:
-        return self._read_json(_project_key(slug), self._default_project(slug))
+        return self._read_json(project_json(slug), self._default_project(slug))
 
     def _read_projects(self, slugs: list[str]) -> list[dict[str, Any]]:
         """The state of each project in *slugs*, read in one round trip, defaulted like `_read_project`."""
-        stored = self._docs.read_many(_project_key(slug) for slug in slugs)
-        return [data if isinstance(data := stored[_project_key(slug)], dict) else self._default_project(slug) for slug in slugs]
+        stored = self._docs.read_many(project_json(slug) for slug in slugs)
+        return [data if isinstance(data := stored[project_json(slug)], dict) else self._default_project(slug) for slug in slugs]
 
     def _write_project(self, slug: str, data: dict[str, Any]) -> None:
-        self._write_json(_project_key(slug), data)
+        self._write_json(project_json(slug), data)
 
     def list_projects(self) -> list[dict[str, Any]]:
         entries = self._read_meta().get("projects", [])
@@ -252,7 +247,7 @@ class ProjectStore:
         - Another writer in between (tab autosave, cards, files, parallel uploads) retries, so no write is lost
         - Raises StorageConflictError when the file keeps changing
         """
-        key = _project_key(slug)
+        key = project_json(slug)
         for _ in range(_GUARDED_ATTEMPTS):
             try:
                 data, revision = self._docs.read_with_revision(key)

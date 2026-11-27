@@ -9,7 +9,6 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
-from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -23,12 +22,13 @@ from backend.routes.deps import (
     get_file_roots,
     get_project_store,
     get_relocate,
+    resolve_allowed,
 )
-from backend.routes.fileviewer import resolve_allowed
 from backend.routes.upstream import call_upstream
 import config
 from lib import document_service, latex, latex_templates, pi_host
 from lib.asset_store import AssetStore
+from lib.async_utils import KeyedLocks
 from lib.attachments import sync_pdf
 from lib.data_store import DataStore, InvalidStorageKey, StorageConflictError, StorageNotFoundError, validate_key
 from lib.disk_files import DiskFiles
@@ -47,7 +47,8 @@ _IMAGE_DIRECTORY = latex_templates.IMAGE_DIRECTORY
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # The chat of each file key being opened in this process, so concurrent first opens share the session the first one starts.
-_OPENING: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+# The lock of the chat of a file while any open of it holds it.
+_opening: KeyedLocks[str] = KeyedLocks()
 
 
 class FilePath(BaseModel):
@@ -420,7 +421,7 @@ async def post_chat(
     - The active session is replaced by a new one when pi-host no longer knows it (404, it is unlinked) or cannot
       start it (502 `spawn_failed`, e.g. its stored folder moved away; it stays listed). A named one passes the error on
     - A PDF answers where its extracted text is, or that the extraction is pending (G3)
-    - Opens of one file in this process take turns (`_OPENING`): two tabs opening it at once share one new session
+    - Opens of one file in this process take turns (`_opening`): two tabs opening it at once share one new session
     """
     chat, prompt, pdf_text = await asyncio.to_thread(_prepare_chat, body.path, docs, roots, assets)
     key = chat.file
@@ -453,14 +454,6 @@ async def post_chat(
             session = await call_upstream(open_chat(None))
         link = await asyncio.to_thread(links.activate, key, session.session_id)
     return OpenedChat(session=session, link=_linked_session(link), kind=chat.kind, cwd=str(chat.cwd), pdf_text=pdf_text)
-
-
-def _opening(key: str) -> asyncio.Lock:
-    """The lock of the chat of *key* while any open of it holds it."""
-    lock = _OPENING.get(key)
-    if lock is None:
-        lock = _OPENING[key] = asyncio.Lock()
-    return lock
 
 
 def _spawn_failed(exc: HTTPException) -> bool:

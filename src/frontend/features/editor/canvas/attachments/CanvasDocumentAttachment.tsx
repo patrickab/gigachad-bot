@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { loadFileViewerText } from "@/lib/backend/api"
 import { HostScaleContext } from "@/contexts/HostScaleContext"
 import type { PlotFigure } from "@/lib/domain/types"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
 import { LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
+import { plotFigureOf } from "@/features/editor/useEditorView"
+import { useLoaded } from "@/hooks/useLoaded"
 
 // A document attachment is a read-only view of a generated chat artifact — a Mermaid
 // or markmap note rendered through the shared markdown renderer, or a Plotly figure
@@ -15,10 +16,21 @@ import { LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 // to avoid overlapping labels, is CSS-scaled into its window, and collapses while a
 // zoom gesture runs: Plotly then redraws at most once per settled zoom, not per frame.
 type DocumentAttachmentState =
-  | { status: "loading" }
   | { status: "markdown"; content: string }
   | { status: "plot"; figure: PlotFigure }
   | { status: "error"; message: string }
+
+async function loadAttachmentDocument(path: string): Promise<DocumentAttachmentState> {
+  let text: string
+  try {
+    text = await loadFileViewerText(path)
+  } catch {
+    return { status: "error", message: "Failed to load document" }
+  }
+  if (!path.endsWith(".plot.json")) return { status: "markdown", content: text }
+  const figure = plotFigureOf(path, text)
+  return figure ? { status: "plot", figure } : { status: "error", message: "Malformed plot document" }
+}
 
 export function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed }: {
   path: string
@@ -27,30 +39,9 @@ export function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed
   plotFrame: { width: number; scale: number } | null
   collapsed: boolean
 }) {
-  // The loaded result is tagged with its path, so a new path reads as loading until it resolves.
-  const [loaded, setLoaded] = useState<{ path: string; state: DocumentAttachmentState } | null>(null)
-  const state: DocumentAttachmentState = loaded?.path === path ? loaded.state : { status: "loading" }
-
-  useEffect(() => {
-    let alive = true
-    const settle = (next: DocumentAttachmentState) => { if (alive) setLoaded({ path, state: next }) }
-    loadFileViewerText(path).then((text) => {
-      if (path.endsWith(".plot.json")) {
-        try {
-          const figure = JSON.parse(text)
-          if (!figure || typeof figure !== "object" || Array.isArray(figure)) throw new Error("Invalid figure")
-          settle({ status: "plot", figure: figure as PlotFigure })
-        } catch {
-          settle({ status: "error", message: "Malformed plot document" })
-        }
-      } else {
-        settle({ status: "markdown", content: text })
-      }
-    }).catch(() => settle({ status: "error", message: "Failed to load document" }))
-    return () => { alive = false }
-  }, [path])
-
-  if (state.status === "loading") return <LoadingPlaceholder size="fill" />
+  // A new path reads as loading until it resolves.
+  const state = useLoaded(path, loadAttachmentDocument).value
+  if (!state) return <LoadingPlaceholder size="fill" />
   if (state.status === "error") return <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">{state.message}</div>
   if (state.status === "plot") {
     if (!plotFrame) return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>

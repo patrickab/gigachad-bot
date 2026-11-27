@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run).
+Generated from bd63559a on 2026-11-25. Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (no `/repomix` run).
 Reduced by hand on 2026-11-25. Conversations section, the Pi tool rows and the backlog edited by hand from 78140998 on 2026-11-26 (no `/repomix` run).
 
 # Architecture

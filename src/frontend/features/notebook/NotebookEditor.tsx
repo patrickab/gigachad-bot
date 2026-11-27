@@ -8,6 +8,7 @@ import type { ServiceManager, Session } from "@jupyterlab/services"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { ErrorText } from "@/components/ui/ErrorText"
+import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { dirName } from "@/lib/paths"
 import { appMarkdownFactory } from "./markdownRenderer"
@@ -22,19 +23,13 @@ import "./notebook-theme.css"
 
 /** Ctrl or Cmd+S inside `root` saves through the file API: the library's own save command talks to a Jupyter contents API this app does not expose. */
 function useSaveShortcut(root: React.RefObject<HTMLElement | null>, save: () => Promise<unknown>) {
-  const latest = useRef(save)
-  useEffect(() => { latest.current = save })
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "s" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
-      if (!(event.target instanceof Node) || !root.current?.contains(event.target)) return
-      event.preventDefault()
-      event.stopPropagation()
-      void latest.current()
-    }
-    window.addEventListener("keydown", onKeyDown, true)
-    return () => window.removeEventListener("keydown", onKeyDown, true)
-  }, [root])
+  useEventListener("window", "keydown", (event) => {
+    if (event.key.toLowerCase() !== "s" || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+    if (!(event.target instanceof Node) || !root.current?.contains(event.target)) return
+    event.preventDefault()
+    event.stopPropagation()
+    void save()
+  }, { capture: true })
 }
 
 /** One service manager per editor. It polls the proxy, so it is disposed when the editor goes, unless React's development remount brings the editor straight back. */

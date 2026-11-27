@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { fetchPiSessionEntries, type PiSessionInfo } from "@/lib/backend/api"
 import { PiTranscript } from "./PiTranscript"
 import { transcriptOfEntries, type Transcript } from "./transcript"
@@ -17,7 +18,7 @@ const NO_FILE_LINKS: FileLinks = { base: "", open: () => {} }
 const previews = new Map<string, { modifiedAt: string; transcript: Promise<Transcript> }>()
 
 /** The preview transcript of `session`, read once per file version; a failed read is dropped so the next call retries. */
-function loadPreview({ sessionId, modifiedAt }: PiSessionInfo): Promise<Transcript> {
+function loadPreview({ sessionId, modifiedAt }: Pick<PiSessionInfo, "sessionId" | "modifiedAt">): Promise<Transcript> {
   const cached = previews.get(sessionId)
   if (cached?.modifiedAt === modifiedAt) return cached.transcript
   const transcript = fetchPiSessionEntries(sessionId, { turns: PREVIEW_TURNS }).then(transcriptOfEntries)
@@ -38,14 +39,12 @@ export function prefetchPiSessionPreviews(sessions: readonly PiSessionInfo[]): (
 }
 
 /** `session`'s preview transcript, null while it is read or when the read failed (the window shows empty). */
-function usePreview(session: PiSessionInfo): Transcript | null {
+function usePreview({ sessionId, modifiedAt }: PiSessionInfo): Transcript | null {
   const [shown, setShown] = useState<{ key: string; transcript: Transcript } | null>(null)
-  const key = `${session.sessionId}:${session.modifiedAt}`
-  useEffect(() => {
-    let cancelled = false
-    loadPreview(session).then((transcript) => { if (!cancelled) setShown({ key, transcript }) }, () => {})
-    return () => { cancelled = true }
-  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps -- `key` is the session's identity and version
+  const key = `${sessionId}:${modifiedAt}`
+  // The answer carries the key it was read for, so one delivered just after the session changed never passes for the next.
+  const load = useCallback(() => loadPreview({ sessionId, modifiedAt }).then((transcript) => ({ key: `${sessionId}:${modifiedAt}`, transcript })), [sessionId, modifiedAt])
+  useLoadWhile(true, load, setShown)
   return shown?.key === key ? shown.transcript : null
 }
 

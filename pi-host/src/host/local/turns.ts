@@ -10,7 +10,9 @@
  * alone, the order of the other lines does not matter to it.
  */
 
-export type TurnEntry = { type: string; id: string; parentId: string | null; [field: string]: unknown };
+import { isPrompt, pathToRoot, type Entry } from "../entries.ts";
+
+export type TurnEntry = Entry;
 
 /** `turn` removes one turn, `end` the turn and everything after it (an edit). */
 export type RemoveThrough = "turn" | "end";
@@ -33,22 +35,6 @@ const STATE_TYPES = new Set(["model_change", "thinking_level_change", "session_i
 /** Entries that point at another one by `targetId`: they go when their target goes. */
 const TARGETING_TYPES = new Set(["label", "context_edit"]);
 
-function isPrompt(entry: TurnEntry): boolean {
-  return entry.type === "message" && (entry.message as { role?: unknown } | undefined)?.role === "user";
-}
-
-/** Root-to-leaf path by `parentId`, bounded so a broken chain cannot loop. */
-function pathTo(byId: Map<string, TurnEntry>, leafId: string | null): TurnEntry[] {
-  const path: TurnEntry[] = [];
-  const seen = new Set<string>();
-  for (let entry = leafId === null ? undefined : byId.get(leafId); entry && !seen.has(entry.id); ) {
-    seen.add(entry.id);
-    path.push(entry);
-    entry = entry.parentId === null ? undefined : byId.get(entry.parentId);
-  }
-  return path.reverse();
-}
-
 /**
  * `entries` without the turn of `promptEntryId` (`through: "turn"`) or without it and everything after it
  * (`through: "end"`, the entry before the prompt becomes the leaf).
@@ -65,7 +51,7 @@ export function removeTurn(entries: TurnEntry[], promptEntryId: string, through:
   if (!prompt) return { ok: false, reason: "unknown" };
   if (!isPrompt(prompt)) return { ok: false, reason: "not_prompt" };
 
-  const path = pathTo(byId, entries.at(-1)?.id ?? null);
+  const path = pathToRoot(byId, entries.at(-1)?.id ?? null);
   const start = path.indexOf(prompt);
   if (start < 0) return { ok: false, reason: "off_branch" };
 

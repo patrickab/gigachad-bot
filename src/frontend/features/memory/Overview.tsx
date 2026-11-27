@@ -4,7 +4,8 @@ import type { ReactNode } from "react"
 import { FileText, Folder, List } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatUpdated, relativeTo, type MemoryLocation } from "@/features/memory/memoryUtils"
+import { formatUpdated, type MemoryLocation } from "@/features/memory/memoryUtils"
+import { relativeIn } from "@/lib/paths"
 import type { MemorySection } from "@/features/memory/useMemoryLibrary"
 
 /** The listed level: at the root a section per memory_store, else the one memory_store or directory. Rows open nested levels, memories and documents. */
@@ -43,21 +44,21 @@ function SectionRows({ section, onOpenLocation, onOpenPage }: {
   return (
     <>
       {listing.memory_stores.map((nested) => (
-        <Row key={`store:${nested}`} icon={Folder} name={relativeTo(nested, memoryStore)}
+        <Row key={`store:${nested}`} icon={Folder} name={relativeIn(memoryStore, nested)}
           onOpen={() => onOpenLocation({ memoryStore: nested, path: "" })} />
       ))}
       {listing.directories.map((directory) => (
-        <Row key={`dir:${directory}`} icon={Folder} name={relativeTo(directory, path)}
+        <Row key={`dir:${directory}`} icon={Folder} name={relativeIn(path, directory)}
           onOpen={() => onOpenLocation({ memoryStore, path: directory })} />
       ))}
       {listing.memories.map((memory) => (
-        <Row key={`memory:${memory.path}`} icon={List} name={relativeTo(memory.path, path)}
+        <Row key={`memory:${memory.path}`} icon={List} name={relativeIn(path, memory.path)}
           secondary={memory.error ? <span className="text-danger">Unreadable</span> : memory.description}
           updated={formatUpdated(memory.updated)}
           onOpen={() => onOpenPage(memoryStore, memory.path)} />
       ))}
       {listing.documents.map((document) => (
-        <Row key={`doc:${document.path}`} icon={FileText} name={relativeTo(document.path, path)}
+        <Row key={`doc:${document.path}`} icon={FileText} name={relativeIn(path, document.path)}
           updated={formatUpdated(document.modified)}
           onOpen={() => onOpenPage(memoryStore, document.path)} />
       ))}

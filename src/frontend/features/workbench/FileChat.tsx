@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FilePanel } from "@/features/editor/FilePanel"
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import type { PiCatalogProps } from "@/features/pi/PiTopBar"
+import { useLoaded } from "@/hooks/useLoaded"
 import { prepareWorkbench } from "@/lib/backend/api"
 import { errorMessage } from "@/lib/utils"
 import { DocumentChat } from "./DocumentChat"
@@ -30,22 +30,12 @@ interface FileChatProps {
  * - Which session shows lives only in the file's links, the owner keeps no view state
  */
 export function FileChat({ path, ...props }: FileChatProps & { path: string }) {
-  const [prepared, setPrepared] = useState<{ requested: string; path: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { value: prepared, error } = useLoaded(path, prepareWorkbench)
 
-  useEffect(() => {
-    let cancelled = false
-    prepareWorkbench(path).then(
-      (file) => { if (!cancelled) setPrepared({ requested: path, path: file.path }) },
-      (cause: unknown) => { if (!cancelled) setError(errorMessage(cause, "Could not open the chat of this file")) },
-    )
-    return () => { cancelled = true }
-  }, [path])
-
-  if (prepared?.requested !== path) {
+  if (!prepared) {
     return (
       <FilePanel label="Chat" bare onClose={props.onClose} width={props.width}>
-        <div className="flex flex-1 items-center justify-center text-xs text-ink-faint">{error ? <ErrorText>{error}</ErrorText> : "Loading…"}</div>
+        <div className="flex flex-1 items-center justify-center text-xs text-ink-faint">{error ? <ErrorText>{errorMessage(error, "Could not open the chat of this file")}</ErrorText> : "Loading…"}</div>
       </FilePanel>
     )
   }

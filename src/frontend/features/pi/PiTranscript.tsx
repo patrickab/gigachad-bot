@@ -26,7 +26,7 @@ import { renderCustomMessage, renderToolCall, toolPlacement } from "./renderers"
 import { ProcessDetails } from "@/features/conversation/tools/ProcessDetails"
 import { ToolCallRow } from "@/features/conversation/tools/ToolCallRow"
 import { toolImageAttachments, toolImagesOf, userImageAttachments } from "./toolImages"
-import { shownMessages, textOf, toolRunsOf, turnsOf, type MessageMarks, type Transcript, type Turn } from "./transcript"
+import { shownMessages, splitSkill, textOf, toolRunsOf, turnsOf, type MessageMarks, type SkillBlock, type Transcript, type Turn } from "./transcript"
 import type { AgentMessage, AssistantMessage, BashExecutionMessage, CompactionSummaryMessage, CustomMessage, ImageContent, ToolCall, ToolRun } from "./types"
 import "./FactoryNotices"
 import "./FactoryTool"
@@ -267,14 +267,6 @@ function CollapsedAnswer({ pieces, runs, fileLinks }: { pieces: Piece[]; runs: R
 function clip(text: string): string {
   const firstLine = text.trim().split("\n")[0] ?? ""
   return firstLine.length <= MAX_LABEL_LENGTH ? firstLine : `${firstLine.slice(0, MAX_LABEL_LENGTH)}\u2026`
-}
-
-interface SkillBlock { name: string; body: string }
-
-/** Pi's expansion of `/skill:<name> <args>`: the skill's file in a `<skill>` block, then the args. */
-export function splitSkill(text: string): { skill?: SkillBlock; text: string } {
-  const match = /^<skill name="([^"]*)"[^>]*>\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]*))?$/.exec(text)
-  return match ? { skill: { name: match[1], body: match[2] }, text: match[3] ?? "" } : { text }
 }
 
 function promptOf(message: AgentMessage): { text: string; compaction: boolean; skill?: SkillBlock } {

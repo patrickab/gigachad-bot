@@ -32,8 +32,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Reques
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
+from starlette import status
 
-from backend.http_plumbing import http_errors
+from backend.http_plumbing import http_errors, not_modified
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.reverse_proxy import relay_websocket
 from backend.routes.deps import get_file_roots
@@ -69,7 +70,6 @@ IMMUTABLE = "public, max-age=31536000, immutable"
 # Pi session ids are UUIDs, the pattern keeps anything else out of pi-host's URL space.
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]+$")]
 
-_TRY_AGAIN_LATER = 1013
 
 
 class RepositoryOut(BaseModel):
@@ -292,36 +292,30 @@ async def post_paste(
     return PastedVideo(path=str(stored), mention=mention.as_posix())
 
 
-def _cached(request: Request, etag: str, body: bytes, media_type: str) -> Response:
-    """*body* with an immutable `ETag`, a 304 when the client already holds *etag*."""
-    headers = {"ETag": etag, "Cache-Control": IMMUTABLE}
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=headers)
-    return Response(content=body, media_type=media_type, headers=headers)
-
-
 @http_router.get("/media/{media_hash}")
 async def get_media(request: Request, media_hash: MediaHash) -> Response:
     etag = f'"{media_hash}"'
-    if request.headers.get("if-none-match") == etag:
-        return _cached(request, etag, b"", "")
+    if (unchanged := not_modified(request, etag, IMMUTABLE)) is not None:
+        return unchanged
     data, media_type = await _call(pi_host.media(media_hash))
-    return _cached(request, etag, data, media_type)
+    return Response(content=data, media_type=media_type, headers={"ETag": etag, "Cache-Control": IMMUTABLE})
 
 
 @http_router.get("/media/{media_hash}/thumb")
 async def get_media_thumbnail(request: Request, media_hash: MediaHash) -> Response:
     etag = f'"{media_hash}-{pi_media.THUMB_PX}w"'
-    if request.headers.get("if-none-match") == etag:
-        return _cached(request, etag, b"", "")
+    if (unchanged := not_modified(request, etag, IMMUTABLE)) is not None:
+        return unchanged
     thumb = pi_media.thumbnail_for(media_hash)
     if thumb is None:
         data, media_type = await _call(pi_host.media(media_hash))
         try:
             thumb = await asyncio.to_thread(pi_media.thumbnail_for, media_hash, data)
-        except ValueError:
-            return _cached(request, f'"{media_hash}"', data, media_type)  # unreadable for Pillow: the original is the best preview
-    return _cached(request, etag, thumb or b"", "image/webp")
+        except ValueError:  # unreadable for Pillow: the original is the best preview
+            etag = f'"{media_hash}"'
+            headers = {"ETag": etag, "Cache-Control": IMMUTABLE}
+            return not_modified(request, etag, IMMUTABLE) or Response(content=data, media_type=media_type, headers=headers)
+    return Response(content=thumb or b"", media_type="image/webp", headers={"ETag": etag, "Cache-Control": IMMUTABLE})
 
 
 @router.websocket("/ws")
@@ -336,7 +330,7 @@ async def pi_socket(websocket: WebSocket, identity: Annotated[RequestIdentity, D
     except pi_host.PiHostUnavailable as exc:
         log.warning("%s", exc)
         await websocket.accept()
-        await websocket.close(code=_TRY_AGAIN_LATER)
+        await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
     await relay_websocket(websocket, upstream)
 

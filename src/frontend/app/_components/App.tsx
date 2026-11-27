@@ -1,6 +1,5 @@
 "use client"
 
-import { DesktopBackendProvider } from "@/app/_components/DesktopBackendProvider"
 import { ProjectProvider } from "@/contexts/ProjectContext"
 import { SettingsProvider } from "@/contexts/SettingsContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
@@ -12,7 +11,6 @@ import { AppShell } from "@/app/_components/AppShell"
 export function App() {
   return (
     <ErrorBoundary fullscreen resetLabel="Reload">
-    <DesktopBackendProvider>
       <StartupReadProvider>
         <SettingsProvider>
           <ProjectProvider>
@@ -24,7 +22,6 @@ export function App() {
           </ProjectProvider>
         </SettingsProvider>
       </StartupReadProvider>
-    </DesktopBackendProvider>
     </ErrorBoundary>
   )
 }

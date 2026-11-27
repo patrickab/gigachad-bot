@@ -57,6 +57,9 @@ export function isNotebookPath(path: string): boolean {
   return path.startsWith("/") && path.endsWith(".ipynb")
 }
 
+/** Disk paths are absolute, a stored key like `project/notes.md` is not and gets its change events from the sync feed. */
+export const isDiskPath = (path: string): boolean => path.startsWith("/")
+
 /** Natural, case-insensitive order for paths and file names ("file2" before "file10"). */
 export const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
 

@@ -1,4 +1,4 @@
-"""Helpers for document metadata, storage keys, and FileRoots path checks.
+"""Helpers for document metadata and storage keys.
 
 PDFs and MinerU output live in Postgres (``AssetStore``) and are mirrored to the
 Nextcloud ``Documents`` tree as a copy the app never reads back. The only path
@@ -10,14 +10,10 @@ and MinerU spawning to ``lib.mineru``. Staying free of route imports lets the ``
 """
 
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
 
 from config import DOCUMENTS
 from lib.data_store import InvalidStorageKey, validate_key
 from lib.mime import mime_for
-
-if TYPE_CHECKING:
-    from lib.file_roots import FileRoots
 
 
 def document_meta(path: str | Path) -> dict[str, str]:
@@ -26,24 +22,11 @@ def document_meta(path: str | Path) -> dict[str, str]:
     return {"path": str(p), "name": p.name, "mime": mime_for(p)}
 
 
-class PathNotAllowed(Exception):
-    """A user-supplied path is not one the app is willing to serve.
-
-    ``outside_roots`` separates the two rejections callers report differently:
-    True when the path is under none of the allowed roots, False when the root
-    is fine but no file actually lives there.
-    """
-
-    def __init__(self, *, outside_roots: bool) -> None:
-        super().__init__("path outside the allowed roots" if outside_roots else "no file at path")
-        self.outside_roots = outside_roots
-
-
-def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | None:
+def storage_key(path: str | Path) -> str | None:
     """The logical store key for an app-owned path, or None when it is not one.
 
-    Accepts an absolute path under *root* (``DOCUMENTS`` by default) or an
-    already-logical key. Paths outside *root*, including FileRoots files, return
+    Accepts an absolute path under ``DOCUMENTS`` or an already-logical key.
+    Paths outside ``DOCUMENTS``, including FileRoots files, return
     None because they are live references with no stored copy.
     """
     text = str(path)
@@ -51,7 +34,7 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
         return None
     if PurePosixPath(text).is_absolute():
         try:
-            text = Path(text).resolve().relative_to(Path(root or DOCUMENTS).resolve()).as_posix()
+            text = Path(text).resolve().relative_to(DOCUMENTS.resolve()).as_posix()
         except ValueError:
             return None
     try:
@@ -59,16 +42,3 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
     except InvalidStorageKey:
         return None
 
-
-def resolve_known_path(path: str | Path, *, roots: "FileRoots | None") -> Path:
-    """Resolve a live FileRoots reference to a real file.
-
-    App-owned artifacts are read from storage, never through this function.
-    Raises ``PathNotAllowed`` so each caller maps the two reasons to its own status.
-    """
-    resolved = Path(path).expanduser().resolve()
-    if roots is None or not roots.contains(resolved):
-        raise PathNotAllowed(outside_roots=True)
-    if not resolved.is_file():
-        raise PathNotAllowed(outside_roots=False)
-    return resolved

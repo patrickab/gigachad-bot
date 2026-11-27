@@ -23,6 +23,7 @@ import shutil
 import signal
 import time
 
+from lib.async_utils import KeyedLocks
 from lib.tex_source import COMMENT, plain_lines
 
 BUILD_DIRECTORY = ".latex-build"
@@ -56,7 +57,7 @@ _BARE_ERROR = re.compile(r"^! (?P<message>.+)$")
 _ERROR_LINE = re.compile(r"^l\.(?P<line>\d+)\b")
 _BARE_ERROR_LOOKAHEAD = 10
 
-_build_locks: dict[Path, asyncio.Lock] = {}
+_build_locks: KeyedLocks[Path] = KeyedLocks()
 log = logging.getLogger(__name__)
 
 
@@ -66,7 +67,10 @@ class LatexUnavailable(RuntimeError):
 
 @dataclass(frozen=True)
 class LatexIssue:
-    """One TeX error, `line` is None when the log does not name a line of a project file, `file` None when it does not name the file."""
+    """One TeX error, `line` is None when the log does not name a line of a project file.
+
+    `file` is None when the log does not name the file.
+    """
 
     line: int | None
     message: str
@@ -192,7 +196,7 @@ async def build(source: Path) -> LatexBuild:
     """
     if not is_latexmk_installed():
         raise LatexUnavailable("latexmk is not installed on the server, install a TeX distribution such as TeX Live")
-    async with _build_locks.setdefault(source, asyncio.Lock()):
+    async with _build_locks(source):
         started = time.monotonic()
         output_directory = source.parent / BUILD_DIRECTORY
         engine = engine_flag(await asyncio.to_thread(_read_head, source))
@@ -255,7 +259,10 @@ def build_output(root: Path, suffix: str) -> Path:
 
 
 def discard_build(source: Path) -> None:
-    """Delete `<directory>/.latex-build/<stem>.*` of *source*, leaving the outputs of a sibling whose stem extends it (`a.b` for `a`)."""
+    """Delete `<directory>/.latex-build/<stem>.*` of *source*.
+
+    The outputs of a sibling whose stem extends it (`a.b` for `a`) stay.
+    """
     outputs = source.parent / BUILD_DIRECTORY
     if not outputs.is_dir():
         return
@@ -285,7 +292,9 @@ def _read_head(source: Path) -> str:
 
 
 def ensure_package(root: Path, package: str) -> bool:
-    r"""Add `\usepackage{package}` on its own line before the `\begin{document}` line of *root* unless it loads it already. Returns whether it wrote.
+    r"""Add `\usepackage{package}` on its own line before the `\begin{document}` line of *root* unless it loads it already.
+
+    Returns whether it wrote.
 
     Loads are looked up in *root* alone (`\usepackage`/`\RequirePackage`, comments ignored, options and lists across lines): a package
     that only an `\input` preamble or a `.sty` loads is added again. The file keeps its line endings; an unreadable, non-UTF-8 or

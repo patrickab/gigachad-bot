@@ -1,23 +1,21 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { FloatingPicker, isRemoveRowKey, neighbourKey, type PickerGroup } from "@/components/ui/CommandPicker"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { FloatingPicker, isRemoveRowKey, neighbourKey, useAltKeyPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useHostAccess } from "@/contexts/SettingsContext"
-import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
-import { useEventListener } from "@/hooks/useEventListener"
+import type { WorkspaceItem } from "@/contexts/TabContext"
+import { useDebouncedSearch } from "@/hooks/useDebouncedSearch"
 import { useNowMs } from "@/hooks/useNowMs"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { archivePiSession, type PiRepository, type PiSessionInfo, type PiSessionMatch } from "@/lib/backend/api"
 import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
-import { cn, compactElapsed, errorMessage, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
+import { cn, compactElapsed } from "@/lib/utils"
 import { focusPiSearchHit } from "./searchFocus"
-import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions, type PiSearchHit } from "./sessionStore"
+import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions } from "./sessionStore"
 import { PiSessionPreview, prefetchPiSessionPreviews } from "./PiSessionPreview"
 import { PiSessionDot, piTokenText, piSessionError, piSessionItem, piSessionRepository, piSessionTitle, piSessionWorktree } from "./usePiSidebar"
 
-/** Typing pauses this long before the transcripts are searched. */
-const SEARCH_DELAY_MS = 200
 /** Widest a row's title and its details line get, one value so both edges line up. */
 const ROW_TEXT_WIDTH = "max-w-[16rem]"
 
@@ -31,23 +29,7 @@ function newestFirst(sessions: readonly PiSessionInfo[]): PiSessionInfo[] {
   return [...sessions].sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))
 }
 
-/** Full-text hits of `query` (M24), read once typing pauses, null while they are read. */
-function useSearchHits(query: string): { hits: PiSearchHit[] | null; error: string } {
-  const [found, setFound] = useState<{ query: string; hits: PiSearchHit[]; error: string } | null>(null)
-  const trimmed = query.trim()
-  useEffect(() => {
-    if (!trimmed) return
-    let cancelled = false
-    const timer = setTimeout(() => {
-      searchPiSessions(trimmed, { profile: "coding" }).then(
-        (hits) => { if (!cancelled) setFound({ query: trimmed, hits, error: "" }) },
-        (cause: unknown) => { if (!cancelled) setFound({ query: trimmed, hits: [], error: errorMessage(cause, "Search failed") }) },
-      )
-    }, SEARCH_DELAY_MS)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [trimmed])
-  return found?.query === trimmed ? { hits: found.hits, error: found.error } : { hits: null, error: "" }
-}
+const searchCodingSessions = (query: string, signal: AbortSignal) => searchPiSessions(query, { profile: "coding" }, signal)
 
 /** `path` whole while it fits its box, else abbreviated to its first and last dir. */
 function FittedPath({ path }: { path: string }) {
@@ -112,22 +94,12 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
   const [query, setQuery] = useState("")
   const [archiving, setArchiving] = useState<ReadonlySet<string>>(() => new Set())
   const [archiveError, setArchiveError] = useState("")
-  const search = useSearchHits(query)
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => { setOpen(false); setQuery("") }, [])
-  const tabActive = useTabActive()
+  const search = useDebouncedSearch(query.trim(), searchCodingSessions)
+  const { open, close } = useAltKeyPicker("a", hostAccess)
+  useResetOnChange(open, (isOpen) => { if (!isOpen) setQuery("") })
   const sessionList = useMemo(() => newestFirst(listed), [listed])
   // The recent sessions' previews are read ahead after load and whenever the list changes, so hovering shows them at once
   useEffect(() => (hostAccess ? prefetchPiSessionPreviews(sessionList) : undefined), [hostAccess, sessionList])
-  // Alt+A toggles the picker from anywhere in the tab, terminals keep their keys
-  useEventListener("window", "keydown", (event) => {
-    if (!isAltOnly(event) || event.key.toLowerCase() !== "a" || isTerminalKeyEvent(event)) return
-    event.preventDefault()
-    if (open) close()
-    else setOpen(true)
-  }, { active: tabActive && Boolean(hostAccess), capture: true })
-  // The list lies in a portal, a tab sent to the background takes its open list along
-  useResetOnChange(tabActive, (active) => { if (!active) close() })
   if (!hostAccess || !open) return null
 
   const sessions = sessionList.filter((session) => !archiving.has(session.sessionId))

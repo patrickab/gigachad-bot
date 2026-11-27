@@ -18,6 +18,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isRecord } from "../json.ts";
 import type { ProfileSpec } from "./profiles.ts";
 import { isProcessAlive, processStartIdentity } from "./process-identity.ts";
 
@@ -27,10 +28,6 @@ const LIST_FILE = /^active-runs-(\d+)\.json$/;
 
 export type RunRecord = { sessionId: string; sessionPath: string; cwd: string; spec: ProfileSpec };
 type RunList = { ownerPid: number; ownerStart: string | null; sessions: RunRecord[] };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function parseList(text: string): RunList | undefined {
   let data: unknown;

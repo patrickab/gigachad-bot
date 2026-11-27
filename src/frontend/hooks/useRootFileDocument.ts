@@ -4,6 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useFollowFiles } from "@/hooks/useFollowFiles"
 import { ApiError, loadFileViewerText } from "@/lib/backend/api"
 import { subscribeToChanges, syncCursorReady, type ChangeEvent } from "@/lib/backend/syncStream"
+import { isDiskPath } from "@/lib/paths"
 
 export type FileLoadFailure = "failed" | "binary" | "forbidden" | "missing"
 
@@ -29,8 +30,6 @@ interface RootFileDocumentOptions<T> {
   /** Called with the text of a followed disk change whatever the state of the edit, and the value it replaces (as last loaded or saved), for editors that merge it themselves. */
   onFollowed?: (text: string, path: string, replaced: T | null) => void
 }
-
-const isDiskPath = (path: string) => path.startsWith("/")
 
 /** Why a failed read of a file could not load it. */
 export function loadFailureOf(error: unknown): FileLoadFailure {

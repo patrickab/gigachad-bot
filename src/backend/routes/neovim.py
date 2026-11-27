@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from starlette import status
 from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
@@ -55,7 +56,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/neovim", tags=["neovim"])
 
 _SAVE_TIMEOUT_SECONDS = 60
-_UNSUPPORTED_DATA = 1003
 
 
 class OpenMessage(BaseModel):
@@ -397,11 +397,11 @@ async def neovim_session(
     try:
         opening = OpenMessage.model_validate(await websocket.receive_json())
     except (ValidationError, ValueError):
-        await websocket.close(code=_UNSUPPORTED_DATA)
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
         return
     notebook = notebook_buffer(roots, opening.path) if opening.notebook else None
     if opening.notebook and notebook is None:
-        await websocket.close(code=_UNSUPPORTED_DATA)
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
         return
     session = NeovimSession.spawn(
         opening.filename,

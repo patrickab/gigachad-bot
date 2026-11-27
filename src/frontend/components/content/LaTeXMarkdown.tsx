@@ -8,7 +8,6 @@ import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { apiRoot, fileViewerRawUrl } from "@/lib/backend/urls"
 import { offsetToCamera } from "@/lib/domain/viewport"
 import { remarkInlineCodeFileLinks, resolveLocalFileHref } from "@/lib/fileLinks"
-import { CitationPill, type CitationSource } from "./diagrams/CitationPill"
 import "katex/dist/katex.min.css"
 import "@gigachad/chat-ui/markdown.css"
 import "@gigachad/chat-ui/code.css"
@@ -57,7 +56,7 @@ function imageUrl(src: unknown, imageDirectory: string | undefined): unknown {
 
 function imageComponent(imageDirectory: string | undefined): MarkdownComponents["img"] {
   return function Image({ src, alt, ...props }) {
-    // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
+    // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime, next/image can't optimize them
     return <img alt={alt ?? ""} src={imageUrl(src, imageDirectory) as typeof src} {...props} />
   }
 }
@@ -73,7 +72,6 @@ export interface FileLinks {
 
 function LaTeXMarkdownInner({
   content,
-  citationMap,
   streaming,
   compact,
   onContentChange,
@@ -82,7 +80,6 @@ function LaTeXMarkdownInner({
   fileLinks,
 }: {
   content: string
-  citationMap?: Record<string, CitationSource>
   streaming?: boolean
   compact?: boolean
   onContentChange?: (newContent: string) => void
@@ -95,15 +92,13 @@ function LaTeXMarkdownInner({
   const components = useMemo<MarkdownComponents>(() => ({
     img: imageComponent(imageDirectory),
     a({ children, ...props }) {
-      const info = citationMap?.[String(children)]
-      if (info) return <CitationPill source={info}>{children}</CitationPill>
       const path = fileLinks && props.href ? resolveLocalFileHref(props.href, fileLinks.base) : null
       if (path && fileLinks) {
         return <a {...props} title={path} onClick={(event) => { event.preventDefault(); fileLinks.open(path) }}>{children}</a>
       }
       return <a {...props}>{children}</a>
     },
-  }), [citationMap, imageDirectory, fileLinks])
+  }), [imageDirectory, fileLinks])
 
   return (
     <MarkdownRenderer

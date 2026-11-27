@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { cn, isModKey } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
@@ -19,8 +19,8 @@ import { EditorShell } from "./EditorShell"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useLoaded } from "@/hooks/useLoaded"
 import { useModeLabel } from "@/hooks/useModeLabel"
-import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 export interface DocumentEditorProps {
@@ -51,7 +51,7 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 export function TextDocumentEditor({ path, slug, onClose, onSaved, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isActive = useTabActive()
   const neovim = useNeovimSetting()
-  const [renderedContent, setRenderedContent] = useState<string | null>(null)
+  const renderedContent = useLoaded(path, readFileRootRendered).value ?? null
 
   const filename = baseName(path)
   const shownName = useDisplayName()(slug, path) ?? filename
@@ -77,12 +77,8 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, persistOverri
 
   useModeLabel(shownName, true, onModeLabel)
 
-  // Drop the rendered preview of the previous document or mode
-  useResetOnChange(path, () => setRenderedContent(null))
-
   useEffect(() => {
     loadFromServer()
-    readFileRootRendered(path).then(setRenderedContent).catch(() => {})
   }, [path, loadFromServer])
 
   const neovimSession = useNeovimTerminal(

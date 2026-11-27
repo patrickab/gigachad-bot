@@ -1,8 +1,8 @@
 "use client"
 
-import { LayoutGrid, Loader2, Plus, Square, ArrowUp } from "lucide-react"
+import { LayoutGrid, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { COMPOSER_ICON_BUTTON, composerSendButton } from "@/components/ui/Composer"
+import { COMPOSER_ICON_BUTTON } from "@/components/ui/Composer"
 import { MenuPopover } from "@/components/ui/MenuPopover"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
@@ -61,36 +61,5 @@ export function ToolsMenu({ disabled }: { disabled?: boolean }) {
         </div>
       )}
     </MenuPopover>
-  )
-}
-
-/** Stop while streaming, a spinner while an attachment is extracted, send otherwise. */
-export function SendButton({ isStreaming, extracting, ready, disabled, onCancel, onSend }: {
-  isStreaming?: boolean
-  extracting?: boolean
-  /** The draft has text or attachments. */
-  ready: boolean
-  disabled?: boolean
-  onCancel?: () => void
-  onSend: () => void
-}) {
-  if (isStreaming) {
-    return (
-      <button onClick={onCancel} className={composerSendButton(true)} aria-label="Stop generating">
-        <Square className="h-3 w-3 fill-current" />
-      </button>
-    )
-  }
-  if (extracting) {
-    return (
-      <button aria-label="Extracting attachment" disabled className={composerSendButton(false)}>
-        <Loader2 className="h-4 w-4 animate-spin" />
-      </button>
-    )
-  }
-  return (
-    <button aria-label="Send message" onClick={onSend} disabled={disabled || !ready} className={composerSendButton(ready && !disabled)}>
-      <ArrowUp className="h-4 w-4" />
-    </button>
   )
 }

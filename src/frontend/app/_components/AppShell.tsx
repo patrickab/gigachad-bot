@@ -153,12 +153,8 @@ export function AppShell() {
     tabManagerRef.current?.relocateProject(oldSlug, newSlug)
   }, [])
 
-  const handleDocumentRenamed = useCallback((oldPath: string, newPath: string) => {
-    tabManagerRef.current?.relocateDocument(oldPath, newPath)
-  }, [])
-
   // A file moved by this device or another one moves the tabs that show it
-  useEffect(() => onFileMove(({ from, to }) => handleDocumentRenamed(from, to)), [handleDocumentRenamed])
+  useEffect(() => onFileMove(({ from, to }) => tabManagerRef.current?.relocateDocument(from, to)), [])
 
   // Every tab's sidebar shows the same lists, one subscription keeps them current
   useEffect(() => watchDocumentLists(), [])
@@ -186,7 +182,7 @@ export function AppShell() {
                 <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
                   <EnabledToolsProvider>
                     <FilePanelProvider>
-                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onDocumentRenamed={handleDocumentRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} reveal={reveal} />
+                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} reveal={reveal} />
                     </FilePanelProvider>
                   </EnabledToolsProvider>
                 </TabManager>

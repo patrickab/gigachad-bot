@@ -3,10 +3,10 @@
 import { useCallback, useState } from "react"
 import { X } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
-import { cn } from "@/lib/utils"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { useNeovimSetting, type NeovimSetting } from "@/contexts/SettingsContext"
 import { FilePanel } from "@/features/editor/FilePanel"
+import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
 import { NeovimEditor, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { PDF_MIME, RawAttachment, RenderedAttachment, isMarkdownAttachment, renderableMarkdown, type ContentChange } from "./AttachmentView"
 import { useAttachmentLabel } from "@/features/chat/useAttachmentLabel"
@@ -60,13 +60,7 @@ function AttachmentPanel({ attachment, onClose, onContentChange }: {
   // Neovim edits the attachment's own text, the rendered view shows it as markdown (code fenced by extension).
   const markdown = renderableMarkdown(attachment)
   const viewPicker = views.length > 1 && (
-    <div role="group" aria-label="Show as" className="flex gap-px rounded-md bg-surface p-0.5">
-      {views.map((option) => (
-        <button key={option} type="button" aria-pressed={view === option} onClick={() => setView(option)} className={cn("rounded px-2 py-0.5 text-xs transition-colors", view === option ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink")}>
-          {viewLabel(option, attachment)}
-        </button>
-      ))}
-    </div>
+    <ViewSwitch value={view} onChange={setView} options={views.map((option) => [option, viewLabel(option, attachment)] as const)} className="flex gap-px rounded-md bg-surface p-0.5" buttonClass="rounded px-2 py-0.5 text-xs transition-colors" inactiveClass="text-ink-subtle hover:text-ink" />
   )
 
   return (
@@ -87,7 +81,7 @@ function ImageWindow({ attachment, onClose }: { attachment: Attachment; onClose:
       <button type="button" aria-label="Close image" onClick={onClose} className="absolute right-2 top-2 rounded-md bg-paper/80 p-1 text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
         <X className="h-3.5 w-3.5" />
       </button>
-      {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image */}
       <img src={attachment.url} alt={attachment.name} className="block max-h-[90vh] max-w-[90vw] object-contain" />
     </FloatingWindow>
   )

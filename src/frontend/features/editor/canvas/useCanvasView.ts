@@ -11,17 +11,8 @@ export type CanvasView =
   | { kind: "architecture"; path: string }
   | { kind: "canvas"; selection: CanvasSelection | null }
 
-/** The sidebar props that pick what the canvas mode shows. */
-interface CanvasSidebarProps {
-  activeCanvasPath: string | null
-  onCanvasSelect: (path: string, scope: CanvasSelection["scope"]) => void
-  onCanvasDeleted: (path: string) => void
-  onArchitectureSelect: (slug: string) => void
-}
-
 interface CanvasViewState {
   view: CanvasView
-  sidebarProps: CanvasSidebarProps
   navigateArchitecture: (path: string) => void
   closeCanvas: () => void
   openCreatedCanvas: (selection: CanvasSelection) => void
@@ -47,18 +38,8 @@ export function useCanvasView(): CanvasViewState {
     setWorkspaceItem({ kind: "architecture", path, projectSlug: architectureSlug(path) })
   }, [setWorkspaceItem])
 
-  const sidebarProps: CanvasSidebarProps = {
-    activeCanvasPath: view.kind === "canvas" ? view.selection?.path ?? null : null,
-    onCanvasSelect: (path, scope) => openCreatedCanvas({ path, scope }),
-    onCanvasDeleted: (path) => {
-      if (view.kind === "canvas" && view.selection?.path === path) closeCanvas()
-    },
-    onArchitectureSelect: (slug) => navigateArchitecture(`graph/${slug}/`),
-  }
-
   return {
     view,
-    sidebarProps,
     navigateArchitecture,
     closeCanvas,
     openCreatedCanvas,

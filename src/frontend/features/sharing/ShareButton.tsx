@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { Copy, Link2 } from "lucide-react"
 import { IconButton } from "@/components/ui/IconButton"
 import { MenuPopover } from "@/components/ui/MenuPopover"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { createShare, readShareAccess, revokeShare, shareLinkUrl, type ShareAccess, type ShareTarget } from "@/lib/backend/api"
 import { cn } from "@/lib/utils"
@@ -28,14 +29,8 @@ function SharePanel({ target }: { target: ShareTarget }) {
   const [link, setLink] = useState<Link | null | undefined>(undefined)
   const [failed, setFailed] = useState(false)
 
-  useEffect(() => {
-    let live = true
-    readShareAccess({ kind, key }).then(
-      (access) => { if (live) setLink(access && { access }) },
-      () => { if (live) setFailed(true) },
-    )
-    return () => { live = false }
-  }, [kind, key])
+  const load = useCallback(() => readShareAccess({ kind, key }), [kind, key])
+  useLoadWhile(true, load, (access) => setLink(access && { access }), () => setFailed(true))
 
   const run = (action: () => Promise<Link | null>) => {
     setFailed(false)

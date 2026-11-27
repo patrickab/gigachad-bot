@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { splitSkill } from "./transcript"
 import type { ImageContent } from "./types"
 
 /**
@@ -68,8 +69,8 @@ export function takeHeld(sessionId: string): readonly HeldMessage[] {
 
 /** Pi expands `/skill:name args` into a `<skill>` block before it queues or records it: map that back to what the user typed. */
 function typed(text: string): string {
-  const match = /^<skill name="([^"]*)"[^>]*>\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]*))?$/.exec(text)
-  return match ? `/skill:${match[1]}${match[2] ? ` ${match[2]}` : ""}` : text
+  const { skill, text: args } = splitSkill(text)
+  return skill ? `/skill:${skill.name}${args ? ` ${args}` : ""}` : text
 }
 
 /** The ids of `entries` that `queue` (Pi's queue snapshot) or `userTexts` (user messages sent at or after `since`, one text per message) confirm. Each queue item or message confirms one entry. */

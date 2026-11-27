@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState, useRef } from "react"
+import { useCallback, useState, useRef } from "react"
 import { motion } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -8,6 +8,7 @@ import { loadProject, addProjectCard, moveProjectCard, deleteProjectCard } from 
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { Dialog } from "@/components/ui/Dialog"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import type { KanbanColumnId, ProjectData } from "@/lib/domain/projects"
 import { ElevationProvider, ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { BoardColumn } from "@/components/ui/BoardColumn"
@@ -113,22 +114,14 @@ function useProjectBoard(slug: string, onLoadFailed: () => void) {
   const [projectData, setProjectData] = useState<ProjectData | null>(null)
   // Newest board, so a change can read the card it replaces without a side effect inside a state updater.
   const latest = useRef<ProjectData | null>(null)
-  const onLoadFailedRef = useRef(onLoadFailed)
-  useEffect(() => { onLoadFailedRef.current = onLoadFailed }, [onLoadFailed])
 
   const change = useCallback((next: (data: ProjectData | null) => ProjectData | null) => {
     latest.current = next(latest.current)
     setProjectData(latest.current)
   }, [])
 
-  useEffect(() => {
-    let stale = false
-    loadProject(slug).then(
-      (data) => { if (!stale) change(() => data) },
-      () => { if (!stale) onLoadFailedRef.current() },
-    )
-    return () => { stale = true }
-  }, [slug, change])
+  const load = useCallback(() => loadProject(slug), [slug])
+  useLoadWhile(true, load, (data) => change(() => data), onLoadFailed)
 
   const addCard = useCallback(async (title: string, description: string, state: string = "backlog") => {
     const card = await addProjectCard(slug, title, description, state)

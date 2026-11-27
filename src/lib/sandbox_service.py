@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict
 
 from lib.agent_sandbox_adapter import SandboxRunner
 from lib.asset_store import AssetStore
+from lib.async_utils import KeyedLocks
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.sandbox_store import RunRecord, SandboxStore
 from lib.storage_namespace import DEFAULT_SANDBOX_SCOPE, sandbox_asset, sandbox_scope
@@ -49,6 +50,7 @@ MAX_OUTPUTS = 20
 MAX_INLINE_TEXT_CHARS = 8000
 WORKSPACE_AGENT_SCOPE = "workspace_agent"
 SANDBOX_PLOT_SCOPE = "sandbox_plot"
+PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
 KNOWN_SANDBOX_SCOPES = (DEFAULT_SANDBOX_SCOPE, WORKSPACE_AGENT_SCOPE, SANDBOX_PLOT_SCOPE)
 
 
@@ -122,14 +124,9 @@ class SandboxRuntimeState:
 
     def __init__(self) -> None:
         self._states: dict[str, _StagedState] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._locks_guard = asyncio.Lock()
+        self.locks: KeyedLocks[str] = KeyedLocks()
         # Serializes checkpoints against asset garbage collection: both hop off the event loop between store reads and writes.
         self.assets_lock = asyncio.Lock()
-
-    async def lock(self, slot_key: str) -> asyncio.Lock:
-        async with self._locks_guard:
-            return self._locks.setdefault(slot_key, asyncio.Lock())
 
     def stage(self, slot_key: str) -> _StagedState:
         return self._states.setdefault(slot_key, _StagedState())
@@ -242,7 +239,7 @@ class SandboxService:
     async def _slot(self, chat_id: str, scope: str) -> AsyncIterator[_Slot]:
         """Hold the slot's lock for the duration of the block."""
         slot = _Slot(scope, self._slot_key(chat_id, scope), SandboxStore(self._data_store, scope=scope))
-        async with await self._runtime.lock(slot.key):
+        async with self._runtime.locks(slot.key):
             yield slot
 
     async def run_script(self, script: str) -> str:
@@ -385,7 +382,7 @@ class SandboxService:
             plot_output, plot_assets = self._make_output_record(
                 display_id=None,
                 title="Interactive plot",
-                bundle={"application/vnd.plotly.v1+json": plot_bytes},
+                bundle={PLOTLY_MEDIA_TYPE: plot_bytes},
                 text=None,
             )
             outputs = (*outputs, plot_output)

@@ -48,7 +48,7 @@
   padding-block: 0;
 }
 
-/* Fenced code: the shell's code card (`@gigachad/chat-ui/code.css` `.gc-code`) on Streamdown's block, header stays hidden.
+/* Fenced code: the shell's code card (`.gc-code` of the chat-ui code styles) on Streamdown's block, header stays hidden.
    The shell draws dark code as a paper well inside a surface card. Here prose sits on the paper itself, so the card is
    the surface in both modes */
 :root:root.cf-embed [data-streamdown="code-block"] {

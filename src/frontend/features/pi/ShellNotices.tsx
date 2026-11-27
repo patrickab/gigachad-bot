@@ -1,9 +1,10 @@
 "use client"
 
+import { isRecord } from "@/lib/utils"
 import { registerMessageRenderer } from "./renderers"
 import type { AgentMessage, CustomMessage } from "./types"
 
-const detailsOf = (message: CustomMessage): Record<string, unknown> => (typeof message.details === "object" && message.details !== null ? (message.details as Record<string, unknown>) : {})
+const detailsOf = (message: CustomMessage): Record<string, unknown> => (isRecord(message.details) ? message.details : {})
 
 /** A background session that ended well: meant for the agent, the transcript leaves it out. */
 export function isSilentShellNotice(message: AgentMessage): boolean {

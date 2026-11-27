@@ -5,8 +5,10 @@ import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
 import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useOpenFile } from "@/features/editor/FilePanel"
-import { ApiError, deletePiTurn, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
+import { ApiError, deletePiTurn, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
+import { piCatalogResource } from "@/lib/backend/resources"
 import type { Attachment, PiCatalog, PiView } from "@/lib/domain/types"
 import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
 import { BtwPanel } from "./BtwPanel"
@@ -91,14 +93,7 @@ async function resumableSession(repo: string, sessionId: string): Promise<PiSess
 export function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<string, string[]>; defaultLevels: string[]; settled: boolean } {
   const [catalog, setCatalog] = useState<PiCatalog | null>(null)
   const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    if (!enabled || catalog) return
-    let cancelled = false
-    fetchPiCatalog().then((loaded) => cancelled || setCatalog(loaded), () => cancelled || setFailed(true))
-    return () => {
-      cancelled = true
-    }
-  }, [enabled, catalog])
+  useLoadWhile(enabled && !catalog, piCatalogResource.load, setCatalog, () => setFailed(true))
   return useMemo(() => {
     const models: PiModel[] = []
     const levels = new Map<string, string[]>()

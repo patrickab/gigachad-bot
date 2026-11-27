@@ -6,9 +6,8 @@
  */
 import type { FactoryState, Host, Profile, SessionMeta, SessionUsage } from "../host/index.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
+import type { LiveStatus } from "../supervisor/session.ts";
 import { cachedUntil } from "./cache.ts";
-
-export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
 
 export type SessionInfo = {
   sessionId: string;

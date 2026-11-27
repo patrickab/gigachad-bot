@@ -25,14 +25,14 @@ from lib.storage_namespace import (
     ATTACHMENT,
     CHAT,
     GRAPH,
-    META_JSON,
     NOTE,
     PROJECT,
-    PROJECT_JSON,
+    PROJECTS_META,
     PROMPT,
     SANDBOX,
     WORKBENCH,
     WORKBENCH_CHATS,
+    project_json,
 )
 from lib.workbench.links import owe_new_paths
 
@@ -158,12 +158,11 @@ def renamed_documents(
     - Catalog entry and `project.json` take the new name
     - A disk folder linked by the old slug's folder name stays linked through `linked_root`
     """
-    meta_key = f"{CHAT}/{META_JSON}"
-    project_key = f"{CHAT}/{refs.old}/{PROJECT_JSON}"
+    project_key = project_json(refs.old)
     for key, content, is_dir in rows:
         target = refs.key(key)
         updated = content if is_dir else refs.content(key, content)
-        if key == meta_key:
+        if key == PROJECTS_META:
             meta = json.loads(updated)
             entry = next(project for project in meta["projects"] if project["slug"] == refs.new)
             entry.update(name=name, updatedAt=utc_now_iso())
@@ -236,7 +235,7 @@ class PostgresProjectRenamer:
                     "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path", (user_id,),
                 ).fetchall()]
                 documents = [(key, bytes(content), is_dir) for key, content, is_dir in rows]
-                new_project_key = f"{CHAT}/{refs.new}/{PROJECT_JSON}"
+                new_project_key = project_json(refs.new)
                 for source, target, content in renamed_documents(documents, refs, name, roots):
                     if target == new_project_key:
                         linked = bool(json.loads(content).get("linked_root"))

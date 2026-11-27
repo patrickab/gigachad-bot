@@ -1,4 +1,5 @@
 import type { Fact } from "@/lib/domain/memory"
+import { relativeIn } from "@/lib/paths"
 
 /** A level of the memory window: the root when `memoryStore` is empty, else a memory_store or one of its directories. */
 export interface MemoryLocation {
@@ -14,15 +15,10 @@ export function locationLabel(location: MemoryLocation): string {
   return location.path ? `${location.memoryStore} / ${location.path}` : location.memoryStore
 }
 
-/** `path` without the `prefix/` it was listed under: `map/auth` under `map` -> `auth`. */
-export function relativeTo(path: string, prefix: string): string {
-  return prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path
-}
-
 /** Breadcrumb label of `child` opened from `parent`, without the part `parent` already names. */
 export function childLabel(parent: MemoryLocation, child: MemoryLocation): string {
-  if (child.memoryStore === parent.memoryStore) return relativeTo(child.path, parent.path)
-  if (parent.memoryStore && !child.path) return relativeTo(child.memoryStore, parent.memoryStore)
+  if (child.memoryStore === parent.memoryStore) return relativeIn(parent.path, child.path)
+  if (parent.memoryStore && !child.path) return relativeIn(parent.memoryStore, child.memoryStore)
   return locationLabel(child)
 }
 

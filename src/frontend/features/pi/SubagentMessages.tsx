@@ -3,7 +3,9 @@
 import { ChevronRight } from "lucide-react"
 import type { ReactNode } from "react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { isRecord } from "@/lib/utils"
 import { registerMessageRenderer } from "./renderers"
+import { str } from "./subagents"
 import { textOf } from "./transcript"
 import type { CustomMessage } from "./types"
 
@@ -12,10 +14,6 @@ import type { CustomMessage } from "./types"
  * `intercom_message` (a child or peer session writes to this one) and `subagent-notify` (a background run settled).
  * A quiet one-line summary, the full text folds open on demand. Both read their `details` leniently.
  */
-type Json = Record<string, unknown>
-const isRecord = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value)
-const str = (value: unknown): string | undefined => (typeof value === "string" && value ? value : undefined)
-
 function Card({ source, summary, body }: { source: string; summary: string; body: string }) {
   const folds = body.trim() !== "" && body.trim() !== summary.trim()
   const head: ReactNode = (

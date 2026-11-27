@@ -13,15 +13,13 @@ from typing import Any
 
 from lib import completions
 from lib.agent_sandbox_adapter import SandboxScriptError
-from lib.sandbox_service import SANDBOX_PLOT_SCOPE, SandboxService
+from lib.sandbox_service import PLOTLY_MEDIA_TYPE, SANDBOX_PLOT_SCOPE, SandboxService
 from lib.tool_context import ToolContext
 from lib.toolcalling import ToolOutcome
 
 __all__ = ["PLOTLY_MEDIA_TYPE", "create_sandbox_plot", "sandbox_plot_dependencies"]
 
 logger = logging.getLogger(__name__)
-
-PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
 
 
 def sandbox_plot_dependencies() -> str:

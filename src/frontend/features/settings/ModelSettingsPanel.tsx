@@ -1,12 +1,13 @@
 "use client"
 
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchPiCatalog } from "@/lib/backend/api"
+import { useCallback, useRef, useState } from "react"
+import { piCatalogResource } from "@/lib/backend/resources"
 import { displayName, PI_MODEL_SOURCE, PI_PROVIDER_LABEL } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse, PiCatalog } from "@/lib/domain/types"
 import { errorMessage, cn } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 
 type SettingsTab = "providers" | "defaults"
@@ -31,10 +32,7 @@ export function useModelSettings(onProvidersChange: (providers: ModelProvider[])
   // Loaded when the settings panel opens, not on mount: pi-host is optional, so
   // probing its gateway for every chat view would cost a request nobody asked
   // for. A failed probe stays null and simply hides the section.
-  useEffect(() => {
-    if (!configuring || piCatalog) return
-    fetchPiCatalog().then(setPiCatalog).catch(() => undefined)
-  }, [configuring, piCatalog])
+  useLoadWhile(configuring && !piCatalog, piCatalogResource.load, setPiCatalog)
 
   const persist = async (next: ModelProvider[]) => {
     setError(null)

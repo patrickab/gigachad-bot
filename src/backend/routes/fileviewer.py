@@ -25,8 +25,8 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
-from backend.http_plumbing import REVALIDATE, etag_matches, http_errors
-from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
+from backend.http_plumbing import REVALIDATE, http_errors, not_modified
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, resolve_allowed
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureError, ArchitectureStore, split_source_path
@@ -39,16 +39,6 @@ from lib.references import annotation_canvas
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
 _SINGLE_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
-
-
-def resolve_allowed(path: str, roots: FileRoots) -> Path:
-    """The live file-root file at *path*, 403 outside the allowed roots and 404 when no file lives there."""
-    try:
-        return lib_docs.resolve_known_path(path, roots=roots)
-    except lib_docs.PathNotAllowed as exc:
-        if exc.outside_roots:
-            raise HTTPException(status_code=403, detail="Unknown file path") from exc
-        raise HTTPException(status_code=404, detail="File not found") from exc
 
 
 def _stored(path: str, docs: DataStore) -> str | None:
@@ -82,13 +72,6 @@ def read_text_content(
     ):
         content = resolved.read_text(encoding="utf-8")
     return FileContent(path=path, content=content)
-
-
-def _not_modified(request: Request, etag: str) -> Response | None:
-    """A 304 when the request's ``If-None-Match`` lists *etag* (weak comparison), else None."""
-    if not etag_matches(request.headers.get("if-none-match"), etag):
-        return None
-    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": REVALIDATE})
 
 
 def _byte_range(request: Request, etag: str, size: int) -> tuple[int, int] | None:
@@ -129,8 +112,8 @@ class _StoredFile:
         raise NotImplementedError
 
     def response(self, request: Request) -> Response:
-        if (not_modified := _not_modified(request, self.etag)) is not None:
-            return not_modified
+        if (unchanged := not_modified(request, self.etag)) is not None:
+            return unchanged
         headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Cache-Control": REVALIDATE}
         span = _byte_range(request, self.etag, self.size)
         with http_errors((StorageNotFoundError, 404, "File not found")):
@@ -211,7 +194,7 @@ class _HostFile:
             stat_result=stat,
             headers={"Cache-Control": REVALIDATE},
         )
-        return _not_modified(request, response.headers["etag"]) or response
+        return not_modified(request, response.headers["etag"]) or response
 
     def sha256(self) -> str:
         with http_errors((OSError, 404, "File not found")), self.path.open("rb") as file:

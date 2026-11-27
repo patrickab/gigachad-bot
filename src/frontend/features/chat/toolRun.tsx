@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 import type { ToolCall, ToolRun } from "@/features/conversation/tools/types"
 import type { ToolCallRecord } from "@/lib/domain/types"
+import { useNowMs } from "@/hooks/useNowMs"
 
 /** The chat's tool call as Pi's row reads it: the call, its run (the full record in `run.result.details`) and its stage timeline. */
 export interface ChatToolRun {
@@ -46,14 +47,8 @@ function stageDuration(stage: Stage, now: number): string {
 
 /** A call's stages with their durations; a running stage's timer ticks. */
 function ChatToolStages({ stages }: { stages: Stage[] }) {
-  const [now, setNow] = useState(() => Date.now())
-  const running = stages.some((stage) => stage.status === "running")
   // Re-render at 10 Hz only while a stage runs so its timer ticks.
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setInterval(() => setNow(Date.now()), 100)
-    return () => window.clearInterval(timer)
-  }, [running])
+  const now = useNowMs(100, stages.some((stage) => stage.status === "running"))
   return stages.map((stage) => (
     <span key={stage.id} className="flex shrink-0 items-center gap-1.5">
       {stage.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-ink-faint" aria-hidden="true" />}

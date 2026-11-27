@@ -10,6 +10,7 @@
  *     `assistant` adds the assistant answers among them as `assistantAnswer` (text, model, usage; no tool calls or
  *     thinking), what the coder said in each round
  */
+import { isPrompt, pathToRoot, type Entry as BranchEntry } from "../host/entries.ts";
 import type { Host, SessionEntries } from "../host/index.ts";
 import { withMediaHashes } from "../media.ts";
 
@@ -34,27 +35,16 @@ function withoutToolImages(entry: Entry): Entry {
   return { ...entry, message: { ...message, content: message.content.filter((block) => block?.type !== "image") } };
 }
 
-function isPrompt(entry: Entry): boolean {
-  return entry.type === "message" && (entry.message as { role?: unknown } | undefined)?.role === "user";
-}
-
 /**
  * The active branch of `entries` (root to `leafId`) from its `turns`-th last prompt on, tool result images left out.
  *
  * The first kept entry's parent is left out, so a reader walking parents from the leaf stops there.
  */
 export function branchTail({ entries, leafId }: SessionEntries, turns: number): SessionEntries {
-  const byId = new Map(entries.map((entry) => [entry.id as string, entry]));
-  const kept: Entry[] = [];
-  let prompts = 0;
-  let entry = leafId ? byId.get(leafId) : undefined;
-  // Bounded by the entry count, so a broken parent chain cannot loop
-  while (entry && kept.length < entries.length) {
-    kept.push(withoutToolImages(entry));
-    if (isPrompt(entry) && ++prompts === turns) break;
-    entry = typeof entry.parentId === "string" ? byId.get(entry.parentId) : undefined;
-  }
-  return { entries: kept.reverse(), leafId };
+  const path = pathToRoot(new Map(entries.map((entry) => [entry.id as string, entry as BranchEntry])), leafId);
+  let start = path.length;
+  for (let prompts = 0; start > 0 && prompts < turns; ) if (isPrompt(path[--start]!)) prompts++;
+  return { entries: path.slice(start).map(withoutToolImages), leafId };
 }
 
 /**

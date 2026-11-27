@@ -1,16 +1,12 @@
 "use client"
 
-import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo } from "react"
-import { Brain, Loader2 } from "lucide-react"
+import { Brain } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { TurnAnswer, TurnQuestion } from "@/features/conversation/TurnQuestion"
-import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
-import type { Message, Attachment } from "@/lib/domain/types"
-
-const WebSearchResult = dynamic(() => import("./WebSearchResult").then(m => m.WebSearchResult), { ssr: false })
+import type { Attachment } from "@/lib/domain/types"
 
 const PULSE_DURATION_S = 1.4
 const PULSE_SCALE_PEAK = 1.12
@@ -28,9 +24,6 @@ interface ChatMessageProps {
   laterTurnsOf?: (index: number) => number
   /** The answer's branch. */
   onBranch?: (index: number) => void
-  search_result?: Message["search_result"]
-  research_steps?: Message["research_steps"]
-  research_progress?: Message["research_progress"]
   /** A tool call of this message is still running; suppresses the "Processing…" placeholder (ChatContainer renders the tool element). */
   toolRunning?: boolean
   isStreaming?: boolean
@@ -44,7 +37,6 @@ interface AssistantMessageContentProps {
   content: string
   isStreaming?: boolean
   compact?: boolean
-  search_result?: Message["search_result"]
 }
 
 /** Split the `<thought>` block from the answer. An unclosed tag means the thought is still streaming. */
@@ -66,30 +58,12 @@ function splitThought(content: string): { thought: string | null; cleanContent: 
   return { thought: t, cleanContent: before.trim() }
 }
 
-/** Spinner plus a short status text for a turn that has nothing to show yet. */
-function StatusLine({ children }: { children: string }) {
-  return (
-    <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
-      <span>{children}</span>
-    </span>
-  )
-}
-
 export function AssistantMessageContent({
   content,
   isStreaming,
   compact,
-  search_result,
 }: AssistantMessageContentProps) {
   const { thought, cleanContent } = useMemo(() => splitThought(content), [content])
-
-  if (search_result) {
-    if (!content.trim() && isStreaming) {
-      return <StatusLine>Searching…</StatusLine>
-    }
-    return <WebSearchResult content={content} search_result={search_result} compact={compact} />
-  }
 
   return (
     <div className="text-ink">
@@ -115,11 +89,8 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf, onBranch, toolRunning, isStreaming, attachments, onAttachmentClick, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
-  const hasResearch = !isUser && !!research_steps?.length
-  // Research steps stream into `content` as progress text until the final answer replaces them
-  const isResearchRunning = hasResearch && isStreaming
   const body = (
     <>
       {isUser ? (
@@ -129,29 +100,16 @@ function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf
             <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
           )}
         </>
-      ) : (content || search_result) && !isResearchRunning ? (
+      ) : content ? (
         <div data-chat-text={`${index}:assistant`}>
           <AssistantMessageContent
             content={content}
             isStreaming={isStreaming}
-            search_result={search_result}
           />
         </div>
-      ) : content ? (
-        <span role="status" className="inline-flex items-center gap-1 text-ink text-sm">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" aria-hidden="true" />
-          {content}
-        </span>
       ) : isStreaming && !toolRunning ? (
         <span role="status" aria-label="Waiting for the reply" className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" />
       ) : null}
-      {hasResearch && research_steps && (
-        <ResearchTrace
-          steps={research_steps}
-          progress={research_progress}
-          isLive={isStreaming}
-        />
-      )}
     </>
   )
   if (isUser) {
@@ -170,11 +128,11 @@ function ChatMessageInner({ role, content, index, onDelete, onEdit, laterTurnsOf
   }
   return (
     <TurnAnswer
-      text={isResearchRunning ? "" : content}
+      text={content}
       live={isStreaming}
       onBranch={onBranch && (() => onBranch(index))}
       branchLabel="Branch conversation from this point"
-      tail={hasResearch || search_result ? "activity" : "text"}
+      tail="text"
     >
       {body}
     </TurnAnswer>

@@ -1,17 +1,14 @@
 "use client"
 
-import { useCallback, useState } from "react"
-import { FloatingPicker, type PickerGroup } from "@/components/ui/CommandPicker"
+import { useState } from "react"
+import { FloatingPicker, useAltKeyPicker, type PickerGroup } from "@/components/ui/CommandPicker"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useProject } from "@/contexts/ProjectContext"
-import { useTabActive } from "@/contexts/TabContext"
-import { useEventListener } from "@/hooks/useEventListener"
 import { useNowMs } from "@/hooks/useNowMs"
-import { useResetOnChange } from "@/hooks/useResetOnChange"
 import type { ChatListing, ChatSearchMatch } from "@/lib/backend/api"
 import type { ChatRevealHit } from "./ChatContainer"
 import type { ProjectListItem } from "@/lib/domain/projects"
-import { cn, compactElapsed, isAltOnly, isTerminalKeyEvent } from "@/lib/utils"
+import { cn, compactElapsed } from "@/lib/utils"
 import { QUERY_MAX_LENGTH, useAllChats, useChatSearch } from "./useChatPicker"
 
 const GENERAL = "General"
@@ -69,17 +66,7 @@ function ChatRow({ entry: { chat, match, first = true }, query, now }: { entry: 
  * - Picking a chat opens it in the active tab, picking a hit reveals its pair and paints its match (`onOpenChat`)
  */
 export function ChatPicker({ onOpenChat }: { onOpenChat: OpenChat }) {
-  const tabActive = useTabActive()
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  // Alt+C toggles the picker from anywhere in the tab, terminals keep their keys
-  useEventListener("window", "keydown", (event) => {
-    if (!isAltOnly(event) || event.key.toLowerCase() !== "c" || isTerminalKeyEvent(event)) return
-    event.preventDefault()
-    setOpen((current) => !current)
-  }, { active: tabActive, capture: true })
-  // The list lies in a portal, a tab sent to the background takes its open list along
-  useResetOnChange(tabActive, (active) => { if (!active) close() })
+  const { open, close } = useAltKeyPicker("c")
   return open ? <ChatPickerPanel onOpenChat={onOpenChat} onClose={close} /> : null
 }
 

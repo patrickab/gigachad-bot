@@ -10,17 +10,10 @@ function resolveApiBase(base: string): string {
   return `${typeof window === "undefined" ? "http://127.0.0.1" : window.location.origin}${base}`
 }
 
-const defaultApiBase = resolveApiBase(process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001/api")
-let apiBase = defaultApiBase
+const apiBase = resolveApiBase(process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8001/api")
 
 export function getApiBase(): string {
   return apiBase
-}
-
-/** Set by the Tauri bootstrap before application providers mount. Throws on an invalid URL. Strips one trailing slash. */
-export function setApiBase(base: string): void {
-  const url = new URL(base)
-  apiBase = url.toString().replace(/\/$/, "")
 }
 
 export const REASONING_LEVELS = ["none", "low", "medium", "high"] as const

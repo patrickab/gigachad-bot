@@ -8,7 +8,7 @@ import { FileTree } from "@/components/ui/file-tree/FileTree"
 import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import { useProject } from "@/contexts/ProjectContext"
-import { useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { fileItem, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
@@ -32,23 +32,15 @@ import { directoryEntries, owningProject, projectItems, workspaceItems } from ".
 const texFileName = (name: string) => (/\.[^./]+$/.test(name) ? name : `${name}.tex`)
 
 interface SidebarProps {
-  /** Open the file `path` of a folder on disk, `scope` is the project it belongs to, null for none. */
-  onFileSelect?: (path: string, scope: string | null) => void
-  onDiffSelect?: (path: string) => void
-  onDocumentSelect?: (path: string, scope: string) => void
-  /** Opens `.tex .bib .sty .cls` and `.md` files in the workbench, absent where it is unavailable. */
-  onWorkbenchSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
-  /** A file was renamed: tabs showing `oldPath` follow it to `newPath`. */
-  onDocumentRenamed?: (oldPath: string, newPath: string) => void
   onNewChat?: (slug: string | null) => void
   activeCanvasPath?: string | null
   activeDocumentPath?: string | null
-  onCanvasSelect?: (path: string, scope: string) => void
+  /** Whether files of the workbench's kinds (`.tex .bib .sty .cls`, `.md`) open in it. */
+  workbench?: boolean
   onCanvasDeleted?: (path: string) => void
-  onArchitectureSelect?: (slug: string) => void
-  /** Show a Pi session or new session, a learn view, or the factory board, in the current tab unless `inNewTab`. */
+  /** Show a file, canvas, diff, architecture, Pi session, learn view or the factory board, in the current tab unless `inNewTab`. */
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
@@ -92,12 +84,9 @@ export function Sidebar(props: SidebarProps) {
       const shown = documents.documents[scope] ?? []
       return shown.some((doc) => doc.path === path) ? path : shown.find((doc) => doc.name === name)?.path ?? path
     },
-    onRenamed: async (oldPath, newPath) => {
-      props.onDocumentRenamed?.(oldPath, newPath)
-      await refreshDocumentLists()
-    },
+    onRenamed: () => refreshDocumentLists(),
   })
-  const selectFile = (path: string) => props.onFileSelect?.(path, owningProject(path, documents.documents, projects, code.mounts))
+  const selectFile = (path: string) => props.onItemOpen?.({ ...fileItem(path, owningProject(path, documents.documents, projects, code.mounts), Boolean(props.workbench)), rootFile: true })
   const folderRows = {
     onFileSelect: selectFile,
     moveToFolder: async (path: string, folder: string) => {

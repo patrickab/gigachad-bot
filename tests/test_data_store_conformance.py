@@ -132,21 +132,6 @@ def test_non_recursive_delete_rejects_non_empty_directory(data_store: DataStore)
         data_store.delete("tree")
 
 
-def test_move_handles_single_key_and_prefix(data_store: DataStore):
-    data_store.write_bytes("source.txt", b"single")
-    data_store.write_bytes("tree/first.txt", b"one")
-    data_store.write_bytes("tree/nested/second.txt", b"two")
-
-    data_store.move("source.txt", "destination.txt")
-    data_store.move("tree", "moved")
-
-    assert data_store.exists("source.txt") is False
-    assert data_store.read_bytes("destination.txt")[0] == b"single"
-    assert data_store.exists("tree") is False
-    assert data_store.read_bytes("moved/first.txt")[0] == b"one"
-    assert data_store.read_bytes("moved/nested/second.txt")[0] == b"two"
-
-
 def test_postgres_store_cannot_read_another_users_key(postgres_pool, clean_database):
     first_user = create_user(postgres_pool, "first@example.test")
     second_user = create_user(postgres_pool, "second@example.test")
@@ -160,11 +145,6 @@ def test_postgres_store_cannot_read_another_users_key(postgres_pool, clean_datab
         second_store.read_bytes("private.json")
 
 
-def test_move_missing_source_raises_storage_not_found(data_store: DataStore):
-    with pytest.raises(StorageNotFoundError):
-        data_store.move("missing", "destination")
-
-
 @pytest.mark.parametrize("key", ["", "/absolute", "../outside", "parent/../../outside"])
 def test_invalid_storage_keys_are_rejected(data_store: DataStore, key: str):
     operations = [
@@ -173,8 +153,6 @@ def test_invalid_storage_keys_are_rejected(data_store: DataStore, key: str):
         lambda: data_store.exists(key),
         lambda: data_store.mkdir(key),
         lambda: data_store.delete(key),
-        lambda: data_store.move(key, "destination"),
-        lambda: data_store.move("source", key),
     ]
     if key:
         operations.append(lambda: data_store.list(key))
@@ -235,5 +213,3 @@ def test_meta_follows_the_content_it_was_written_with(data_store: DataStore):
     data_store.write_meta({"meta/a.json": ({"n": 5}, hashlib.sha256(b"one again").hexdigest())})
     assert data_store.read_bytes("meta/a.json")[1] == revision
 
-    data_store.move("meta/a.json", "meta/moved.json")
-    assert data_store.list_meta("meta")["meta/moved.json"] == {"n": 5}

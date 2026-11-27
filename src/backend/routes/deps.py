@@ -2,11 +2,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 import hashlib
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends
 
+from backend.http_plumbing import http_errors
 from backend.identity import RequestIdentity, get_request_identity
 from lib import document_service, pi_models
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, SandboxRunner
@@ -148,6 +150,12 @@ def get_file_roots(
     scope: UserScope = Depends(get_user_scope),
 ) -> FileRoots:
     return FileRoots(repository=PostgresFileRootRepository(scope), host_access=identity.has_host_access)
+
+
+def resolve_allowed(path: str, roots: FileRoots) -> Path:
+    """The live file-root file at *path*, 403 outside the allowed roots and 404 when no file lives there."""
+    with http_errors((ValueError, 403, "Unknown file path"), (FileNotFoundError, 404, "File not found")):
+        return roots.resolve(path)
 
 
 def get_disk_files(roots: FileRoots = Depends(get_file_roots), scope: UserScope = Depends(get_user_scope)) -> DiskFiles:

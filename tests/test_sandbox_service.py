@@ -7,13 +7,13 @@ import pytest
 from config import TEST_MODEL
 from lib.asset_store import AssetStore, StorageNotFoundError
 from lib.changes import UserScope
-from lib.fake_sandbox_runner import FakeSandboxRunner
 from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_service import PROMPT_MAX_LEN, SandboxRuntimeState, SandboxService
 from lib.sandbox_store import ActivePointer, SandboxStore
 from lib.storage_namespace import sandbox_active, sandbox_asset, sandbox_manifest
 from tests.conftest import create_user
+from tests.fakes import FakeSandboxRunner
 
 # The model id is caller-supplied configuration; these tests only check it is forwarded.
 SANDBOX_MODEL = TEST_MODEL

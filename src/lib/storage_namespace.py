@@ -32,6 +32,7 @@ WORKBENCH_CHATS = f"{WORKBENCH}/chats.json"
 PROJECT_JSON = "project.json"
 # The project catalog (names, slugs, archived flags), at the chat namespace root.
 META_JSON = "projects-meta.json"
+PROJECTS_META = f"{CHAT}/{META_JSON}"
 DEFAULT_SANDBOX_SCOPE = "workspace"
 
 

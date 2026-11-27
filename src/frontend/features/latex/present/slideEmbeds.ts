@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useLoaded } from "@/hooks/useLoaded"
 import type { PdfDocument } from "@/components/content/pdf/pdfLayout"
 
 /** A live frame over part of a slide: its address and its box in fractions of the page. */
@@ -52,23 +52,18 @@ export function frameStep(frame: DeckFrame, pageNumber: number): number {
 
 /** Every embed of the deck in page order, none without `pdf` or while they load. */
 export function useDeckEmbeds(pdf: PdfDocument | undefined): DeckEmbed[] {
-  const [loaded, setLoaded] = useState<{ pdf: PdfDocument; embeds: DeckEmbed[] } | null>(null)
-  useEffect(() => {
-    if (!pdf) return
-    let current = true
-    const pageEmbeds = async (pageNumber: number): Promise<DeckEmbed[]> => {
-      const page = await pdf.getPage(pageNumber)
-      return slideEmbeds(await page.getAnnotations(), page.view).map((embed) => ({ ...embed, page: pageNumber }))
-    }
-    Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pageEmbeds(index + 1).catch(() => [])))
-      .then((pages) => {
-        if (current) setLoaded({ pdf, embeds: pages.flat() })
-      })
-    return () => {
-      current = false
-    }
-  }, [pdf])
-  return pdf && loaded?.pdf === pdf ? loaded.embeds : []
+  return useLoaded(pdf ?? null, loadDeckEmbeds).value ?? NO_EMBEDS
+}
+
+const NO_EMBEDS: DeckEmbed[] = []
+
+async function loadDeckEmbeds(pdf: PdfDocument): Promise<DeckEmbed[]> {
+  const pageEmbeds = async (pageNumber: number): Promise<DeckEmbed[]> => {
+    const page = await pdf.getPage(pageNumber)
+    return slideEmbeds(await page.getAnnotations(), page.view).map((embed) => ({ ...embed, page: pageNumber }))
+  }
+  const pages = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pageEmbeds(index + 1).catch(() => [])))
+  return pages.flat()
 }
 
 /** The key an embedded applet hands back to the deck with `postMessage({ type: "deck-key", key })`, null for any other message. */

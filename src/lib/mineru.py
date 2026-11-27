@@ -13,7 +13,6 @@ import logging
 from pathlib import Path
 import re
 import shutil
-import sys
 import tempfile
 import threading
 
@@ -99,14 +98,6 @@ async def parse_pdf(pdf_path: str | Path, output_dir: str | Path) -> tuple[Path,
         local = None
         if MINERU_SERVER_URL:
             base_url = MINERU_SERVER_URL.rstrip("/")
-        elif getattr(sys, "frozen", False):
-            # LocalAPIServer spawns `sys.executable -m mineru.cli.fast_api`,
-            # which cannot work inside a PyInstaller bundle (sys.executable is
-            # the frozen sidecar itself, and the ML stack isn't bundled).
-            raise MineruUnavailable(
-                "PDF OCR in the desktop app requires MINERU_SERVER_URL pointing at a "
-                "running MinerU server (e.g. `python -m mineru.cli.fast_api` from the repo venv)."
-            )
         else:
             local = api_client.LocalAPIServer()
             with _active_servers_lock:

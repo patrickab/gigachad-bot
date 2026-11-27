@@ -11,7 +11,7 @@ import re
 from typing import Any
 import zlib
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, Response
 from sse_starlette.sse import EventSourceResponse
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -71,7 +71,7 @@ def _sse(events: AsyncIterator[tuple[str, str]]) -> EventSourceResponse:
     return EventSourceResponse(event_stream(), headers=_SSE_HEADERS)
 
 
-def stream_completion(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> EventSourceResponse:
+def stream_completion(model: str, messages: list[dict[str, Any]], **kwargs: Any) -> EventSourceResponse:  # noqa: ANN401 - completion options
     """Stream a completion as SSE: text becomes `token` events, the usage dict a `usage` event, a failure an `error` event."""
 
     async def events() -> AsyncIterator[tuple[str, str]]:
@@ -113,6 +113,13 @@ def etag_matches(if_none_match: str | None, etag: str) -> bool:
         return False
     tags = {tag.strip().removeprefix("W/") for tag in if_none_match.split(",")}
     return "*" in tags or etag.removeprefix("W/") in tags
+
+
+def not_modified(request: Request, etag: str, cache_control: str = REVALIDATE) -> Response | None:
+    """A 304 carrying *etag* and *cache_control* when `If-None-Match` lists *etag* (weak comparison), else None."""
+    if not etag_matches(request.headers.get("if-none-match"), etag):
+        return None
+    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache_control})
 
 
 def _is_transfer_optimizable(status: int, headers: Headers) -> bool:
@@ -191,7 +198,8 @@ class TransferMiddleware:
 
         async def send_optimized(message: Message) -> None:
             nonlocal deferred_start
-            if message["type"] == "http.response.start" and _is_transfer_optimizable(message["status"], Headers(raw=message["headers"])):
+            start = message["type"] == "http.response.start"
+            if start and _is_transfer_optimizable(message["status"], Headers(raw=message["headers"])):
                 deferred_start = message
                 return
             if deferred_start is None or message["type"] != "http.response.body":

@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isRecord } from "./json.ts";
 
 const HASH_RE = /^[a-f0-9]{64}$/;
 const SWEEP_EVERY_MS = 24 * 60 * 60 * 1000;
@@ -134,10 +135,6 @@ export function forgetMedia(hashes: readonly string[]): string[] {
 }
 
 type Json = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function mediaBlock(block: unknown): unknown {
   if (!isRecord(block) || block.type !== "image" || typeof block.data !== "string" || block.data === "") return block;

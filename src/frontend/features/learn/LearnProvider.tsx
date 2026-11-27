@@ -57,10 +57,17 @@ function useLearnBridge(): LearnBridge {
   return useRequiredContext(LearnFrameContext, "learn frame hooks must be used inside LearnProvider")
 }
 
+function useBridgeState<Type extends LearnStateType>(bridge: LearnBridge, type: Type): LearnFrameState<Type> {
+  return useSyncExternalStore(bridge.subscribe, () => bridge.state(type), () => bridge.state(type))
+}
+
+function useBridgeDrive(bridge: LearnBridge): LearnDrive {
+  return useSyncExternalStore(bridge.subscribe, bridge.drive, bridge.drive)
+}
+
 /** The frame's latest `type` state since its last load (`IS_STATE`): the message or null, per session for `session-meta`. */
 export function useLearnFrameState<Type extends LearnStateType>(type: Type): LearnFrameState<Type> {
-  const bridge = useLearnBridge()
-  return useSyncExternalStore(bridge.subscribe, () => bridge.state(type), () => bridge.state(type))
+  return useBridgeState(useLearnBridge(), type)
 }
 
 /** Call `listener` with every frame event of `type` (`model-open`, `chrome-key`), always its latest render's version. */
@@ -72,8 +79,7 @@ export function useLearnFrameEvent<Type extends LearnEventType>(type: Type, list
 
 /** Whether the shell may drive the frame: `"matched"` only when both run the same protocol version, `"mismatch"` asks for a LearnHarness restart. */
 export function useLearnDrive(): LearnDrive {
-  const bridge = useLearnBridge()
-  return useSyncExternalStore(bridge.subscribe, bridge.drive, bridge.drive)
+  return useBridgeDrive(useLearnBridge())
 }
 
 /** A `showInFrame` request waiting for the frame: driven, attached to a learn tab, on session `sessionId` when it names one. */
@@ -92,7 +98,7 @@ const FRAME_REQUEST_MS = 10_000
  * title. A reported session the list lacks reads the list again. One instance for every tab.
  */
 function useReportedTitles(bridge: LearnBridge, sessions: LearnSessions) {
-  const metas = useSyncExternalStore(bridge.subscribe, () => bridge.state("session-meta"), () => bridge.state("session-meta"))
+  const metas = useBridgeState(bridge, "session-meta")
   const reported = useRef(new Map<string, string>())
   const { sessions: known, retitle, refresh } = sessions
   useEffect(() => {
@@ -180,8 +186,8 @@ export function LearnProvider({ onOpenItem, children }: { onOpenItem: OpenItem; 
     frameRequest.current = { message, sessionId: session?.id ?? null, at: Date.now() }
     setRequested((count) => count + 1)
   }, [onOpenItem, attached])
-  const drive = useSyncExternalStore(bridge.subscribe, bridge.drive, bridge.drive)
-  const frameView = useSyncExternalStore(bridge.subscribe, () => bridge.state("view"), () => bridge.state("view"))
+  const drive = useBridgeDrive(bridge)
+  const frameView = useBridgeState(bridge, "view")
   useEffect(() => {
     const request = frameRequest.current
     if (!request) return

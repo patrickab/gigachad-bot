@@ -14,6 +14,7 @@
  * reproduces (entries, replay, UI state) are dropped, the rest (responses to its own commands, transient UI requests)
  * go out after the replay.
  */
+import { pathToRoot, type Entry } from "../host/entries.ts";
 import type { PiChild } from "../host/index.ts";
 import { withMediaHashes } from "../media.ts";
 import type { SessionLock } from "./lock.ts";
@@ -28,7 +29,6 @@ export interface FrameSink {
 
 export type PiRecord = { type?: unknown; id?: unknown; [field: string]: unknown };
 export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
-export type SessionEntry = { id: string; parentId: string | null; type: string; [field: string]: unknown };
 
 /** Ids of commands pi-host sends itself; their responses never reach clients. */
 const INTERNAL_ID_PREFIX = "pi-host:";
@@ -57,7 +57,7 @@ type BufferedRecord = { line: string; type: string; toolCallId?: string };
 type Dialog = { record: PiRecord; timer?: Timer };
 type UiState = { dialogs: PiRecord[]; statuses: Record<string, string>; widgets: Record<string, string[]>; queue: Queue };
 type Queue = { steering: unknown[]; followUp: unknown[] };
-type EntriesData = { entries: SessionEntry[]; leafId: string | null };
+type EntriesData = { entries: Entry[]; leafId: string | null };
 type PendingSnapshot = {
   /** The snapshot frame without `state`, set at the snapshot point. */
   frame?: Record<string, unknown>;
@@ -68,27 +68,13 @@ type PendingSnapshot = {
   queued: string[];
 };
 
-/** Root-to-leaf path through `entries` by `parentId`. */
-export function branchOf(entries: SessionEntry[], leafId: string | null): SessionEntry[] {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const path: SessionEntry[] = [];
-  for (let id = leafId; id !== null; ) {
-    const entry = byId.get(id);
-    if (!entry) break;
-    byId.delete(id);
-    path.push(entry);
-    id = entry.parentId;
-  }
-  return path.reverse();
-}
-
 /**
  * Entries to append after `cursor`, given the `get_entries` tail after it: the leaf's ancestors back to the cursor.
  * Undefined when the cursor is not an ancestor of the leaf or a compaction follows it (M2 replace rule).
  */
-export function appendAfter(cursor: string, tail: SessionEntry[], leafId: string | null): SessionEntry[] | undefined {
+export function appendAfter(cursor: string, tail: Entry[], leafId: string | null): Entry[] | undefined {
   const byId = new Map(tail.map((entry) => [entry.id, entry]));
-  const path: SessionEntry[] = [];
+  const path: Entry[] = [];
   let id = leafId;
   while (id !== null && id !== cursor) {
     const entry = byId.get(id);
@@ -126,7 +112,7 @@ function asArray(value: unknown): unknown[] {
 function entriesData(data: unknown): EntriesData {
   const record = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
   return {
-    entries: asArray(record.entries) as SessionEntry[],
+    entries: asArray(record.entries) as Entry[],
     leafId: typeof record.leafId === "string" ? record.leafId : null,
   };
 }
@@ -257,7 +243,7 @@ export class LiveSession {
         this.request({ type: "get_entries" }, (record) => {
           if (record.success !== true) return done(record);
           const { entries, leafId } = entriesData(record.data);
-          this.markSnapshot(client, pending, { mode: "replace", entries: branchOf(entries, leafId), leafId });
+          this.markSnapshot(client, pending, { mode: "replace", entries: pathToRoot(new Map(entries.map((entry) => [entry.id, entry])), leafId), leafId });
           done();
         });
       if (cursor === null) return replaceAll();

@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import { useTabActive } from "@/contexts/TabContext"
+import { useEventListener } from "@/hooks/useEventListener"
 import type { FileBranchController } from "./useFileTree"
 import type { InlineRename } from "./useInlineRename"
 
@@ -253,6 +253,20 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     }
   }
 
+  /** Drag handlers of a row or section button that takes the drags its `onMoveHere`/`onDropFiles` accept. */
+  const dropTarget = (item: FileTreeItem<T>) => ({
+    onDragOver: (event: React.DragEvent) => {
+      event.stopPropagation()
+      const files = event.dataTransfer.types.includes(FILE_DRAG_TYPE)
+      if (files ? !item.onDropFiles : !item.onMoveHere || !carriesKind(event.dataTransfer.types, item.accepts)) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = files ? "copy" : "move"
+      setDragOverId(item.id)
+    },
+    onDragLeave: () => setDragOverId(null),
+    onDrop: (event: React.DragEvent) => { void handleDrop(event, item) },
+  })
+
   const renderItems = (nodes: FileTreeItem<T>[], depth: number, ancestors: ReadonlySet<string> = new Set()): ReactNode => nodes.filter((item) => !ancestors.has(item.id)).map((item) => {
     const branch = item.type !== "element"
     const expanded = branch && controller.isExpanded(item.id)
@@ -263,7 +277,6 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     const disclosure = item.icon
       ? <item.icon className={cn("h-3 w-3 shrink-0 transition-colors", expanded ? "text-ink" : "text-ink-faint")} />
       : <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
-    const { inline, menu } = splitActions(item)
     return <div key={item.id}>
       {!branch && renderBeforeItem && <div style={{ paddingLeft: paddingLeft + 20 }}>
         {renderBeforeItem(item)}
@@ -273,16 +286,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
           item.multiSelect && "select-none")}
         style={{ marginLeft: paddingLeft }}
-        onDragOver={(event) => {
-          event.stopPropagation()
-          const files = event.dataTransfer.types.includes(FILE_DRAG_TYPE)
-          if (files ? !item.onDropFiles : !item.onMoveHere || !carriesKind(event.dataTransfer.types, item.accepts)) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = files ? "copy" : "move"
-          setDragOverId(item.id)
-        }}
-        onDragLeave={() => setDragOverId(null)}
-        onDrop={(event) => { void handleDrop(event, item) }}
+        {...dropTarget(item)}
       >
         {branch && item.onSelect && <button
           aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`}
@@ -324,21 +328,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           </>}
         </button>}
         {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
-        {!item.rename?.editing && <>
-          {(inline.length > 0 || menu.length > 0 || item.onDelete) && <div className={ACTIONS_CLASS}>
-            {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
-              <action.icon className="h-3 w-3" />
-            </button>)}
-            {menu.length > 0 && <RowMenu label={item.label} actions={menu} />}
-            {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
-              <Trash2 className="h-3 w-3" />
-            </button>}
-          </div>}
-          {/* Creating is the row's main action, so it stays visible at the row end while the rest appears on hover. */}
-          {item.create && <button aria-label={item.create.label} onClick={() => { void startCreate(item.id, item.create!) }} className={ACTION_CLASS}>
-            <Plus className="h-3 w-3" />
-          </button>}
-        </>}
+        {!item.rename?.editing && <RowActions item={item} onCreate={() => { void startCreate(item.id, item.create!) }} />}
       </div>
       {renameError?.id === item.id && item.rename?.editing && <div style={{ marginLeft: paddingLeft + 20 }}>
         <ErrorText className="px-1 py-0.5">{renameError.message}</ErrorText>
@@ -371,7 +361,6 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     const choose = (section: FileTreeItem<T>) => {
       controller.set(Object.fromEntries(sections.map((other) => [other.id, other === section && !controller.isExpanded(section.id)])))
     }
-    const { inline, menu } = open ? splitActions(open) : { inline: [], menu: [] }
     const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (event.key === "Escape" && open) {
         event.stopPropagation()
@@ -394,16 +383,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           return <button key={section.id} type="button" data-section aria-label={section.label} aria-pressed={isOpen}
             tabIndex={isOpen || (!open && section === sections[0]) ? 0 : -1}
             onClick={() => choose(section)}
-            onDragOver={(event) => {
-              const files = event.dataTransfer.types.includes(FILE_DRAG_TYPE)
-              if (files ? !section.onDropFiles : !section.onMoveHere || !carriesKind(event.dataTransfer.types, section.accepts)) return
-              event.preventDefault()
-              event.stopPropagation()
-              event.dataTransfer.dropEffect = files ? "copy" : "move"
-              setDragOverId(section.id)
-            }}
-            onDragLeave={() => setDragOverId(null)}
-            onDrop={(event) => { void handleDrop(event, section) }}
+            {...dropTarget(section)}
             className={cn("relative shrink-0 rounded-md p-1 transition-colors duration-160 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted motion-reduce:transition-none",
               isOpen ? "bg-surface-elevated text-ink" : section.children?.length === 0 ? "text-ink-faint/50 hover:text-ink" : "text-ink-faint hover:text-ink",
               dragOverId === section.id && "ring-1 ring-ink-muted bg-surface-elevated")}>
@@ -414,15 +394,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         {open && <span className="ml-1 min-w-0 truncate text-xs text-ink-subtle">{open.label}</span>}
         {open && <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {open.meta != null && <span className="flex shrink-0 gap-1.5 text-[10px] tabular-nums">{open.meta}</span>}
-          {(inline.length > 0 || menu.length > 0) && <span className={ACTIONS_CLASS}>
-            {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
-              <action.icon className="h-3 w-3" />
-            </button>)}
-            {menu.length > 0 && <RowMenu label={open.label} actions={menu} />}
-          </span>}
-          {open.create && <button aria-label={open.create.label} onClick={() => { void startCreate(open.id, open.create!) }} className={ACTION_CLASS}>
-            <Plus className="h-3 w-3" />
-          </button>}
+          <RowActions item={open} onCreate={() => { void startCreate(open.id, open.create!) }} />
         </span>}
       </div>
       {open && <div role="group" aria-label={`${open.label} contents`} className="motion-expand-in">
@@ -479,6 +451,26 @@ function CapToggle<T>({ item, depth, uncapped, onToggle }: {
   </button>
 }
 
+/** The hover actions of a row or open section, then its create button. */
+function RowActions<T>({ item, onCreate }: { item: FileTreeItem<T>; onCreate: () => void }) {
+  const { inline, menu } = splitActions(item)
+  return <>
+    {(inline.length > 0 || menu.length > 0 || item.onDelete) && <span className={ACTIONS_CLASS}>
+      {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
+        <action.icon className="h-3 w-3" />
+      </button>)}
+      {menu.length > 0 && <RowMenu label={item.label} actions={menu} />}
+      {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
+        <Trash2 className="h-3 w-3" />
+      </button>}
+    </span>}
+    {/* Creating is the row's main action, so it stays visible at the row end while the rest appears on hover. */}
+    {item.create && <button aria-label={item.create.label} onClick={onCreate} className={ACTION_CLASS}>
+      <Plus className="h-3 w-3" />
+    </button>}
+  </>
+}
+
 /** A row's "…" button and its menu of secondary actions, the destructive ones last and set apart. */
 function RowMenu({ label, actions }: { label: string; actions: RowAction[] }) {
   const trigger = useRef<HTMLButtonElement>(null)
@@ -531,8 +523,7 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
   onCancel: () => void
 }) {
   const [name, setName] = useState("")
-  const tabActive = useTabActive()
-  useEscapeLayer(onCancel, tabActive)
+  useEscapeLayer(onCancel)
   const [choice, setChoice] = useState(action.choice?.initial)
   const [subchoice, setSubchoice] = useState<string>()
   /** Open window: "choice" first when floating, then "then" for the `then` choice of the picked option, null once picked. */
@@ -594,19 +585,15 @@ function ChoiceWindow({ choice, initial, onConfirm, onCancel }: {
 }) {
   const [selected, setSelected] = useState(initial)
   // Window-level keys: the name field behind the window may hold focus, so the list cannot rely on having it.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const backwards = event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
-      const forwards = event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)
-      if (event.key !== "Enter" && !backwards && !forwards) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (event.key === "Enter") onConfirm(selected)
-      else setSelected(choice.options[(choice.options.indexOf(selected) + (backwards ? -1 : 1) + choice.options.length) % choice.options.length])
-    }
-    window.addEventListener("keydown", onKeyDown, true)
-    return () => window.removeEventListener("keydown", onKeyDown, true)
-  }, [choice.options, onConfirm, selected])
+  useEventListener("window", "keydown", (event) => {
+    const backwards = event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)
+    const forwards = event.key === "ArrowDown" || (event.key === "Tab" && !event.shiftKey)
+    if (event.key !== "Enter" && !backwards && !forwards) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === "Enter") onConfirm(selected)
+    else setSelected(choice.options[(choice.options.indexOf(selected) + (backwards ? -1 : 1) + choice.options.length) % choice.options.length])
+  }, { capture: true })
   return <FloatingWindow label={choice.label} onClose={onCancel} panelClassName="h-auto w-60 max-w-full rounded-2xl p-2">
     <div role="listbox" aria-label={choice.label} className="flex flex-col">
       {choice.options.map((option) => <div key={option} role="option" aria-selected={option === selected}
@@ -625,12 +612,11 @@ function RenameInput({ label, rename, onError }: { label: string; rename: Inline
   // Leaving after a refused name drops it instead of asking again
   const refused = useRef<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
-  const tabActive = useTabActive()
   const stop = () => {
     onError("")
     rename.stop()
   }
-  useEscapeLayer(stop, tabActive)
+  useEscapeLayer(stop)
 
   useEffect(() => {
     const suffixAt = rename.keepSuffix ? label.lastIndexOf(".") : -1

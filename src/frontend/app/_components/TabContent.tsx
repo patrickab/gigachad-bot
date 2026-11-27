@@ -38,7 +38,6 @@ interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
   onOpenProject: (slug: string) => void
   onProjectRenamed: (oldSlug: string, newSlug: string) => void
-  onDocumentRenamed: (oldPath: string, newPath: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   reveal: ChatReveal
@@ -67,7 +66,7 @@ export function TabContent(props: TabContentProps) {
 }
 
 /** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
-function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentRenamed, onNewChat, onOpenItem, reveal }: TabContentProps) {
+function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, reveal }: TabContentProps) {
   const { tab, isActive, setModeLabel } = useTab()
   const { projectSlug, config } = tab
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
@@ -164,7 +163,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onDocumentR
       <TabSidebar
         onOpenProject={onOpenProject}
         onProjectRenamed={onProjectRenamed}
-        onDocumentRenamed={onDocumentRenamed}
         onNewChat={onNewChat}
         onOpenItem={onOpenItem}
         onEditPrompts={openPromptEditor}

@@ -33,10 +33,10 @@ import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/Top
 import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
 import { factoryItem as factoryTaskItem } from "@/features/factory/items"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
-import { itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { fileItem, itemOf, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import type { Usage } from "@/lib/domain/types"
-import { opensInWorkbench, workbenchKindOf } from "@/lib/domain/workbench"
+import { workbenchKindOf } from "@/lib/domain/workbench"
 import { writeRootFile } from "@/lib/backend/api"
 import { isNotebookPath } from "@/lib/paths"
 
@@ -118,7 +118,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
     onClose,
     modelProps,
   }
-  const navigate = (path: string) => onItemChange({ kind: opensInWorkbench(path) ? "workbench" : "document", path, projectSlug: item.projectSlug })
+  const navigate = (path: string) => onItemChange(fileItem(path, item.projectSlug, true))
   return workbenchKindOf(item.path) === "latex"
     ? <LatexWorkbench key={sessionKey} {...props} texFolder={item.texFolder} onTexFolder={(texFolder) => onItemChange({ ...item, texFolder })} />
     : <MarkdownWorkbench key={sessionKey} {...props} projectSlug={item.projectSlug} onNavigate={navigate} onModeLabel={onModeLabel} />

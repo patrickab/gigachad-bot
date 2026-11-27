@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 import re
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from memory_store import store as memory_store
 from memory_store.cli import render_results
@@ -24,8 +24,6 @@ from lib.web_search import brave_sources, evidence_prompt, plan_query, source_la
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-
-T = TypeVar("T")
 
 TOOL_GUIDANCE = (
     "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
@@ -230,7 +228,7 @@ def _memory_argument_error(message: str) -> ToolOutcome:
     return ToolOutcome(content=f"Tool call rejected: {message}", summary="Rejected", error=message)
 
 
-async def _in_memory_root(context: ToolContext, function: Callable[..., T], *args: object) -> T:
+async def _in_memory_root[T](context: ToolContext, function: Callable[..., T], *args: object) -> T:
     """Run a blocking store call in the login's root, off the event loop; never in the default root."""
     if context.memory_root is None:
         raise memory_store.MemoryStoreError("unavailable", "Memory is not available for this request.")

@@ -22,6 +22,7 @@ import pwd
 
 from fastapi import APIRouter, Depends, WebSocket
 from pydantic import BaseModel, Field, ValidationError
+from starlette import status
 from starlette.websockets import WebSocketState
 
 from backend.identity import RequestIdentity, get_request_identity
@@ -30,7 +31,6 @@ from lib.pty_process import PtyProcess
 
 router = APIRouter(prefix="/api/terminal", tags=["terminal"])
 
-_UNSUPPORTED_DATA = 1003
 
 
 class OpenMessage(BaseModel):
@@ -87,7 +87,7 @@ async def terminal_session(websocket: WebSocket, identity: RequestIdentity = Dep
     try:
         opening = OpenMessage.model_validate(await websocket.receive_json())
     except (ValidationError, ValueError):
-        await websocket.close(code=_UNSUPPORTED_DATA)
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
         return
     shell = PtyProcess.spawn([login_shell(), "-l"], cwd=start_directory(opening.cwd), rows=opening.rows, cols=opening.cols)
     relays = [asyncio.create_task(_relay_output(websocket, shell)), asyncio.create_task(_relay_input(websocket, shell))]

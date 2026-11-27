@@ -323,8 +323,7 @@ export function useLearnSidebar({ open, projects, sidebar }: {
 
 /** Title filter of the Learn section with LearnHarness's kind filter: Escape clears and closes it. */
 function LearnFilter({ filter }: { filter: LearnFilterState }) {
-  const { isActive } = useTab()
-  useEscapeLayer(() => filter.setQuery(null), isActive)
+  useEscapeLayer(() => filter.setQuery(null))
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => { input.current?.focus() }, [filter.focusRequest])
   return <div className="mb-1 flex flex-col gap-1 px-2">

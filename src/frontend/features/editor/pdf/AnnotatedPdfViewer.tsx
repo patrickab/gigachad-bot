@@ -9,6 +9,7 @@ import { DEFAULT_PEN_COLOR, ERASER_RADIUS_PX, appendPointerSamples, finishStroke
 import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useLoaded } from "@/hooks/useLoaded"
 import { useUndoRedoKeys } from "@/hooks/useUndoRedoKeys"
 import { canvasEndpoint, openPdfAnnotations } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
@@ -36,21 +37,12 @@ interface AnnotatedPdfViewerProps extends ViewerProps {
 
 /** PDF viewer with ink and highlighter annotations, shared by every copy of the same PDF. Falls back to the plain viewer when annotations are unavailable. */
 export function AnnotatedPdfViewer({ path, pen, clipToPages = false, ...viewerProps }: AnnotatedPdfViewerProps) {
-  const [annotations, setAnnotations] = useState<{ path: string; key: string | null } | null>(null)
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [renderPageOverlay, setRenderPageOverlay] = useState<PageOverlay | undefined>(undefined)
   const publishPageOverlay = useCallback((render: PageOverlay | undefined) => setRenderPageOverlay(() => render), [])
 
-  useEffect(() => {
-    let cancelled = false
-    openPdfAnnotations(path)
-      .then((key) => { if (!cancelled) setAnnotations({ path, key }) })
-      .catch(() => { if (!cancelled) setAnnotations({ path, key: null }) })
-    return () => { cancelled = true }
-  }, [path])
-
   // The PDF loads alongside the key instead of after it, ink joins the same viewer once the key arrives.
-  const canvasKey = annotations?.path === path ? annotations.key : null
+  const canvasKey = useLoaded(path, openPdfAnnotations).value ?? null
   return (
     <>
       <PdfViewer key={path} url={fileViewerRawUrl(path)} {...viewerProps} renderPageOverlay={renderPageOverlay} onScrollerChange={setScroller} />

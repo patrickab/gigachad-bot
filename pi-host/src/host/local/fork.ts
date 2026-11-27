@@ -10,10 +10,9 @@
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { pathToRoot, type Entry } from "../entries.ts";
 import type { ForkRequest, ForkResult } from "../index.ts";
 import { cwdSessionDir, sessionsRoot } from "./paths.ts";
-
-type Entry = { type: string; id: string; parentId: string | null; [field: string]: unknown };
 
 function isEntry(value: unknown): value is Entry {
   const entry = value as Entry | null;
@@ -53,12 +52,8 @@ function branchEntries(entries: Entry[], entryId: string): Entry[] | undefined {
     else labels.delete(entry.targetId);
   }
 
-  const path: Entry[] = [];
-  for (let current = byId.get(entryId); current; current = current.parentId ? byId.get(current.parentId) : undefined) {
-    path.push(current);
-  }
+  const path = pathToRoot(byId, entryId);
   if (path.length === 0) return undefined;
-  path.reverse();
 
   const kept: Entry[] = [];
   const replacementByLabelId = new Map<string, string>();

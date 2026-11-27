@@ -56,7 +56,7 @@ export function RawAttachment({ attachment }: { attachment: Attachment }) {
   }
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
-      {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image */}
       <img src={attachment.url} alt={attachment.name} className="max-h-full max-w-full rounded-lg object-contain" />
     </div>
   )

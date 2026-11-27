@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useLoaded } from "@/hooks/useLoaded"
 import { loadLatexTemplates } from "@/lib/backend/api"
 import type { LatexTemplates } from "@/lib/domain/latex"
 
@@ -13,17 +13,5 @@ const NOT_A_PRESENTATION: LatexTemplates = { theme: null, primitives: [] }
  * - No root, or a read that failed, is no presentation
  */
 export function useLatexTemplates(root: string | null): LatexTemplates {
-  const [loaded, setLoaded] = useState<{ root: string; templates: LatexTemplates } | null>(null)
-
-  useEffect(() => {
-    if (root === null) return
-    let cancelled = false
-    loadLatexTemplates(root).then(
-      (templates) => { if (!cancelled) setLoaded({ root, templates }) },
-      () => { if (!cancelled) setLoaded({ root, templates: NOT_A_PRESENTATION }) },
-    )
-    return () => { cancelled = true }
-  }, [root])
-
-  return loaded !== null && loaded.root === root ? loaded.templates : NOT_A_PRESENTATION
+  return useLoaded(root, loadLatexTemplates).value ?? NOT_A_PRESENTATION
 }

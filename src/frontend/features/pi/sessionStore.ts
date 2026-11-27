@@ -18,6 +18,7 @@ import { createElement, Fragment, useEffect, useMemo, useSyncExternalStore, type
 import { fetchPiRepositories, fetchPiSessions, searchPiSessions as fetchSearchHits, type PiLiveStatus, type PiProfile, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
 import { readStorage, writeStorage } from "@/lib/storage"
 import { observePiSocket, sendPiCommand, type HostEvent, type HostFrame } from "./piSocket"
+import { isDialogRequest } from "./types"
 
 export type { PiSearchHit }
 
@@ -77,7 +78,6 @@ interface AttachedSession {
 
 const POLL_MS = 30_000
 const UNREAD_KEY = "pi-unread-sessions"
-const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"])
 /** Id prefix of this page's `get_session_stats` commands: responses reach every client attached to the session. */
 const STATS_PREFIX = `stats-${crypto.randomUUID().slice(0, 8)}-`
 const IDLE_STATUS: PiSessionStatus = { running: false, waiting: false, unread: false, failed: false }
@@ -308,10 +308,6 @@ function attachedSession(sessionId: string): AttachedSession {
   return session
 }
 
-function isDialogRequest(record: PiRecord): boolean {
-  return record.type === "extension_ui_request" && DIALOG_METHODS.has(record.method as string)
-}
-
 /** The last assistant message's stop reason of an `agent_end`. */
 function stopReasonOf(record: PiRecord): unknown {
   const messages = Array.isArray(record.messages) ? record.messages as { role?: string; stopReason?: unknown }[] : []
@@ -432,10 +428,10 @@ export function PiSessionsProvider({ children }: { children: ReactNode }) {
 }
 
 /** Sessions of every repo (of `profile` when given) whose entries match `query`, none for a blank query. */
-export async function searchPiSessions(query: string, filter: { profile?: PiProfile } = {}): Promise<PiSearchHit[]> {
+export async function searchPiSessions(query: string, filter: { profile?: PiProfile } = {}, signal?: AbortSignal): Promise<PiSearchHit[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
-  const hits = await fetchSearchHits(trimmed)
+  const hits = await fetchSearchHits(trimmed, signal)
   return filter.profile === undefined ? hits : hits.filter((hit) => piSessionProfile(hit.session) === filter.profile)
 }
 

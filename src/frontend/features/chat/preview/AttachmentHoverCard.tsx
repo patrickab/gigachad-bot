@@ -78,7 +78,7 @@ function HoverCard({ attachment, text, bottom, left, width, reservedHeight, onMo
 function CardBody({ attachment, text, width, onPageAspect }: { attachment: Attachment; text?: string; width: number; onPageAspect: (ratio: number) => void }) {
   if (text !== undefined) return <pre className="whitespace-pre-wrap break-words px-1 font-mono text-[11px] text-ink">{text}</pre>
   if (attachment.mime.startsWith("image/")) {
-    // eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export
+    // eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image
     return <img src={attachment.url} alt="" onLoad={(event) => onPageAspect(event.currentTarget.naturalHeight / event.currentTarget.naturalWidth)} className="w-full rounded object-contain" />
   }
   if (attachment.mime === PDF_MIME) return <LazyPdfPages url={attachment.url} width={width} onFirstPageAspect={onPageAspect} />

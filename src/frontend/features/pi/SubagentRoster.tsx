@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Check, ChevronDown, ChevronRight, Circle, LoaderCircle, Square, X, XCircle, type LucideIcon } from "lucide-react"
 import { IconButton } from "@/components/ui/IconButton"
+import { useNowMs } from "@/hooks/useNowMs"
 import { cn } from "@/lib/utils"
 import {
   currentRows, dismissFinished, dismissRows, elapsedMs, EMPTY_ROSTER, formatCost, formatDuration, formatTokens, isActive, mergeRoster,
@@ -36,16 +37,6 @@ export function useSubagentRoster(runs: Record<string, ToolRun>, widgets: Record
   const dismiss = (id: string) => setState((current) => ({ ...current, roster: dismissRows(current.roster, [id]) }))
   const clear = () => setState((current) => ({ ...current, roster: dismissFinished(current.roster) }))
   return { rows: roster.rows, dismiss, clear }
-}
-
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!active) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [active])
-  return now
 }
 
 function Detail({ row, inspect }: { row: SubagentRow; inspect: (row: SubagentRow) => Promise<InspectReply> }) {
@@ -122,7 +113,7 @@ export function SubagentRoster({ rows, onDismiss, onClear, inspect }: {
   const [collapsed, setCollapsed] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
   const running = rows.filter((row) => isActive(row.status)).length
-  const now = useNow(running > 0)
+  const now = useNowMs(1000, running > 0)
   if (rows.length === 0) return null
   const finished = rows.length - running
   const summary = [`${rows.length} subagent${rows.length === 1 ? "" : "s"}`, running > 0 ? `${running} running` : null, finished > 0 && running > 0 ? `${finished} done` : null].filter(Boolean).join(" · ")

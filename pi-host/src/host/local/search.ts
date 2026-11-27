@@ -12,6 +12,7 @@
  * https://github.com/ompweb-dev/ompweb), adapted to Pi's records and to report the hit's entry and a snippet.
  */
 import { stat } from "node:fs/promises";
+import { pathToRoot } from "../entries.ts";
 import type { SearchMatch, SessionMatch, SessionMatchPage, SessionMeta } from "../index.ts";
 import {
   compileSearchQuery,
@@ -113,16 +114,7 @@ function parseRecord(line: string, previous: SessionRecord | undefined, index: n
 
 /** Records on the path from the last record to the root, minus what the latest compaction summarized away. */
 function activeBranch(records: SessionRecord[]): SessionRecord[] {
-  const byId = new Map(records.map((record) => [record.id, record]));
-  const path: SessionRecord[] = [];
-  const seen = new Set<string>();
-  let current = records.at(-1);
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    path.push(current);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
-  }
-  path.reverse();
+  const path = pathToRoot(new Map(records.map((record) => [record.id, record])), records.at(-1)?.id ?? null);
   const compaction = path.findLastIndex((record) => record.type === "compaction");
   if (compaction < 0) return path;
   const firstKept = path.findIndex((record, index) => index < compaction && record.id === path[compaction]!.firstKeptEntryId);
