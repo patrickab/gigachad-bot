@@ -10,7 +10,7 @@ import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { catalogOffering, gatewayModelId, selectorIdOf } from "@/lib/models"
 import { baseName } from "@/lib/paths"
 import type { PiModel } from "./types"
-import type { PiSessionStats } from "./usePiSession"
+import type { PiSessionStats } from "./protocol"
 
 /** The session's model and thinking level as a header shows and changes them, with every model Pi offers it (`get_available_models`). */
 export interface PiModelControls {

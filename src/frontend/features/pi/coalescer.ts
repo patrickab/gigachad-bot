@@ -2,7 +2,6 @@
  * Ported from omp-web `lib/message-update-coalescer.ts` (https://github.com/ompweb-dev/ompweb, MIT, Copyright (c) 2026 agegr).
  * Pi streams deltas, not whole messages: every buffered record is kept and applied in one `events` action instead of only the latest.
  */
-import { useEffect, useMemo, type Dispatch } from "react"
 import type { TranscriptAction } from "./transcript"
 
 /** Schedules `flush` and returns a cancel function. */
@@ -45,7 +44,7 @@ export interface TranscriptCoalescer {
  *
  * Every other action (`message_end`, snapshot, resync, ...) flushes the buffer before it is dispatched, so actions apply in arrival order.
  */
-export function createTranscriptCoalescer(dispatch: Dispatch<TranscriptAction>, schedule: FlushScheduler = scheduleAtDisplayRate): TranscriptCoalescer {
+export function createTranscriptCoalescer(dispatch: (action: TranscriptAction) => void, schedule: FlushScheduler = scheduleAtDisplayRate): TranscriptCoalescer {
   let buffered: Extract<TranscriptAction, { kind: "event" }>["event"][] = []
   let cancelScheduled: (() => void) | null = null
 
@@ -75,11 +74,4 @@ export function createTranscriptCoalescer(dispatch: Dispatch<TranscriptAction>, 
       buffered = []
     },
   }
-}
-
-/** `dispatch` through a coalescer that lives as long as the component, stable for a stable `dispatch` (a `useReducer` one). */
-export function useCoalescedDispatch(dispatch: Dispatch<TranscriptAction>, schedule?: FlushScheduler): Dispatch<TranscriptAction> {
-  const coalescer = useMemo(() => createTranscriptCoalescer(dispatch, schedule), [dispatch, schedule])
-  useEffect(() => () => coalescer.reset(), [coalescer])
-  return coalescer.push
 }

@@ -21,6 +21,7 @@ const { send, runBash } = vi.hoisted(() => ({ send: vi.fn(async () => {}), runBa
 const NO_WIDGETS = {}
 const inspectSubagent = vi.fn()
 vi.mock("../usePiSession", () => ({
+  usePiTranscript: (_id: string, select = (t: unknown) => t) => select(EMPTY_TRANSCRIPT),
   usePiSession: () => ({
     transcript: EMPTY_TRANSCRIPT,
     status: { kind: "ready" },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { HostFrame } from "../piSocket"
+import type { ClientFrame, HostFrame } from "../protocol"
 import { createResyncGuard, SessionResync } from "../resync"
 
 const SESSION = "session-1"
@@ -9,7 +9,7 @@ function entry(id: string, parentId: string | null) {
 }
 
 function frame(type: string, streamId: string | null, fields: Record<string, unknown> = {}): HostFrame {
-  return { type, sessionId: SESSION, streamId, sequence: 0, ...fields }
+  return { type, sessionId: SESSION, streamId, sequence: 0, ...fields } as HostFrame
 }
 
 function attached(streamId: string, leafId: string | null) {
@@ -22,7 +22,7 @@ function resyncAnswer(streamId: string, leafId: string | null, entries: unknown[
 
 /** A tracker attached on stream `s1` at cursor `a`, recording what it sends. */
 function attachedTracker(online = true) {
-  const sent: HostFrame[] = []
+  const sent: ClientFrame[] = []
   const sync = new SessionResync(SESSION, (sentFrame) => {
     if (online) sent.push(sentFrame)
     return online
@@ -52,7 +52,7 @@ describe("createResyncGuard", () => {
 
 describe("SessionResync", () => {
   it("does nothing before the session is attached", () => {
-    const sent: HostFrame[] = []
+    const sent: ClientFrame[] = []
     const sync = new SessionResync(SESSION, (sentFrame) => sent.push(sentFrame) > 0)
     sync.request()
     expect(sent).toEqual([])
@@ -105,7 +105,7 @@ describe("SessionResync", () => {
     sync.reconnected()
     expect(sent.at(-1)).toEqual({ type: "resync", sessionId: SESSION, cursor: "a" })
 
-    const fresh: HostFrame[] = []
+    const fresh: ClientFrame[] = []
     const unattached = new SessionResync(SESSION, (sentFrame) => fresh.push(sentFrame) > 0)
     unattached.reconnected()
     expect(fresh).toEqual([{ type: "attach", sessionId: SESSION }])

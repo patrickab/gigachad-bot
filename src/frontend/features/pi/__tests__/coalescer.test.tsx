@@ -1,8 +1,7 @@
-import { act, render } from "@testing-library/react"
-import { useReducer, type Dispatch } from "react"
+import type { Dispatch } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { createTranscriptCoalescer, scheduleAtDisplayRate, useCoalescedDispatch, type FlushScheduler } from "../coalescer"
-import { EMPTY_TRANSCRIPT, transcriptReducer, type Transcript, type TranscriptAction } from "../transcript"
+import { createTranscriptCoalescer, scheduleAtDisplayRate, type FlushScheduler } from "../coalescer"
+import type { TranscriptAction } from "../transcript"
 import type { AssistantMessage } from "../types"
 
 /** A scheduler the test fires by hand, standing in for `requestAnimationFrame`. */
@@ -45,33 +44,6 @@ describe("createTranscriptCoalescer", () => {
     coalescer.reset()
     frames.frame()
     expect(dispatch).toHaveBeenCalledTimes(2)
-  })
-})
-
-describe("useCoalescedDispatch", () => {
-  it("renders once per frame for a burst of deltas", () => {
-    const frames = manualFrames()
-    let renders = 0
-    let push: Dispatch<TranscriptAction> = () => {}
-    let shown: Transcript = EMPTY_TRANSCRIPT
-    function Probe() {
-      const [transcript, dispatch] = useReducer(transcriptReducer, EMPTY_TRANSCRIPT)
-      push = useCoalescedDispatch(dispatch, frames.schedule)
-      shown = transcript
-      renders++
-      return null
-    }
-    render(<Probe />)
-    act(() => push({ kind: "event", event: { type: "message_start", message: reply } }))
-    act(() => push({ kind: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } } }))
-    const before = renders
-    act(() => {
-      for (let index = 0; index < 50; index++) push(delta("x"))
-    })
-    expect(renders).toBe(before)
-    act(() => frames.frame())
-    expect(renders).toBe(before + 1)
-    expect(shown.streaming?.content).toEqual([{ type: "text", text: "x".repeat(50) }])
   })
 })
 

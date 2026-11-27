@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { useTabWorkingDirectory } from "@/contexts/tabWorkingDirectory"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
 import { LoadFailure } from "@/components/ui/DocumentLoadState"
@@ -16,6 +16,7 @@ import { isBtwCommand } from "./btw"
 import { imageOf, PiComposer, type PiInsertion, type PiSubmit } from "./PiComposer"
 import { piGatewayId, PiRepoLabel, PiTopBar, type PiCatalogProps, type PiModelControls, type PiSessionHeader, type PiTopBarSlots } from "./PiTopBar"
 import { PiTranscript } from "./PiTranscript"
+import type { Transcript } from "./transcript"
 import { usePiSearchFocus } from "./searchFocus"
 import { factoryRulings } from "./factoryCard"
 import { SessionWavesPanel, useSessionWaves, type SessionCards } from "./SessionWaves"
@@ -24,7 +25,9 @@ import { refreshPiSessions } from "./sessionStore"
 import { PiSessionDot } from "./usePiSidebar"
 import { isActive, type SubagentRow } from "./subagents"
 import type { ImageContent, PiCommand, PiModel } from "./types"
-import { usePiSession, type Notice } from "./usePiSession"
+import { liveSession, type Notice } from "./liveSession"
+import { useHeld } from "./outbox"
+import { usePiSession, usePiTranscript } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
 export interface PiLaunch {
@@ -141,6 +144,18 @@ function useSubSessions(sessionId: string, rows: readonly SubagentRow[]): { subC
   return { subCost: total, subActive: rows.filter((row) => isActive(row.status)).length + activeTasks }
 }
 
+/** A transcript without turns: nothing confirmed, live, sent or running. */
+const isEmptyTranscript = (transcript: Transcript) =>
+  transcript.messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
+
+/** The session's transcript and held messages: the only part of the view that follows a streamed frame. */
+function LiveTranscript({ sessionId, ...props }: { sessionId: string } & Omit<ComponentProps<typeof PiTranscript>, "transcript" | "held" | "onRetryHeld" | "onDeleteHeld">) {
+  const transcript = usePiTranscript(sessionId)
+  const held = useHeld(sessionId)
+  const { retryHeld, deleteHeld } = liveSession(sessionId)
+  return <PiTranscript transcript={transcript} held={held} onRetryHeld={retryHeld} onDeleteHeld={deleteHeld} {...props} />
+}
+
 /**
  * One open Pi session: its header (`renderHeader`), transcript and composer, shared by Pi tabs, the `/pi` page and workbench chats.
  *
@@ -177,23 +192,26 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const openFile = useOpenFile()
   const session = usePiSession(sessionId, openFile)
   const search = usePiSearchFocus(sessionId)
-  const { state, status, transcript, send, runBash, compact, setModel, setThinking, notify } = session
+  const { state, status, send, runBash, compact, setModel, setThinking, notify } = session
+  const running = usePiTranscript(sessionId, (transcript) => transcript.running)
+  const queue = usePiTranscript(sessionId, (transcript) => transcript.queue)
+  const messages = usePiTranscript(sessionId, (transcript) => transcript.messages)
+  const runs = usePiTranscript(sessionId, (transcript) => transcript.runs)
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
-  const tone: StatusTone = status.kind === "ready" ? (transcript.running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
+  const tone: StatusTone = status.kind === "ready" ? (running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
   const [column, setColumn] = useState<HTMLDivElement | null>(null)
   // The strip's view of the transcript's factory cards: a jump goes through this tab's transcript, never another
   const revealNoticeRef = useRef<((key: string) => void) | null>(null)
   const revealNotice = useCallback((key: string) => revealNoticeRef.current?.(key), [])
-  const rulings = useMemo(() => factoryRulings(transcript.messages), [transcript.messages])
+  const rulings = useMemo(() => factoryRulings(messages), [messages])
   const cards = useMemo<SessionCards>(() => ({ ...rulings, revealNotice }), [rulings, revealNotice])
-  const roster = useSubagentRoster(transcript.runs, session.widgets, transcript.running)
+  const roster = useSubagentRoster(runs, session.widgets, running)
   const { inspectSubagent } = session
   const { subCost, subActive } = useSubSessions(sessionId, roster.rows)
   const inspectRow = useCallback((row: SubagentRow) => inspectSubagent(row.inspect!), [inspectSubagent])
 
-  const { messages } = transcript
   // Known to be empty only once attached: a connecting session keeps the composer at the bottom, like a chat whose history loads
-  const empty = status.kind === "ready" && !firstSubmit && messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
+  const empty = usePiTranscript(sessionId, isEmptyTranscript) && status.kind === "ready" && !firstSubmit
   const dock = useComposerDock(empty && !docked)
   const { mountColumn } = dock
   const notices = useMemo(() => status.kind === "closed" ? [...session.notices, { id: "closed", text: status.reason, tone: "error" as const }] : session.notices, [status, session.notices])
@@ -227,17 +245,17 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   // `/compact` sent with Alt+Enter while a run is active waits for the run to settle: compacting now would abort it
   const pendingCompact = useRef<{ instructions?: string } | null>(null)
   useEffect(() => {
-    if (transcript.running || !pendingCompact.current) return
+    if (running || !pendingCompact.current) return
     const { instructions } = pendingCompact.current
     pendingCompact.current = null
     void compact(instructions)
-  }, [transcript.running, compact])
+  }, [running, compact])
   const submit = useCallback(async (request: PiSubmit) => {
     const { action } = request
     if (action.kind === "prompt" && isBtwCommand(action.text)) void send(action.text, [])
     else if (action.kind === "bash") void runBash(action.command, action.excludeFromContext)
     else if (action.kind === "compact") {
-      if (request.mode === "followUp" && transcript.running) pendingCompact.current = { instructions: action.instructions }
+      if (request.mode === "followUp" && running) pendingCompact.current = { instructions: action.instructions }
       else void compact(action.instructions)
     }
     else {
@@ -248,7 +266,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
         onLeadSent?.()
       }
     }
-  }, [runBash, compact, send, lead, onLeadSent, transcript.running])
+  }, [runBash, compact, send, lead, onLeadSent, running])
 
   const firstSent = useRef(false)
   useEffect(() => {
@@ -284,17 +302,17 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   return (
     <section ref={mountColumn} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {renderHeader(header)}
-      <PiTranscript transcript={transcript} held={session.held} onRetryHeld={session.retryHeld} onDeleteHeld={session.deleteHeld} fileLinks={fileLinks} search={search} onBranch={branch} onDeleteTurn={deleteTurn} onEditTurn={editTurn} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} revealNoticeRef={revealNoticeRef} />
+      <LiveTranscript sessionId={sessionId} fileLinks={fileLinks} search={search} onBranch={branch} onDeleteTurn={deleteTurn} onEditTurn={editTurn} paddingBottom={dock.paddingBottom} onColumnChange={setColumn} revealNoticeRef={revealNoticeRef} />
       <ComposerDock dock={dock}>
         <BtwPanel threads={session.btw.threads} actions={session.btw} fileLinks={fileLinks} />
         <PiComposer
           sessionKey={sessionId}
           files={files}
-          running={transcript.running}
-          disabled={status.kind !== "ready" && !(status.kind === "connecting" && transcript.running)}
+          running={running}
+          disabled={status.kind !== "ready" && !(status.kind === "connecting" && running)}
           commands={session.commands}
           dialog={session.dialogs[0]}
-          queue={transcript.queue}
+          queue={queue}
           notices={notices}
           statusLines={session.statusLines}
           roster={<>{onOpenTask && <SessionWavesPanel sessionId={sessionId} cards={cards} onOpenTask={onOpenTask} />}<SubagentRoster rows={roster.rows} onDismiss={roster.dismiss} onClear={roster.clear} inspect={inspectRow} /></>}

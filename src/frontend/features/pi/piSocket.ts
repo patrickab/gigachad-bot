@@ -3,15 +3,13 @@
  *
  * - Consumes host frames `{type, sessionId, streamId, sequence, ...}` and routes each to the subscribers of its session
  * - Provides `subscribePiSession`: the first subscriber of a session attaches it, the last detaches it
- * - Provides `observePiSocket`: frames of every attached session and host frames without `sessionId` (`sessions_changed`), for the session store
+ * - Provides `observePiSocket`: host frames without `sessionId` (`sessions_changed`) and socket reopens, for lists
  * - Reconnects with backoff while anything is subscribed or held; per session a subscriber's `onReopen` decides how to catch up (resync or attach), else it re-attaches
  * - No ack timeouts: liveness never depends on how fast the host answers (M18)
  * - Closes shortly after the last session and hold leave, so a remount (React strict mode, a tab switch) keeps the socket
  */
 import { piSocketUrl } from "@/lib/backend/urls"
-
-/** A host frame: `attached`, `resync`, `replay_start`, `pi`, `replay_end`, `ui_closed`, `lock_held`, `exit` or `error`. */
-export type HostFrame = { type: string; sessionId: string; [field: string]: unknown }
+import type { ClientFrame, HostFrame } from "./protocol"
 
 /** A host frame about no single session, e.g. `{type: "sessions_changed", sessionPaths}`. */
 export type HostEvent = { type: string; [field: string]: unknown }
@@ -27,12 +25,8 @@ export interface SessionSubscriber {
 
 /** Sees the socket's traffic without attaching anything. */
 export interface SocketObserver {
-  /** A frame of a session this page has attached, after its subscribers saw it. */
-  onFrame?: (frame: HostFrame) => void
   /** A host frame without `sessionId`. */
   onHostEvent?: (event: HostEvent) => void
-  /** The page's last subscriber of `sessionId` left, the session is detached. */
-  onDetach?: (sessionId: string) => void
   /** The socket (re)opened, frames sent while it was down are lost. */
   onOpen?: () => void
 }
@@ -60,7 +54,7 @@ function setStatus(next: SocketStatus) {
   for (const group of subscribers.values()) for (const subscriber of group) subscriber.onStatus(next)
 }
 
-function sendRaw(frame: object): boolean {
+function sendRaw(frame: ClientFrame): boolean {
   if (!socket || socket.readyState !== WebSocket.OPEN) return false
   socket.send(JSON.stringify(frame))
   return true
@@ -90,7 +84,6 @@ function connect() {
     const group = subscribers.get(frame.sessionId)
     if (!group) return
     for (const subscriber of group) subscriber.onFrame(frame as HostFrame)
-    for (const observer of observers) observer.onFrame?.(frame as HostFrame)
   }
   opened.onclose = (event) => {
     socket = null
@@ -141,7 +134,6 @@ export function subscribePiSession(sessionId: string, subscriber: SessionSubscri
     if (current.size > 0) return
     subscribers.delete(sessionId)
     sendRaw({ type: "detach", sessionId })
-    for (const observer of observers) observer.onDetach?.(sessionId)
     if (idle()) closeWhenIdle()
   }
 }
@@ -172,6 +164,6 @@ export function sendPiCommand(sessionId: string, command: Record<string, unknown
 }
 
 /** Send a session frame (`resync`, `attach`, `detach`). False while the socket is down. */
-export function sendPiFrame(frame: HostFrame): boolean {
+export function sendPiFrame(frame: ClientFrame): boolean {
   return sendRaw(frame)
 }

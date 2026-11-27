@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
-import type { HostFrame, SessionSubscriber } from "../piSocket"
+import type { SessionSubscriber } from "../piSocket"
+import type { HostFrame } from "../protocol"
 import { clearOutbox } from "../outbox"
-import { OPEN_FILE_NOTICE_PREFIX, usePiSession } from "../usePiSession"
+import { OPEN_FILE_NOTICE_PREFIX } from "../liveSession"
+import { usePiSession } from "../usePiSession"
 
 const socket = vi.hoisted(() => ({ subscriber: null as SessionSubscriber | null, connected: true, sent: [] as Record<string, unknown>[], onSend: undefined as ((command: Record<string, unknown>) => void) | undefined }))
 vi.mock("../piSocket", () => ({
@@ -165,7 +167,7 @@ describe("usePiSession subagent widgets", () => {
         requestId = id!
         // The command answers first, then emits the reply
         queueMicrotask(() => {
-          socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record: { type: "response", id: command.id, command: "prompt", success: true } })
+          socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record: { type: "response", id: command.id as string, command: "prompt", success: true } })
           socket.subscriber!.onFrame(widgetFrame("subagent-inspect", [`PI_SUBAGENT_INSPECT_JSON:${JSON.stringify({ requestId, task: "Review it", finalOutput: "LGTM" })}`]))
         })
       }

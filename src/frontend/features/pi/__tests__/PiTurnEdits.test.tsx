@@ -31,6 +31,7 @@ const STATE = { model: null, thinkingLevel: "medium", isStreaming: false, sessio
 const BTW = { threads: [], followUp: () => {}, cancel: () => {}, dismiss: () => {} }
 const NONE: never[] = []
 vi.mock("../usePiSession", () => ({
+  usePiTranscript: (_id: string, select = (t: unknown) => t) => select(session.transcript),
   usePiSession: () => ({
     transcript: session.transcript,
     status: { kind: "ready" },

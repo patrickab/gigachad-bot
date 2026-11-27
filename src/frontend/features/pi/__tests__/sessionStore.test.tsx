@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { PiSessionInfo } from "@/lib/backend/api"
-import { subscribePiSession } from "../piSocket"
+import { liveSession } from "../liveSession"
 import { markPiSessionRead, piSessionEvents, PiSessionsProvider, searchPiSessions, usePiSessions, usePiSessionStatus, type PiSessionEvent } from "../sessionStore"
 
 const api = vi.hoisted(() => ({
@@ -68,9 +68,9 @@ const cleanups: (() => void)[] = []
 
 /** Attach `sessionId` as a tab would, idle, and return a helper that sends its `pi` records. */
 function attach(sessionId: string) {
-  cleanups.push(subscribePiSession(sessionId, { onFrame: () => {}, onStatus: () => {} }))
+  cleanups.push(liveSession(sessionId).attach())
   const host = socket()
-  host.emit({ type: "attached", sessionId, state: { isStreaming: false }, ui: { dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } }, entries: [] })
+  host.emit({ type: "attached", sessionId, streamId: "x", state: { isStreaming: false }, ui: { dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } }, entries: { entries: [], leafId: null } })
   host.emit({ type: "replay_start", sessionId })
   host.emit({ type: "replay_end", sessionId })
   return (record: object) => host.emit({ type: "pi", sessionId, record })
@@ -250,15 +250,29 @@ describe("usePiSessionStatus", () => {
     expect(result.current.waiting).toBe(false)
   })
 
-  it("shows context usage and cost from get_session_stats while attached", () => {
+  it("shows context usage and cost from get_session_stats while attached", async () => {
     const { result, unmount } = renderHook(() => usePiSessionStatus("s4"), { wrapper })
     cleanups.push(unmount)
     const send = attach("s4")
     const request = socket().sent.find((frame) => frame.sessionId === "s4" && frame.command?.type === "get_session_stats")!
     send({ type: "response", id: request.command!.id, command: "get_session_stats", success: true, data: { cost: 0.45, contextUsage: { percent: 30 } } })
-    expect(result.current).toMatchObject({ contextPercent: 30, cost: 0.45 })
+    await waitFor(() => expect(result.current).toMatchObject({ contextPercent: 30, cost: 0.45 }))
 
     act(() => cleanups.pop()!())
     expect(result.current.contextPercent).toBeUndefined()
+  })
+
+  it("asks get_session_stats once on attach, after an answer and after the run settles (measure)", () => {
+    cleanups.push(renderHook(() => usePiSessionStatus("s5"), { wrapper }).unmount)
+    const asked = () => socket().sent.filter((frame) => frame.sessionId === "s5" && frame.command?.type === "get_session_stats").length
+    const send = attach("s5")
+    expect(asked()).toBe(1)
+    send({ type: "agent_start" })
+    send({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop", timestamp: 1 } })
+    expect(asked()).toBe(2)
+    send({ type: "agent_settled" })
+    // Was 5: the session store asked on its own beside the view (2 + 1 + 2)
+    expect(asked()).toBe(3)
+    act(() => markPiSessionRead("s5"))
   })
 })

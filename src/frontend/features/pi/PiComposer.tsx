@@ -12,7 +12,7 @@ import { fetchPiFiles, pastePiVideo, type PiFileScope } from "@/lib/backend/api"
 import type { Attachment } from "@/lib/domain/types"
 import { composerAction, piCompletions, type ComposerAction } from "./composerInput"
 import type { ExtensionDialog, ImageContent, PiCommand } from "./types"
-import type { Notice, QueueMode } from "./usePiSession"
+import type { Notice, QueueMode } from "./liveSession"
 
 /** The composer sends images (Pi image blocks) and videos (a mention), nothing else. */
 const acceptsFile = (file: File) => file.type.startsWith("image/") || file.type.startsWith("video/")

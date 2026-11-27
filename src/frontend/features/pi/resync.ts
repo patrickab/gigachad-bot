@@ -7,8 +7,7 @@
  * - A host without resync answers with an `error` frame: from then on every request is a full reattach (`detach` + `attach`)
  * - No ack timeouts (M18): a request in flight is only given up when the socket closes
  */
-import type { HostFrame } from "./piSocket"
-import type { SessionEntries } from "./transcript"
+import type { ClientFrame, HostFrame } from "./protocol"
 
 /*
  * Guard ported from omp-web `lib/reconcile-guard.ts` (https://github.com/ompweb-dev/ompweb, MIT, Copyright (c) 2026 agegr),
@@ -89,9 +88,9 @@ export class SessionResync {
   private resyncSupported = true
 
   private readonly sessionId: string
-  private readonly send: (frame: HostFrame) => boolean
+  private readonly send: (frame: ClientFrame) => boolean
 
-  constructor(sessionId: string, send: (frame: HostFrame) => boolean) {
+  constructor(sessionId: string, send: (frame: ClientFrame) => boolean) {
     this.sessionId = sessionId
     this.send = send
   }
@@ -127,7 +126,7 @@ export class SessionResync {
     switch (frame.type) {
       case "attached": {
         this.attached = true
-        this.cursor = (frame.entries as SessionEntries).leafId
+        this.cursor = frame.entries.leafId
         if (this.sent[0]?.kind === "attach") this.settle(this.sent.shift()!)
         return { streamChanged, apply: true }
       }
@@ -139,8 +138,7 @@ export class SessionResync {
           this.guard.release(request.token)
           return { streamChanged, apply: false }
         }
-        const entries = frame.entries as SessionEntries["entries"]
-        this.cursor = (frame.leafId as string | null) ?? entries[entries.length - 1]?.id ?? this.cursor
+        this.cursor = frame.leafId ?? frame.entries[frame.entries.length - 1]?.id ?? this.cursor
         this.settle(request)
         return { streamChanged, apply: true }
       }

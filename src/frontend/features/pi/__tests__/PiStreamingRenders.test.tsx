@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { PiSessionInfo } from "@/lib/backend/api"
 import { PiTab } from "../PiTab"
 import type { SessionSubscriber } from "../piSocket"
+import type { PiRecord } from "../protocol"
 import { PiTranscript } from "../PiTranscript"
 import { EMPTY_TRANSCRIPT, transcriptReducer, type Transcript, type TranscriptAction } from "../transcript"
 import type { AgentMessage } from "../types"
@@ -282,7 +283,7 @@ describe("a Pi tab while its answer streams", () => {
     renders.clear()
   })
 
-  it("renders the top bar and the composer per delta frame (measure)", async () => {
+  it("renders neither the top bar nor the composer per delta frame (measure)", async () => {
     // A session of 20 settled turns, attached in a Pi tab with its top bar slots
     const messages = Array.from({ length: 20 }, (_, index): AgentMessage[] => [
       { role: "user", content: `Prompt ${index}`, timestamp: index * 10 },
@@ -297,7 +298,7 @@ describe("a Pi tab while its answer streams", () => {
       </Profiler>,
     )
     await waitFor(() => expect(socket.subscriber).not.toBeNull())
-    const frame = (record: Record<string, unknown>) => act(() => socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record }))
+    const frame = (record: PiRecord) => act(() => socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record }))
     act(() => socket.subscriber!.onFrame({
       type: "attached", sessionId: "s1", streamId: "x", sequence: 0,
       state: { isStreaming: true, sessionId: "s1", model: { provider: "anthropic", id: "claude" }, thinkingLevel: "medium" },
@@ -327,8 +328,8 @@ describe("a Pi tab while its answer streams", () => {
     const { bar = 0, composer = 0, tab: total = 0 } = Object.fromEntries(durations.ms)
     console.info(`pi, 100 delta frames: ${JSON.stringify(counts)}; bar ${(100 * bar / total).toFixed(1)}%, composer ${(100 * composer / total).toFixed(1)}% of ${total.toFixed(0)} ms`)
 
-    // baseline, lowered by the live-session selectors
-    expect(counts).toEqual({ ModelDropdown: 100, PiComposer: 100 })
+    // Was 100 each before the view read the transcript through selectors: a text frame renders the transcript only
+    expect(counts).toEqual({ ModelDropdown: 0, PiComposer: 0 })
     // WorkspaceSurface and the tab workspace sit above PiTab: measured 0 per frame in the full TabContent, nothing to lower
     topBar.remove()
   })

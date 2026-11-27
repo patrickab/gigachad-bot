@@ -35,6 +35,7 @@ const { send, session } = vi.hoisted(() => ({ send: vi.fn(async () => {}), sessi
 const NO_WIDGETS = {}
 const inspectSubagent = vi.fn()
 vi.mock("../usePiSession", () => ({
+  usePiTranscript: (_id: string, select = (t: unknown) => t) => select(session.transcript ?? EMPTY_TRANSCRIPT),
   usePiSession: () => ({
     transcript: session.transcript ?? EMPTY_TRANSCRIPT,
     status: { kind: "ready" },
