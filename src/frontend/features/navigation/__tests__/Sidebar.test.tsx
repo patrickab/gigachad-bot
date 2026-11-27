@@ -77,7 +77,7 @@ vi.mock("@/lib/backend/api", async (importOriginal) => {
     ...api,
     ApiError, currentConnectionPool, leaveConnectionPool,
     addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), createWorktree: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
-    removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
+    removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(), renameDocument: fixtures.renameDocument,
   }
 })
 const sidebarFrame = vi.hoisted(() => ({ collapsed: false, toggleCollapsed: vi.fn() }))
@@ -88,15 +88,15 @@ vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
     branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}), moveHistory: vi.fn(),
   })),
 }))
-vi.mock("@/contexts/ProjectContext", async () => {
+vi.mock("@/contexts/ProjectContext", async (importOriginal) => {
   const { displayName } = await import("@/lib/domain/projects")
   return {
+    useRenameDocument: (await importOriginal<typeof import("@/contexts/ProjectContext")>()).useRenameDocument,
     useProject: () => ({
       projects: fixtures.projects,
       createProject: vi.fn(), deleteProject: vi.fn(),
       renameProject: fixtures.renameProject,
     }),
-    useRenameDocument: () => fixtures.renameDocument,
     useDisplayName: () => (slug: string | null, path: string) => displayName(fixtures.projects, slug, path),
   }
 })

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { displayName, type ProjectListItem } from "@/lib/domain/projects"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { announceFileChange, announceFileMove } from "@/lib/backend/fileEvents"
 import { forgetProjectDocuments } from "@/lib/backend/resources"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import {
@@ -41,12 +42,16 @@ export function useDisplayName(): (slug: string | null | undefined, path: string
   return useCallback((slug, path) => displayName(projects, slug, path), [projects])
 }
 
-/** Rename `path` of project `slug` (a note when empty), then read the projects again so every view shows the new name. */
+/** Rename `path` of project `slug` (a note when empty), read the projects again so every view shows the new name, and announce a moved file and the files rewritten to follow it. */
 export function useRenameDocument(): (slug: string, path: string, name: string) => Promise<RenamedDocument> {
   const refreshProjects = useContext(ProjectContext)?.refreshProjects
   return useCallback(async (slug, path, name) => {
     const renamed = await apiRenameDocument(slug, path, name)
     await refreshProjects?.().catch(() => {})
+    if (renamed.path !== path) {
+      announceFileMove({ from: path, to: renamed.path })
+      for (const changed of renamed.changed) announceFileChange(changed)
+    }
     return renamed
   }, [refreshProjects])
 }

@@ -61,7 +61,7 @@ const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(async () => ""),
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn<typeof import("@/lib/backend/api").writeDocument>(async () => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
-  renameDocument: vi.fn(async (_slug: string, path: string, name: string) => ({ path, name: `${name}.md`, mime: "text/markdown" })),
+  renameDocument: vi.fn(async (_slug: string, path: string, name: string) => ({ path, name: `${name}.md`, mime: "text/markdown", changed: [] as string[] })),
   removeDocument: vi.fn<typeof import("@/lib/backend/api").removeDocument>(async () => []),
   ApiError: class ApiError extends Error {
     status: number
@@ -106,6 +106,7 @@ import { CanvasEditor } from "@/features/editor/canvas/CanvasEditor"
 import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc } from "@/lib/domain/canvasDocument"
 import { watchDocumentLists } from "@/lib/backend/resources"
+import { onFileChange, onFileMove, type FileMove } from "@/lib/backend/fileEvents"
 
 class RO {
   observe() {}
@@ -563,7 +564,7 @@ describe("document attachments", () => {
     const plot = { path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "sandbox_plot-toolu_1.plot.json", mime: "application/json" }
     const diagram = { path: "project/proj/document/diagram-toolu_2.md", name: "diagram-toolu_2.md", mime: "text/markdown" }
     api.listProjectDocuments.mockResolvedValueOnce([plot, diagram]).mockResolvedValueOnce([{ ...plot, name: "Loss.plot.json" }, diagram])
-    api.renameDocument.mockResolvedValueOnce({ ...plot, name: "Loss.plot.json" })
+    api.renameDocument.mockResolvedValueOnce({ ...plot, name: "Loss.plot.json", changed: [] })
     api.removeDocument.mockResolvedValueOnce([diagram.path])
     const stopWatching = watchDocumentLists()
     const seen: CanvasDocument[] = []
@@ -609,6 +610,29 @@ describe("document attachments", () => {
     expect(api.removeDocument).toHaveBeenCalledWith("proj", diagram.path)
     expect(latest(seen).attachments.map((a) => a.id)).toEqual(["plot"])
     expect(queryByLabelText("Delete diagram-toolu_2.md")).toBeNull()
+  })
+
+  it("announces a rename from the add menu that moved the file, so this device's tabs of it follow", async () => {
+    const notes = { path: "/work/notes.md", name: "notes.md", mime: "text/markdown" }
+    api.listProjectDocuments.mockResolvedValueOnce([notes])
+    api.renameDocument.mockResolvedValueOnce({ path: "/work/ideas.md", name: "ideas.md", mime: "text/markdown", changed: ["/work/paper.tex"] })
+    const moves: FileMove[] = []
+    const changed: string[] = []
+    const stopMoves = onFileMove((move) => moves.push(move))
+    const stopChanges = onFileChange(() => true, (path) => changed.push(path))
+    const { container, getByLabelText } = render(<Harness seen={[]} slug="proj" />)
+
+    act(() => { toolbarButton(container, "Add to canvas").click() })
+    await act(async () => {})
+    fireEvent.click(getByLabelText("Rename notes.md"))
+    const input = getByLabelText("New name for notes.md")
+    fireEvent.change(input, { target: { value: "ideas" } })
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(moves).toEqual([{ from: notes.path, to: "/work/ideas.md" }]))
+    expect(changed).toEqual(["/work/paper.tex"])
+    stopMoves()
+    stopChanges()
   })
 
   it("lists notes-scoped artifacts when the canvas has no project slug", async () => {

@@ -1,7 +1,6 @@
 "use client"
 
 import { useRenameDocument } from "@/contexts/ProjectContext"
-import { announceFileChange, announceFileMove } from "@/lib/backend/fileEvents"
 
 /** The file a rename is about: `scope` is its project's slug, empty for a mounted file shown outside any project. */
 export interface RenameTarget {
@@ -24,8 +23,6 @@ export function useFileRename({ currentPath, onRenamed }: FileRenameOptions) {
     const path = currentPath(target)
     const renamed = await renameDocument(target.scope, path, name)
     if (renamed.path === path) return
-    announceFileMove({ from: path, to: renamed.path })
-    for (const changed of renamed.changed) announceFileChange(changed)
     await onRenamed()
   }
   return { renameFile }
