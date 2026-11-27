@@ -11,6 +11,7 @@ import hashlib
 import logging
 from pathlib import Path
 import tempfile
+import threading
 
 # Bound as a module so tests can replace ``mineru.parse_pdf``.
 from lib import mineru
@@ -22,6 +23,9 @@ StoreParse = Callable[[str, Path, Path], None]
 
 _queue: asyncio.Queue[tuple[str, bytes, StoreParse] | None] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
+# The worker's loop: sync routes enqueue from threadpool threads, and asyncio.Queue is not thread-safe.
+_loop: asyncio.AbstractEventLoop | None = None
+_pending_lock = threading.Lock()
 # PDFs queued or extracting, by name and content hash: live references re-attach the same PDF on every send.
 _pending: set[tuple[str, str]] = set()
 
@@ -48,26 +52,38 @@ async def _worker() -> None:
         except Exception:
             log.exception("Background MinerU extraction failed for %s", name)
         finally:
-            _pending.discard(_pending_key(name, content))
+            with _pending_lock:
+                _pending.discard(_pending_key(name, content))
             _queue.task_done()
 
 
 def enqueue(name: str, content: bytes, store: StoreParse) -> None:
     """Queue a PDF for background extraction, unless these bytes are already queued or extracting. *store* persists the parse."""
     key = _pending_key(name, content)
-    if key in _pending:
-        return
-    _pending.add(key)
-    _queue.put_nowait((name, content, store))
+    with _pending_lock:
+        if key in _pending:
+            return
+        _pending.add(key)
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if _loop is not None and running is not _loop:
+        _loop.call_soon_threadsafe(_queue.put_nowait, (name, content, store))
+    else:
+        _queue.put_nowait((name, content, store))
     log.info("Queued for extraction: %s (queue depth: %d)", name, _queue.qsize())
 
 
 async def start() -> None:
-    global _worker_task
+    global _loop, _worker_task
+    _loop = asyncio.get_running_loop()
     _worker_task = asyncio.create_task(_worker(), name="mineru-extract-worker")
 
 
 async def stop() -> None:
+    global _loop
+    _loop = None
     # None is the sentinel that makes _worker exit after draining earlier items.
     _queue.put_nowait(None)
     if _worker_task:
