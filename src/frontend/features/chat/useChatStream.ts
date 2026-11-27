@@ -76,7 +76,13 @@ export function useChatStream(): UseChatStreamReturn {
     async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message): Promise<ChatStreamCompletion | null> => {
       setIsStreaming(true)
 
-      const publish = createMessagePublisher(setMessages, assistantMsg)
+      // Every message this reply put at the end of the list. Another chat opened meanwhile replaces it: the reply then leaves the list alone.
+      const mine = new Set([messagesRef.current.at(-1)])
+      const publish = createMessagePublisher((update) => setMessages((prev) => {
+        const next = typeof update === "function" ? update(prev) : update
+        if (next !== prev) mine.add(next.at(-1))
+        return next
+      }), assistantMsg)
       // Answer text is paced, everything else lands as it arrives.
       const pacer = createTokenPacer((text) => {
         assistantMsg.content += text
@@ -143,7 +149,7 @@ export function useChatStream(): UseChatStreamReturn {
         settleRunningToolCalls(assistantMsg, unresolvedReason)
         publish()
         const current = messagesRef.current
-        if (current.at(-1)?.role === "assistant") {
+        if (current.at(-1)?.role === "assistant" && mine.has(current.at(-1))) {
           finalMessages = deactivateSentImages(
             [...current.slice(0, -1), { ...assistantMsg }],
             req.img_paths,

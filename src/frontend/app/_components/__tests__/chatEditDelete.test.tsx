@@ -14,7 +14,7 @@ import { useTabChat } from "../useTabChat"
 
 const { saveChat, streams, history, branches, undoDelete, enabledTools } = vi.hoisted(() => ({
   saveChat: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
-  streams: { requests: [] as unknown[], fail: false },
+  streams: { requests: [] as unknown[], fail: false, gate: null as Promise<void> | null },
   history: { current: null as unknown },
   branches: {
     refreshAll: async () => {},
@@ -34,6 +34,7 @@ function stubStream(req: unknown): SSEStreamResult {
     abort: () => {},
     async *[Symbol.asyncIterator]() {
       if (streams.fail) throw new Error("model unavailable")
+      if (streams.gate) await streams.gate
       yield* events
     },
   }
@@ -78,7 +79,7 @@ async function renderChat(historyFile: string | null) {
   history.current = {
     messages, filename: "c1.json", chat_id: "c1", title: null, usage: null, parent_id: null, branch_message_idx: null, children: [],
   } satisfies ChatHistory
-  const tab: TabContextValue = {
+  let tab: TabContextValue = {
     tab: {
       id: "t1", chatId: "c1", historyFile, title: null,
       config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, appMode: "chat", projectSlug: null, workspaceItem: null,
@@ -93,7 +94,14 @@ async function renderChat(historyFile: string | null) {
   let draft = ""
   const composer = { updateText: (update: (current: string) => string) => { draft = update(draft) } } as ChatInputHandle
   rendered.result.current.chatInputRef.current = composer
-  return { ...rendered, draft: () => draft }
+  /** Open the saved chat `file` holding `other` in this tab, as the chat picker does, and wait until it shows. */
+  const openChat = async (file: string, other: Message[]) => {
+    history.current = { ...history.current as ChatHistory, messages: other, filename: file, chat_id: "c2" }
+    tab = { ...tab, tab: { ...tab.tab, chatId: "c2", historyFile: file } }
+    rendered.rerender()
+    await waitFor(() => expect(contents(rendered.result.current.chat.messages)).toEqual(contents(other)))
+  }
+  return { ...rendered, draft: () => draft, openChat }
 }
 
 const contents = (list: Message[]) => list.map((m) => m.content)
@@ -104,6 +112,7 @@ afterEach(() => {
   saveChat.mockClear()
   streams.requests = []
   streams.fail = false
+  streams.gate = null
 })
 
 describe("deleting a pair", () => {
@@ -147,6 +156,22 @@ describe("sending a question", () => {
     expect(attached.user_msg).toContain("notes")
     expect(attached.user_msg).toContain("Attached question")
     expect(attached.messages.map((m) => m.content).slice(-3)).toEqual(["Answer 2", "Plain question", "edited answer"])
+  })
+
+  it("leaves another chat opened in the tab before the reply ends alone", async () => {
+    const { result, openChat } = await renderChat("c1.json")
+    let release = () => {}
+    streams.gate = new Promise((resolve) => { release = resolve })
+    let sent: Promise<boolean> = Promise.resolve(false)
+    act(() => { sent = result.current.turns.handleSend("Late question", []) })
+    await waitFor(() => expect(streams.requests).toHaveLength(1))
+
+    const other: Message[] = [{ role: "user", content: "Other question" }, { role: "assistant", content: "Other answer" }]
+    await openChat("c2.json", other)
+    await act(async () => { release(); await sent })
+
+    expect(contents(result.current.chat.messages)).toEqual(contents(other))
+    expect(saveChat).not.toHaveBeenCalled()
   })
 })
 
