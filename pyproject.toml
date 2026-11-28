@@ -16,7 +16,7 @@ dependencies = [
     # GPT-Researcher's DuckDuckGo retriever imports `ddgs` but declares only its old name `duckduckgo-search`.
     "ddgs>=9.0",
     "mineru>=3.4.3",
-    "nodeenv>=1.10.0",
+    "nodeenv>=1.11.0",
     "numpy>=2.0.0",
     "openai>=2.43.0",
     "pathspec>=1.0",
