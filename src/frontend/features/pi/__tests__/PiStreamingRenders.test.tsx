@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { Profiler, useReducer, type ComponentProps } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { PiSessionInfo } from "@/lib/backend/api"
+import { liveSession } from "../liveSession"
 import { PiTab } from "../PiTab"
 import type { SessionSubscriber } from "../piSocket"
 import type { PiRecord } from "../protocol"
@@ -277,60 +278,81 @@ const modelProps = {
   onProvidersChange: async () => {}, onDefaultsChange: async () => {}, placement: "below" as const,
 }
 
+/** A Pi tab with its top bar slots, attached to a session of 20 settled turns while a reply streams: sends one host frame. */
+async function streamingTab() {
+  const messages = Array.from({ length: 20 }, (_, index): AgentMessage[] => [
+    { role: "user", content: `Prompt ${index}`, timestamp: index * 10 },
+    { role: "assistant", content: [{ type: "text", text: `Answer ${index}` }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: index * 10 + 1 },
+  ]).flat()
+  const entries = messages.map((message, index) => ({ type: "message", id: `e${index}`, parentId: index ? `e${index - 1}` : null, timestamp: new Date(message.timestamp).toISOString(), message }))
+  const topBar = document.body.appendChild(document.createElement("div"))
+  const slots = { thinking: topBar.appendChild(document.createElement("div")), model: topBar.appendChild(document.createElement("div")), usage: topBar.appendChild(document.createElement("div")) }
+  render(
+    <Profiler id="tab" onRender={profile}>
+      <PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={noop} modelProps={modelProps} slots={slots} />
+    </Profiler>,
+  )
+  await waitFor(() => expect(socket.subscriber).not.toBeNull())
+  const frame = (record: PiRecord) => act(() => socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record }))
+  act(() => socket.subscriber!.onFrame({
+    type: "attached", sessionId: "s1", streamId: "x", sequence: 0,
+    state: { isStreaming: true, sessionId: "s1", model: { provider: "anthropic", id: "claude" }, thinkingLevel: "medium" },
+    entries: { entries, leafId: entries.at(-1)!.id }, ui: { dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } },
+  }))
+  await waitFor(() => expect(renders.get("Answer 19")).toBeGreaterThan(0))
+  await waitFor(() => expect(renders.get("ModelDropdown")).toBeGreaterThan(0))
+  return frame
+}
+
+/** Renders of the top bar's model dropdown and of the composer while `step` runs 100 times (one host frame each), logged with their share of render time. */
+async function barAndComposerRenders(label: string, step: () => Promise<void>) {
+  await step()
+  await step()
+  const watched = ["ModelDropdown", "PiComposer"] as const
+  const before = Object.fromEntries(watched.map((key) => [key, renders.get(key) ?? 0]))
+  durations.ms.clear()
+  durations.measuring = true
+  for (let index = 0; index < 100; index++) await step()
+  durations.measuring = false
+  const counts = Object.fromEntries(watched.map((key) => [key, (renders.get(key) ?? 0) - before[key]]))
+  const { bar = 0, composer = 0, tab: total = 0 } = Object.fromEntries(durations.ms)
+  console.info(`pi, 100 ${label} frames: ${JSON.stringify(counts)}; bar ${(100 * bar / total).toFixed(1)}%, composer ${(100 * composer / total).toFixed(1)}% of ${total.toFixed(0)} ms`)
+  return counts
+}
+
 describe("a Pi tab while its answer streams", () => {
   afterEach(() => {
     cleanup()
     renders.clear()
+    document.body.replaceChildren()
   })
 
   it("renders neither the top bar nor the composer per delta frame (measure)", async () => {
-    // A session of 20 settled turns, attached in a Pi tab with its top bar slots
-    const messages = Array.from({ length: 20 }, (_, index): AgentMessage[] => [
-      { role: "user", content: `Prompt ${index}`, timestamp: index * 10 },
-      { role: "assistant", content: [{ type: "text", text: `Answer ${index}` }], provider: "anthropic", model: "claude", stopReason: "stop", timestamp: index * 10 + 1 },
-    ]).flat()
-    const entries = messages.map((message, index) => ({ type: "message", id: `e${index}`, parentId: index ? `e${index - 1}` : null, timestamp: new Date(message.timestamp).toISOString(), message }))
-    const topBar = document.body.appendChild(document.createElement("div"))
-    const slots = { thinking: topBar.appendChild(document.createElement("div")), model: topBar.appendChild(document.createElement("div")), usage: topBar.appendChild(document.createElement("div")) }
-    render(
-      <Profiler id="tab" onRender={profile}>
-        <PiTab view={{ repo: "repo", sessionId: "s1" }} onViewChange={noop} modelProps={modelProps} slots={slots} />
-      </Profiler>,
-    )
-    await waitFor(() => expect(socket.subscriber).not.toBeNull())
-    const frame = (record: PiRecord) => act(() => socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record }))
-    act(() => socket.subscriber!.onFrame({
-      type: "attached", sessionId: "s1", streamId: "x", sequence: 0,
-      state: { isStreaming: true, sessionId: "s1", model: { provider: "anthropic", id: "claude" }, thinkingLevel: "medium" },
-      entries: { entries, leafId: entries.at(-1)!.id }, ui: { dialogs: [], statuses: {}, queue: { steering: [], followUp: [] } },
-    }))
-    await waitFor(() => expect(renders.get("Answer 19")).toBeGreaterThan(0))
-    await waitFor(() => expect(renders.get("ModelDropdown")).toBeGreaterThan(0))
+    const frame = await streamingTab()
     frame({ type: "message_start", message: { role: "assistant", content: [], provider: "anthropic", model: "claude", stopReason: "pending", timestamp: 1000 } })
     frame({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } })
-
     // One delta per frame: the coalescer applies it on the next animation frame
     let answer = ""
-    const delta = async () => {
+    const counts = await barAndComposerRenders("delta", async () => {
       answer += "b"
       frame({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "b" } })
       await waitFor(() => expect(renders.get(answer)).toBeGreaterThan(0))
-    }
-    await delta()
-    await delta()
-    const watched = ["ModelDropdown", "PiComposer"] as const
-    const before = Object.fromEntries(watched.map((key) => [key, renders.get(key) ?? 0]))
-    durations.ms.clear()
-    durations.measuring = true
-    for (let index = 0; index < 100; index++) await delta()
-    durations.measuring = false
-    const counts = Object.fromEntries(watched.map((key) => [key, (renders.get(key) ?? 0) - before[key]]))
-    const { bar = 0, composer = 0, tab: total = 0 } = Object.fromEntries(durations.ms)
-    console.info(`pi, 100 delta frames: ${JSON.stringify(counts)}; bar ${(100 * bar / total).toFixed(1)}%, composer ${(100 * composer / total).toFixed(1)}% of ${total.toFixed(0)} ms`)
-
+    })
     // Was 100 each before the view read the transcript through selectors: a text frame renders the transcript only
     expect(counts).toEqual({ ModelDropdown: 0, PiComposer: 0 })
     // WorkspaceSurface and the tab workspace sit above PiTab: measured 0 per frame in the full TabContent, nothing to lower
-    topBar.remove()
+  })
+
+  it("renders neither the top bar nor the composer per tool-output frame (measure)", async () => {
+    const frame = await streamingTab()
+    frame({ type: "tool_execution_start", toolCallId: "bash-1" })
+    let line = 0
+    const counts = await barAndComposerRenders("tool-output", async () => {
+      const text = `line ${++line}`
+      frame({ type: "tool_execution_update", toolCallId: "bash-1", partialResult: { content: [{ type: "text", text }], details: {} } })
+      await waitFor(() => expect(liveSession("s1").transcript.get().runs["bash-1"]?.result?.content).toEqual([{ type: "text", text }]))
+      await act(async () => {})
+    })
+    expect(counts).toEqual({ ModelDropdown: 0, PiComposer: 0 })
   })
 })

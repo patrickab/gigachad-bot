@@ -227,7 +227,8 @@ def test_an_active_session_pi_host_lost_is_replaced_but_a_named_one_answers_404(
     file = _markdown(root)
     docs.write_bytes(WORKBENCH_CHATS, json.dumps({str(file): {"active": "gone", "sessions": ["gone"]}}).encode(), expected=None)
 
-    assert client.post("/api/workbench/chat", json={"path": str(file), "session_id": "gone"}).status_code == 404
+    named = client.post("/api/workbench/chat", json={"path": str(file), "session_id": "gone"})
+    assert (named.status_code, named.json()) == (404, {"detail": "not_found"})
     opened = client.post("/api/workbench/chat", json={"path": str(file)}).json()
 
     assert opened["link"] == {"session_id": "s1", "session_ids": ["s1"], "moved": []}
@@ -252,12 +253,14 @@ def test_an_active_session_pi_host_cannot_start_stays_listed_beside_a_new_one(cl
     # pi-host resumes in the session's stored folder: a moved project folder makes the spawn fail.
     host.failures["s1"] = (502, {"error": "spawn_failed", "message": "ENOENT: no such file or directory, posix_spawn"})
 
-    assert client.post("/api/workbench/chat", json={"path": str(file), "session_id": "s1"}).status_code == 502
+    failed = client.post("/api/workbench/chat", json={"path": str(file), "session_id": "s1"})
+    assert (failed.status_code, failed.json()) == (502, {"detail": "spawn_failed"})
     replaced = client.post("/api/workbench/chat", json={"path": str(file)}).json()
 
     assert replaced["link"] == {"session_id": "s2", "session_ids": ["s1", "s2"], "moved": []}
     host.failures["s2"] = (502, {"error": "other"})
-    assert client.post("/api/workbench/chat", json={"path": str(file)}).status_code == 502
+    other = client.post("/api/workbench/chat", json={"path": str(file)})
+    assert (other.status_code, other.json()) == (502, {"detail": "other"})
 
 
 def test_a_latex_file_chats_in_its_project_folder_even_at_a_repository_top(client, host, vault):

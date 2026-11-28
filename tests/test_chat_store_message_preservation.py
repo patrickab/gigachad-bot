@@ -63,6 +63,14 @@ def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projec
     assert store.list_histories() == {"files": ["loose.json"]}
 
 
+def test_histories_keep_underscore_chats_that_the_other_listings_leave_out(chat_store: ChatStore) -> None:
+    chat_store.save("_draft.json", {"chat_id": "draft"})
+
+    assert chat_store.list_histories() == {"files": ["_draft.json"]}
+    assert chat_store.list_all() == []
+    assert chat_store.get_branch_meta() == {}
+
+
 def test_pre_tool_search_and_research_fields_round_trip(chat_store: ChatStore) -> None:
     """Chats saved before web search and research became tool calls keep their fields although no renderer reads them."""
     source = {"title": "T", "url": "https://example.com", "content": "c"}

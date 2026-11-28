@@ -77,3 +77,26 @@ async def test_enqueue_from_a_thread_wakes_the_idle_worker(monkeypatch):
         assert await asyncio.get_running_loop().run_in_executor(None, enqueue_and_wait)
     finally:
         await extract_queue.stop()
+
+
+async def test_the_same_pdf_enqueued_from_two_threads_is_parsed_once(monkeypatch):
+    enqueued = asyncio.Event()
+    parses = []
+
+    async def fake_parse_pdf(pdf_path: Path, output_dir: Path):
+        await enqueued.wait()  # still extracting when the second enqueue arrives
+        parses.append(pdf_path.name)
+        raise RuntimeError("stop here")
+
+    def enqueue() -> None:
+        extract_queue.enqueue("twice.pdf", b"%PDF twice", lambda *_: None)
+
+    monkeypatch.setattr(extract_queue.mineru, "parse_pdf", fake_parse_pdf)
+    monkeypatch.setattr(extract_queue, "_queue", asyncio.Queue())  # an earlier test's idle worker bound the old one to its loop
+    await extract_queue.start()
+    try:
+        await asyncio.gather(asyncio.to_thread(enqueue), asyncio.to_thread(enqueue))
+        enqueued.set()
+    finally:
+        await extract_queue.stop()
+    assert parses == ["twice.pdf"]

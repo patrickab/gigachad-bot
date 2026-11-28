@@ -391,7 +391,7 @@ def test_a_pi_gateway_down_empty_or_serving_none_fails_instead_of_degrading(cata
 
 
 def test_ollama_down_leaves_only_its_models_out(catalog, monkeypatch):
-    monkeypatch.setattr(ollama_models, "sync_pi_provider", lambda: None)
+    monkeypatch.setattr(ollama_models, "sync_pi_provider", list)
     models, _ = asyncio.run(learnharness_config.served_catalog("host"))
     assert "ollama/gemma3:4b" not in [model.id for model in models]
 

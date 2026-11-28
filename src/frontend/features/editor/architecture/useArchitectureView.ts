@@ -10,32 +10,35 @@ import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode
 import { labelFontsReady, nodeMinWidth } from "./architectureLabelWidth"
 
 export type Mutate = (write: () => Promise<ArchitectureWorkspace>) => Promise<ArchitectureWorkspace>
+const queues = new Map<string, Promise<unknown>>()
 
 /**
  * A `.c4` file of a project's architecture, drawn through the view it opens
  * in: a system's own `view x of x`, its system's view for a module, or a
- * saved view. Every window of a project shows its one shared workspace. Writes run one at a time in order; each
+ * saved view. Every window of a project shows its one shared workspace. The project's writes, from all its windows, run one at a time in order; each
  * write is validated by the server against the model as it is then, so a
  * stale edit is refused with a reason instead of overwriting newer work.
  */
 export function useArchitectureView(slug: string, file: string) {
-  const workspace = useResource(null, architectureResource(slug)) ?? null
+  const workspace = useResource(null, architectureResource(slug), false) ?? null
   // A refused edit, cleared by the next one; and a failed read, cleared by the next successful read.
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<DiagramNode[]>([])
   const [optimistic, setOptimistic] = useState<DiagramGraph | null>(null)
-  const queueRef = useRef<Promise<void>>(Promise.resolve())
   const inFlightRef = useRef(0)
+  // Another device changed the model during a write, whose answer may predate that change.
+  const remoteRef = useRef(false)
 
   // Queues a write; its answer, the whole workspace, replaces the one every window of the project shows.
   // A failure rejects with the server's reason, which the caller shows.
   const mutate: Mutate = useCallback((write) => {
     inFlightRef.current += 1
-    const result = queueRef.current.then(async () => {
+    const result = (queues.get(slug) ?? Promise.resolve()).then(async () => {
       try {
         const next = await write()
         architectureResource(slug).set(next)
+        if (remoteRef.current) { remoteRef.current = false; architectureResource(slug).invalidate() }
         return next
       } finally {
         inFlightRef.current -= 1
@@ -43,7 +46,7 @@ export function useArchitectureView(slug: string, file: string) {
         if (inFlightRef.current === 0) setOptimistic(null)
       }
     })
-    queueRef.current = result.then(() => undefined, () => undefined)
+    queues.set(slug, result.catch(() => undefined))
     return result
   }, [slug])
 
@@ -63,7 +66,9 @@ export function useArchitectureView(slug: string, file: string) {
 
   // `watchDocumentLists` reads the model again on another device's change; the window joins that read to show its failure.
   useEffect(() => subscribeToChanges((event) => {
-    if (event.resource_kind === "document" && event.resource_key.startsWith(`graph/${slug}/`)) read()
+    if (event.resource_kind !== "document" || !event.resource_key.startsWith(`graph/${slug}/`)) return
+    remoteRef.current ||= inFlightRef.current > 0
+    read()
   }), [slug, read])
 
   // How the tree lists `file`, and the view it opens in (a module opens its system's).

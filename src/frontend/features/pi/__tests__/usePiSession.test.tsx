@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import type { SessionSubscriber } from "../piSocket"
 import type { HostFrame } from "../protocol"
-import { clearOutbox } from "../outbox"
-import { OPEN_FILE_NOTICE_PREFIX } from "../liveSession"
+import { clearOutbox, heldOf } from "../outbox"
+import { liveSession, OPEN_FILE_NOTICE_PREFIX } from "../liveSession"
 import { usePiSession } from "../usePiSession"
 
 const socket = vi.hoisted(() => ({ subscriber: null as SessionSubscriber | null, connected: true, sent: [] as Record<string, unknown>[], onSend: undefined as ((command: Record<string, unknown>) => void) | undefined }))
@@ -71,11 +71,11 @@ describe("usePiSession held messages", () => {
     attach()
     await act(async () => { await result.current.send("steer me", [], "steer") })
     expect(prompts()[0]).toMatchObject({ message: "steer me", streamingBehavior: "steer" })
-    expect(result.current.held[0]).toMatchObject({ text: "steer me", state: "sending" })
+    expect(heldOf("s1")[0]).toMatchObject({ text: "steer me", state: "sending" })
     await act(async () => respond(prompts()[0].id as string, true))
-    expect(result.current.held[0].state).toBe("queued")
+    expect(heldOf("s1")[0].state).toBe("queued")
     act(() => socket.subscriber!.onFrame({ type: "pi", sessionId: "s1", record: { type: "queue_update", steering: ["steer me"], followUp: [] } }))
-    expect(result.current.held).toEqual([])
+    expect(heldOf("s1")).toEqual([])
   })
 
   it("keeps messages held while the socket is down and flushes them in order once attached", async () => {
@@ -87,7 +87,7 @@ describe("usePiSession held messages", () => {
       await result.current.send("second", [], "followUp")
     })
     expect(prompts()).toEqual([])
-    expect(result.current.held.map((entry) => entry.text)).toEqual(["first", "second"])
+    expect(heldOf("s1").map((entry) => entry.text)).toEqual(["first", "second"])
     act(() => socket.subscriber!.onStatus({ kind: "connecting" }))
     socket.connected = true
     attach()
@@ -99,10 +99,10 @@ describe("usePiSession held messages", () => {
     attach()
     await act(async () => { await result.current.send("maybe", [], "steer") })
     await act(async () => socket.subscriber!.onStatus({ kind: "connecting" }))
-    expect(result.current.held[0].state).toBe("failed")
+    expect(heldOf("s1")[0].state).toBe("failed")
     attach()
     expect(prompts()).toHaveLength(1)
-    act(() => result.current.retryHeld(result.current.held[0].id))
+    act(() => liveSession("s1").retryHeld(heldOf("s1")[0].id))
     expect(prompts()).toHaveLength(2)
   })
 
@@ -113,7 +113,7 @@ describe("usePiSession held messages", () => {
     await act(async () => { await result.current.send("look", images, "steer") })
     await act(async () => socket.subscriber!.onStatus({ kind: "connecting" }))
     attach()
-    act(() => result.current.retryHeld(result.current.held[0].id))
+    act(() => liveSession("s1").retryHeld(heldOf("s1")[0].id))
     expect(prompts()).toHaveLength(2)
     expect(prompts()[1]).toMatchObject({ message: "look", images })
   })
@@ -134,7 +134,7 @@ describe("usePiSession held messages", () => {
       back = await aborting
     })
     expect(back).toEqual(["a"])
-    expect(result.current.held).toEqual([])
+    expect(heldOf("s1")).toEqual([])
   })
 })
 

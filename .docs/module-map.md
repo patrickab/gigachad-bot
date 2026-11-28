@@ -142,7 +142,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- factory_revert.py         Dry-run and `git revert` of a merged task's commit before its removal
 |   |   |-- factory_images.py         Images attached to task requests/messages, stored outside every repo
 |   |   |-- factory_preview.py        Task previews: processes, ports, throwaway database, state files, gate URLs
-|   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
+|   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient` (pooled connections, `close_clients` at shutdown)
 |   |   |-- async_utils.py            `aiter_in_thread`, `KeyedLocks` (one `asyncio.Lock` per key)
 |   |   |-- naming.py                 `slugify` for project slugs, `segment` single-segment name check
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
@@ -319,6 +319,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- components/
 |       |   |-- ui/                   Reusable interaction primitives
 |       |   |   |-- Dialog.tsx
+|       |   |   |-- SegmentedSwitch.tsx   Segmented view switch shared by the editor, diff, PDF, attachment and architecture views
 |       |   |   |-- Composer.tsx      Composer card, `ComposerTextarea`, `ComposerMicButton`, `ComposerSendButton`: shared by ChatInput, AssistantChat and the factory AgentPanel
 |       |   |   |-- FloatingWindow.tsx Modal floating window, `FloatingPanel` its panel look shared with the picker preview
 |       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), with a preview a sidebar-card finder beside a centered preview window; `useAltKeyPicker` opens it on an Alt+key
@@ -406,7 +407,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
 |-- run-frontend.sh                   Frontend launch/setup
 |-- run-pi-host.sh                    pi-host launcher (Pi sessions, completion gateway, usage)
-|-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md` (turn delete: `src/host/local/turns.ts`, `delete-turn.ts`; `src/host/entries.ts`: session `Entry`, `isPrompt`, `pathToRoot`; `src/json.ts`: `isRecord`)
+|-- pi-host/                          pi-host Bun service, see `.docs/pi-migration.md` (turn delete: `src/host/local/turns.ts`, `delete-turn.ts`; `src/host/entries.ts`: session `Entry`, `isPrompt`, `pathToRoot`; `src/json.ts`: `isRecord`, `asRecord`; `src/routes.ts`: `sessionRoute`, the `/sessions/:id/…` path parser and method table of Supervisor and Catalog; `src/sidecar.ts`: `updateState`, `markSpawn`)
 |-- pi-extensions/                    Pi extensions loaded into every `coding` session
 |                                     (the factory is the agent-factory package, `~/git/agent-factory`)
 |-- run-learnharness.sh               LearnHarness sidecar launcher
@@ -420,7 +421,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
     |-- gigachad-bot-learnharness*.service/.timer  Learn mode units, see `.docs/integration-learnharness.md`
     |-- gigachad-bot-preview-gate.service
     |-- run-production-*.sh           Production runners of pi-host and LearnHarness
-    |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile)
+    |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile, `stop_tree`)
     |-- install-systemd-service.sh
     |-- load-env.sh                   Literal runtime configuration loader
     `-- tailscale-serve.sh

@@ -41,7 +41,7 @@ function withoutToolImages(entry: Entry): Entry {
  * The first kept entry's parent is left out, so a reader walking parents from the leaf stops there.
  */
 export function branchTail({ entries, leafId }: SessionEntries, turns: number): SessionEntries {
-  const path = pathToRoot(new Map(entries.map((entry) => [entry.id as string, entry as BranchEntry])), leafId);
+  const path = pathToRoot(entries as BranchEntry[], leafId);
   let start = path.length;
   for (let prompts = 0; start > 0 && prompts < turns; ) if (isPrompt(path[--start]!)) prompts++;
   return { entries: path.slice(start).map(withoutToolImages), leafId };

@@ -7,8 +7,7 @@ import { LoadFailure } from "@/components/ui/DocumentLoadState"
 import type { StatusTone } from "@/components/ui/StatusDot"
 import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useOpenFile } from "@/features/editor/FilePanel"
-import { ApiError, deletePiTurn, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
-import { piCatalogResource } from "@/lib/backend/resources"
+import { ApiError, deletePiTurn, fetchPiCatalog, fetchPiSessions, openPiSession, restorePiSession, type PiFileScope, type PiSessionInfo, type PiSessionOptions } from "@/lib/backend/api"
 import type { Attachment, PiCatalog, PiView } from "@/lib/domain/types"
 import { ComposerDock, useComposerDock } from "@/features/chat/ComposerDock"
 import { BtwPanel } from "./BtwPanel"
@@ -23,10 +22,10 @@ import { SessionWavesPanel, useSessionWaves, type SessionCards } from "./Session
 import { SubagentRoster, useSubagentRoster } from "./SubagentRoster"
 import { refreshPiSessions } from "./sessionStore"
 import { PiSessionDot } from "./usePiSidebar"
-import { isActive, type SubagentRow } from "./subagents"
-import type { ImageContent, PiCommand, PiModel } from "./types"
+import { isActive, rowsFromToolDetails, type SubagentRow } from "./subagents"
+import type { ImageContent, PiCommand, PiModel, ToolRun } from "./types"
 import { liveSession, type Notice } from "./liveSession"
-import { useHeld } from "./outbox"
+import { removeHeld, useHeld } from "./outbox"
 import { usePiSession, usePiTranscript } from "./usePiSession"
 
 /** First message of a Pi tab started from a chat, sent once the tab's session is ready. */
@@ -96,7 +95,7 @@ async function resumableSession(repo: string, sessionId: string): Promise<PiSess
 export function useNewSessionModels(enabled: boolean): { models: PiModel[]; levels: Map<string, string[]>; defaultLevels: string[]; settled: boolean } {
   const [catalog, setCatalog] = useState<PiCatalog | null>(null)
   const [failed, setFailed] = useState(false)
-  useLoadWhile(enabled && !catalog, piCatalogResource.load, setCatalog, () => setFailed(true))
+  useLoadWhile(enabled && !catalog, fetchPiCatalog, setCatalog, () => setFailed(true))
   return useMemo(() => {
     const models: PiModel[] = []
     const levels = new Map<string, string[]>()
@@ -148,12 +147,22 @@ function useSubSessions(sessionId: string, rows: readonly SubagentRow[]): { subC
 const isEmptyTranscript = (transcript: Transcript) =>
   transcript.messages.length === 0 && transcript.unconfirmed.length === 0 && !transcript.optimistic && !transcript.running
 
+/** A selector of the runs the subagent roster reads (those with rows), the previous object while they are the same: a bash call's output frame changes nothing. */
+function rosterRunsSelector() {
+  let last: Record<string, ToolRun> = {}
+  return ({ runs }: Transcript) => {
+    const next = Object.fromEntries(Object.entries(runs).filter(([id, run]) => rowsFromToolDetails(id, run.result?.details, run.running).length > 0))
+    const ids = Object.keys(next)
+    if (ids.length !== Object.keys(last).length || ids.some((id) => next[id] !== last[id])) last = next
+    return last
+  }
+}
+
 /** The session's transcript and held messages: the only part of the view that follows a streamed frame. */
 function LiveTranscript({ sessionId, ...props }: { sessionId: string } & Omit<ComponentProps<typeof PiTranscript>, "transcript" | "held" | "onRetryHeld" | "onDeleteHeld">) {
   const transcript = usePiTranscript(sessionId)
   const held = useHeld(sessionId)
-  const { retryHeld, deleteHeld } = liveSession(sessionId)
-  return <PiTranscript transcript={transcript} held={held} onRetryHeld={retryHeld} onDeleteHeld={deleteHeld} {...props} />
+  return <PiTranscript transcript={transcript} held={held} onRetryHeld={liveSession(sessionId).retryHeld} onDeleteHeld={(id) => removeHeld(sessionId, [id])} {...props} />
 }
 
 /**
@@ -196,7 +205,7 @@ export function PiSessionView({ sessionId, cwd, files, renderHeader, composerLea
   const running = usePiTranscript(sessionId, (transcript) => transcript.running)
   const queue = usePiTranscript(sessionId, (transcript) => transcript.queue)
   const messages = usePiTranscript(sessionId, (transcript) => transcript.messages)
-  const runs = usePiTranscript(sessionId, (transcript) => transcript.runs)
+  const runs = usePiTranscript(sessionId, useMemo(() => rosterRunsSelector(), []))
   const fileLinks = useMemo<FileLinks>(() => ({ base: cwd, open: openFile }), [cwd, openFile])
   const tone: StatusTone = status.kind === "ready" ? (running ? "active" : "ready") : status.kind === "connecting" ? "idle" : "error"
   const [column, setColumn] = useState<HTMLDivElement | null>(null)

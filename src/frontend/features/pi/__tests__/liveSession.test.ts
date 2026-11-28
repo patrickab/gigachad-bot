@@ -117,6 +117,48 @@ describe("a live session", () => {
     expect(session.state.get().notices).toMatchObject([{ text: "Disconnected", tone: "error" }])
     release()
   })
+
+  it("drops what its pending commands report after the last release", async () => {
+    const session = liveSession("s10")
+    const release = session.attach()
+    const socket = host()
+    socket.emit(attached("s10"))
+    void session.send("hi", [])
+    void session.compact()
+    const sent = socket.sent.length
+    release()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(socket.sent.slice(sent).filter((frame) => frame.type === "command")).toEqual([])
+    const releaseAgain = session.attach()
+    expect(session.state.get().notices).toEqual([])
+    releaseAgain()
+  })
+
+  it("resyncs each attached session once when the tab turns visible", () => {
+    const releases = ["s11", "s12"].map((id) => liveSession(id).attach())
+    const socket = host()
+    for (const id of ["s11", "s12"]) socket.emit(attached(id))
+    act(() => { document.dispatchEvent(new Event("visibilitychange")) })
+    expect(["s11", "s12"].map((id) => framesOf(socket, id, "resync").length)).toEqual([1, 1])
+    releases.forEach((release) => release())
+  })
+
+  it("tells status observers only of what liveStatus reads (measure)", () => {
+    const onStatus = vi.fn()
+    const stop = observeLiveSessions({ onStatus, onEvent: vi.fn() })
+    const release = liveSession("s13").attach()
+    const socket = host()
+    socket.emit(attached("s13"))
+    onStatus.mockClear()
+    const request = (fields: object) => socket.emit({ type: "pi", sessionId: "s13", record: { type: "extension_ui_request", ...fields } })
+    request({ id: "w1", method: "setWidget", widgetKey: "k", widgetLines: ["busy"] })
+    // Was 1: every patch reached the observers
+    expect(onStatus).toHaveBeenCalledTimes(0)
+    request({ id: "d1", method: "confirm", title: "Ok?" })
+    expect(onStatus).toHaveBeenCalledTimes(1)
+    stop()
+    release()
+  })
 })
 
 describe("two views of one session", () => {

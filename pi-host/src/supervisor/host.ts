@@ -17,13 +17,14 @@ import { sessionInfo, type SessionInfo } from "../catalog/index.ts";
 import type { DeleteTurnRequest, DeleteTurnResult, Host, SessionMeta } from "../host/index.ts";
 import { forgetMedia } from "../media.ts";
 import { isRecord } from "../json.ts";
-import { copyPrivateState, markCacheRetention, markProfile, profileOf } from "../sidecar.ts";
+import { sessionRoute } from "../routes.ts";
+import { copyPrivateState, markSpawn, profileOf } from "../sidecar.ts";
 import type { SupervisorConfig } from "./config.ts";
 import { RESUME_PROMPT, type ResumeState, type RunRecord } from "./resume.ts";
-import type { Health, SocketData, Supervisor } from "./index.ts";
+import type { Health, LiveStatus, SocketData, Supervisor } from "./index.ts";
 import { SessionLock } from "./lock.ts";
 import { childModels, parseProfileSpec, profileArgs, sameProfile, type ModelRef, type ProfileSpec } from "./profiles.ts";
-import { envelope, LiveSession, stamp, type FrameSink, type LiveStatus } from "./session.ts";
+import { envelope, LiveSession, stamp, type FrameSink } from "./session.ts";
 
 type ForkOf = { sessionPath: string; entryId: string };
 type Resume = null | { sessionPath: string } | { sessionId: string } | { forkOf: ForkOf };
@@ -38,9 +39,6 @@ type Failure = { status: number; body: Record<string, unknown> };
 type StartOutcome = { session: LiveSession } | Failure;
 type DeleteTurnAnswer = Extract<DeleteTurnResult, { ok: true }>;
 
-const SESSION_CLOSE = /^\/sessions\/([^/]+)\/close$/;
-const SESSION = /^\/sessions\/([^/]+)$/;
-const TURN_DELETE = /^\/sessions\/([^/]+)\/turns\/([^/]+)\/delete$/;
 /** HTTP answer of each `Host.deleteTurn` refusal. */
 const TURN_REFUSALS: Record<string, number> = {
   not_found: 404,
@@ -65,15 +63,6 @@ function fail(status: number, error: string, extra: Record<string, unknown> = {}
 /** JSON response of a failure. */
 function respond({ status, body }: Failure): Response {
   return Response.json(body, { status });
-}
-
-/** The session id of a route's path segment, undefined when it is not valid percent-encoding. */
-function sessionIdOf(segment: string): string | undefined {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return undefined;
-  }
 }
 
 /** True when `live` differs from `spec` only in its document prompt or tools and nothing is in flight. */
@@ -207,26 +196,20 @@ export class SupervisorHost implements Supervisor {
       if ("status" in outcome) return respond(outcome);
       return Response.json({ session: await this.info(outcome.session) });
     }
-    const close = SESSION_CLOSE.exec(url.pathname);
-    if (close && request.method === "POST") {
-      await this.byId.get(decodeURIComponent(close[1]!))?.close();
+    const route = sessionRoute(url, request.method);
+    if (route instanceof Response) return route;
+    if (route?.action === "close") {
+      await this.byId.get(route.sessionId)?.close();
       return new Response(null, { status: 204 });
     }
-    const turn = TURN_DELETE.exec(url.pathname);
-    if (turn && request.method === "POST") {
-      const sessionId = sessionIdOf(turn[1]!);
-      const entryId = sessionIdOf(turn[2]!);
-      if (sessionId === undefined || entryId === undefined) return respond(fail(400, "invalid_session_id"));
+    if (route?.action === "turns") {
       const body = await request.json().catch(() => undefined);
       if (!isRecord(body) || (body.through !== "turn" && body.through !== "end")) return respond(fail(400, "invalid_body"));
-      const answer = await this.deleteTurn(sessionId, entryId, body.through);
+      const answer = await this.deleteTurn(route.sessionId, route.entryId!, body.through);
       return "status" in answer ? respond(answer) : Response.json(answer);
     }
-    const target = SESSION.exec(url.pathname);
-    if (target && request.method === "DELETE") {
-      const sessionId = sessionIdOf(target[1]!);
-      if (sessionId === undefined) return respond(fail(400, "invalid_session_id"));
-      const refused = await this.delete(sessionId);
+    if (route?.action === "") {
+      const refused = await this.delete(route.sessionId);
       return refused ? respond(refused) : new Response(null, { status: 204 });
     }
     return undefined;
@@ -527,10 +510,9 @@ export class SupervisorHost implements Supervisor {
     }
 
     try {
-      // G5: before the session is listed, so a `document` session never shows as `coding`.
-      await markProfile(this.host, session.sessionPath, request.spec.profile);
-      // The retention its Pi got through `childEnv`, so the session list knows how long its cache lives
-      await markCacheRetention(this.host, session.sessionPath, process.env.PI_CACHE_RETENTION);
+      // G5: before the session is listed, so a `document` session never shows as `coding`. The retention its Pi got
+      // through `childEnv`, so the session list knows how long its cache lives
+      await markSpawn(this.host, session.sessionPath, request.spec.profile, process.env.PI_CACHE_RETENTION);
     } catch (error) {
       await session.close();
       return fail(502, "spawn_failed", { message: `profile marker: ${String(error)}` });

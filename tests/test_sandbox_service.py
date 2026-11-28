@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
+import threading
 
 import pytest
 
@@ -230,3 +232,37 @@ async def test_delete_chat_state_preserves_shared_assets(sandbox_service, asset_
     for path in asset_paths_1:
         asset = asset_store.read(path)
         assert asset.content is not None
+
+
+async def test_a_store_failure_while_saving_a_run_is_a_failed_result(sandbox_service, asset_store):
+    def failing_write(*args, **kwargs):
+        raise RuntimeError("database is down")
+
+    asset_store.write = failing_write
+
+    result = await sandbox_service.invoke(chat_id="chat-store-fail", tool_call_id="tool-call-store-fail", prompt="Save me")
+
+    assert result.status == "failed"
+    assert result.error == "runner_error"
+
+
+async def test_a_cancelled_call_holds_the_locks_until_its_save_ends(sandbox_service, monkeypatch):
+    saving, release = threading.Event(), threading.Event()
+    persist_run = sandbox_service._persist_run
+
+    def slow_persist_run(*args):
+        saving.set()
+        release.wait(5)
+        persist_run(*args)
+
+    monkeypatch.setattr(sandbox_service, "_persist_run", slow_persist_run)
+    call = asyncio.create_task(sandbox_service.invoke(chat_id="chat-cancel-save", tool_call_id="tool-call-cancel", prompt="Save me"))
+    await asyncio.to_thread(saving.wait, 5)
+    call.cancel()
+    await asyncio.sleep(0.05)
+
+    assert sandbox_service._runtime.assets_lock.locked()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert not sandbox_service._runtime.assets_lock.locked()

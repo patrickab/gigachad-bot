@@ -24,7 +24,6 @@ from backend.routes.deps import (
     get_relocate,
     resolve_allowed,
 )
-from backend.routes.upstream import call_upstream
 import config
 from lib import document_service, latex, latex_templates, pi_host
 from lib.asset_store import AssetStore
@@ -443,22 +442,21 @@ async def post_chat(
         link = await asyncio.to_thread(links.of, key, roots)
         wanted = None if body.new else body.session_id or link.active
         try:
-            session = await call_upstream(open_chat(wanted))
-        except HTTPException as exc:
-            lost = exc.status_code == 404
+            session = await open_chat(wanted)
+        except pi_host.PiHostRejected as exc:
+            lost = exc.status == 404
             if not (lost or _spawn_failed(exc)) or wanted is None or body.session_id is not None:
                 raise
             if lost:
                 await asyncio.to_thread(links.discard, key, wanted)
-            session = await call_upstream(open_chat(None))
+            session = await open_chat(None)
         link = await asyncio.to_thread(links.activate, key, session.session_id)
     return OpenedChat(session=session, link=_linked_session(link), kind=chat.kind, cwd=str(chat.cwd), pdf_text=pdf_text)
 
 
-def _spawn_failed(exc: HTTPException) -> bool:
+def _spawn_failed(exc: pi_host.PiHostRejected) -> bool:
     """Whether pi-host could not start the child (`spawn_failed`), as for a session whose stored folder is gone."""
-    cause = exc.__cause__
-    return isinstance(cause, pi_host.PiHostRejected) and isinstance(cause.body, dict) and cause.body.get("error") == "spawn_failed"
+    return isinstance(exc.body, dict) and exc.body.get("error") == "spawn_failed"
 
 
 @router.get("/chats")
@@ -469,7 +467,7 @@ async def get_chats(
 ) -> ChatList:
     """The Pi sessions linked to the absolute file, LaTeX project folder or canvas key `path` (`SessionLinks.of`)."""
     link = await asyncio.to_thread(SessionLinks(docs).of, _link_key(path), roots)
-    known = {session.session_id: session for session in await call_upstream(pi_host.list_sessions(None, archived=False))}
+    known = {session.session_id: session for session in await pi_host.list_sessions(None, archived=False)}
     return ChatList(link=_linked_session(link), sessions=[known[id_] for id_ in link.sessions if id_ in known])
 
 

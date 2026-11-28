@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,7 +8,6 @@ from backend.routes.deps import get_chat_cleanup, get_chat_store
 from backend.routes.schemas import ChatSnapshot
 from lib.chat_cleanup import ChatCleanup
 from lib.chat_store import ChatStore, ParentDiverged
-from lib.data_store import StorageConflictError
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
@@ -68,14 +66,14 @@ def load_chat_history(filename: str, store: ChatStore = Depends(get_chat_store))
 
 
 @router.put("/{filename:path}")
-async def save_chat_history(
+def save_chat_history(
     filename: str,
     data: ChatSnapshot | None = None,
     store: ChatStore = Depends(get_chat_store),
 ) -> dict[str, str]:
     """Save a chat."""
-    with http_errors(((StorageConflictError, ValueError), 409, None)):
-        return await asyncio.to_thread(store.save, filename, data.model_dump() if data else None)
+    with http_errors((ValueError, 409, None)):
+        return store.save(filename, data.model_dump() if data else None)
 
 
 @router.delete("/cascade/{filename:path}")

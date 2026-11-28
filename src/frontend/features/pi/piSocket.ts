@@ -1,10 +1,10 @@
 /**
  * The page's one WebSocket to pi-host (`WS /api/pi/ws`), shared by every open Pi session (M18).
  *
- * - Consumes host frames `{type, sessionId, streamId, sequence, ...}` and routes each to the subscribers of its session
- * - Provides `subscribePiSession`: the first subscriber of a session attaches it, the last detaches it
+ * - Consumes host frames `{type, sessionId, streamId, sequence, ...}` and routes each to its session's subscriber
+ * - Provides `subscribePiSession`: one subscriber per session (`liveSession.ts` counts the holders), subscribing attaches it, unsubscribing detaches it
  * - Provides `observePiSocket`: host frames without `sessionId` (`sessions_changed`) and socket reopens, for lists
- * - Reconnects with backoff while anything is subscribed or held; per session a subscriber's `onReopen` decides how to catch up (resync or attach), else it re-attaches
+ * - Reconnects with backoff while anything is subscribed or held; per session the subscriber's `onReopen` catches up (resync or attach), its `catchUp` when the tab turns visible or the network returns
  * - No ack timeouts: liveness never depends on how fast the host answers (M18)
  * - Closes shortly after the last session and hold leave, so a remount (React strict mode, a tab switch) keeps the socket
  */
@@ -19,8 +19,10 @@ export type SocketStatus = { kind: "connecting" } | { kind: "open" } | { kind: "
 export interface SessionSubscriber {
   onFrame: (frame: HostFrame) => void
   onStatus: (status: SocketStatus) => void
-  /** The socket (re)opened: send this session's catch-up frames. Without it the socket sends `attach`. */
-  onReopen?: () => void
+  /** The socket (re)opened: send this session's catch-up frames. */
+  onReopen: () => void
+  /** The tab turned visible or the network returned: ask for what this session missed. */
+  catchUp: () => void
 }
 
 /** Sees the socket's traffic without attaching anything. */
@@ -35,7 +37,7 @@ const RETRY_MIN_MS = 500
 const RETRY_MAX_MS = 10_000
 const IDLE_CLOSE_MS = 2_000
 
-const subscribers = new Map<string, Set<SessionSubscriber>>()
+const subscribers = new Map<string, SessionSubscriber>()
 const observers = new Set<SocketObserver>()
 /** Observers that keep the socket open with no session attached. */
 let holds = 0
@@ -51,7 +53,7 @@ function idle(): boolean {
 
 function setStatus(next: SocketStatus) {
   status = next
-  for (const group of subscribers.values()) for (const subscriber of group) subscriber.onStatus(next)
+  for (const subscriber of subscribers.values()) subscriber.onStatus(next)
 }
 
 function sendRaw(frame: ClientFrame): boolean {
@@ -68,11 +70,7 @@ function connect() {
   opened.onopen = () => {
     retryMs = RETRY_MIN_MS
     setStatus({ kind: "open" })
-    for (const [sessionId, group] of subscribers) {
-      const owner = [...group].find((subscriber) => subscriber.onReopen)
-      if (owner) owner.onReopen!()
-      else sendRaw({ type: "attach", sessionId })
-    }
+    for (const subscriber of subscribers.values()) subscriber.onReopen()
     for (const observer of observers) observer.onOpen?.()
   }
   opened.onmessage = (message) => {
@@ -81,9 +79,7 @@ function connect() {
       for (const observer of observers) observer.onHostEvent?.(frame)
       return
     }
-    const group = subscribers.get(frame.sessionId)
-    if (!group) return
-    for (const subscriber of group) subscriber.onFrame(frame as HostFrame)
+    subscribers.get(frame.sessionId)?.onFrame(frame as HostFrame)
   }
   opened.onclose = (event) => {
     socket = null
@@ -114,24 +110,25 @@ function closeWhenIdle() {
   }, IDLE_CLOSE_MS)
 }
 
-/** Watch one session: attaches it (now or once connected) and reports frames and socket status. Returns the unsubscribe. */
+function catchUp() {
+  for (const subscriber of subscribers.values()) subscriber.catchUp()
+}
+
+if (typeof window !== "undefined") {
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") catchUp() })
+  window.addEventListener("online", catchUp)
+}
+
+/** Watch one session: attaches it (now or once connected) and reports frames and socket status. Returns the unsubscribe, which detaches it. */
 export function subscribePiSession(sessionId: string, subscriber: SessionSubscriber): () => void {
   clearTimeout(idleTimer)
   idleTimer = undefined
-  let group = subscribers.get(sessionId)
-  if (!group) {
-    group = new Set()
-    subscribers.set(sessionId, group)
-    sendRaw({ type: "attach", sessionId })
-  }
-  group.add(subscriber)
+  subscribers.set(sessionId, subscriber)
+  sendRaw({ type: "attach", sessionId })
   if (socket) subscriber.onStatus(status)
   else connect()
   return () => {
-    const current = subscribers.get(sessionId)
-    if (!current) return
-    current.delete(subscriber)
-    if (current.size > 0) return
+    if (subscribers.get(sessionId) !== subscriber) return
     subscribers.delete(sessionId)
     sendRaw({ type: "detach", sessionId })
     if (idle()) closeWhenIdle()

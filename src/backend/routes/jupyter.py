@@ -29,13 +29,12 @@ from starlette import status
 from backend.identity import RequestIdentity, get_request_identity, host_access_only
 from backend.reverse_proxy import PROXIED_METHODS, has_body, relay_websocket, streaming_response
 from backend.routes.deps import get_file_roots
-from backend.routes.upstream import call_upstream
 from backend.websocket_origin import POLICY_VIOLATION, is_allowed_websocket, require_trusted_request
 from lib import jupyter, jupyter_service
 from lib.file_roots import FileRoots
 from lib.jupyter import KernelRef, KernelSpecList
 from lib.jupyter_service import RemoteJupyterHost
-from lib.upstream import UpstreamRequestFailed, UpstreamUnavailable
+from lib.upstream import UpstreamUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -60,10 +59,7 @@ def get_jupyter_host() -> RemoteJupyterHost:
 
 def _allowed_notebook(roots: FileRoots, path: str) -> str:
     """The resolved path of the notebook *path* when the file roots reach it, else a 404 like any other path outside them."""
-    try:
-        notebook = jupyter.notebook_path(path)
-    except UpstreamRequestFailed as exc:
-        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    notebook = jupyter.notebook_path(path)
     if not roots.contains(notebook):
         raise HTTPException(status_code=404, detail=f"Path outside file roots: {path}")
     return str(notebook)
@@ -80,7 +76,7 @@ def _working_directory(roots: FileRoots, notebook: str) -> str:
 async def list_kernelspecs(
     path: str = Query(...), host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> KernelSpecList:
-    return await call_upstream(asyncio.to_thread(host.kernelspecs, _allowed_notebook(roots, path)))
+    return await asyncio.to_thread(host.kernelspecs, _allowed_notebook(roots, path))
 
 
 @router.post("/kernel", response_model=KernelRef, dependencies=[_host_only, _trusted])
@@ -88,14 +84,14 @@ async def start_kernel(
     req: StartKernelRequest, host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> KernelRef:
     notebook = _allowed_notebook(roots, req.path)
-    return await call_upstream(asyncio.to_thread(host.start_kernel, notebook, req.name, _working_directory(roots, notebook)))
+    return await asyncio.to_thread(host.start_kernel, notebook, req.name, _working_directory(roots, notebook))
 
 
 @router.delete("/kernel", status_code=204, dependencies=[_host_only, _trusted])
 async def shutdown_kernel(
     path: str = Query(...), host: RemoteJupyterHost = Depends(get_jupyter_host), roots: FileRoots = Depends(get_file_roots)
 ) -> Response:
-    await call_upstream(asyncio.to_thread(host.shutdown_kernel, _allowed_notebook(roots, path)))
+    await asyncio.to_thread(host.shutdown_kernel, _allowed_notebook(roots, path))
     return Response(status_code=204)
 
 
@@ -128,11 +124,9 @@ async def proxy_http(path: str, request: Request, host: RemoteJupyterHost = Depe
     body = request.stream() if has_body(request) else None
     if request.method in {"POST", "PATCH"} and path.startswith("api/sessions"):
         content = await _session_body(request)
-        await call_upstream(asyncio.to_thread(host.check_session, request.method, content))
+        await asyncio.to_thread(host.check_session, request.method, content)
         body = _replay(content)
-    upstream = await call_upstream(
-        host.open_http(request.method, path, request.query_params.multi_items(), request.headers.items(), body)
-    )
+    upstream = await host.open_http(request.method, path, request.query_params.multi_items(), request.headers.items(), body)
     return streaming_response(upstream, jupyter.drops_response_header)
 
 

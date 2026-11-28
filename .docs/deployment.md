@@ -149,7 +149,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 - Runs `run-backend.sh --prod`: loads credentials/config, starts or reuses production PostgreSQL, serves loopback Uvicorn without reload.
 - Keep `NoNewPrivileges`, `PrivateTmp`, `UMask=0077`, restart handling and stop timeout.
 - **Never bind FastAPI to a LAN, Tailnet or wildcard address.**
-- Starts after `gigachad-bot-pi-host.service`, reaching it via `GIGACHAD_PI_HOST_URL=http://127.0.0.1:8301`, set in its unit (and the LiteLLM proxy's), **not** in `$ENV`: development's pi-host holds the default `127.0.0.1:8300`.
+- Starts after `gigachad-bot-pi-host.service`, reaching it via `GIGACHAD_PI_HOST_URL=http://127.0.0.1:8301`, set in its unit, **not** in `$ENV`: development's pi-host holds the default `127.0.0.1:8300`.
 - Starts the stateless LikeC4 service, points `C4_SERVICE_URL` at it, stops it on exit; `npm ci` against its lockfile on each start. If unavailable, architecture routes return 503, everything else works.
 
 Units use `%h` and `GIGACHAD_ENV_FILE`, not `EnvironmentFile` (systemd must not parse credentials).
@@ -177,7 +177,7 @@ Units use `%h` and `GIGACHAD_ENV_FILE`, not `EnvironmentFile` (systemd must not 
 | LikeC4 | `127.0.0.1:8011` | `127.0.0.1:8012` |
 | PostgreSQL | `gigachad-dev` container/volume | `gigachad-prod` container/volume |
 | pi-host (Pi sessions, completion gateway, usage) | `127.0.0.1:8300` (`run.sh`) | `127.0.0.1:8301`, same token file and `~/.pi/agent` |
-| LearnHarness / LiteLLM proxy / gate | `127.0.0.1:30181` / `127.0.0.1:30183` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
+| LearnHarness / gate | `127.0.0.1:30181` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
 | Factory preview gate | `127.0.0.1:30185` | Same default, one instance per machine, behind Serve `:8445` |
 
 On failure, read the logs; do not expose another listener:

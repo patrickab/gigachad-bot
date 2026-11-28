@@ -7,13 +7,13 @@
 import { isAbsolute, resolve } from "node:path";
 import type { Host, SessionMatch } from "../host/index.ts";
 import { isRecord } from "../json.ts";
+import { sessionRoute } from "../routes.ts";
 import { updateState } from "../sidecar.ts";
 import type { LiveSessions } from "../supervisor/index.ts";
 import { sessionEntries } from "./entries.ts";
 import { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
 
 export { listSessions, sessionInfo, type SessionInfo } from "./sessions.ts";
-export type { LiveStatus } from "../supervisor/session.ts";
 
 const DEFAULT_FILE_LIMIT = 50;
 const MAX_FILE_LIMIT = 500;
@@ -21,16 +21,6 @@ const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
 const DEFAULT_MATCH_LIMIT = 50;
 const MAX_MATCH_LIMIT = 500;
-/** The methods each `/sessions/:id/<action>` route takes. */
-const ACTION_METHODS = {
-  archive: ["POST"],
-  restore: ["POST"],
-  pin: ["PUT"],
-  entries: ["GET"],
-  matches: ["GET"],
-} as const satisfies Record<string, readonly string[]>;
-type SessionAction = keyof typeof ACTION_METHODS;
-const SESSION_ACTION = new RegExp(`^/sessions/([^/]+)/(${Object.keys(ACTION_METHODS).join("|")})$`);
 
 /** One `GET /search` hit (M24). */
 export type SearchHit = { session: SessionInfo; snippet: string; entryId: string; matches: SessionMatch[] };
@@ -124,7 +114,7 @@ async function handlePin(request: Request, sessionPath: string, live: LiveSessio
   const body = await request.json().catch(() => undefined);
   if (!isRecord(body) || typeof body.pinned !== "boolean") return fail(400, "invalid_body");
   const pinned = body.pinned;
-  await updateState(host, sessionPath, (state) => ({ next: { ...state, pinned }, result: undefined }));
+  await updateState(host, sessionPath, (state) => ({ ...state, pinned }));
   const session = await sessionInfo(host, sessionPath, live);
   return session ? Response.json({ session }) : fail(404, "not_found");
 }
@@ -153,21 +143,14 @@ export async function handleCatalog(request: Request, url: URL, live: LiveSessio
   if (url.pathname === "/sessions" && request.method === "GET") return handleList(url, live, host);
   if (url.pathname === "/files" && request.method === "GET") return handleFiles(url, host);
   if (url.pathname === "/search" && request.method === "GET") return handleSearch(url, live, host);
-  const match = SESSION_ACTION.exec(url.pathname);
-  if (!match) return undefined;
-  const [, rawId, rawAction] = match;
-  const action = rawAction as SessionAction;
-  if (!(ACTION_METHODS[action] as readonly string[]).includes(request.method)) return fail(405, "method_not_allowed");
-  let sessionId: string;
-  try {
-    sessionId = decodeURIComponent(rawId!);
-  } catch {
-    return fail(400, "invalid_session_id");
-  }
+  const route = sessionRoute(url, request.method);
+  if (!route || route instanceof Response) return route;
+  const { sessionId, action } = route;
   const sessionPath = await host.findSession(sessionId);
   if (!sessionPath) return fail(404, "not_found");
   if (action === "archive" || action === "restore") return handleMove(sessionPath, action === "archive", live, host);
   if (action === "pin") return handlePin(request, sessionPath, live, host);
   if (action === "entries") return handleEntries(url, sessionPath, host);
-  return handleMatches(url, sessionPath, host);
+  // `/sessions/:id`, its `close` and `turns` routes are the supervisor's, which answers them first
+  return action === "matches" ? handleMatches(url, sessionPath, host) : undefined;
 }

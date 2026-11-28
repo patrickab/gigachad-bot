@@ -37,7 +37,7 @@ vi.mock("../usePiSession", () => ({
     status: { kind: "ready" },
     state: STATE,
     btw: BTW, commands: NONE, dialogs: NONE, notices: NONE, statusLines: NO_WIDGETS, widgets: NO_WIDGETS, inspectSubagent: () => {}, editorText: null,
-    models: NONE, thinkingLevels: NONE, stats: null, held: NONE, retryHeld: () => {}, deleteHeld: () => {},
+    models: NONE, thinkingLevels: NONE, stats: null,
     send: session.send, abort: async () => [], runBash: async () => {}, compact: async () => {}, setModel: async () => {}, setThinking: async () => {},
     answerDialog: () => {}, notify: session.notify,
   }),

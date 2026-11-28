@@ -62,19 +62,14 @@ stop_postgres() {
     fi
 }
 
-# Asks each child to stop, then stops whatever is left of its tree. uvicorn's worker holds
-# the port itself, and one hung in shutdown would otherwise keep it, with or without its
-# reloader, until killed by hand.
+# Asks each child to stop, and kills whatever is left of its tree after 10s. uvicorn's
+# worker holds the port itself, and one hung in shutdown would otherwise keep it, with
+# or without its reloader, until killed by hand.
 stop_children() {
-    local pid tree_pid
-    local -a tree left
+    local pid
     for pid in "$backend_pid" "$c4_pid" "$jupyter_pid"; do
         [[ -n "$pid" ]] || continue
-        mapfile -t tree < <(descendants "$pid")
-        stop_processes 10 "$pid"
-        left=()
-        for tree_pid in "${tree[@]}"; do running "$tree_pid" && left+=("$tree_pid"); done
-        stop_processes 5 "${left[@]}"
+        stop_tree 10 "$pid"
         wait "$pid" 2>/dev/null || true
     done
     backend_pid=''

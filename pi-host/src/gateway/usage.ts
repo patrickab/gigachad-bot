@@ -8,6 +8,7 @@
  */
 import type { Models } from "@earendil-works/pi-ai";
 import { getJson, tokenFor } from "pi-usage-meters/extensions/core.js";
+import { asRecord } from "../json.ts";
 import { HttpError } from "./openai.ts";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -16,9 +17,6 @@ const CACHE_MS = 60_000;
 export type UsageLimit = { window: "5h" | "7d"; label?: string; usedPercent: number; resetsAt: string | null };
 export type UsageReport = { provider: "anthropic"; limits: UsageLimit[]; fetchedAt: string };
 export type FetchJson = (url: string, token: string, headers: Record<string, string>) => Promise<unknown>;
-
-const record = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 function isoOrNull(value: unknown): string | null {
   const ms = typeof value === "string" ? Date.parse(value) : NaN;
@@ -32,18 +30,18 @@ function limitOf(window: UsageLimit["window"], percent: unknown, resetsAt: unkno
 
 /** Map Anthropic's usage payload: `limits[]` session -> 5h, weekly -> 7d (model-scoped keeps its model label). */
 export function mapAnthropicUsage(payload: unknown): UsageLimit[] {
-  const usage = record(payload);
+  const usage = asRecord(payload);
   if (Array.isArray(usage.limits)) {
     return usage.limits.flatMap((entry) => {
-      const limit = record(entry);
+      const limit = asRecord(entry);
       const window = limit.group === "session" ? "5h" : limit.group === "weekly" ? "7d" : undefined;
-      const label = record(record(record(limit.scope).model)).display_name;
+      const label = asRecord(asRecord(asRecord(limit.scope).model)).display_name;
       return (window && limitOf(window, limit.percent, limit.resets_at, label)) || [];
     });
   }
   // Older payloads without limits[]: the fixed five_hour / seven_day windows.
-  const fiveHour = record(usage.five_hour);
-  const sevenDay = record(usage.seven_day);
+  const fiveHour = asRecord(usage.five_hour);
+  const sevenDay = asRecord(usage.seven_day);
   return [
     limitOf("5h", fiveHour.utilization, fiveHour.resets_at),
     limitOf("7d", sevenDay.utilization, sevenDay.resets_at),

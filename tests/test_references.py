@@ -112,6 +112,18 @@ async def test_chat_delete_keeps_library_data_another_chat_references(world: Wor
     assert world.has(annotation)
 
 
+async def test_chat_delete_keeps_the_annotations_of_a_pdf_stored_under_notes(world: World) -> None:
+    annotation = world.library_pdf("paper.pdf")
+    world.docs.write_bytes("note/reading/Paper.PDF", PDF)
+    world.docs.write_bytes("note/reading/paper.md", b"# not a PDF")
+    world.chat("one.json", "c1", [pdf_attachment("paper.pdf")])
+
+    await world.cleanup.after(lambda released: world.chats.delete("one.json", released=released))
+
+    assert not world.library_left("paper.pdf")
+    assert world.has(annotation)
+
+
 async def test_cascade_delete_releases_every_branch(world: World) -> None:
     world.library_pdf("paper.pdf")
     world.chat("root.json", "root", [])

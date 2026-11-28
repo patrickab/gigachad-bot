@@ -1,12 +1,12 @@
 import { createStore, type Store } from "@/lib/store"
 import { BTW_WIDGET_KEY, parseBtwWidget, isBtwCommand, type BtwThread } from "./btw"
 import { createTranscriptCoalescer } from "./coalescer"
-import { confirmedIds, heldOf, hold, patchHeld, removeHeld, takeHeld, type HeldMessage } from "./outbox"
+import { confirmFromTranscript, heldOf, hold, patchHeld, takeBack, takeHeld } from "./outbox"
 import { sendPiCommand, sendPiFrame, subscribePiSession } from "./piSocket"
 import type { AttachedUi, HostFrame, PiRecord, PiResponse, PiSessionStats } from "./protocol"
 import { SessionResync } from "./resync"
 import { INSPECT_WIDGET_KEY, inspectCommand, parseInspectReply, type InspectReply, type SubagentRow } from "./subagents"
-import { EMPTY_TRANSCRIPT, textOf, transcriptReducer, type Transcript } from "./transcript"
+import { EMPTY_TRANSCRIPT, transcriptReducer, type Transcript } from "./transcript"
 import { isDialogRequest, type ExtensionDialog, type ImageContent, type PiCommand, type PiModel, type PiState, type UserMessage } from "./types"
 
 export type ConnectionStatus = { kind: "connecting" } | { kind: "ready" } | { kind: "closed"; reason: string }
@@ -33,27 +33,7 @@ export interface LiveSessionState {
   failed: boolean
 }
 
-export interface LiveSession {
-  /** Everything but the transcript: a new object per change. */
-  state: Pick<Store<LiveSessionState>, "get" | "subscribe">
-  /** A new object per reducer step, at most one per animation frame while a reply streams. */
-  transcript: Pick<Store<Transcript>, "get" | "subscribe">
-  /** Keep the session attached until the returned release runs. The first holder attaches, the last detaches and drops the state. */
-  attach: () => () => void
-  /** Called with the path of every `Open file: ` notice. */
-  onOpenFile: (open: (path: string) => void) => () => void
-  send: (message: string, images: ImageContent[], mode?: QueueMode) => Promise<boolean>
-  abort: () => Promise<string[]>
-  runBash: (line: string, excludeFromContext: boolean) => Promise<void>
-  compact: (customInstructions?: string) => Promise<void>
-  setModel: (model: PiModel) => Promise<void>
-  setThinking: (level: string) => Promise<void>
-  answerDialog: (id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) => void
-  inspectSubagent: (target: NonNullable<SubagentRow["inspect"]>) => Promise<InspectReply>
-  notify: (text: string, tone: Notice["tone"]) => void
-  retryHeld: (id: string) => void
-  deleteHeld: (id: string) => void
-}
+export type LiveSession = ReturnType<typeof createLiveSession>
 
 /** A run of a session ended, waits on a dialog, or failed (for notifications). */
 export interface PiSessionEvent {
@@ -91,13 +71,13 @@ export function liveSession(sessionId: string): LiveSession {
   return session
 }
 
-/** Run state of a session some view holds attached, null otherwise (and while it is not attached yet or reconnecting). */
+/** Run state of a session some view holds attached, null otherwise (and until its first `attached`). While it reconnects, the last known state. */
 export function liveStatus(sessionId: string): { running: boolean; waiting: boolean; failed: boolean; contextPercent?: number; cost?: number } | null {
   const session = sessions.get(sessionId)
   if (!session) return null
-  const { status, dialogs, failed, stats } = session.state.get()
-  if (status.kind === "connecting") return null
-  const open = status.kind === "ready"
+  const { status, state: piState, dialogs, failed, stats } = session.state.get()
+  if (piState === null) return null
+  const open = status.kind !== "closed"
   return { running: open && session.transcript.get().running, waiting: open && dialogs.length > 0, failed, contextPercent: stats?.contextUsage?.percent ?? undefined, cost: stats?.cost }
 }
 
@@ -132,7 +112,7 @@ function stopReasonOf(record: PiRecord): unknown {
  * - Extension dialogs queue until answered, `notify` shows briefly, `setStatus` keeps a line per key
  * - A `notify` led by `OPEN_FILE_NOTICE_PREFIX` goes to every `onOpenFile` instead of showing
  */
-function createLiveSession(sessionId: string): LiveSession {
+function createLiveSession(sessionId: string) {
   const state = createStore(INITIAL_STATE)
   const transcript = createStore(EMPTY_TRANSCRIPT)
   const pending = new Map<string, (response: PiResponse) => void>()
@@ -147,17 +127,17 @@ function createLiveSession(sessionId: string): LiveSession {
   /** The current run's `agent_end` reported an abort; `settled` was emitted for it. */
   let aborted = false
   let settled = false
-  let running = false
 
+  /** Tell the observers when what `liveStatus` reads changed, not on every patch (a widget, a notice). */
+  let lastStatus = ""
   const statusChanged = () => {
+    const current = JSON.stringify(liveStatus(sessionId))
+    if (current === lastStatus) return
+    lastStatus = current
     for (const observer of observers) observer.onStatus()
   }
   state.subscribe(statusChanged)
-  transcript.subscribe(() => {
-    if (transcript.get().running === running) return
-    running = !running
-    statusChanged()
-  })
+  transcript.subscribe(statusChanged)
 
   /** Apply `change` unless every field in it is already current, as React's state setters bail out. */
   const patch = (change: Partial<LiveSessionState>) => {
@@ -166,28 +146,17 @@ function createLiveSession(sessionId: string): LiveSession {
     state.set({ ...current, ...change })
   }
 
-  /** Pi's queue snapshot or the user message in the session confirms a held message. */
-  const confirmHeld = () => {
-    const held = heldOf(sessionId)
-    if (held.length === 0) return
-    const { messages, queue } = transcript.get()
-    const userTexts = (since: number) => messages
-      .filter((message) => message.role === "user" && message.timestamp >= since - 2_000)
-      .map((message) => textOf((message as UserMessage).content))
-    const ids = confirmedIds(held, queue, userTexts)
-    if (ids.length > 0) removeHeld(sessionId, ids)
-  }
-
   const coalescer = createTranscriptCoalescer((action) => {
     const before = transcript.get()
     const after = transcriptReducer(before, action)
     if (after === before) return
     transcript.set(after)
-    if (after.messages !== before.messages || after.queue !== before.queue) confirmHeld()
+    if (after.messages !== before.messages || after.queue !== before.queue) confirmFromTranscript(sessionId, after)
   })
   const dispatch = coalescer.push
 
   const notify = (text: string, tone: Notice["tone"]) => {
+    if (!detach) return
     const id = `notice-${++nextId}`
     patch({ notices: [...state.get().notices, { id, text, tone }] })
     const timer = setTimeout(() => {
@@ -197,10 +166,10 @@ function createLiveSession(sessionId: string): LiveSession {
     noticeTimers.add(timer)
   }
 
-  /** Write one command to the socket: its answer, or null when the socket is down and nothing was sent. */
+  /** Write one command to the socket: its answer, or null when detached or the socket is down and nothing was sent. */
   const post = (type: string, fields: Record<string, unknown> = {}): Promise<PiResponse> | null => {
     const id = `${CLIENT_ID}-${++nextId}`
-    if (!sendPiCommand(sessionId, { id, type, ...fields })) return null
+    if (!detach || !sendPiCommand(sessionId, { id, type, ...fields })) return null
     const { promise, resolve } = Promise.withResolvers<PiResponse>()
     pending.set(id, resolve)
     return promise
@@ -213,13 +182,6 @@ function createLiveSession(sessionId: string): LiveSession {
   const refreshStats = async () => {
     const response = await command("get_session_stats")
     if (response.success) patch({ stats: response.data })
-  }
-
-  /** Model, thinking level and the levels the model offers, after switching models (Pi may clamp the level). */
-  const refreshModelState = async () => {
-    const [stateResponse, levelsResponse] = await Promise.all([command("get_state"), command("get_available_thinking_levels")])
-    if (stateResponse.success) patch({ state: stateResponse.data })
-    if (levelsResponse.success) patch({ thinkingLevels: levelsResponse.data.levels })
   }
 
   const failPending = () => {
@@ -382,15 +344,8 @@ function createLiveSession(sessionId: string): LiveSession {
     }
   }
 
-  const catchUpWhenVisible = () => {
-    if (document.visibilityState === "visible") sync?.request()
-  }
-  const catchUp = () => sync?.request()
-
   const connect = () => {
     sync = new SessionResync(sessionId, sendPiFrame)
-    document.addEventListener("visibilitychange", catchUpWhenVisible)
-    window.addEventListener("online", catchUp)
     detach = subscribePiSession(sessionId, {
       onFrame: handleFrame,
       onStatus: (socketStatus) => {
@@ -401,12 +356,11 @@ function createLiveSession(sessionId: string): LiveSession {
         if (state.get().status.kind !== "closed") patch({ status: socketStatus.kind === "connecting" ? { kind: "connecting" } : socketStatus })
       },
       onReopen: () => sync?.reconnected(),
+      catchUp: () => sync?.request(),
     })
   }
 
   const disconnect = () => {
-    document.removeEventListener("visibilitychange", catchUpWhenVisible)
-    window.removeEventListener("online", catchUp)
     detach?.()
     detach = null
     failPending()
@@ -429,7 +383,7 @@ function createLiveSession(sessionId: string): LiveSession {
     }
     if (transcript.get().running) {
       hold(sessionId, { text: message, images, mode })
-      confirmHeld()
+      confirmFromTranscript(sessionId, transcript.get())
       flush()
       return true
     }
@@ -443,62 +397,61 @@ function createLiveSession(sessionId: string): LiveSession {
   }
 
   return {
+    /** Everything but the transcript: a new object per change. */
     state,
+    /** A new object per reducer step, at most one per animation frame while a reply streams. */
     transcript,
+    /** Keep the session attached until the returned release runs. The first holder attaches, the last detaches and drops the state. */
     attach() {
       if (++holders === 1) connect()
       return () => {
         if (--holders === 0) disconnect()
       }
     },
-    onOpenFile(open) {
+    /** Called with the path of every `Open file: ` notice. */
+    onOpenFile(open: (path: string) => void) {
       openers.add(open)
       return () => openers.delete(open)
     },
     send,
     notify,
     /** Stop the run. Resolves to the queued messages taken back, and the held ones not queued, for the draft. */
-    async abort() {
+    async abort(): Promise<string[]> {
       const taken = takeHeld(sessionId)
       const cleared = await command("clear_queue")
       await command("abort")
-      const queue = cleared.data ?? EMPTY_QUEUE
-      const back = [...queue.steering, ...queue.followUp]
-      const unqueued: string[] = []
-      for (const entry of taken as readonly HeldMessage[]) {
-        const at = back.indexOf(entry.text)
-        if (at >= 0) back.splice(at, 1)
-        else unqueued.push(entry.text)
-      }
-      return [...queue.steering, ...queue.followUp, ...unqueued]
+      return takeBack(taken, cleared.data ?? EMPTY_QUEUE)
     },
     /** Run `line` in the session's shell (`!cmd`), its output kept out of the model's context with `excludeFromContext` (`!!cmd`). */
-    async runBash(line, excludeFromContext) {
+    async runBash(line: string, excludeFromContext: boolean) {
       const response = await command("bash", { command: line, ...(excludeFromContext ? { excludeFromContext: true } : {}) })
       if (!response.success) notify(response.error ?? "Command refused", "error")
       sync?.request()
     },
     /** Compact the context now, steered by `customInstructions` when given. */
-    async compact(customInstructions) {
+    async compact(customInstructions?: string) {
       const response = await command("compact", customInstructions ? { customInstructions } : {})
       if (!response.success) notify(response.error ?? "Compaction failed", "error")
       sync?.request()
       void refreshStats()
     },
-    async setModel(model) {
+    async setModel(model: PiModel) {
       const response = await command("set_model", { provider: model.provider, modelId: model.id })
       if (!response.success) return notify(response.error ?? "Model refused", "error")
-      await refreshModelState()
+      // Pi may clamp the thinking level to the new model's
+      const [stateResponse, levelsResponse] = await Promise.all([command("get_state"), command("get_available_thinking_levels")])
+      if (stateResponse.success) patch({ state: stateResponse.data })
+      if (levelsResponse.success) patch({ thinkingLevels: levelsResponse.data.levels })
       void refreshStats()
     },
-    async setThinking(level) {
+    async setThinking(level: string) {
       const response = await command("set_thinking_level", { level })
       if (!response.success) return notify(response.error ?? "Thinking level refused", "error")
       const current = state.get().state
       patch({ state: current && { ...current, thinkingLevel: level } })
     },
     /** A background subagent's task, transcript window and output, read through its extension's `/subagents-inspect-rpc` command (no model turn). */
-    async inspectSubagent(target) {
+    async inspectSubagent(target: NonNullable<SubagentRow["inspect"]>): Promise<InspectReply> {
       const requestId = `${CLIENT_ID}-i${++nextId}`
       const failed = (message: string): InspectReply => ({ requestId, error: { code: "unavailable", message } })
       const { promise, resolve } = Promise.withResolvers<InspectReply>()
@@ -511,16 +464,13 @@ function createLiveSession(sessionId: string): LiveSession {
       inspects.delete(requestId)
       return reply
     },
-    answerDialog(id, answer) {
+    answerDialog(id: string, answer: { value: string } | { confirmed: boolean } | { cancelled: true }) {
       sendPiCommand(sessionId, { type: "extension_ui_response", id, ...answer })
       patch({ dialogs: state.get().dialogs.filter((dialog) => dialog.id !== id) })
     },
-    retryHeld(id) {
+    retryHeld(id: string) {
       patchHeld(sessionId, id, { state: "sending", dispatched: false, error: undefined })
       flush()
-    },
-    deleteHeld(id) {
-      removeHeld(sessionId, [id])
     },
   }
 }

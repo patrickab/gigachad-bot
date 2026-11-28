@@ -44,7 +44,6 @@ function newEntryId(taken: Set<string>): string {
 
 /** The fork's entries: the branch from the root to `entryId` without labels, then the kept entries' labels. */
 function branchEntries(entries: Entry[], entryId: string): Entry[] | undefined {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const labels = new Map<string, { label: unknown; timestamp: unknown }>();
   for (const entry of entries) {
     if (entry.type !== "label" || typeof entry.targetId !== "string") continue;
@@ -52,7 +51,7 @@ function branchEntries(entries: Entry[], entryId: string): Entry[] | undefined {
     else labels.delete(entry.targetId);
   }
 
-  const path = pathToRoot(byId, entryId);
+  const path = pathToRoot(entries, entryId);
   if (path.length === 0) return undefined;
 
   const kept: Entry[] = [];

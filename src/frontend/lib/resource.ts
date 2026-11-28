@@ -185,15 +185,12 @@ export interface ResourceFamily<T> {
 }
 
 /** One resource per key, created on first use, e.g. the reasoning levels of each model. */
-export function resourceFamily<T>(
-  read: (key: string, signal: AbortSignal) => Promise<T>,
-  options?: { same?: (current: T, next: T) => boolean },
-): ResourceFamily<T> {
+export function resourceFamily<T>(read: (key: string, signal: AbortSignal) => Promise<T>): ResourceFamily<T> {
   const members = new Map<string, Resource<T>>()
   const member = (key: string) => {
     let found = members.get(key)
     if (!found) {
-      found = createResource((signal) => read(key, signal), options)
+      found = createResource((signal) => read(key, signal))
       members.set(key, found)
     }
     return found

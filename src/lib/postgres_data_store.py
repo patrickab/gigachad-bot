@@ -276,6 +276,13 @@ class PostgresDataStore:
             raise StorageNotFoundError(key)
         return row[0]
 
+    def sha256s(self, prefix: str) -> dict[str, str]:
+        with self._scope.connection() as connection:
+            return dict(connection.execute(
+                "SELECT key, encode(sha256, 'hex') FROM documents WHERE user_id = %s AND key LIKE %s ESCAPE '\\' AND NOT is_dir",
+                (self._scope.user_id, like_prefix(validate_key(prefix, allow_empty=True))),
+            ).fetchall())
+
     def mkdir(self, key: str) -> None:
         key = validate_key(key)
         with self._scope.connection() as connection, connection.transaction():

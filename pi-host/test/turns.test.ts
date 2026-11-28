@@ -221,6 +221,6 @@ describe("removeTurn", () => {
 
 test("pathToRoot ends at a repeated id on a cyclic parent chain", () => {
   const entries = [user("u1", "a1"), answer("a1", "u1")];
-  const path = pathToRoot(new Map(entries.map((e) => [e.id, e])), "a1");
+  const path = pathToRoot(entries, "a1");
   expect(ids(path)).toEqual(["u1", "a1"]);
 });

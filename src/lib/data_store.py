@@ -92,6 +92,9 @@ class DataStore(ByteStore, Protocol):
     def sha256(self, key: str) -> str:
         """Hex SHA-256 of the file at *key*, kept where it is stored so the content is not read. Raises StorageNotFoundError."""
         ...
+    def sha256s(self, prefix: str) -> dict[str, str]:
+        """Hex SHA-256 of every file under *prefix*, by key, like `sha256` but in one round trip."""
+        ...
     def delete(self, key: str, *, recursive: bool = False) -> None: ...
 
 

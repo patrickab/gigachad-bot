@@ -1216,6 +1216,7 @@ describe("DELETE /sessions/:id", () => {
     expect((await remove("no-such-session")).status).toBe(404);
     expect((await remove("..%2F..%2Fetc")).status).toBe(404);
     expect((await remove("%E0%A4%A")).status).toBe(400);
+    expect((await api("/sessions/%E0%A4%A/close", { method: "POST" })).status).toBe(400);
 
     const { sessionId, sessionPath } = writeSessionFile(workdir("delete-held"), [messageEntry("u1", null, "user", "hi")]);
     const held = tryLockFile(sessionPath)!;

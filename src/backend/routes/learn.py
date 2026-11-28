@@ -8,7 +8,6 @@ from pydantic import BaseModel, StringConstraints
 from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
 from backend.routes.deps import get_project_store
-from backend.routes.upstream import call_upstream
 from lib import learnharness
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
@@ -47,7 +46,7 @@ async def get_sessions(store: ProjectStoreDep) -> list[LearnSessionEntry]:
     # The mapping is read before the list: a session it holds was created before the list was read, so a session it
     # holds and the list lacks was deleted in LearnHarness, never one created in between.
     projects = await asyncio.to_thread(store.learn_session_projects)
-    sessions = await call_upstream(learnharness.list_sessions())
+    sessions = await learnharness.list_sessions()
     if gone := projects.keys() - {session.id for session in sessions}:
         # Best effort: a busy project.json keeps the stale ids until the next read.
         with contextlib.suppress(StorageConflictError):
@@ -65,7 +64,7 @@ def put_session_project(session_id: SessionId, body: SessionProject, store: Proj
 @router.patch("/sessions/{session_id}")
 async def patch_session(session_id: SessionId, body: SessionTitle) -> SessionTitle:
     """Rename the session in LearnHarness, answering the title it stored."""
-    return SessionTitle(title=await call_upstream(learnharness.rename_session(session_id, body.title)))
+    return SessionTitle(title=await learnharness.rename_session(session_id, body.title))
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
@@ -74,7 +73,7 @@ async def delete_session(session_id: SessionId, store: ProjectStoreDep, mode: le
 
     `delete-nodes` is upstream's "Also remove its graph traces".
     """
-    await call_upstream(learnharness.delete_session(session_id, mode))
+    await learnharness.delete_session(session_id, mode)
     # Best effort: the next session list drops an id LearnHarness no longer lists anyway.
     with contextlib.suppress(StorageConflictError):
         await asyncio.to_thread(store.forget_learn_sessions, {session_id})
@@ -89,5 +88,5 @@ class SessionMarkdown(BaseModel):
 @router.get("/sessions/{session_id}/markdown")
 async def get_session_markdown(session_id: SessionId) -> SessionMarkdown:
     """The session as LearnHarness exports it: one Markdown document and its file name (a header the browser hides cross-origin)."""
-    export = await call_upstream(learnharness.export_markdown(session_id))
+    export = await learnharness.export_markdown(session_id)
     return SessionMarkdown(filename=export.filename, markdown=export.markdown)

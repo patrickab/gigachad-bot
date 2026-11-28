@@ -6,7 +6,7 @@ import type { Attachment } from "@/lib/domain/types"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { useNeovimSetting, type NeovimSetting } from "@/contexts/SettingsContext"
 import { FilePanel } from "@/features/editor/FilePanel"
-import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
+import { ViewSwitch } from "@/components/ui/SegmentedSwitch"
 import { NeovimEditor, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { PDF_MIME, RawAttachment, RenderedAttachment, isMarkdownAttachment, renderableMarkdown, type ContentChange } from "./AttachmentView"
 import { useAttachmentLabel } from "@/features/chat/useAttachmentLabel"
@@ -60,7 +60,7 @@ function AttachmentPanel({ attachment, onClose, onContentChange }: {
   // Neovim edits the attachment's own text, the rendered view shows it as markdown (code fenced by extension).
   const markdown = renderableMarkdown(attachment)
   const viewPicker = views.length > 1 && (
-    <ViewSwitch value={view} onChange={setView} options={views.map((option) => [option, viewLabel(option, attachment)] as const)} className="flex gap-px rounded-md bg-surface p-0.5" buttonClass="rounded px-2 py-0.5 text-xs transition-colors" inactiveClass="text-ink-subtle hover:text-ink" />
+    <ViewSwitch value={view} onChange={setView} options={views.map((option) => [option, viewLabel(option, attachment)] as const)} />
   )
 
   return (

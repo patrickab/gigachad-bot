@@ -51,14 +51,14 @@ export function removeTurn(entries: TurnEntry[], promptEntryId: string, through:
   if (!prompt) return { ok: false, reason: "unknown" };
   if (!isPrompt(prompt)) return { ok: false, reason: "not_prompt" };
 
-  const path = pathToRoot(byId, entries.at(-1)?.id ?? null);
+  const path = pathToRoot(entries, entries.at(-1)?.id ?? null);
   const start = path.indexOf(prompt);
   if (start < 0) return { ok: false, reason: "off_branch" };
 
   const children = new Map<string, TurnEntry[]>();
   for (const entry of entries) {
     if (entry.parentId === null) continue;
-    children.set(entry.parentId, [...(children.get(entry.parentId) ?? []), entry]);
+    (children.get(entry.parentId) ?? children.set(entry.parentId, []).get(entry.parentId)!).push(entry);
   }
   const removed = new Set<string>();
   const removeSubtree = (root: TurnEntry) => {

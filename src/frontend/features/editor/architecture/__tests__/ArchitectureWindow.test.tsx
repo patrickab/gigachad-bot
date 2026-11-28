@@ -203,6 +203,22 @@ describe("ArchitectureWindow", () => {
     expect(api.readArchitecture).toHaveBeenCalledTimes(2)
   })
 
+  it("ends two windows' writes on the later write's answer", async () => {
+    api.readArchitecture.mockResolvedValue(workspace)
+    const window = <ArchitectureWindow path="graph/proj/" maximized={false} hostScale={1} onEdgeStyleChange={() => {}} onNavigate={() => {}} />
+    const { findAllByText, getAllByLabelText } = render(<UndoDeleteProvider>{window}{window}</UndoDeleteProvider>)
+    await act(async () => {})
+    const first = deferred<ArchitectureWorkspace>()
+    api.applyArchitectureOperations.mockReturnValueOnce(first.promise).mockResolvedValueOnce(retitled("Second"))
+    for (const index of [0, 1]) {
+      act(() => { getAllByLabelText("New system")[index].click() })
+      fireEvent.change(getAllByLabelText("System name")[index], { target: { value: "Frontend" } })
+      await act(async () => { fireEvent.keyDown(getAllByLabelText("System name")[index], { key: "Enter" }) })
+    }
+    await act(async () => { first.resolve(retitled("First")) })
+    expect(await findAllByText("Second")).toHaveLength(2)
+  })
+
   it("reads a model another device changed while no window showed it", async () => {
     const { unmount } = await open()
     unmount()
@@ -229,6 +245,24 @@ describe("ArchitectureWindow", () => {
     await waitFor(() => expect(api.readArchitecture).toHaveBeenCalledTimes(3))
     expect(queryByText("Written")).toBeTruthy()
     expect(queryByText("Read")).toBeNull()
+  })
+
+  it("rereads once after a write when another device changed the model meanwhile", async () => {
+    const { createSystem, findByText, getByText } = await open()
+    const write = deferred<ArchitectureWorkspace>()
+    api.applyArchitectureOperations.mockReturnValueOnce(write.promise)
+    api.readArchitecture.mockResolvedValue(retitled("Changed elsewhere"))
+
+    await createSystem("Frontend")
+    remoteChange()
+    remoteChange()
+    await findByText("Changed elsewhere")
+    expect(api.readArchitecture).toHaveBeenCalledTimes(2)
+
+    // The write's answer predates the other device's change, so the model is read once more.
+    await act(async () => { write.resolve(workspace) })
+    await waitFor(() => expect(api.readArchitecture).toHaveBeenCalledTimes(3))
+    expect(getByText("Changed elsewhere")).toBeTruthy()
   })
 
   it("shows a failed reread until a later one succeeds", async () => {

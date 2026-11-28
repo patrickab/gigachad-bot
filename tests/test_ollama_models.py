@@ -74,7 +74,7 @@ def test_lists_chat_models_without_embedding_models(serve, scratch_pi_agent_dir:
 
 def test_ollama_down_lists_nothing_and_writes_nothing(serve, scratch_pi_agent_dir: Path) -> None:
     serve(_ollama_down)
-    assert ollama_models.sync_pi_provider() is None
+    assert ollama_models.sync_pi_provider() == []
     assert not (scratch_pi_agent_dir / "models.json").exists()
 
 

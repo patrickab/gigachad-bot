@@ -32,7 +32,7 @@ import signal
 import socket
 import subprocess
 import time
-from typing import Annotated, Literal
+from typing import Annotated, Literal, LiteralString
 import urllib.error
 from urllib.parse import urlsplit
 import urllib.request
@@ -197,7 +197,7 @@ def start_preview(task: PreviewTask) -> Preview:
             ready_timeout_s=config.ready_timeout_s, ports=ports, database=database, data_dir=str(data_dir),
         )
         if database is not None:
-            _reset_database(database, create=True)
+            _admin(database, "created", "DROP DATABASE IF EXISTS {} WITH (FORCE)", "CREATE DATABASE {}")  # replaces a crashed start's
         try:
             data_dir.mkdir(parents=True, exist_ok=True)
             _write_state(state)
@@ -330,15 +330,14 @@ def _is_bindable(port: int) -> bool:
     return True
 
 
-def _reset_database(name: str, *, create: bool) -> None:
-    """Drop database *name* beside the backend's own, then with *create* make it anew and empty (replacing a crashed start's)."""
+def _admin(name: str, verb: str, *statements: LiteralString) -> None:
+    """Run *statements*, each naming database *name*, beside the backend's own database; *verb* says what failed."""
     try:
         with psycopg.connect(database_url(), autocommit=True, connect_timeout=DATABASE_CONNECT_TIMEOUT_SECONDS) as connection:
-            connection.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
-            if create:
-                connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+            for statement in statements:
+                connection.execute(sql.SQL(statement).format(sql.Identifier(name)))
     except psycopg.Error as exc:
-        raise PreviewError(f"The preview database {name} could not be {'created' if create else 'dropped'}: {exc}") from exc
+        raise PreviewError(f"The preview database {name} could not be {verb}: {exc}") from exc
 
 
 def _spawn(name: str, argv: list[str], ready_url: str, workspace: Path, environment: dict[str, str], log: Path) -> ProcessState:
@@ -429,7 +428,7 @@ def _tear_down(state: PreviewState) -> None:
         _signal_groups(groups, signal.SIGKILL)
         _wait_until_gone(groups, KILL_WAIT_SECONDS)
     if state.database is not None:
-        _reset_database(state.database, create=False)
+        _admin(state.database, "dropped", "DROP DATABASE IF EXISTS {} WITH (FORCE)")
     shutil.rmtree(_task_directory(state.task_id), ignore_errors=True)
 
 

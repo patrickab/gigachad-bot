@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import type { PiSessionInfo } from "@/lib/backend/api"
 import { liveSession } from "../liveSession"
-import { markPiSessionRead, piSessionEvents, PiSessionsProvider, searchPiSessions, usePiSessions, usePiSessionStatus, type PiSessionEvent } from "../sessionStore"
+import { markPiSessionRead, piSessionEvents, PiSessionsProvider, refreshPiSessions, searchPiSessions, usePiSessions, usePiSessionStatus, type PiSessionEvent } from "../sessionStore"
 
 const api = vi.hoisted(() => ({
   sessions: [] as unknown[],
@@ -140,6 +140,24 @@ describe("usePiSessions", () => {
     api.sessions = [session("l1", "/home/u/git/alpha")]
     socket().emit({ type: "sessions_changed", sessionPaths: [] })
     await waitFor(() => expect(result.current.status).toEqual({ running: false, waiting: false, unread: true, failed: false }))
+  })
+
+  it("keeps an attached session's run state while its socket reconnects, a listing meanwhile marks nothing unread", async () => {
+    api.sessions = [session("r1", "/home/u/git/alpha", true)]
+    const { result, unmount } = renderHook(() => ({ list: usePiSessions(), status: usePiSessionStatus("r1") }), { wrapper })
+    cleanups.push(unmount)
+    await waitFor(() => expect(result.current.status.running).toBe(true))
+    attach("r1")({ type: "agent_start" })
+    const dropped = socket()
+    act(() => dropped.onclose?.({ reason: "gone" }))
+
+    api.sessions = [session("r1", "/home/u/git/alpha")]
+    act(() => refreshPiSessions())
+    await waitFor(() => expect(result.current.list.sessions[0]?.live).toBeNull())
+    expect(result.current.status).toMatchObject({ running: true, unread: false })
+    // piSocket reconnects after its backoff
+    await waitFor(() => expect(FakeSocket.instances.at(-1)).not.toBe(dropped))
+    socket()
   })
 })
 

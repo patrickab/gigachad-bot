@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { SEPARATOR, ToolButton, toolButton } from "@/features/editor/canvas/CanvasToolbar"
 import { TopBarSlot, TopBarSlotProvider, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { TextDocumentEditor } from "@/features/editor/TextDocumentEditor"
-import { ViewSwitch } from "@/features/editor/EditorViewSwitch"
+import { ViewSwitch } from "@/components/ui/SegmentedSwitch"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { ArchitectureTree } from "./ArchitectureTree"
 import { ArchitectureViewPicker } from "./ArchitectureViewPicker"
@@ -104,7 +104,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
     <ToolButton icon={ListTree} label={treeOpen ? "Hide files" : "Show files"} active={treeOpen} aria-expanded={treeOpen} onClick={() => setTreeOpen((current) => !current)} />
   )
   const modeToggle = entry && (
-    <ViewSwitch value={mode} onChange={setMode} options={[["diagram", "Diagram"], ["text", "Text"]]} className="flex gap-px rounded-md bg-surface p-0.5" buttonClass="rounded px-2 py-0.5 text-xs transition-colors" inactiveClass="text-ink-subtle hover:text-ink" />
+    <ViewSwitch value={mode} onChange={setMode} options={[["diagram", "Diagram"], ["text", "Text"]]} />
   )
   return (
     // The surface's own slot scope: the window's mounting points inside the top-bar slots, so its controls keep a fixed order.

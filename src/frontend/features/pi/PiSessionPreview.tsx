@@ -1,8 +1,7 @@
 "use client"
 
-import { useCallback, useState } from "react"
 import type { FileLinks } from "@/components/content/LaTeXMarkdown"
-import { useLoadWhile } from "@/hooks/useLoadWhile"
+import { useLoaded } from "@/hooks/useLoaded"
 import { fetchPiSessionEntries, type PiSessionInfo } from "@/lib/backend/api"
 import { PiTranscript } from "./PiTranscript"
 import { transcriptOfEntries, type Transcript } from "./transcript"
@@ -41,14 +40,10 @@ export function prefetchPiSessionPreviews(sessions: readonly PiSessionInfo[]): (
   return () => cancelIdleCallback(handle)
 }
 
-/** `session`'s preview transcript, null while it is read or when the read failed (the window shows empty). */
-function usePreview({ sessionId, modifiedAt }: PiSessionInfo): Transcript | null {
-  const [shown, setShown] = useState<{ key: string; transcript: Transcript } | null>(null)
-  const key = `${sessionId}:${modifiedAt}`
-  // The answer carries the key it was read for, so one delivered just after the session changed never passes for the next.
-  const load = useCallback(() => loadPreview({ sessionId, modifiedAt }).then((transcript) => ({ key: `${sessionId}:${modifiedAt}`, transcript })), [sessionId, modifiedAt])
-  useLoadWhile(true, load, setShown)
-  return shown?.key === key ? shown.transcript : null
+/** The preview transcript of the session `key` names, `<sessionId>\n<modifiedAt>`. */
+const loadPreviewOfKey = (key: string) => {
+  const [sessionId, modifiedAt] = key.split("\n")
+  return loadPreview({ sessionId, modifiedAt })
 }
 
 /**
@@ -59,7 +54,8 @@ function usePreview({ sessionId, modifiedAt }: PiSessionInfo): Transcript | null
  * - Reads go through one cache per file version, `prefetchPiSessionPreviews` fills it ahead for the recent sessions
  */
 export function PiSessionPreview({ session }: { session: PiSessionInfo }) {
-  const transcript = usePreview(session)
+  // Empty while it is read or when the read failed
+  const transcript = useLoaded(`${session.sessionId}\n${session.modifiedAt}`, loadPreviewOfKey).value
   return <div className="flex h-full w-full flex-col overflow-hidden">
     {transcript && <PiTranscript transcript={transcript} fileLinks={NO_FILE_LINKS} readOnly />}
   </div>

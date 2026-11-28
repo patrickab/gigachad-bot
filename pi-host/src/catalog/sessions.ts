@@ -5,8 +5,7 @@
  * - Provides: `SessionInfo`, `sessionInfo`, `listSessions`
  */
 import type { FactoryState, Host, Profile, SessionMeta, SessionUsage } from "../host/index.ts";
-import type { LiveSessions } from "../supervisor/index.ts";
-import type { LiveStatus } from "../supervisor/session.ts";
+import type { LiveSessions, LiveStatus } from "../supervisor/index.ts";
 import { cachedUntil } from "./cache.ts";
 
 export type SessionInfo = {

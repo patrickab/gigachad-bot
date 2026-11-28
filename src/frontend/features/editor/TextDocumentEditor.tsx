@@ -8,6 +8,7 @@ import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
 import { readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile } from "@/lib/backend/api"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
+import { architectureResource } from "@/lib/backend/resources"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
@@ -40,11 +41,10 @@ function editorLanguage(path: string): string {
   return "markdown"
 }
 
-/** Edit a workspace's `.c4` source as text; the architecture route refuses text that no longer parses into a model. */
+/** Edit a workspace's `.c4` source as text; the architecture route refuses text that no longer parses into a model. The answer is what every window of the project shows. */
 export function ArchitectureSourceEditor(props: DocumentEditorProps) {
   const slug = architectureSlug(props.path)
-  const file = architectureSource(props.path)
-  return <TextDocumentEditor {...props} persistOverride={async (content) => { await writeArchitectureSource(slug, file, content) }} />
+  return <TextDocumentEditor {...props} persistOverride={async (content) => { architectureResource(slug).set(await writeArchitectureSource(slug, architectureSource(props.path), content)) }} />
 }
 
 /** Text document editor; `persistOverride` replaces the default document write. */

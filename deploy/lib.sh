@@ -48,6 +48,23 @@ stop_processes() {
     kill -KILL "$@" 2>/dev/null || true
 }
 
+# Stops `pid` and its descendants: TERM to `pid`, up to `grace` seconds for the whole tree, then KILL for the rest.
+stop_tree() {
+    local grace=$1 pid tick
+    local -a tree alive
+    mapfile -t tree < <(descendants "$2"; printf '%s\n' "$2")
+    kill -TERM "$2" 2>/dev/null || true
+    for ((tick = 0; ; tick++)); do
+        alive=()
+        for pid in "${tree[@]}"; do running "$pid" && alive+=("$pid"); done
+        ((${#alive[@]} == 0)) && return 0
+        ((tick < grace * 4)) || break
+        sleep 0.25
+    done
+    printf 'warning: %s did not stop within %ss, killing it\n' "${alive[*]}" "$grace" >&2
+    kill -KILL "${alive[@]}" 2>/dev/null || true
+}
+
 # Kills what listens on `port` when it was started from `dir` and no `run*.sh` launcher owns it any more:
 # the leftovers of a run that was killed before its cleanup ran. A live stack's processes are left alone.
 free_orphaned_port() {
@@ -61,7 +78,7 @@ free_orphaned_port() {
         done
         if [[ "$owned" == false ]]; then
             printf 'Stopping orphaned process %s on port %s\n' "$pid" "$port" >&2
-            stop_processes 5 "$pid"
+            stop_tree 5 "$pid"
         fi
     done
 }

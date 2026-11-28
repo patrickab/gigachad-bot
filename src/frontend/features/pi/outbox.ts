@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
-import { splitSkill } from "./transcript"
-import type { ImageContent } from "./types"
+import { splitSkill, textOf, type Transcript } from "./transcript"
+import type { ImageContent, UserMessage } from "./types"
 
 /**
  * Messages sent while a run streams, held in browser memory until pi-host confirms them (queue snapshot or the user message in the session).
@@ -73,26 +73,37 @@ function typed(text: string): string {
   return skill ? `/skill:${skill.name}${args ? ` ${args}` : ""}` : text
 }
 
-/** The ids of `entries` that `queue` (Pi's queue snapshot) or `userTexts` (user messages sent at or after `since`, one text per message) confirm. Each queue item or message confirms one entry. */
-export function confirmedIds(entries: readonly HeldMessage[], queue: { steering: string[]; followUp: string[] }, userTexts: (since: number) => string[]): string[] {
+/** Drop the held messages of `sessionId` that Pi's queue snapshot or a user message sent since (one per message) confirms. Each queue item or message confirms one. */
+export function confirmFromTranscript(sessionId: string, { messages, queue }: Pick<Transcript, "messages" | "queue">) {
   const queued = [...queue.steering, ...queue.followUp].map(typed)
-  const seen: string[][] = []
+  const byMessage: string[] = []
   const ids: string[] = []
-  for (const entry of entries) {
+  for (const entry of heldOf(sessionId)) {
     const at = queued.indexOf(entry.text)
     if (at >= 0) {
       queued.splice(at, 1)
       ids.push(entry.id)
       continue
     }
-    const texts = userTexts(entry.createdAt).map(typed)
-    const used = seen.flat().filter((text) => text === entry.text).length
-    if (texts.filter((text) => text === entry.text).length > used) {
-      seen.push([entry.text])
+    const sent = messages.filter((message) => message.role === "user" && message.timestamp >= entry.createdAt - 2_000 && typed(textOf((message as UserMessage).content)) === entry.text)
+    if (sent.length > byMessage.filter((text) => text === entry.text).length) {
+      byMessage.push(entry.text)
       ids.push(entry.id)
     }
   }
-  return ids
+  removeHeld(sessionId, ids)
+}
+
+/** For the draft after an abort: `queue` (Pi's queue it cleared), then the texts of `taken` (the held messages) it does not hold. */
+export function takeBack(taken: readonly HeldMessage[], queue: { steering: string[]; followUp: string[] }): string[] {
+  const back = [...queue.steering, ...queue.followUp]
+  const rest = [...back]
+  for (const { text } of taken) {
+    const at = rest.indexOf(text)
+    if (at >= 0) rest.splice(at, 1)
+    else back.push(text)
+  }
+  return back
 }
 
 function subscribe(listener: () => void): () => void {

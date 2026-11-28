@@ -81,12 +81,12 @@ def _pi_model(tag: str, details: dict[str, Any]) -> dict[str, Any]:
     return model
 
 
-def sync_pi_provider() -> list[str] | None:
-    """Merge the installed chat models into Pi's provider `ollama` and return their tags, None when Ollama is not running."""
+def sync_pi_provider() -> list[str]:
+    """Merge the installed chat models into Pi's provider `ollama` and return their tags, none when Ollama is not running."""
     # Other providers and keys stay. Ollama down, an unreadable file or an unchanged provider writes nothing.
     details = _installed_chat_details()
     if details is None:
-        return None
+        return []
 
     def with_installed(providers: dict[str, Any]) -> dict[str, Any] | None:
         if not details and PROVIDER_ID not in providers:

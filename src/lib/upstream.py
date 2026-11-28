@@ -4,6 +4,7 @@
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through
 """
 
+import asyncio
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from functools import cache
@@ -18,6 +19,7 @@ HOP_BY_HOP_HEADERS = frozenset(
     {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
 )
 TIMEOUT_SECONDS = 10.0
+_CLIENTS: list["UpstreamClient"] = []
 
 
 class UpstreamUnavailable(Exception):
@@ -100,6 +102,9 @@ class UpstreamClient:
         self._timeout = timeout
         # Tests swap in an `httpx.MockTransport`, None is the real network.
         self.transport: httpx.AsyncBaseTransport | None = None
+        # One pooled client, built for a transport and an event loop: a swapped transport or a new loop (a test's) builds anew.
+        self.built: tuple[tuple[object, object], httpx.AsyncClient] | None = None
+        _CLIENTS.append(self)
 
     @property
     def url(self) -> str:
@@ -110,9 +115,11 @@ class UpstreamClient:
         """Send one request (*kwargs* of `httpx.AsyncClient.request`) and return the answer, raising a refusal."""
         url = self.url
         with unreachable(f"{self._label} at {url}"):
+            key = (self.transport, asyncio.get_running_loop())
+            if self.built is None or self.built[0] != key:
+                self.built = (key, httpx.AsyncClient(transport=self.transport, verify=tls_context()))
             timeout = self._timeout if timeout is None else timeout
-            async with httpx.AsyncClient(base_url=url, timeout=timeout, transport=self.transport, verify=tls_context()) as client:
-                response = await client.request(method, path, **kwargs)
+            response = await self.built[1].request(method, f"{url}{path}", timeout=timeout, **kwargs)
         if response.is_error:
             raise UpstreamRequestFailed(response.status_code, error_message(response))
         return response
@@ -130,3 +137,11 @@ class UpstreamClient:
         """Send one request and validate the JSON answer as *result*, *timeout* overriding the client's default."""
         response = await self.send(method, path, json=json, params=params, timeout=timeout)
         return validate_answer(result, response.content, label=self._label, path=path)
+
+
+async def close_clients() -> None:
+    """Close the pooled connections of every `UpstreamClient` (the app's shutdown)."""
+    for client in _CLIENTS:
+        if client.built is not None:
+            await client.built[1].aclose()
+            client.built = None

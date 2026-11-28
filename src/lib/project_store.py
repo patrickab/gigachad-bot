@@ -116,6 +116,11 @@ class ProjectStore:
         stored = self._docs.read_many(project_json(slug) for slug in slugs)
         return [data if isinstance(data := stored[project_json(slug)], dict) else self._default_project() for slug in slugs]
 
+    def _projects(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every catalogued project's slug and state, read in one round trip."""
+        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
+        return list(zip(slugs, self._read_projects(slugs), strict=True))
+
     def _write_project(self, slug: str, data: dict[str, Any]) -> None:
         self._write_json(project_json(slug), data)
 
@@ -199,12 +204,7 @@ class ProjectStore:
 
     def learn_session_projects(self) -> dict[str, str]:
         """The project slug of every grouped learn session, by session id."""
-        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
-        return {
-            session_id: slug
-            for slug, data in zip(slugs, self._read_projects(slugs), strict=True)
-            for session_id in data.get(LEARN_SESSIONS, [])
-        }
+        return {session_id: slug for slug, data in self._projects() for session_id in data.get(LEARN_SESSIONS, [])}
 
     def assign_learn_session(self, session_id: str, slug: str | None) -> None:
         """Group learn session *session_id* under project *slug*, moving it out of any other project; None ungroups it.
@@ -213,8 +213,7 @@ class ProjectStore:
         """
         if slug is not None:
             self._require(slug)
-        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
-        for owner, data in zip(slugs, self._read_projects(slugs), strict=True):
+        for owner, data in self._projects():
             sessions = data.get(LEARN_SESSIONS, [])
             if owner == slug and session_id not in sessions:
                 self._update_learn_sessions(owner, lambda ids: ids if session_id in ids else [*ids, session_id])
@@ -223,8 +222,7 @@ class ProjectStore:
 
     def forget_learn_sessions(self, session_ids: set[str]) -> None:
         """Drop *session_ids* from every project's learn sessions: sessions deleted in LearnHarness."""
-        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
-        for owner, data in zip(slugs, self._read_projects(slugs), strict=True):
+        for owner, data in self._projects():
             if not session_ids.isdisjoint(data.get(LEARN_SESSIONS, [])):
                 self._update_learn_sessions(owner, lambda ids: [s for s in ids if s not in session_ids])
 
@@ -349,8 +347,7 @@ class ProjectStore:
 
     def forget_file_names(self, path: str) -> None:
         """Show *path* under its file name in every project that gives it a display name."""
-        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
-        for slug, data in zip(slugs, self._read_projects(slugs), strict=True):
+        for slug, data in self._projects():
             if _files_of(data).get(path) is not None:
                 self._mutate_files(slug, lambda files: {f: None if f == path else name for f, name in files.items()})
 

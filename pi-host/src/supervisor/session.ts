@@ -16,7 +16,9 @@
  */
 import { pathToRoot, type Entry } from "../host/entries.ts";
 import type { PiChild } from "../host/index.ts";
+import { asRecord } from "../json.ts";
 import { withMediaHashes } from "../media.ts";
+import type { LiveStatus } from "./index.ts";
 import type { SessionLock } from "./lock.ts";
 import type { ProfileSpec } from "./profiles.ts";
 
@@ -28,7 +30,6 @@ export interface FrameSink {
 }
 
 export type PiRecord = { type?: unknown; id?: unknown; [field: string]: unknown };
-export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
 
 /** Ids of commands pi-host sends itself; their responses never reach clients. */
 const INTERNAL_ID_PREFIX = "pi-host:";
@@ -110,7 +111,7 @@ function asArray(value: unknown): unknown[] {
 }
 
 function entriesData(data: unknown): EntriesData {
-  const record = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+  const record = asRecord(data);
   return {
     entries: asArray(record.entries) as Entry[],
     leafId: typeof record.leafId === "string" ? record.leafId : null,
@@ -243,7 +244,7 @@ export class LiveSession {
         this.request({ type: "get_entries" }, (record) => {
           if (record.success !== true) return done(record);
           const { entries, leafId } = entriesData(record.data);
-          this.markSnapshot(client, pending, { mode: "replace", entries: pathToRoot(new Map(entries.map((entry) => [entry.id, entry])), leafId), leafId });
+          this.markSnapshot(client, pending, { mode: "replace", entries: pathToRoot(entries, leafId), leafId });
           done();
         });
       if (cursor === null) return replaceAll();

@@ -6,7 +6,7 @@
  */
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isRecord } from "../../json.ts";
+import { asRecord, isRecord } from "../../json.ts";
 import { PROFILES, type PrivateState, type Profile } from "../index.ts";
 
 /** Sidecar path of a session file. */
@@ -33,7 +33,7 @@ export async function readState(sessionPath: string): Promise<PrivateState> {
   } catch {
     return defaults;
   }
-  const record = isRecord(parsed) ? parsed : {};
+  const record = asRecord(parsed);
   return {
     revision: Number.isInteger(record.revision) ? (record.revision as number) : 0,
     pinned: record.pinned === true,

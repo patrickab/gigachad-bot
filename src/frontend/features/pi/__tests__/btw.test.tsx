@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import type { SessionSubscriber } from "../piSocket"
-import { clearOutbox } from "../outbox"
+import { clearOutbox, heldOf } from "../outbox"
 import { BtwPanel } from "../BtwPanel"
 import { parseBtwWidget, type BtwThread } from "../btw"
 import { usePiSession } from "../usePiSession"
@@ -57,7 +57,7 @@ describe("usePiSession btw", () => {
       { type: "prompt", message: "/btw what now?", streamingBehavior: undefined },
       { type: "prompt", message: "/btw-cancel btw-1", streamingBehavior: undefined },
     ])
-    expect(result.current.held).toEqual([])
+    expect(heldOf("s1")).toEqual([])
   })
 })
 

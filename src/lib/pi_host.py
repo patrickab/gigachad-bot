@@ -195,18 +195,7 @@ class ResumeById(ContractModel):
     session_id: str
 
 
-Resume = Literal["continue"] | ResumeFromFile | ResumeFork | ResumeById | None
-
-
-class SessionState(ContractModel):
-    """Private per-session state (M19): `revision` is the one to send back on the next write."""
-
-    revision: int
-    data: dict[str, object]
-
-
-class StateRevision(ContractModel):
-    revision: int
+Resume = ResumeFromFile | ResumeFork | ResumeById | None
 
 
 class FileMatch(ContractModel):
@@ -265,12 +254,6 @@ class TurnDeleted(ContractModel):
     removed_entries: int
     removed_media: list[str]
     not_removed: list[str] = []
-
-
-class PromptAnswer(ContractModel):
-    """How Pi took a prompt: `handled` for an extension command, else Pi's own disposition of a message."""
-
-    disposition: str
 
 
 class PiSettings(ContractModel):
@@ -467,20 +450,9 @@ async def pin_session(session_id: str, pinned: bool) -> SessionInfo:
     return (await _request("PUT", f"/sessions/{session_id}/pin", SessionAnswer, json={"pinned": pinned})).session
 
 
-async def session_state(session_id: str) -> SessionState:
-    return await _request("GET", f"/sessions/{session_id}/state", SessionState)
-
-
-async def write_session_state(session_id: str, state: SessionState) -> int:
-    """Store *state*, returns the new revision. A stale revision answers 409 with the current state as body."""
-    body = state.model_dump(by_alias=True)
-    return (await _request("PUT", f"/sessions/{session_id}/state", StateRevision, json=body)).revision
-
-
-async def find_files(cwd: str, query: str, limit: int | None = None) -> list[FileMatch]:
-    """Files of *cwd* fuzzy-ranked against *query*, relative paths (M7). A blank *query* answers the cached list
-    unranked, whole unless *limit* is given (K6: the UI ranks it)."""
-    params: dict[str, str | int] = {"cwd": cwd, "q": query}
+async def find_files(cwd: str, limit: int | None = None) -> list[FileMatch]:
+    """Files of *cwd*, relative paths, unranked and whole unless *limit* is given (K6: the UI ranks it)."""
+    params: dict[str, str | int] = {"cwd": cwd}
     if limit is not None:
         params["limit"] = limit
     return (await _request("GET", "/files", FileList, params=params)).files
@@ -549,21 +521,6 @@ async def session_entries(
     given = {"turns": turns, "customType": custom_type, "since": since, "assistant": "1" if assistant else None}
     params: dict[str, str | int] = {name: value for name, value in given.items() if value is not None}
     return await _request("GET", f"/sessions/{session_id}/entries", SessionEntries, params=params or None)
-
-
-async def prompt_session(
-    session_id: str, message: str, streaming_behavior: Literal["steer", "followUp"] | None = None
-) -> str:
-    """Send *message* to the live session as a Pi prompt, returns Pi's disposition (`handled` for an extension command).
-
-    - A session that is not live answers 409 `not_live`, a prompt Pi refuses 502 `prompt_failed`
-    - Pi refuses a prompt during a run unless *streaming_behavior* says how to queue it
-    """
-    body: dict[str, object] = {"message": message}
-    if streaming_behavior is not None:
-        body["streamingBehavior"] = streaming_behavior
-    answer = await _request("POST", f"/sessions/{session_id}/prompt", PromptAnswer, json=body, timeout=CHILD_TIMEOUT_SECONDS)
-    return answer.disposition
 
 
 async def delete_session(session_id: str) -> None:

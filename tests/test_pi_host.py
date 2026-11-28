@@ -428,7 +428,7 @@ def test_pi_host_down_answers_503(monkeypatch):
     response = _client().get("/api/pi/sessions")
 
     assert response.status_code == 503
-    assert "pi-host" in response.json()["detail"]
+    assert list(response.json()) == ["detail"] and "pi-host" in response.json()["detail"]
 
 
 def test_a_changed_shape_answers_502_naming_the_field(monkeypatch):
@@ -437,7 +437,7 @@ def test_a_changed_shape_answers_502_naming_the_field(monkeypatch):
 
     response = _client().get("/api/pi/sessions")
 
-    assert response.status_code == 502
+    assert response.status_code == 502 and list(response.json()) == ["detail"]
     assert "`sessions.0.messageCount`" in response.json()["detail"]
 
 
@@ -472,7 +472,7 @@ def test_session_actions_reach_their_pi_host_routes(monkeypatch, repositories):
     assert client.get("/api/pi/files", params={"repo": "app"}).json() == {"files": [{"path": "src/app.py", "score": 0.9}]}
     assert json.loads(host.requests[2].content) == {"pinned": True}
     # K6: pi-host answers the whole cached list, the UI ranks it.
-    assert dict(host.requests[3].url.params) == {"cwd": str(repositories / "app"), "q": ""}
+    assert dict(host.requests[3].url.params) == {"cwd": str(repositories / "app")}
 
 
 def test_session_ids_outside_the_uuid_alphabet_are_refused(monkeypatch):
@@ -656,3 +656,8 @@ def test_a_turn_delete_from_an_untrusted_request_or_without_host_access_is_refus
     assert _client(has_host_access=False).post(TURN_URL, json={"through": "turn"}, headers=TRUSTED).status_code == 403
     assert _client().post(TURN_URL, json={"through": "all"}, headers=TRUSTED).status_code == 422
     assert host.requests == []
+
+
+def test_opening_a_session_with_resume_continue_is_refused(monkeypatch, repositories):
+    _serve(monkeypatch, {})
+    assert _client().post("/api/pi/sessions", json={"repo": "app", "resume": "continue"}).status_code == 422

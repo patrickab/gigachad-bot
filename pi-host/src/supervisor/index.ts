@@ -16,13 +16,14 @@ import { isPinned } from "../sidecar.ts";
 import { loadConfig, type SupervisorConfig } from "./config.ts";
 import { SupervisorHost, type ResumeOutcome } from "./host.ts";
 import type { ResumeState } from "./resume.ts";
-import type { LiveStatus } from "./session.ts";
 
 export type SocketData = { clientId: string };
 
 /** One live session in `GET /health`. */
 export type LiveSessionHealth = { sessionId: string; sessionPath: string; running: boolean; attached: number; pinned: boolean };
 export type Health = { ok: true; piVersion: string; sessions: LiveSessionHealth[] };
+
+export type LiveStatus = { running: boolean; waiting: boolean; attached: number };
 
 /** What the catalog needs to know about running sessions. */
 export interface LiveSessions {

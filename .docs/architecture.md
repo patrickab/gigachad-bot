@@ -175,9 +175,9 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 ### Sandbox checkpoints
 
 - Slots are scoped by user, chat and sandbox scope. `SandboxRuntimeState` lives per backend process and serializes per slot (two workers can still run one slot at once). Storing a run and `delete_chat_state` do store IO in a thread holding the slot lock and `SandboxRuntimeState.assets_lock`; asset deletes stay on the event loop.
-- A run's workspace archive, rich output assets and run record are stored when the run returns, assets before the manifest that names them; the chat save does not checkpoint. `SandboxStore.checkpoint` writes slot, manifest, pointer and run records in one transaction. A failed or cancelled run records itself and leaves the active pointer where it was. Runs of a chat that is never saved are not collected (see "Delete cleanup").
-- Completed `tool_call_id` results are reused; a running record is busy, abandoned ones (> 5 min) may rerun; native resources are released on cancellation.
-- Only a manifest with `pi_sessions` resumes. A schema-1 manifest (`omp_sessions`) restores its workspace and starts a fresh Pi session.
+- A run's workspace archive, rich output assets and run record are stored when the run returns, assets before the manifest that names them; the chat save does not checkpoint. `SandboxStore.checkpoint` writes manifest, pointer and run records in one transaction. A failed run records itself and leaves the active pointer where it was; a store failure while saving is a failed run (`runner_error`). A cancelled run records nothing; a call cancelled during its save keeps both locks until the save thread ends. Runs of a chat that is never saved stay stored: nothing collects them, only the dry run reports them (see "Delete cleanup").
+- A recorded `tool_call_id` result (completed or failed) is replayed; native resources are released on cancellation.
+- Only a manifest with `pi_sessions` resumes. A schema-1 manifest (`omp_sessions`) is no longer read: the run fails as `invalid_manifest`.
 
 ### Live attachments and extraction
 
@@ -505,7 +505,7 @@ templates/latex/
 - Held canvases: every `note/` canvas and project canvases reachable from a chat, project `files` or another held canvas. Annotation canvases count PDF bytes of stored uploads, library and document PDFs, and referenced host PDFs (hashed from disk).
 - Host-PDF annotation canvases record opened host paths in meta `hosts`; the canvas stays while any recorded file exists with its hash.
 - MinerU output is never deleted by a release nor listed by the dry run. Host files and the disk mirror are never written or deleted.
-- Post-commit cleanup failures are logged. No automatic orphan purge: `python -m lib.references --dry-run [--database-url URL]` (from `src/`) lists orphans per user, plus uploads of unstored chats (Pi composer uploads keyed `pi:<session>`).
+- Post-commit cleanup failures are logged. No automatic orphan purge: `python -m lib.references --dry-run [--database-url URL]` (from `src/`) lists orphans per user, plus uploads of unstored chats (Pi composer uploads keyed `pi:<session>`) and the sandbox records of chats never saved, which stay stored.
 - gigachad stores nothing per Pi session: Pi keeps them in `~/.pi/agent/sessions`, factory tasks in `~/.pi/agent/factory/sessions`.
 
 ## Provider usage

@@ -4,11 +4,11 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LiveStatus, SessionInfo } from "../src/catalog/index.ts";
+import type { SessionInfo } from "../src/catalog/index.ts";
 import { tryLockFile } from "../src/host/local/lock.ts";
 import { cwdDirName } from "../src/host/local/paths.ts";
-import type { LiveSessions } from "../src/supervisor/index.ts";
-import { copyPrivateState, handleCatalog, isPinned } from "./fixtures/local-catalog.ts";
+import type { LiveSessions, LiveStatus } from "../src/supervisor/index.ts";
+import { copyPrivateState, handleCatalog, isPinned, markSpawn } from "./fixtures/local-catalog.ts";
 
 /** Union of the catalog response bodies; each assertion reads the fields of its route. */
 type Body = {
@@ -685,6 +685,12 @@ describe("private state", () => {
     await writeFile(`${oldPath}.gigachad.json`, JSON.stringify({ revision: 0, pinned: false, data: {}, profile: "document" }));
     await copyPrivateState(oldPath, newPath);
     expect(JSON.parse(await readFile(`${newPath}.gigachad.json`, "utf8"))).toEqual({ revision: 0, pinned: false, data: {}, profile: "document" });
+  });
+
+  test("a pin write and a spawn's markers at the same time both land in the sidecar", async () => {
+    const { oldPath } = await writeFixtures();
+    await Promise.all([call("PUT", `/sessions/${OLD_ID}/pin`, { pinned: true }), markSpawn(oldPath, "document", "long")]);
+    expect(JSON.parse(await readFile(`${oldPath}.gigachad.json`, "utf8"))).toMatchObject({ pinned: true, profile: "document", cacheRetention: "long" });
   });
 
   test("the profile marker shows in SessionInfo and survives a pin write", async () => {

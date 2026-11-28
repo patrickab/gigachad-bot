@@ -236,8 +236,7 @@ class _Holders:
     @cached_property
     def stored_pdfs(self) -> dict[str, str]:
         """The SHA-256 of every PDF stored under notes and projects."""
-        entries = [entry for prefix in (NOTE, PROJECT) for entry in self._docs.list(prefix, recursive=True)]
-        return {entry.key: self._docs.sha256(entry.key) for entry in entries if not entry.is_dir and _is_pdf(entry.key)}
+        return {key: sha256 for prefix in (NOTE, PROJECT) for key, sha256 in self._docs.sha256s(prefix).items() if _is_pdf(key)}
 
     @cached_property
     def hosts(self) -> dict[str, list[str]]:

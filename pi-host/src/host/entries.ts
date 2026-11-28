@@ -13,7 +13,8 @@ export function isPrompt(entry: { type?: unknown; message?: unknown }): boolean 
 }
 
 /** Root-to-leaf path by `parentId`; a missing parent or a repeated id ends the walk. */
-export function pathToRoot<T extends { id: string; parentId: string | null }>(byId: ReadonlyMap<string, T>, leafId: string | null): T[] {
+export function pathToRoot<T extends { id: string; parentId: string | null }>(entries: readonly T[], leafId: string | null): T[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const path: T[] = [];
   const seen = new Set<string>();
   for (let entry = leafId === null ? undefined : byId.get(leafId); entry && !seen.has(entry.id); ) {

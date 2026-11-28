@@ -21,7 +21,7 @@ Host code execution: `host_access_only` on HTTP, the origin and host-access gate
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 import logging
 from pathlib import Path as FilePath
@@ -94,16 +94,6 @@ class PastedVideo(BaseModel):
     mention: str
 
 
-async def _call[Result](request: Awaitable[Result]) -> Result:
-    """Await a `pi_host` call, mapping unreachable to 503 and unknown shape to 502. Refusals reach `_PassRefusals`."""
-    try:
-        return await request
-    except pi_host.PiHostUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except pi_host.PiHostBadResponse as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
 def _cwd(repo: str) -> str:
     folder = repository_index.resolve(repo)
     if folder is None:
@@ -113,13 +103,13 @@ def _cwd(repo: str) -> str:
 
 @http_router.get("/settings")
 async def get_settings() -> pi_host.PiSettings:
-    return await _call(pi_host.get_settings())
+    return await pi_host.get_settings()
 
 
 @http_router.put("/settings")
 async def put_settings(body: pi_host.PiSettings) -> pi_host.PiSettings:
     """Store pi-host's settings, `autoResume`: reopen the runs a pi-host crash or reboot interrupted (off by default)."""
-    return await _call(pi_host.set_settings(auto_resume=body.auto_resume))
+    return await pi_host.set_settings(auto_resume=body.auto_resume)
 
 
 @http_router.get("/repos")
@@ -142,7 +132,7 @@ async def get_sessions(repo: str | None = None, archived: bool = False) -> pi_ho
     """Sessions newest first, of *repo* when given, factory tasks left out (the factory core lists those), so the
     session picker and sidebar never show one, also an older task whose file sits in Pi's normal root."""
     cwd = None if repo is None else await asyncio.to_thread(_cwd, repo)
-    sessions = await _call(pi_host.list_sessions(cwd, archived=archived))
+    sessions = await pi_host.list_sessions(cwd, archived=archived)
     return pi_host.SessionList(sessions=[session for session in sessions if session.factory is None])
 
 
@@ -151,18 +141,18 @@ async def post_session(body: OpenSessionBody) -> pi_host.SessionAnswer:
     """Open a coding session in *repo*: new (`resume` null), a given file (`{sessionPath}`)
     or a fork of one up to an entry (`{forkOf: {sessionPath, entryId}}`)."""
     cwd = await asyncio.to_thread(_cwd, body.repo)
-    session = await _call(pi_host.open_session(cwd, body.resume, model=body.model, thinking=body.thinking))
+    session = await pi_host.open_session(cwd, body.resume, model=body.model, thinking=body.thinking)
     return pi_host.SessionAnswer(session=session)
 
 
 @http_router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: SessionId) -> None:
-    await _call(pi_host.delete_session(session_id))
+    await pi_host.delete_session(session_id)
 
 
 @http_router.post("/sessions/{session_id}/archive")
 async def post_archive(session_id: SessionId) -> pi_host.SessionAnswer:
-    return pi_host.SessionAnswer(session=await _call(pi_host.archive_session(session_id)))
+    return pi_host.SessionAnswer(session=await pi_host.archive_session(session_id))
 
 
 class TurnDeleteBody(BaseModel):
@@ -172,7 +162,7 @@ class TurnDeleteBody(BaseModel):
 @http_router.post("/sessions/{session_id}/turns/{entry_id}/delete", dependencies=[Depends(require_trusted_request)])
 async def post_delete_turn(session_id: SessionId, entry_id: SessionId, body: TurnDeleteBody) -> pi_host.TurnDeleted:
     """Delete a turn for good. Its thumbnails of the removed tool images go too: pi-host's cleanup does not reach them."""
-    deleted = await _call(pi_host.delete_turn(session_id, entry_id, body.through))
+    deleted = await pi_host.delete_turn(session_id, entry_id, body.through)
     # A failed scan leaves the images' hashes only in `not_removed`, among paste ids and other names.
     pi_media.forget([*deleted.removed_media, *(name for name in deleted.not_removed if re.fullmatch(pi_media.HASH_PATTERN, name))])
     return deleted
@@ -180,12 +170,12 @@ async def post_delete_turn(session_id: SessionId, entry_id: SessionId, body: Tur
 
 @http_router.post("/sessions/{session_id}/restore")
 async def post_restore(session_id: SessionId) -> pi_host.SessionAnswer:
-    return pi_host.SessionAnswer(session=await _call(pi_host.restore_session(session_id)))
+    return pi_host.SessionAnswer(session=await pi_host.restore_session(session_id))
 
 
 @http_router.put("/sessions/{session_id}/pin")
 async def put_pin(session_id: SessionId, body: PinBody) -> pi_host.SessionAnswer:
-    return pi_host.SessionAnswer(session=await _call(pi_host.pin_session(session_id, body.pinned)))
+    return pi_host.SessionAnswer(session=await pi_host.pin_session(session_id, body.pinned))
 
 
 @http_router.get("/sessions/{session_id}/entries")
@@ -203,13 +193,13 @@ async def get_entries(
     does not know (400 `invalid_since`). *assistant* adds the assistant answers among them (text, model, usage): what
     the coder said in each round.
     """
-    return await _call(pi_host.session_entries(session_id, turns, custom_type=custom_type, since=since, assistant=assistant))
+    return await pi_host.session_entries(session_id, turns, custom_type=custom_type, since=since, assistant=assistant)
 
 
 @http_router.get("/search")
 async def get_search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> pi_host.SearchResult:
     """Live sessions of every repo whose transcript matches *q*, best first (M24)."""
-    return pi_host.SearchResult(hits=await _call(pi_host.search_sessions(q, limit)))
+    return pi_host.SearchResult(hits=await pi_host.search_sessions(q, limit))
 
 
 @http_router.get("/sessions/{session_id}/matches")
@@ -217,7 +207,7 @@ async def get_session_matches(
     session_id: SessionId, q: str, limit: int = Query(default=50, ge=1, le=500)
 ) -> pi_host.SessionMatches:
     """The best *limit* hits of the session's transcript for *q*, ranked, each addressed by entry id and ordinal."""
-    return await _call(pi_host.session_matches(session_id, q, limit))
+    return await pi_host.session_matches(session_id, q, limit)
 
 
 def _allowed_cwd(cwd: str, roots: FileRoots) -> str:
@@ -243,7 +233,7 @@ async def get_files(
     if (repo is None) == (cwd is None):
         raise HTTPException(status_code=400, detail="Give either repo or cwd")
     folder = await asyncio.to_thread(_cwd, repo) if repo is not None else await asyncio.to_thread(_allowed_cwd, cwd, roots)
-    return pi_host.FileList(files=await _call(pi_host.find_files(folder, "", limit)))
+    return pi_host.FileList(files=await pi_host.find_files(folder, limit))
 
 
 @http_router.post("/pastes")
@@ -277,10 +267,11 @@ async def post_paste(
 @http_router.get("/media/{media_hash}")
 async def get_media(request: Request, media_hash: MediaHash) -> Response:
     etag = f'"{media_hash}"'
-    if (unchanged := not_modified(request, etag, IMMUTABLE)) is not None:
-        return unchanged
-    data, media_type = await _call(pi_host.media(media_hash))
-    return Response(content=data, media_type=media_type, headers={"ETag": etag, "Cache-Control": IMMUTABLE})
+    return not_modified(request, etag, IMMUTABLE) or _immutable(etag, *await pi_host.media(media_hash))
+
+
+def _immutable(etag: str, content: bytes, media_type: str) -> Response:
+    return Response(content=content, media_type=media_type, headers={"ETag": etag, "Cache-Control": IMMUTABLE})
 
 
 @http_router.get("/media/{media_hash}/thumb")
@@ -290,14 +281,13 @@ async def get_media_thumbnail(request: Request, media_hash: MediaHash) -> Respon
         return unchanged
     thumb = pi_media.thumbnail_for(media_hash)
     if thumb is None:
-        data, media_type = await _call(pi_host.media(media_hash))
+        data, media_type = await pi_host.media(media_hash)
         try:
             thumb = await asyncio.to_thread(pi_media.thumbnail_for, media_hash, data)
         except ValueError:  # unreadable for Pillow: the original is the best preview
-            etag = f'"{media_hash}"'
-            headers = {"ETag": etag, "Cache-Control": IMMUTABLE}
-            return not_modified(request, etag, IMMUTABLE) or Response(content=data, media_type=media_type, headers=headers)
-    return Response(content=thumb or b"", media_type="image/webp", headers={"ETag": etag, "Cache-Control": IMMUTABLE})
+            original = f'"{media_hash}"'
+            return not_modified(request, original, IMMUTABLE) or _immutable(original, data, media_type)
+    return _immutable(etag, thumb or b"", "image/webp")
 
 
 @router.websocket("/ws")

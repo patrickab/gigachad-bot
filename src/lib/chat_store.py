@@ -358,19 +358,8 @@ class ChatStore:
         return {"status": "ok"}
 
     def list_histories(self) -> dict[str, list[str]]:
-        """List every chat outside a project: a history is simply a chat with no project."""
-        # One listing query instead of an is_file/is_dir round trip per entry.
-        prefix = f"{CHAT}/"
-        entries = {e.key.removeprefix(prefix): e.is_dir for e in self._docs.list(CHAT, recursive=True)}
-        marker = f"/{PROJECT_JSON}"
-        project_dirs = {rel.removesuffix(marker) for rel in entries if rel.count("/") == 1 and rel.endswith(marker)}
-        files: list[str] = []
-        for rel in sorted(entries):
-            *dirs, name = rel.split("/")
-            if entries[rel] or not _is_chat_file(name) or _in_hidden_dir(dirs) or (dirs and dirs[0] in project_dirs):
-                continue
-            files.append(rel)
-        return {"files": files}
+        """List every chat outside a project, `_` files included: a history is simply a chat with no project."""
+        return {"files": sorted(chat.history_file for chat in self._chat_files() if chat.slug is None)}
 
     def list_all(self) -> list[dict[str, Any]]:
         """Every chat of the user, project chats included, newest first, without reading chat bodies."""
@@ -407,22 +396,24 @@ class ChatStore:
 
     def _listed_chats(self) -> list[_ListedChat]:
         """Every listed chat (hidden folders and `_` files left out), newest first, from one listing query."""
-        prefix = f"{CHAT}/"
-        entries = [e for e in self._docs.list(CHAT, recursive=True) if not e.is_dir]
-        marker = f"/{PROJECT_JSON}"
-        rels = [e.key.removeprefix(prefix) for e in entries]
-        project_dirs = {rel.removesuffix(marker) for rel in rels if rel.count("/") == 1 and rel.endswith(marker)}
-        chats: list[_ListedChat] = []
-        for entry in entries:
-            rel = entry.key.removeprefix(prefix)
-            *dirs, name = rel.split("/")
-            if not _is_chat_file(name) or name.startswith("_") or _in_hidden_dir(dirs):
-                continue
-            slug = dirs[0] if dirs and dirs[0] in project_dirs else None
-            chats.append(_ListedChat(entry.key, rel, slug, entry.modified))
+        chats = [chat for chat in self._chat_files() if not PurePosixPath(chat.key).name.startswith("_")]
         # Newest first, a chat without a known date last, the path breaking ties so the order is stable.
         chats.sort(key=lambda chat: chat.history_file)
         chats.sort(key=lambda chat: chat.modified.timestamp() if chat.modified else float("-inf"), reverse=True)
+        return chats
+
+    def _chat_files(self) -> list[_ListedChat]:
+        """Every chat outside hidden folders, `_` files included, from one listing query."""
+        prefix = f"{CHAT}/"
+        entries = [e for e in self._docs.list(CHAT, recursive=True) if not e.is_dir]
+        rels = [e.key.removeprefix(prefix) for e in entries]
+        marker = f"/{PROJECT_JSON}"
+        project_dirs = {rel.removesuffix(marker) for rel in rels if rel.count("/") == 1 and rel.endswith(marker)}
+        chats: list[_ListedChat] = []
+        for entry, rel in zip(entries, rels, strict=True):
+            *dirs, name = rel.split("/")
+            if _is_chat_file(name) and not _in_hidden_dir(dirs):
+                chats.append(_ListedChat(entry.key, rel, dirs[0] if dirs and dirs[0] in project_dirs else None, entry.modified))
         return chats
 
     def _project_tab_names(self, slugs: set[str]) -> dict[str, dict[str, str]]:

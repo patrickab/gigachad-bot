@@ -28,6 +28,7 @@ import pytest
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes import latex as latex_route
 from backend.routes.deps import get_file_roots, get_user_scope
+from backend.routes.upstream import UPSTREAM_ERRORS
 from lib import latex_templates, repository_index
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
@@ -111,7 +112,7 @@ def _returning(value: Any) -> Callable[[], Any]:
 
 def route_client(*routers: APIRouter, overrides: Mapping[Callable[..., Any], Any] | None = None) -> TestClient:
     """A client for *routers* mounted on a bare app, each dependency in *overrides* answering its fixed value."""
-    app = FastAPI()
+    app = FastAPI(exception_handlers=UPSTREAM_ERRORS)
     for router in routers:
         app.include_router(router)
     for dependency, value in (overrides or {}).items():

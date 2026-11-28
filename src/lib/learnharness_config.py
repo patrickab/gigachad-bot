@@ -335,7 +335,7 @@ def _gateway_entries() -> dict[str, dict[str, Any]]:
 
 def _ollama_and_gateway() -> tuple[list[str], dict[str, dict[str, Any]]]:
     """The installed Ollama tags and the gateway's rows, read after Pi's Ollama provider caught up with those tags."""
-    return ollama_models.sync_pi_provider() or [], _gateway_entries()
+    return ollama_models.sync_pi_provider(), _gateway_entries()
 
 
 async def served_catalog(login: str) -> tuple[list[ServedModel], dict[str, str]]:

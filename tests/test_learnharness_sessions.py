@@ -291,7 +291,7 @@ def test_unreachable_learnharness_is_503_and_unknown_shape_is_502_naming_the_fie
 
     LearnHarness(monkeypatch, {"GET /api/chats": (200, {"sessions": []})})
     response = _learn_client(store).get("/api/learn/sessions")
-    assert response.status_code == 502
+    assert response.status_code == 502 and list(response.json()) == ["detail"]
     assert "`chats`" in response.json()["detail"]
 
 
@@ -342,7 +342,7 @@ def test_renaming_an_unknown_session_is_404(monkeypatch, store):
     response = _learn_client(store).patch("/api/learn/sessions/chat_gone", json={"title": "Fourier"})
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Not found"
+    assert response.json() == {"detail": "Not found"}
 
 
 def test_deleting_a_session_preserves_knowledge_and_leaves_its_project(monkeypatch, store):
@@ -391,7 +391,7 @@ def test_a_refused_session_delete_keeps_its_project(monkeypatch, store):
     response = _learn_client(store).delete("/api/learn/sessions/chat_a")
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "A turn is running"
+    assert response.json() == {"detail": "A turn is running"}
     assert store.learn_session_projects() == {"chat_a": "physics"}
 
 
@@ -481,7 +481,7 @@ def test_a_moved_delete_route_keeps_the_project(monkeypatch, store):
 
     response = _projects_client(store).delete("/api/projects/physics")
 
-    assert response.status_code == 502
+    assert response.status_code == 502 and list(response.json()) == ["detail"]
     assert [project["slug"] for project in store.list_projects()] == ["physics", "maths"]
     assert store.learn_sessions("physics") == ["chat_a"]
 

@@ -456,7 +456,7 @@ def test_a_failed_ipykernel_install_answers_bad_gateway_with_the_reason(world, t
 
     response = world.client.post("/api/jupyter/kernel", json={"path": str(nb), "name": name})
 
-    assert response.status_code == 502
+    assert response.status_code == 502 and list(response.json()) == ["detail"]
     assert "no index reachable" in response.json()["detail"]
 
 
@@ -858,5 +858,6 @@ def test_a_worker_without_its_jupyter_service_answers_unavailable(home, tmp_path
     monkeypatch.setenv(jupyter_service.SOCKET_VARIABLE, str(tmp_path / "missing.sock"))
     nb = notebook(home / "a.ipynb")
     with client_for(RemoteJupyterHost(), home) as client:
-        assert client.get("/api/jupyter/kernelspecs", params={"path": str(nb)}).status_code == 503
+        unavailable = client.get("/api/jupyter/kernelspecs", params={"path": str(nb)})
+        assert unavailable.status_code == 503 and list(unavailable.json()) == ["detail"]
         assert client.get(f"{SERVER}/api/kernels").status_code == 503

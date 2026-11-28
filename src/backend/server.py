@@ -18,6 +18,7 @@ from backend.routes import (
     assets,
     canvases,
     chat,
+    config,
     deploy,
     documents,
     factory,
@@ -39,19 +40,15 @@ from backend.routes import (
     pi,
     projects,
     share_links,
+    sync,
     terminal,
     theme,
     workbench,
 )
-from backend.routes import (
-    config as config_routes,
-)
-from backend.routes import (
-    sync as sync_routes,
-)
+from backend.routes.upstream import UPSTREAM_ERRORS
 from backend.sync import get_change_broker
 from config import CORS_ORIGINS, is_cors_unsafe_for_production
-from lib import factory_migration, jupyter_service, ollama_models, repository_index
+from lib import factory_migration, jupyter_service, ollama_models, repository_index, upstream
 from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound
 from lib.c4_service import C4ServiceUnavailable
 from lib.data_store import StorageConflictError
@@ -118,6 +115,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     factory_move.cancel()
     kill_all_mineru_servers()
     await jupyter_service.aclose()
+    await upstream.close_clients()
     if stopped := stop_owned():  # what Neovim sessions left running: language servers, programs they ran
         log.info("Stopped %d processes the backend's children left running: %s", len(stopped), stopped)
     await extract_queue.stop()
@@ -125,7 +123,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     close_postgres_pool()
 
 
-app = FastAPI(title="gigachad-bot", lifespan=lifespan)
+app = FastAPI(title="gigachad-bot", lifespan=lifespan, exception_handlers=UPSTREAM_ERRORS)
 
 # Inside CORS, so 304s and gzipped bodies still carry the CORS headers.
 app.add_middleware(TransferMiddleware)
@@ -171,16 +169,16 @@ for _exception, _status in (
     (ArchitectureNotFound, 404),
     (ArchitectureError, 400),
     (C4ServiceUnavailable, 503),
-    # A stale revision or taken name. Project rename, chat save and document rename map it to 409 themselves.
+    # A stale revision or taken name. Project rename and document rename map it to 409 themselves.
     (StorageConflictError, 412),
 ):
     app.add_exception_handler(_exception, _json_error(_status))
 
 
-for router in (
+for _router in (
     chat.router,
     architecture.router,
-    config_routes.router,
+    config.router,
     theme.router,
     documents.router,
     files.router,
@@ -201,7 +199,7 @@ for router in (
     file_git.router,
     ocr.router,
     projects.router,
-    sync_routes.router,
+    sync.router,
     canvases.router,
     share_links.owner_router,
     share_links.guest_router,
@@ -210,4 +208,4 @@ for router in (
     factory.router,
     factory_preview.router,
 ):
-    app.include_router(router)
+    app.include_router(_router)

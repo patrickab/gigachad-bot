@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { FilePanelProvider, FilePanelSlot, useOpenFile } from "../FilePanel"
-import { TextDocumentEditor } from "../TextDocumentEditor"
+import { ArchitectureSourceEditor, TextDocumentEditor } from "../TextDocumentEditor"
+import { architectureResource } from "@/lib/backend/resources"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn<(path: string) => Promise<string>>(),
@@ -161,4 +162,13 @@ it("the file panel's Neovim gets the followed text through setContent", async ()
 
   await changeOnDisk(PATH, "two")
   expect(neovim.setContent).toHaveBeenCalledWith("two", PATH)
+})
+
+it("a .c4 saved from the document editor updates every open window of its project", async () => {
+  const saved = { created: [], model: { errors: [], kinds: [], elements: [], views: [], tree: [] } }
+  api.writeArchitectureSource.mockResolvedValue(saved)
+  render(<ArchitectureSourceEditor path="graph/proj/backend.c4" slug="proj" onClose={vi.fn()} />)
+  fireEvent.change(await screen.findByRole("textbox", { name: "Document text" }), { target: { value: "model {}" } })
+  fireEvent.keyDown(document, { key: "s", ctrlKey: true })
+  await waitFor(() => expect(architectureResource("proj").get()).toBe(saved))
 })

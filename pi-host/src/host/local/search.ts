@@ -12,6 +12,7 @@
  * https://github.com/ompweb-dev/ompweb), adapted to Pi's records and to report the hit's entry and a snippet.
  */
 import { stat } from "node:fs/promises";
+import { asRecord } from "../../json.ts";
 import { pathToRoot } from "../entries.ts";
 import type { SearchMatch, SessionMatch, SessionMatchPage, SessionMeta } from "../index.ts";
 import {
@@ -100,8 +101,8 @@ function parseRecord(line: string, previous: SessionRecord | undefined, index: n
   const id = legacy ? `legacy:${index}` : raw.id;
   const parentId = legacy ? (previous?.id ?? null) : raw.parentId;
   if (typeof id !== "string" || (parentId !== null && typeof parentId !== "string")) return undefined;
-  const message = typeof raw.message === "object" && raw.message !== null ? (raw.message as { role?: unknown; content?: unknown }) : undefined;
-  const searchable = message?.role === "user" || message?.role === "assistant";
+  const message = asRecord(raw.message);
+  const searchable = message.role === "user" || message.role === "assistant";
   return {
     id,
     parentId: (parentId as string | null) ?? null,
@@ -114,7 +115,7 @@ function parseRecord(line: string, previous: SessionRecord | undefined, index: n
 
 /** Records on the path from the last record to the root, minus what the latest compaction summarized away. */
 function activeBranch(records: SessionRecord[]): SessionRecord[] {
-  const path = pathToRoot(new Map(records.map((record) => [record.id, record])), records.at(-1)?.id ?? null);
+  const path = pathToRoot(records, records.at(-1)?.id ?? null);
   const compaction = path.findLastIndex((record) => record.type === "compaction");
   if (compaction < 0) return path;
   const firstKept = path.findIndex((record, index) => index < compaction && record.id === path[compaction]!.firstKeptEntryId);

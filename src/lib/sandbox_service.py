@@ -300,7 +300,15 @@ class SandboxService:
                 result=result.model_dump(mode="json"),
             )
             async with self._runtime.assets_lock:
-                await asyncio.to_thread(self._persist_run, chat_id, store, record, manifest, assets, media_types)
+                save = asyncio.create_task(asyncio.to_thread(self._persist_run, chat_id, store, record, manifest, assets, media_types))
+                try:
+                    await asyncio.shield(save)
+                except asyncio.CancelledError:
+                    await asyncio.wait([save])  # the save thread cannot stop: keep the locks until it ends
+                    raise
+                except Exception:  # noqa: BLE001 - a store failure is a failed run, as for the runner
+                    logger.exception("sandbox run %s could not be stored for slot %s", tool_call_id, slot_key)
+                    return _failed_result(prior_manifest, "runner_error")
             return result
 
     @staticmethod
