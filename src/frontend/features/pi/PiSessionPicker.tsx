@@ -9,7 +9,7 @@ import { useDebouncedSearch } from "@/hooks/useDebouncedSearch"
 import { useNowMs } from "@/hooks/useNowMs"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { archivePiSession, type PiRepository, type PiSessionInfo, type PiSessionMatch } from "@/lib/backend/api"
-import { abbreviatePath, baseName, shortPath } from "@/lib/paths"
+import { abbreviatePath, shortPath } from "@/lib/paths"
 import { cn, compactElapsed } from "@/lib/utils"
 import { focusPiSearchHit } from "./searchFocus"
 import { refreshPiSessions, searchPiSessions, usePiRepositories, usePiSessions } from "./sessionStore"
@@ -158,7 +158,7 @@ export function PiSessionPicker({ onOpenItem }: { onOpenItem: (item: WorkspaceIt
     onPick={(entry) => {
       const { session, hit } = entry
       if (hit) focusPiSearchHit(session.sessionId, query.trim(), hit, entry.listed)
-      onOpenItem(piSessionItem(session, piSessionRepository(session, repositories)?.name ?? baseName(session.cwd), null))
+      onOpenItem(piSessionItem(session, piSessionRepository(session, repositories)?.name ?? session.cwd, null))
       return true
     }}
   />

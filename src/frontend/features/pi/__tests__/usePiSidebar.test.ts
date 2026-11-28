@@ -38,6 +38,12 @@ describe("Pi sidebar grouping", () => {
     expect(piSessionRepository(piSession("x", "/git/proj-two"), repositories)?.name).toBe("proj-two")
   })
 
+  it("picks the deepest checkout, so a home folder never shadows the repo inside it", () => {
+    const nested = [{ name: "home", path: "/home/u" }, { name: "proj", path: "/home/u/git/proj" }]
+    expect(piSessionRepository(piSession("n", "/home/u/git/proj/src"), nested)?.name).toBe("proj")
+    expect(piSessionRepository(piSession("h", "/home/u/notes"), nested)?.name).toBe("home")
+  })
+
   it("lists a directory's sessions, worktrees included, and checkouts outside every mount with theirs", () => {
     const sessions = [
       piSession("main", "/git/proj/src"), piSession("tree", "/git/worktrees/proj/feat"), piSession("two", "/git/proj-two"),

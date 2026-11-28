@@ -36,9 +36,15 @@ function worktreeHome(repositoryPath: string): string {
   return `${dirName(trimSlash(repositoryPath))}/worktrees/${baseName(trimSlash(repositoryPath))}`
 }
 
-/** The checkout a session ran in: the one holding its cwd, or whose worktree holds it. */
+/** The checkout a session ran in: the deepest one holding its cwd, or whose worktree holds it (`~` never shadows `~/git/x`). */
 export function piSessionRepository(session: Pick<PiSessionInfo, "cwd">, repositories: readonly PiRepository[]): PiRepository | undefined {
-  return repositories.find((repository) => isInside(session.cwd, repository.path) || isInside(session.cwd, worktreeHome(repository.path)))
+  let best: PiRepository | undefined
+  let depth = -1
+  for (const repository of repositories) {
+    const home = isInside(session.cwd, repository.path) ? repository.path : isInside(session.cwd, worktreeHome(repository.path)) ? worktreeHome(repository.path) : null
+    if (home !== null && trimSlash(home).length > depth) [best, depth] = [repository, trimSlash(home).length]
+  }
+  return best
 }
 
 /** Branch folder of a session that ran in a worktree, else null. */
