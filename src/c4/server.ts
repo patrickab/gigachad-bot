@@ -2,6 +2,7 @@
 // carries the workspace sources and every answer is a pure function of it;
 // the backend owns storage and revisions.
 import { createHash } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { readPins, type Snapshots } from './layout.ts'
@@ -50,12 +51,11 @@ function snapshotsOf(body: Record<string, unknown>): Snapshots {
   return snapshots as Snapshots
 }
 
-function send(response: ServerResponse, status: number, json: string) {
+/** Writes `payload` as JSON; a string is already JSON. */
+function send(response: ServerResponse, status: number, payload: unknown) {
   response.writeHead(status, { 'content-type': 'application/json' })
-  response.end(json)
+  response.end(typeof payload === 'string' ? payload : JSON.stringify(payload))
 }
-
-const sendJson = (response: ServerResponse, status: number, payload: unknown) => send(response, status, JSON.stringify(payload))
 
 /** `/model` answers by SHA-256 of their request body (a parse and layout costs about a second): at most 8 and 32 MB, oldest evicted first; identical concurrent requests share one run. */
 const MODEL_MEMO_BYTES = 32 * 1024 * 1024
@@ -93,8 +93,8 @@ async function modelAnswer(raw: Buffer): Promise<string> {
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse) {
-  if (request.method === 'GET' && request.url === '/health') return sendJson(response, 200, { status: 'ok' })
-  if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' })
+  if (request.method === 'GET' && request.url === '/health') return send(response, 200, { status: 'ok' })
+  if (request.method !== 'POST') return send(response, 405, { error: 'Method not allowed' })
   const raw = await readBody(request)
   if (request.url === '/model') return send(response, 200, await modelAnswer(raw))
   const body = parseJson(raw)
@@ -102,20 +102,20 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     if (!Array.isArray(body.ops)) throw new OperationError('ops must be a list')
     const home = body.home ?? null
     if (home !== null && typeof home !== 'string') throw new OperationError('home must be a source file path')
-    return sendJson(response, 200, await applyOperations(sourcesOf(body), readPins(snapshotsOf(body)), body.ops as Operation[], home))
+    return send(response, 200, await applyOperations(sourcesOf(body), readPins(snapshotsOf(body)), body.ops as Operation[], home))
   }
-  return sendJson(response, 404, { error: 'Not found' })
+  return send(response, 404, { error: 'Not found' })
 }
 
 export const createC4Server = () => createServer((request, response) => {
   handle(request, response).catch((error: unknown) => {
-    if (error instanceof OperationError || error instanceof SyntaxError) return sendJson(response, 422, { error: error.message })
+    if (error instanceof OperationError || error instanceof SyntaxError) return send(response, 422, { error: error.message })
     console.error(error)
-    sendJson(response, 500, { error: 'C4 service failed' })
+    send(response, 500, { error: 'C4 service failed' })
   })
 })
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const port = Number(process.env.C4_SERVICE_PORT ?? 8011)
   const host = process.env.C4_SERVICE_HOST ?? '127.0.0.1'
   createC4Server().listen(port, host, () => console.log(JSON.stringify({ event: 'ready', host, port })))

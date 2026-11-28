@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useState, type RefCallback } from "react"
 import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
+import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { ChatContainer, type ChatContainerProps, type ChatReveal, type ChatRevealHit } from "@/features/chat/ChatContainer"
 import type { ChatStore } from "@/features/chat/chatStore"
 import { newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
@@ -31,8 +32,6 @@ import "@/features/pi/MemoryTool"
 interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
-  /** Asks the app's chrome for a name to save this tab's chat under. */
-  onSaveAs: (save: (name: string) => Promise<void>) => void
   reveal: ChatReveal
 }
 
@@ -70,7 +69,7 @@ export function TabChat({ chat, ...props }: { chat: ChatStore } & Omit<ChatConta
 }
 
 /** The tab's chat surfaces and the top bar whose slots they render their controls into. */
-function TabWorkspace({ onOpenChat, onOpenItem, onSaveAs, reveal }: TabContentProps) {
+function TabWorkspace({ onOpenChat, onOpenItem, reveal }: TabContentProps) {
   const { tab, isActive, setModeLabel } = useTab()
   const { projectSlug, config } = tab
   const registerContentArea = useContentAreaRef()
@@ -99,8 +98,8 @@ function TabWorkspace({ onOpenChat, onOpenItem, onSaveAs, reveal }: TabContentPr
   const canvas = useCanvasView()
   const {
     chat, hasMessages, isStreaming, chatConfig, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch,
-  } = useTabChat({ onOpenChat, onOpenItem, onSaveAs })
+    filePicker, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch, saveAs,
+  } = useTabChat({ onOpenChat, onOpenItem })
   const { models } = chatConfig
   const { standaloneFile } = filePicker
   const modelProps: ModelProps = { models, loadError: chatConfig.modelLoadError, onProvidersChange: chatConfig.saveModelProviders, onTabOrderChange: chatConfig.saveModelTabOrder, onDefaultsChange: chatConfig.saveModelDefaults, placement: "below" }
@@ -202,6 +201,7 @@ function TabWorkspace({ onOpenChat, onOpenItem, onSaveAs, reveal }: TabContentPr
         )}
       </main>
       <FilePanelSlot />
+      <SaveAsModal {...saveAs} />
       {isActive && filePicker.filePickerOpen && filePicker.rootFiles.enabled && (
         <FileViewer
           files={(filePicker.rootFiles.files ?? []).map((f) => f.path)}

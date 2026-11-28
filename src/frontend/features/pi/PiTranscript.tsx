@@ -8,7 +8,7 @@ import { PREVIEW_HEAD_CHARS, previewHead, TurnPreview, TurnSurface, usePreviewIn
 import "@gigachad/chat-ui/turn.css"
 import { LaTeXMarkdown, type FileLinks } from "@/components/content/LaTeXMarkdown"
 import { useEventListener } from "@/hooks/useEventListener"
-import { TabContext, useTabActive } from "@/contexts/TabContext"
+import { useTabActive, useTabId } from "@/contexts/TabContext"
 import { MessageAttachments } from "@/features/chat/messages/MessageAttachments"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ConversationColumn, type ConversationReveal, type ConversationTurn } from "@/features/conversation/ConversationColumn"
@@ -518,7 +518,7 @@ export function PiTranscript({ transcript, held = [], onRetryHeld, onDeleteHeld,
   } : null), [search, hit, hitKey])
 
   // Factory events: the tab's view switch (Alt+V), their files, and a decision's jump to the notice it answers
-  const tabId = useContext(TabContext)?.tab.id ?? null
+  const tabId = useTabId()
   const agentText = useTabAgentText(tabId, tabActive && !readOnly)
   const navRef = useRef({ messages, turns, columnTurns, search })
   useLayoutEffect(() => { navRef.current = { messages, turns, columnTurns, search } }, [messages, turns, columnTurns, search])

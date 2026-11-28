@@ -38,9 +38,10 @@ export function useArchitectureView(slug: string, file: string) {
       try {
         const next = await write()
         architectureResource(slug).set(next)
-        if (remoteRef.current) { remoteRef.current = false; architectureResource(slug).invalidate() }
+        if (remoteRef.current) architectureResource(slug).invalidate()
         return next
       } finally {
+        remoteRef.current = false
         inFlightRef.current -= 1
         // Only once the queue drains: an earlier answer must not wipe a later edit's preview.
         if (inFlightRef.current === 0) setOptimistic(null)

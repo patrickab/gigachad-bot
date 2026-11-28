@@ -5,8 +5,8 @@
    - Every rule hangs off the renderer's root, `.gc-markdown` (full) or `.gc-markdown-compact` (compact, the `compact`
      prop). Both carry `data-markdown-root`. Nothing outside the root is styled, a host's own markdown surfaces
      (tool output, thinking, `.markdown-body`) are untouched.
-   - Fenced code and diagrams are the package's renderers, styled by `code.css`. Citations and images are the host's
-     components. Only the prose around them is styled here.
+   - Fenced code and diagrams are the package's renderers, styled by `code.css`. Images are the host's
+     component. Only the prose around them is styled here.
 
    Host contract: the role tokens this file reads. The shell defines them in `app/globals.css`, a host with another
    palette maps them on `[data-markdown-root]` (`learnharness-overlay/theme/prose.css` does).

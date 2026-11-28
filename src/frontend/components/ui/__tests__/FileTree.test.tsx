@@ -42,3 +42,20 @@ describe("FileTree childLimit", () => {
     expect(shownLabels()).toEqual(["Session 0", "Session 1", "Session 2", "Session 3", "Session 4", "Session 6", "Show 2 more"])
   })
 })
+
+describe("FileTree row actions", () => {
+  afterEach(cleanup)
+
+  it("wraps a row's actions in a div and gives an open section no delete button", () => {
+    const project: FileTreeItem = {
+      id: "p", label: "project", type: "folder",
+      sections: [{ id: "chats", label: "chats", type: "folder", onDelete: () => {}, children: [
+        { id: "c", label: "chat", type: "element", onDelete: () => {} },
+      ] }],
+    }
+    render(<FileTree items={[project]} controller={controller} label="Projects" />)
+
+    expect(screen.getByRole("button", { name: "Delete chat" }).parentElement?.tagName).toBe("DIV")
+    expect(screen.queryByRole("button", { name: "Delete chats" })).toBeNull()
+  })
+})

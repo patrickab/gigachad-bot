@@ -40,7 +40,7 @@ interface Flight<T> {
 }
 
 const resets = new Set<() => void>()
-/** The retry of every resource whose latest invalidation has no successful read yet. */
+/** The retry of every resource whose latest invalidation has no successful read yet, and of every failed quiet first read. */
 const staleRetries = new Set<() => void>()
 const ignore = () => {}
 /** The startup read's bound: an outdated request older than this is aborted, it may hang on a dead connection. */
@@ -205,9 +205,17 @@ export async function refresh<T>(resource: Resource<T>): Promise<void> {
   if (resource.get() !== undefined) await resource.load().catch(ignore)
 }
 
-/** Invalidate every resource whose latest re-read failed and that no read is running for. */
+/** Invalidate every resource whose latest re-read failed and that no read is running for, and read failed quiet first reads again. */
 export function revalidateStale(): void {
   [...staleRetries].forEach((retry) => retry())
+}
+
+/** Run `read` once at the next `revalidateStale`, unless `signal` aborted by then. */
+export function retryWhenStale(read: () => void, signal: AbortSignal): void {
+  if (signal.aborted) return
+  const once = () => { staleRetries.delete(once); read() }
+  staleRetries.add(once)
+  signal.addEventListener("abort", () => staleRetries.delete(once), { once: true })
 }
 
 /** Forget every resource's value and read in progress without notifying, so one test's values never reach the next. */

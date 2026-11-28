@@ -178,7 +178,7 @@ const onOpenItem = () => {}
 
 /** `TabContent`'s chat body for a non-empty chat: `useTabChat`'s outputs handed down prop for prop. */
 function ChatOfTab({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabChat>) => void }) {
-  const tabChat = useTabChat({ onOpenChat, onOpenItem, onSaveAs: noop })
+  const tabChat = useTabChat({ onOpenChat, onOpenItem })
   onTabChat(tabChat)
   const { chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch } = tabChat
   return (
@@ -283,7 +283,7 @@ describe("a tab's chat while a reply streams", () => {
       <Profiler id="tab" onRender={profile}>
         <SidebarProvider>
           <TabContext.Provider value={tab}>
-            <TabContent onOpenChat={noop} onOpenItem={onOpenItem} onSaveAs={noop} reveal={reveal} />
+            <TabContent onOpenChat={noop} onOpenItem={onOpenItem} reveal={reveal} />
           </TabContext.Provider>
         </SidebarProvider>
       </Profiler>,

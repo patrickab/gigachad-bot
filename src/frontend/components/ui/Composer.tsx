@@ -81,25 +81,27 @@ export function Composer({
   )
 }
 
+/** Fit `element`'s height to its text up to the cap, recording the width it was fitted at. Reset first so scrollHeight can shrink */
+function fitTextarea(element: HTMLTextAreaElement, fittedWidth: { current: number }) {
+  fittedWidth.current = element.clientWidth
+  element.style.height = "0"
+  element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
+}
+
 /** One-line textarea that grows with its text up to a cap and refits when its width changes, e.g. a side panel springing open. */
 export function ComposerTextarea({ ref, ...props }: ComponentProps<"textarea"> & { ref: RefObject<HTMLTextAreaElement | null> }) {
-  // Reset first so scrollHeight can shrink
+  const fittedWidth = useRef(-1)
+  useLayoutEffect(() => {
+    if (ref.current) fitTextarea(ref.current, fittedWidth)
+  }, [props.value, ref])
   useLayoutEffect(() => {
     const element = ref.current
-    if (!element) return
-    let fittedWidth = -1
-    const fit = () => {
-      fittedWidth = element.clientWidth
-      element.style.height = "0"
-      element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
-    }
-    fit()
-    if (typeof ResizeObserver === "undefined") return
-    // Height changes from `fit` itself must not refit
-    const observer = new ResizeObserver(() => { if (element.clientWidth !== fittedWidth) fit() })
+    if (!element || typeof ResizeObserver === "undefined") return
+    // Height changes from the fit itself must not refit
+    const observer = new ResizeObserver(() => { if (element.clientWidth !== fittedWidth.current) fitTextarea(element, fittedWidth) })
     observer.observe(element)
     return () => observer.disconnect()
-  }, [props.value, ref])
+  }, [ref])
 
   return (
     <textarea

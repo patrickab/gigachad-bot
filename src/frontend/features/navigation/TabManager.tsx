@@ -235,10 +235,10 @@ export function TabManager({ children, chrome, onTabsChange, onActiveTabChange, 
     heldFiles.current = held
   }, [tabs])
 
-  useEffect(() => {
-    const selected = tabs.find((tab) => tab.id === activeTab)
-    if (selected) onActiveTabChange?.(selected)
-  }, [tabs, activeTab, onActiveTabChange])
+  // Every change of the tabs or the tab in front sets both in one batch: a missing front tab is a bug, never a fallback
+  const front = tabs.find((tab) => tab.id === activeTab)
+  if (!front) throw new Error(`The tab in front, ${activeTab}, is not open`)
+  useEffect(() => { onActiveTabChange?.(front) }, [front, onActiveTabChange])
 
   const addTab = useCallback(({ activate = true }: { activate?: boolean } = {}) => {
     const tab = nextTab(defaultConfig)
@@ -327,7 +327,6 @@ export function TabManager({ children, chrome, onTabsChange, onActiveTabChange, 
       ))}
     </div>
   )
-  const front = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
 
   return (
     <TabStripContext.Provider value={strip}>

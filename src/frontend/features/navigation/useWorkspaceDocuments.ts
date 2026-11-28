@@ -11,7 +11,6 @@ import { notesResource, projectDocumentsResource, refreshProjectDocuments, templ
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
 import { errorMessage } from "@/lib/utils"
-import { useSettledTab } from "./useSettledTab"
 
 /** The notes while they load. */
 const NO_NOTES: ProjectDocument[] = []
@@ -57,13 +56,12 @@ export function useWorkspaceDocuments({
   projects, moveHistory, workbench = false, onItemOpen, onCanvasDeleted,
 }: WorkspaceDocumentsOptions) {
   const { schedule } = useUndoDelete()
-  const settled = useSettledTab()
   const documents = useResourceFamily("Sidebar project documents", projectDocumentsResource, projects.map((project) => project.slug))
   const notes = useResource("Sidebar notes", notesResource) ?? NO_NOTES
   const [fileError, setFileError] = useState("")
 
   // The LaTeX templates come from the template sets on the server, none when they fail to load. The next tab switch tries again.
-  const templateSets = useResource(null, templateSetsResource, workbench && settled)
+  const templateSets = useResource(null, templateSetsResource, workbench)
   const templateNames = useMemo(() => new Map((templateSets ?? []).map((set) => [set.label, set.name])), [templateSets])
   /** The `+` choice of the files folder: the file type, then the template for LaTeX. Absent without the workbench, files are Markdown then. */
   const newFileChoice = useMemo((): FileTreeCreateChoice | undefined => {

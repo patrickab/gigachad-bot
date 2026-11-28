@@ -1,4 +1,5 @@
 import { act, render, renderHook } from "@testing-library/react"
+import { useLayoutEffect, type ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { EnabledToolsProvider, useEnabledTools } from "@/features/chat/EnabledToolsContext"
@@ -17,13 +18,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+const tab = (id: string, chatId = id) => ({ tab: { id, chatId } }) as TabContextValue
+
+function InTab({ children }: { children: ReactNode }) {
+  return <EnabledToolsProvider><TabContext.Provider value={tab("t")}>{children}</TabContext.Provider></EnabledToolsProvider>
+}
+
 function renderTools() {
-  return renderHook(() => useEnabledTools(), { wrapper: EnabledToolsProvider })
+  return renderHook(() => useEnabledTools(), { wrapper: InTab })
 }
 
 describe("useEnabledTools", () => {
   it("offers the default tools and toggles one without disturbing the others", () => {
-    const { result } = renderHook(() => useEnabledTools(), { wrapper: EnabledToolsProvider })
+    const { result } = renderTools()
 
     expect(result.current.enabledTools).toEqual(TOOLS.filter((tool) => tool.defaultEnabled && !tool.hostOnly).map((tool) => tool.name))
     expect(result.current.enabledTools).not.toContain("workspace_agent")
@@ -39,12 +46,12 @@ describe("useEnabledTools", () => {
   })
 
   it("offers learn sessions to host logins only", () => {
-    const guest = renderHook(() => useEnabledTools(), { wrapper: EnabledToolsProvider })
+    const guest = renderTools()
     expect(guest.result.current.enabledTools).not.toContain("start_learn_session")
     guest.unmount()
 
     login.hostAccess = true
-    const host = renderHook(() => useEnabledTools(), { wrapper: EnabledToolsProvider })
+    const host = renderTools()
     expect(host.result.current.enabledTools).toContain("start_learn_session")
   })
 
@@ -75,14 +82,15 @@ describe("useEnabledTools", () => {
   it("keeps a toggle in its tab's chat: another tab under the same provider keeps its tools and research block", () => {
     const seen: Record<string, ReturnType<typeof useEnabledTools>> = {}
     function Composer({ name }: { name: string }) {
-      seen[name] = useEnabledTools()
+      const tools = useEnabledTools()
+      useLayoutEffect(() => { seen[name] = tools })
       return null
     }
-    const tab = (chatId: string) => ({ tab: { chatId } }) as TabContextValue
-    render(<EnabledToolsProvider>
-      <TabContext.Provider value={tab("a")}><Composer name="a" /></TabContext.Provider>
+    const tabs = (aChat: string) => <EnabledToolsProvider>
+      <TabContext.Provider value={tab("a", aChat)}><Composer name="a" /></TabContext.Provider>
       <TabContext.Provider value={tab("b")}><Composer name="b" /></TabContext.Provider>
-    </EnabledToolsProvider>)
+    </EnabledToolsProvider>
+    const { rerender } = render(tabs("a"))
     expect(seen.b.researchEnabled).toBe(true)
 
     act(() => seen.a.toggleTool("deep_research"))
@@ -90,5 +98,11 @@ describe("useEnabledTools", () => {
     expect(seen.a.researchEnabled).toBe(false)
     expect(seen.b.researchEnabled).toBe(true)
     expect(seen.b.enabledTools).toContain("deep_research")
+
+    // Another chat in the tab starts from the last saved choice, as a remounted tab did
+    act(() => seen.b.toggleTool("web_search"))
+    rerender(tabs("a2"))
+    expect(seen.a.enabledTools).not.toContain("web_search")
+    expect(seen.a.researchEnabled).toBe(true)
   })
 })

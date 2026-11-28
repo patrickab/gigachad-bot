@@ -88,4 +88,12 @@ export default defineConfig([
       "no-restricted-imports": ["error", { patterns: [{ group: ["@/*"], message: "A package must not import the app it ships from." }] }],
     },
   },
+  {
+    // A reader of the tab goes through `useTabValue`/`useTab`/`useTabId`: a raw read of the tab's context gets null in the app's chrome.
+    files: ["{app,components,contexts,features,hooks,lib}/**/*.{ts,tsx}"],
+    ignores: ["contexts/TabContext.tsx"],
+    rules: {
+      "no-restricted-syntax": ["error", { selector: "CallExpression[callee.name=/^(use|useContext)$/][arguments.0.name=/^(Chrome)?TabContext$/]", message: "Read the tab through useTabValue, useTab or useTabId." }],
+    },
+  },
 ])

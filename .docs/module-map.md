@@ -79,7 +79,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- factory.py            `/api/factory/call`, `/actions`, `/images`: core pass-through, login tag, revert on remove, preview stop (host access)
 |   |       |-- factory_preview.py    `/api/factory/tasks/{id}/preview`: start, stop, status (host access)
 |   |       |-- deploy.py             Host-gated production redeploy trigger
-|   |       `-- upstream.py           Host-access dependency and adapter error mapping
+|   |       `-- upstream.py           Host-access dependency and the apps' `UPSTREAM_ERRORS` handlers (adapter failures to 503/502)
 |   |-- lib/                          Python domain services, stores and external adapters
 |   |   |-- data_store.py             Storage contract, logical keys and errors
 |   |   |-- postgres_data_store.py    PostgreSQL text/document implementation
@@ -190,7 +190,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   `-- _components/
 |       |       |-- App.tsx, AppEntry.tsx, AppEntry.dev.tsx App root with a fullscreen error boundary; hydrated build entry, browser-only `next dev` entry
 |       |       |-- AppShell.tsx      Cross-feature composition and workspace navigation
-|       |       |-- AppChrome.tsx     Once per app: sidebar, tab/chat/Pi session pickers, prompt editor and Save-as dialog, acting on the tab in front
+|       |       |-- AppChrome.tsx     Once per app: sidebar, tab/chat/Pi session pickers, prompt editor, acting on the tab in front
 |       |       |-- AppSidebar.tsx    The app's one Sidebar: memoized, outside the tab stack, so streamed frames never reach navigation
 |       |       |-- TabContent.tsx    Per-tab layout: surface, top bar and file panel, per-tab error boundary
 |       |       |-- WorkspaceSurface.tsx Per-surface table (by the tab's shown item) of top-bar controls and surface body
@@ -198,7 +198,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       |-- deepLink.ts       Preview/open-target parsing
 |       |-- features/                 Domain-owned interactive surfaces
 |       |   |-- chat/                 Turns, attachments, persistence and streaming (`chatStore.ts` over `lib/backend/tokenPacer.ts`)
-|       |   |   |-- chatStore.ts      A tab's chat: messages, `isStreaming`, `usage`; `send`/`cancel`/`removePairs`, the reply writes only while it is the list's last message. `useChatConfig.ts` holds the tab's model and tool config
+|       |   |   |-- chatStore.ts      A tab's chat: messages, `isStreaming`, `usage`; `get`/`subscribe`/`update`/`reset`/`send`/`cancel` (`withoutPairs` removes pairs), the reply writes only while it is the list's last message. `useChatConfig.ts` holds the tab's model and tool config
 |       |   |   |-- ChatContainer.tsx Chat on the shared ConversationColumn; settles a reveal and paints a search hit
 |       |   |   |-- ChatPair.tsx      A pair's label, collapsed preview and open body (`renderPreview`/`renderBody`)
 |       |   |   |-- useChatTurns.ts   Send, pair delete and edit (cut, save, resend), attachment removal
@@ -323,7 +323,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- components/
 |       |   |-- ui/                   Reusable interaction primitives
 |       |   |   |-- Dialog.tsx
-|       |   |   |-- SegmentedSwitch.tsx   Segmented view switch shared by the editor, diff, PDF, attachment and architecture views
+|       |   |   |-- ViewSwitch.tsx        Segmented view switch shared by the editor, diff, PDF, attachment and architecture views
 |       |   |   |-- Composer.tsx      Composer card, `ComposerTextarea`, `ComposerMicButton`, `ComposerSendButton`: shared by ChatInput, AssistantChat and the factory AgentPanel
 |       |   |   |-- FloatingWindow.tsx Modal floating window, `FloatingPanel` its panel look shared with the picker preview
 |       |   |   |-- CommandPicker.tsx The one search picker: list at a trigger (`CommandPicker`) or docked (`FloatingPicker`), with a preview a sidebar-card finder beside a centered preview window; `useAltKeyPicker` opens it on an Alt+key

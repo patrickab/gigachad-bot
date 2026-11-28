@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Brain, FolderPlus } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -8,7 +8,7 @@ import { FileTree } from "@/components/ui/file-tree/FileTree"
 import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useInlineRename } from "@/components/ui/file-tree/useInlineRename"
 import { useProject } from "@/contexts/ProjectContext"
-import { fileItem, useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { fileItem, itemOf, scratchItem, tabSurface, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
@@ -35,15 +35,11 @@ interface SidebarProps {
   onProjectSelect?: (slug: string) => void
   onProjectRenamed?: (oldSlug: string, newSlug: string) => void
   onNewChat?: (slug: string | null) => void
-  activeCanvasPath?: string | null
-  activeDocumentPath?: string | null
   /** Whether files of the workbench's kinds (`.tex .bib .sty .cls`, `.md`) open in it. */
   workbench?: boolean
-  onCanvasDeleted?: (path: string) => void
   /** Show a file, canvas, diff, architecture, Pi session, learn view or the factory board, in the current tab unless `inNewTab`. */
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
-  appMode: AppSurface
   /** The question of the tab's chat that was revealed last, marked in its branch rows. */
   activeQaIndex?: number | null
 }
@@ -51,11 +47,20 @@ interface SidebarProps {
 export function Sidebar(props: SidebarProps) {
   const { onNewChat, renderSettings } = props
   const { collapsed, toggleCollapsed, width, setWidth } = useSidebar()
-  const { tab } = useTab()
+  const { tab, setWorkspaceItem, dropItem } = useTab()
+  const panel = useRef<HTMLElement>(null)
+  const onCanvasDeleted = (path: string) => {
+    if (tab.workspaceItem?.kind !== "canvas" || tab.workspaceItem.path !== path) return
+    if (tab.itemHidden) dropItem()
+    else setWorkspaceItem(scratchItem(tab.projectSlug))
+  }
+  const front = {
+    appMode: tabSurface(tab), activeCanvasPath: itemOf(tab, "canvas")?.path ?? null, activeDocumentPath: (itemOf(tab, "document") ?? itemOf(tab, "workbench"))?.path,
+  }
   // A row that switched tabs keeps no focus, so Tab and Space act on the tabs again, as when each tab's own sidebar went inert
   useEffect(() => {
     const focused = document.activeElement
-    if (focused instanceof HTMLElement && focused.closest("[aria-label='Sidebar']")) focused.blur()
+    if (focused instanceof HTMLElement && panel.current?.contains(focused)) focused.blur()
   }, [tab.id])
   const branches = useBranches()
   const { projects, createProject } = useProject()
@@ -83,7 +88,7 @@ export function Sidebar(props: SidebarProps) {
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const projectActions = useProjectActions(props.onProjectRenamed)
   const { renameOf } = useInlineRename()
-  const documents = useWorkspaceDocuments({ ...props, projects, moveHistory: branches.moveHistory })
+  const documents = useWorkspaceDocuments({ ...props, onCanvasDeleted, projects, moveHistory: branches.moveHistory })
   const code = useCodeMounts(props)
   const fileRename = useFileRename({
     // Opening a stored file in the workbench moves it to disk, so the row may hold the key it had before
@@ -114,14 +119,14 @@ export function Sidebar(props: SidebarProps) {
   const activeFile = tab.historyFile
   const activeQaIndex = props.activeQaIndex ?? null
   const projectTree = projectItems({
-    ...props, ...branches, activeFile, activeQaIndex, ...documents, ...projectActions, ...fileRename, ...folderRows, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
+    ...props, ...front, ...branches, activeFile, activeQaIndex, ...documents, ...projectActions, ...fileRename, ...folderRows, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
   })
   // Host logins see each project's learn sessions in its group.
   const items = code.hostAccess ? projectTree.map((root) => {
     const project = projects.find((candidate) => candidate.slug === root.id)
     return project ? learn.withProjectLearn(root, project) : root
   }) : projectTree
-  const codeContext = { ...props, ...code, ...fileRename, ...folderRows, renameOf, projects, pending }
+  const codeContext = { ...props, ...front, ...code, ...fileRename, ...folderRows, renameOf, projects, pending }
   const archiveEntries = [
     ...projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: `project:${project.slug}`, name: project.name, archived: Boolean(project.archived) })),
     ...directoryEntries(codeContext).map((entry) => ({ ...entry, key: `directory:${entry.key}` })),
@@ -131,7 +136,7 @@ export function Sidebar(props: SidebarProps) {
     : code.setArchived(key.slice("directory:".length), false)
 
   return <>
-    <SidePanel side="left" open={!collapsed} width={width} onWidthChange={setWidth} label="Sidebar" className="z-10">
+    <SidePanel ref={panel} side="left" open={!collapsed} width={width} onWidthChange={setWidth} label="Sidebar" className="z-10">
       <div className="flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
         <button onClick={openMemoryViewer} aria-label="Open memory"
           className="rounded-md p-1 text-ink-subtle hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted transition-colors">

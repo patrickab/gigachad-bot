@@ -394,7 +394,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         {open && <span className="ml-1 min-w-0 truncate text-xs text-ink-subtle">{open.label}</span>}
         {open && <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {open.meta != null && <span className="flex shrink-0 gap-1.5 text-[10px] tabular-nums">{open.meta}</span>}
-          <RowActions item={open} onCreate={() => { void startCreate(open.id, open.create!) }} />
+          <RowActions item={open} section onCreate={() => { void startCreate(open.id, open.create!) }} />
         </span>}
       </div>
       {open && <div role="group" aria-label={`${open.label} contents`} className="motion-expand-in">
@@ -451,19 +451,21 @@ function CapToggle<T>({ item, depth, uncapped, onToggle }: {
   </button>
 }
 
-/** The hover actions of a row or open section, then its create button. */
-function RowActions<T>({ item, onCreate }: { item: FileTreeItem<T>; onCreate: () => void }) {
+/** The hover actions of a row (in a div) or open section (in a span, without delete), then its create button. */
+function RowActions<T>({ item, section, onCreate }: { item: FileTreeItem<T>; section?: boolean; onCreate: () => void }) {
   const { inline, menu } = splitActions(item)
+  const onDelete = section ? undefined : item.onDelete
+  const Wrapper = section ? "span" : "div"
   return <>
-    {(inline.length > 0 || menu.length > 0 || item.onDelete) && <span className={ACTIONS_CLASS}>
+    {(inline.length > 0 || menu.length > 0 || onDelete) && <Wrapper className={ACTIONS_CLASS}>
       {inline.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
         <action.icon className="h-3 w-3" />
       </button>)}
       {menu.length > 0 && <RowMenu label={item.label} actions={menu} />}
-      {item.onDelete && <button aria-label={`Delete ${item.label}`} onClick={item.onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
+      {onDelete && <button aria-label={`Delete ${item.label}`} onClick={onDelete} className={cn(ACTION_CLASS, "hover:text-danger")}>
         <Trash2 className="h-3 w-3" />
       </button>}
-    </span>}
+    </Wrapper>}
     {/* Creating is the row's main action, so it stays visible at the row end while the rest appears on hover. */}
     {item.create && <button aria-label={item.create.label} onClick={onCreate} className={ACTION_CLASS}>
       <Plus className="h-3 w-3" />

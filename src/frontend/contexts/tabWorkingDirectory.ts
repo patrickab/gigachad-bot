@@ -14,6 +14,7 @@ export function tabWorkingDirectory(tabId: string): string | undefined {
  * - Null or empty claims nothing. Outside a tab it does nothing
  */
 export function useTabWorkingDirectory(directory: string | null | undefined): void {
+  // eslint-disable-next-line no-restricted-syntax -- chrome-blind on purpose: only a tab claims a working directory, never the app's chrome
   const tabId = useContext(TabContext)?.tab.id
   useEffect(() => {
     if (!tabId || !directory) return

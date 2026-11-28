@@ -4,12 +4,12 @@
 // Consumes a `Resource` or `ResourceFamily` from `lib/resource`. Provides a resource's value, through `useResourceState` its
 // first read's failure, and through `useResourceFamily` the values of several members of a family.
 // A first read with a label runs as a startup read, so a failure reaches the shared banner with its retry and 15 second bound.
-// A null label reads quietly: a failure leaves the value unloaded until `enabled` turns on again.
+// A null label reads quietly: a failure leaves the value unloaded until `revalidateStale` (a tab switch) or `enabled` turning on reads it again.
 
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { syncCursorReady } from "@/lib/backend/syncStream"
-import type { Resource, ResourceFamily } from "@/lib/resource"
+import { retryWhenStale, type Resource, type ResourceFamily } from "@/lib/resource"
 
 // The read stores its result in the resource, the subscription delivers it.
 const ignore = () => {}
@@ -25,7 +25,8 @@ function useFirstRead(label: string | null, load: (signal: AbortSignal) => Promi
     if (!quiet) return
     const controller = new AbortController()
     // Like a startup read, read once the change feed holds its head, so no later change is missed.
-    syncCursorReady().then(() => load(controller.signal)).catch(ignore)
+    const read = () => syncCursorReady().then(() => load(controller.signal)).catch(() => retryWhenStale(read, controller.signal))
+    void read()
     return () => controller.abort()
   }, [quiet, load])
   return error

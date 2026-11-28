@@ -1,22 +1,6 @@
 import type { SSEEvent } from "./sse"
 import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "@/lib/domain/types"
 
-/** Replace the message at `index` (negative counts from the end) with `update(message)`; a missing message or a null result leaves state untouched. */
-export function updateMessageAt(
-  setMessages: (change: (messages: Message[]) => Message[]) => unknown,
-  index: number,
-  update: (message: Message) => Message | null,
-) {
-  setMessages((prev) => {
-    const at = index < 0 ? prev.length + index : index
-    const next = prev[at] && update(prev[at])
-    if (!next) return prev
-    const copy = [...prev]
-    copy[at] = next
-    return copy
-  })
-}
-
 /** A wire event decoded into the shape the chat reducer consumes. Unknown event
  *  names decode to null so new backend events stay inert instead of breaking the fold. */
 type ChatStreamEvent =

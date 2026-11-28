@@ -78,7 +78,7 @@ async function renderWorkspace(openTabs = true) {
   const view = render(
     <UndoDeleteProvider>
       <TabManager ref={manager} chrome={(stack) => <>
-        <Sidebar appMode="chat" workbench onItemOpen={(item) => manager.current!.showItem(item)} />
+        <Sidebar workbench onItemOpen={(item) => manager.current!.showItem(item)} />
         {stack}
         <TabPicker />
       </>}>{null}</TabManager>

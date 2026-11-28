@@ -3,7 +3,12 @@ import type { ChangeEvent } from "@/lib/backend/syncStream"
 import { createResource, refresh, resetResources, resourceFamily, revalidateStale } from "@/lib/resource"
 
 const feed = vi.hoisted(() => ({ listeners: [] as ((event: ChangeEvent) => void)[], listProjects: vi.fn() }))
-vi.mock("@/lib/backend/api", async (importOriginal) => ({ ...await importOriginal<object>(), listProjects: feed.listProjects }))
+vi.mock("@/lib/backend/api", async (importOriginal) => ({
+  ...await importOriginal<object>(),
+  listProjects: feed.listProjects,
+  listChatHistories: async () => ({ files: [] }),
+  fetchBranchMeta: async () => ({}),
+}))
 vi.mock("@/lib/backend/syncStream", () => ({
   subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
     feed.listeners.push(listener)
@@ -327,6 +332,20 @@ describe("projectsResource", () => {
       listener({ seq: 1, resource_kind: "document", resource_key: "chat/projects-meta.json", version: null, operation: "write", device_id: null })
     }
     await vi.waitFor(() => expect(projectsResource.get()).toEqual([{ slug: "p", name: "P", tabs: [] }]))
+    stop()
+  })
+  it("reads the projects once at startup and again on every later histories read", async () => {
+    const { historiesResource, projectsResource, watchDocumentLists } = await import("@/lib/backend/resources")
+    resetResources()
+    feed.listProjects.mockReset().mockResolvedValue([])
+    const stop = watchDocumentLists()
+    projectsResource.subscribe(() => {})
+    await projectsResource.load()
+
+    await historiesResource.load()
+    expect(feed.listProjects).toHaveBeenCalledOnce()
+    await refresh(historiesResource)
+    await vi.waitFor(() => expect(feed.listProjects).toHaveBeenCalledTimes(2))
     stop()
   })
 })

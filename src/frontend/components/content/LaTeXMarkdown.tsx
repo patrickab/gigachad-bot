@@ -116,5 +116,5 @@ function LaTeXMarkdownInner({
   )
 }
 
-/** Render markdown with KaTeX math, citations, diagrams and optional checkbox toggling via `onContentChange`. */
+/** Render markdown with KaTeX math, diagrams and optional checkbox toggling via `onContentChange`. */
 export const LaTeXMarkdown = memo(LaTeXMarkdownInner)

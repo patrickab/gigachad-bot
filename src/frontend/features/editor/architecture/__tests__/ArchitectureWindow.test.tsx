@@ -265,6 +265,23 @@ describe("ArchitectureWindow", () => {
     expect(getByText("Changed elsewhere")).toBeTruthy()
   })
 
+  it("forgets another device's change when the write it overlapped fails", async () => {
+    const { createSystem, findByRole } = await open()
+    let fail: (reason: Error) => void = () => {}
+    api.applyArchitectureOperations.mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    api.readArchitecture.mockResolvedValue(workspace)
+    await createSystem("Frontend")
+    remoteChange()
+    await waitFor(() => expect(api.readArchitecture).toHaveBeenCalledTimes(2))
+    await act(async () => { fail(new Error("Refused")) })
+    await findByRole("alert")
+
+    api.applyArchitectureOperations.mockResolvedValueOnce(retitled("Saved"))
+    await createSystem("Backend")
+    await act(async () => {})
+    expect(api.readArchitecture).toHaveBeenCalledTimes(2)
+  })
+
   it("shows a failed reread until a later one succeeds", async () => {
     const { findByRole, queryByRole } = await open()
 

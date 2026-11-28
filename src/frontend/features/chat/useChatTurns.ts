@@ -20,10 +20,15 @@ import {
   withAttachments,
   withReferenceRead,
 } from "@/features/chat/attachments"
-import { updateMessageAt } from "@/lib/backend/streaming"
 import type { Attachment, ChatRequest, Message, Usage } from "@/lib/domain/types"
 
 type BaseChatRequest = Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
+
+/** `messages` with the one at `index` replaced by `change(message)`; the same list when it is missing or `change` gives null. */
+function withMessageAt(messages: Message[], index: number, change: (message: Message) => Message | null): Message[] {
+  const next = messages[index] && change(messages[index])
+  return next ? messages.map((m, i) => i === index ? next : m) : messages
+}
 
 /** Build the request fields a tab's config decides. UI-only "none" reasoning maps to null. */
 function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record<string, string>, enabledTools: ChatRequest["tools"]): BaseChatRequest {
@@ -124,23 +129,22 @@ export function useChatTurns({
     setTurnError(null)
     const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
+    const answer: Message = { role: "assistant", content: "" }
     if (draft.length === 0) {
+      chat.update((current) => [...current, { role: "user", content: text }, answer])
       const completion = await chat.send({
         ...baseParams,
         chat_id: chatId,
         user_msg: text,
         img_paths: collectActiveImagePaths(history),
         project_slug: projectSlug,
-      })
+      }, answer)
       await finishTurn(completion)
       return completion !== null
     }
 
-    chat.update((current) => [
-      ...current,
-      { role: "user" as const, content: text, attachments: draft },
-      { role: "assistant" as const, content: "" },
-    ])
+    const user: Message = { role: "user", content: text, attachments: draft }
+    chat.update((current) => [...current, user, answer])
 
     const built = await buildAttachedSend({
       text,
@@ -151,18 +155,18 @@ export function useChatTurns({
       baseParams,
     }, parseFiles).catch(() => null)
     if (!built) {
-      updateMessageAt(chat.update, -1, (m) => m.role === "assistant" ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : null)
+      chat.update((current) => current.map((m) => m === answer ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : m))
       return false
     }
 
-    updateMessageAt(chat.update, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
-    const completion = await chat.send(built.request, "lastAnswer")
+    chat.update((current) => current.map((m) => m === user ? withAttachments(m, built.enriched) : m))
+    const completion = await chat.send(built.request, answer)
     await finishTurn(completion)
     return completion !== null
   }, [refreshForSend, finishTurn, chat, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
-    updateMessageAt(chat.update, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
+    chat.update((current) => withMessageAt(current, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active }))))
   }, [chat])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -210,7 +214,8 @@ export function useChatTurns({
       return null
     }
     setTurnError(null)
-    return chat.removePairs(user, through) && user
+    const after = withoutPairs(chat.get().messages, user, through)
+    return after && chat.update(() => after) && user
   }, [chat, save])
 
   /** Delete the pair whose question is at `index`, for good: it leaves the saved history, then the chat. */
@@ -234,7 +239,7 @@ export function useChatTurns({
     const attachment = findAttachment(chat.get().messages[messageIndex], attachmentName)
     if (!attachment) return
     const saved = await saveAttachmentEdit(attachment, newContent)
-    updateMessageAt(chat.update, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved))
+    chat.update((current) => withMessageAt(current, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved)))
   }, [chat])
 
   return {

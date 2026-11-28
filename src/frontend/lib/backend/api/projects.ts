@@ -44,7 +44,7 @@ export async function deleteProjectCard(name: string, cardId: string): Promise<v
   await del(`${projectPath(name)}/cards/${cardId}`)
 }
 
-/** Omitting a field leaves it unchanged server-side; passing null clears it. */
+/** Omitting a field leaves it unchanged server-side. */
 interface SaveProjectTabOptions {
   chatId?: string
   title?: string
@@ -52,7 +52,7 @@ interface SaveProjectTabOptions {
 }
 
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
-  const body: Record<string, unknown> = { messages, chat_id: opts.chatId ?? null, tab_name: null, title: opts.title ?? null, usage: opts.usage ?? null }
+  const body: Record<string, unknown> = { messages, chat_id: opts.chatId ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
   return put(`${projectPath(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 

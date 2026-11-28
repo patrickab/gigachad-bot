@@ -72,9 +72,13 @@ const messages: Message[] = [
 
 const noop = () => {}
 
-/** `useTabChat` for a chat holding `messages`, saved in `historyFile` or unsaved, with a stub composer; `onSaveAs` gets its Alt+S requests. */
-async function renderChat(historyFile: string | null, onSaveAs: (save: (name: string) => Promise<void>) => void = noop) {
-  const adopted = vi.fn()
+/** `useTabChat` for a chat holding `messages`, saved in `historyFile` or unsaved, with a stub composer. */
+async function renderChat(historyFile: string | null) {
+  // The tab adopts the file under the same chat, as TabManager's setHistoryFile does
+  const adopted = vi.fn((file: string | null) => {
+    tab = { ...tab, tab: { ...tab.tab, historyFile: file } }
+    rendered.rerender()
+  })
   history.current = {
     messages, filename: "c1.json", chat_id: "c1", title: null, usage: null, parent_id: null, branch_message_idx: null, children: [],
   } satisfies ChatHistory
@@ -87,7 +91,7 @@ async function renderChat(historyFile: string | null, onSaveAs: (save: (name: st
     setModeLabel: noop, updateConfig: noop, hideItem: noop, dropItem: noop, setWorkspaceItem: noop, setHistoryFile: adopted, setTitle: noop,
   }
   const wrapper = ({ children }: { children: ReactNode }) => <TabContext.Provider value={tab}>{children}</TabContext.Provider>
-  const rendered = renderHook(() => useTabChat({ onOpenChat: noop, onOpenItem: noop, onSaveAs }), { wrapper })
+  const rendered = renderHook(() => useTabChat({ onOpenChat: noop, onOpenItem: noop }), { wrapper })
   if (historyFile) await waitFor(() => expect(rendered.result.current.chat.get().messages).toHaveLength(messages.length))
   else act(() => { rendered.result.current.chat.update(() => messages) })
   let draft = ""
@@ -257,16 +261,39 @@ describe("saving", () => {
   })
 
   it("saves an untitled chat under the name asked for with its messages when named, and the tab adopts the file", async () => {
-    let save = (_name: string) => Promise.resolve()
-    const { result, adopted } = await renderChat(null, (request) => { save = request })
+    const { result, adopted } = await renderChat(null)
 
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true })) })
+    expect(result.current.saveAs.open).toBe(true)
     act(() => { result.current.chat.update((current) => [...current, { role: "user", content: "Question 3" }]) })
-    await act(() => save("Notes"))
+    act(() => result.current.saveAs.onSave("Notes"))
 
+    await waitFor(() => expect(result.current.saveAs.open).toBe(false))
     expect(saveChat.mock.calls[0][0]).toBe("Notes.json")
     expect(contents(lastSaved()).at(-1)).toBe("Question 3")
     expect(adopted).toHaveBeenCalledWith("Notes.json")
+  })
+
+  it("a reply keeps streaming and is saved when the chat is saved as while it streams", async () => {
+    const { result } = await renderChat(null)
+    // The file holds a copy of what was saved
+    saveChat.mockImplementationOnce(async (...args) => { history.current = { ...history.current as ChatHistory, messages: structuredClone(args[2] as Message[]) } })
+    let release = () => {}
+    streams.gate = new Promise((resolve) => { release = resolve })
+    let sent: Promise<boolean> = Promise.resolve(false)
+    act(() => { sent = result.current.turns.handleSend("Late question", []) })
+    await waitFor(() => expect(streams.requests).toHaveLength(1))
+
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true })) })
+    act(() => result.current.saveAs.onSave("Notes"))
+    await waitFor(() => expect(result.current.saveAs.open).toBe(false))
+    await act(async () => { release(); await sent })
+    await act(async () => { await result.current.turns.handleSend("Next question", []) })
+
+    const turns = ["Late question", "edited answer", "Next question", "edited answer"]
+    expect(contents(result.current.chat.get().messages).slice(-4)).toEqual(turns)
+    expect(saveChat.mock.calls.at(-1)?.[0]).toBe("Notes.json")
+    expect(contents(lastSaved()).slice(-4)).toEqual(turns)
   })
 
   it("writes two autosaves in flight in the order of their turns", async () => {

@@ -3,7 +3,7 @@ import { fetchRootDiffFiles, fetchRootFileDiff } from "@/lib/backend/api"
 import type { RootDiffFiles } from "@/lib/domain/files"
 import { parsePatch, type PatchLine } from "@/lib/diff"
 import { usePolling } from "@/hooks/usePolling"
-import { TabContext, TabPeekContext } from "@/contexts/TabContext"
+import { TabPeekContext, useTabValue } from "@/contexts/TabContext"
 
 export type FilePatch = { lines: PatchLine[] | null; failed: boolean; stamp: string }
 
@@ -24,7 +24,7 @@ export function useRootDiff(root: string, revision: number): { changes: RootDiff
   const patchesRef = useRef(patches)
   useEffect(() => { patchesRef.current = patches }, [patches])
 
-  const tab = useContext(TabContext)
+  const tab = useTabValue()
   const peeked = useContext(TabPeekContext)
   const shown = !tab || tab.isActive || peeked === tab.tab.id
 

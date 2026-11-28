@@ -26,7 +26,7 @@ import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
 import { onFileMove } from "@/lib/backend/fileEvents"
 import { watchDocumentLists } from "@/lib/backend/resources"
 import { AmbientBackdrop } from "@/features/ambient/AmbientBackdrop"
-import { AppChrome, type SaveAsRequest } from "./AppChrome"
+import { AppChrome } from "./AppChrome"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -151,14 +151,6 @@ export function AppShell() {
 
   const closeDashboard = useCallback(() => setDashboardSlug(null), [])
 
-  // The save dialog of the app's chrome, opened by the tab in front and shown while it is
-  const [saveAs, setSaveAs] = useState<SaveAsRequest | null>(null)
-  const handleSaveAs = useCallback((save: SaveAsRequest["save"]) => {
-    const tab = activeTabRef.current
-    if (tab) setSaveAs({ tabId: tab.id, save })
-  }, [])
-  const closeSaveAs = useCallback(() => setSaveAs(null), [])
-
   return (
     <ContentAreaProvider>
       <AmbientBackdrop />
@@ -181,14 +173,12 @@ export function AppShell() {
                         onNewChat={handleNewChat}
                         onOpenItem={handleOpenItem}
                         reveal={reveal}
-                        saveAs={saveAs}
-                        onSaveAsDone={closeSaveAs}
                       >
                         {stack}
                       </AppChrome>
                     )}
                   >
-                    <TabContent onOpenChat={handleOpenChat} onOpenItem={handleOpenItem} onSaveAs={handleSaveAs} reveal={reveal} />
+                    <TabContent onOpenChat={handleOpenChat} onOpenItem={handleOpenItem} reveal={reveal} />
                   </TabManager>
                 </EnabledToolsProvider>
               </LearnProvider>

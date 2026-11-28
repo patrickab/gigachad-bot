@@ -19,15 +19,8 @@ import { useBusyCount } from "@/hooks/useBusyCount"
 import { useStore } from "@/hooks/useStore"
 import { useEventListener } from "@/hooks/useEventListener"
 
-const NO_USAGE = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-
 /** Run one tab's chat (history, turns, attachments, shortcuts); called in every mode so the chat survives mode switches. */
-export function useTabChat({ onOpenChat, onOpenItem, onSaveAs }: {
-  onOpenChat: (historyFile: string) => void
-  onOpenItem: (item: WorkspaceItem) => void
-  /** Asks for a name, then `save` saves the chat under it: the messages of that moment, adopted by this tab. */
-  onSaveAs: (save: (name: string) => Promise<void>) => void
-}) {
+export function useTabChat({ onOpenChat, onOpenItem }: { onOpenChat: (historyFile: string) => void; onOpenItem: (item: WorkspaceItem) => void }) {
   const { tab, isActive, updateConfig, setHistoryFile, setTitle } = useTab()
   const { projectSlug, config } = tab
   const chatShown = shownItem(tab) === null
@@ -49,11 +42,12 @@ export function useTabChat({ onOpenChat, onOpenItem, onSaveAs }: {
   const historyLoading = !!tab.historyFile && !historyLoaded
   const { busy: extracting, track } = useBusyCount()
   const chatInputRef = useRef<ChatInputHandle>(null)
+  const [naming, setNaming] = useState(false)
 
   const filePicker = useFilePicker({ hasMessages, chatInputRef, track, onOpenItem })
   const filesEnabled = filePicker.rootFiles.enabled
   const docs = useProjectDocuments({ isActive, chatShown, projectSlug, chatId, chatInputRef, track })
-  const persistence = useChatPersistence({ tab, projectSlug, chat, chatId, refreshAll, setHistoryFile })
+  const persistence = useChatPersistence({ tab, projectSlug, chat, chatId, refreshAll, setHistoryFile, setTitle })
   const turns = useChatTurns({
     chat,
     chatId,
@@ -74,28 +68,30 @@ export function useTabChat({ onOpenChat, onOpenItem, onSaveAs }: {
 
   useEffect(() => chat.cancel, [chat])
 
+  // The chat whose messages this hook holds: a new history file of that chat is the same chat saved as or moved, not reloaded
+  const heldChat = useRef(tab.historyFile ? null : tab.chatId)
   useEffect(() => {
     if (!tab.historyFile) return
     const historyFile = tab.historyFile
+    const tabChatId = tab.chatId
+    if (heldChat.current === tabChatId) return setLoadedBranch((loaded) => ({ ...loaded, historyFile }))
     let stale = false
-    chat.update(() => [])
-    chat.setUsage(NO_USAGE)
+    chat.reset()
     // Project chats load by their own slug, so switching projects never reloads open tabs.
     const { slug } = parseHistoryFile(historyFile)
     loadChatHistory(historyFile).then((data) => {
       if (stale) return
-      if (data.messages.length > 0) {
-        const loaded = data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug))
-        chat.update(() => loaded)
-        void syncReferences(liveReferencePaths(loaded.flatMap((m) => m.attachments ?? [])))
-      }
+      heldChat.current = tabChatId
+      const loaded = data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug))
+      const { messages, usage } = chat.get()
+      chat.reset(loaded.length > 0 ? loaded : messages, data.usage ?? usage)
+      if (loaded.length > 0) void syncReferences(liveReferencePaths(loaded.flatMap((m) => m.attachments ?? [])))
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) setTitle(data.title)
-      if (data.usage) chat.setUsage(data.usage)
       setLoadedBranch({ historyFile, messageIdx: data.branch_message_idx ?? null })
     }).catch(() => { })
     return () => { stale = true }
-  }, [tab.historyFile, chat, setTitle, syncReferences])
+  }, [tab.historyFile, tab.chatId, chat, setTitle, syncReferences])
 
   // Capture phase so the shortcuts win over handlers inside focused editors.
   useEventListener("window", "keydown", (e) => {
@@ -103,12 +99,11 @@ export function useTabChat({ onOpenChat, onOpenItem, onSaveAs }: {
     if (e.altKey && e.key === "s") {
       e.preventDefault()
       if (persistence.isTitled) persistence.handleQuickSave()
-      else onSaveAs(persistence.handleSaveSubmit)
+      else setNaming(true)
     }
     if (e.altKey && e.key === "r") {
       e.preventDefault()
-      chat.update(() => [])
-      chat.setUsage(NO_USAGE)
+      chat.reset()
     }
     if (e.altKey && e.key.toLowerCase() === "o") {
       e.preventDefault()
@@ -151,5 +146,7 @@ export function useTabChat({ onOpenChat, onOpenItem, onSaveAs }: {
     chat, hasMessages, isStreaming, chatConfig, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
     filePicker, docs, turns, attachmentActions, attachMenuItems, onEditPair,
     onBranch: tab.historyFile ? handleBranch : undefined,
+    // The Save As dialog: the name saves the messages of that moment, adopted by this tab
+    saveAs: { open: naming, onClose: () => setNaming(false), onSave: (name: string) => void persistence.handleSaveSubmit(name).then(() => setNaming(false)) },
   }
 }

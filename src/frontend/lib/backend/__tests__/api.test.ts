@@ -86,7 +86,7 @@ describe("api.ts — saveChat", () => {
 
     const { url, init } = lastCall(calls)
     expect(url).toContain("/projects/proj/tabs/notes.json")
-    expect(JSON.parse(init.body as string)).toMatchObject({ tab_name: null, title: "notes" })
+    expect(JSON.parse(init.body as string)).toMatchObject({ title: "notes" })
   })
 
   it("saves any other chat as a plain history without a tab name", async () => {

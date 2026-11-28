@@ -168,9 +168,10 @@ function withoutRemoved(documents: ProjectDocument[], path: string): ProjectDocu
  * - A change to a project's architecture on another device reads its workspace again (this device's writes set their answer), or forgets it while no window shows it
  * - A file deleted here or elsewhere leaves every list at once, a list reads again when the file lay in one of its folder entries
  * - A file created inside a folder entry or a mount, or a mounted file renamed, reads the lists that show it again
- * - New chat histories read the projects again, whose entries show the chats' labels
+ * - New chat histories read the projects again, whose entries show the chats' labels; not the first histories read, which the projects' own startup read already reflects
  */
 export function watchDocumentLists(): () => void {
+  let seenHistories = historiesResource.get()
   const stops = [
     // This device's own changes too, so no list depends on the code that changed it to read it again.
     subscribeToChanges((event) => {
@@ -218,7 +219,11 @@ export function watchDocumentLists(): () => void {
     onFileMove(({ from }) => {
       if (from.startsWith("/")) for (const tree of rootTreeResource.members()) tree.invalidate()
     }),
-    historiesResource.subscribe(() => projectsResource.invalidate()),
+    historiesResource.subscribe(() => {
+      const first = seenHistories === undefined
+      seenHistories = historiesResource.get()
+      if (!first) projectsResource.invalidate()
+    }),
   ]
   return () => stops.forEach((stop) => stop())
 }

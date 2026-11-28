@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createChatStore } from "@/features/chat/chatStore"
-import type { ChatRequest } from "@/lib/domain/types"
+import { createChatStore, type ChatStore } from "@/features/chat/chatStore"
+import type { ChatRequest, Message } from "@/lib/domain/types"
 import type { SSEEvent, SSEStreamResult } from "@/lib/backend/sse"
 
 const { createChatStream } = vi.hoisted(() => ({ createChatStream: vi.fn() }))
@@ -13,6 +13,13 @@ vi.mock("@/lib/backend/tokenPacer", () => ({
 
 function request(user_msg: string): ChatRequest {
   return { model: "provider/test-model", chat_id: "chat-1", user_msg, img_paths: [] }
+}
+
+/** Append the question and its empty answer, then stream the reply into it, as `handleSend` does. */
+function ask(chat: ChatStore, user_msg: string) {
+  const answer: Message = { role: "assistant", content: "" }
+  chat.update((current) => [...current, { role: "user", content: user_msg }, answer])
+  return chat.send(request(user_msg), answer)
 }
 
 function stream(events: SSEEvent[]): SSEStreamResult {
@@ -77,7 +84,7 @@ describe("createChatStore", () => {
     const chat = createChatStore()
     chat.update(() => [{ role: "user", content: "Earlier" }, { role: "assistant", content: "Answer" }])
 
-    const sent = chat.send(request("Question"))
+    const sent = ask(chat, "Question")
 
     expect(createChatStream.mock.calls[0][0].messages).toEqual([
       { role: "user", content: "Earlier" },
@@ -92,7 +99,7 @@ describe("createChatStore", () => {
     const { stream, held, release } = heldStream([{ event: "token", data: "Early" }])
     createChatStream.mockReturnValue(stream)
     const chat = createChatStore()
-    const sent = chat.send(request("Question"))
+    const sent = ask(chat, "Question")
     await held
     expect(chat.get().messages.at(-1)).toEqual({ role: "assistant", content: "Early" })
 
@@ -103,11 +110,31 @@ describe("createChatStore", () => {
     expect(chat.get().messages).toEqual([])
   })
 
+  it("a lastAnswer send into an emptied chat writes nothing and resolves null", async () => {
+    createChatStream.mockReturnValue(stream([event("token", "Orphan"), event("done", "")]))
+    const chat = createChatStore()
+
+    expect(await chat.send(request("Question"), { role: "assistant", content: "" })).toBeNull()
+    expect(chat.get().messages).toEqual([])
+  })
+
+  it("reset clears messages and usage in one notification", async () => {
+    createChatStream.mockReturnValue(stream([event("token", "Hi"), event("usage", JSON.stringify({ prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 })), event("done", "")]))
+    const chat = createChatStore()
+    await ask(chat, "Question")
+    const seen: unknown[] = []
+    chat.subscribe(() => seen.push({ messages: chat.get().messages, usage: chat.get().usage }))
+
+    chat.reset()
+
+    expect(seen).toEqual([{ messages: [], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }])
+  })
+
   it("stops streaming at once on cancel", async () => {
     const { stream, held } = heldStream([])
     createChatStream.mockReturnValue(stream)
     const chat = createChatStore()
-    const sent = chat.send(request("Question"))
+    const sent = ask(chat, "Question")
     await held
     expect(chat.get().isStreaming).toBe(true)
 
@@ -140,7 +167,7 @@ describe("a chat store's stream", () => {
       event("done", ""),
     ]))
     const chat = createChatStore()
-    const completion = await chat.send(request("Find cats"))
+    const completion = await ask(chat, "Find cats")
 
     expect(chat.get().messages).toEqual([
       { role: "user", content: "Find cats" },
@@ -186,7 +213,7 @@ describe("a chat store's stream", () => {
       },
     })
     const chat = createChatStore()
-    const sent = chat.send(request("Stream this"))
+    const sent = ask(chat, "Stream this")
     await firstToken
     await vi.waitFor(() => expect(chat.get().messages.at(-1)).toEqual({ role: "assistant", content: "First" }))
 
@@ -208,8 +235,8 @@ describe("a chat store's stream", () => {
       ]))
     const chat = createChatStore()
 
-    await chat.send(request("First question"))
-    await chat.send(request("Second question"))
+    await ask(chat, "First question")
+    await ask(chat, "Second question")
 
     expect(chat.get().usage).toEqual({
       prompt_tokens: 29,
@@ -238,10 +265,10 @@ describe("a chat store's stream", () => {
       ]))
     const chat = createChatStore()
 
-    await chat.send(request("Create a mind map"))
+    await ask(chat, "Create a mind map")
     expect(chat.get().messages[1].content).toBe("")
 
-    await chat.send(request("Follow up"))
+    await ask(chat, "Follow up")
 
     expect(createChatStream.mock.calls[1][0].messages).toEqual([
       { role: "user", content: "Create a mind map" },
@@ -284,13 +311,13 @@ describe("a chat store's stream", () => {
       ]))
     const chat = createChatStore()
 
-    await chat.send(request("Initial question"))
+    await ask(chat, "Initial question")
 
     expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(detailSentinel)
     expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(sourceSentinel)
     expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(sandboxSentinel)
 
-    await chat.send(request("Follow up"))
+    await ask(chat, "Follow up")
 
     const laterRequest = createChatStream.mock.calls[1][0]
     expect(laterRequest.messages).toEqual([
@@ -309,7 +336,7 @@ describe("a chat store's stream", () => {
     }
     createChatStream.mockReturnValueOnce(dead).mockReturnValueOnce(stream([event("token", "Hi"), event("done", "")]))
     const chat = createChatStore()
-    const completion = await chat.send(request("hi"))
+    const completion = await ask(chat, "hi")
     expect(createChatStream).toHaveBeenCalledTimes(2)
     expect(completion).not.toBeNull()
     expect(chat.get().messages[1].content).toBe("Hi")
@@ -325,7 +352,7 @@ describe("a chat store's stream", () => {
     ])
     createChatStream.mockReturnValue(parkedResult)
     const chat = createChatStore()
-    const sent = chat.send(request("Plot it"))
+    const sent = ask(chat, "Plot it")
     await parked
     chat.cancel()
     const completion = await sent
@@ -345,7 +372,7 @@ describe("a chat store's stream", () => {
     ]))
     const chat = createChatStore()
 
-    await chat.send(request("Find cats"))
+    await ask(chat, "Find cats")
 
     const assistant = chat.get().messages[1]
     expect(assistant.content).toContain("upstream died")

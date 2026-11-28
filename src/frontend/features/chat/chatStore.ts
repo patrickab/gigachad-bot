@@ -13,15 +13,14 @@ export interface ChatStreamCompletion { messages: Message[]; usage: Usage }
 export interface ChatStore extends Pick<Store<ChatState>, "get" | "subscribe"> {
   /** Replace the messages by `change(current)` at once: the next `get()`, and a `send` right after, see them. Returns them. */
   update: (change: (current: Message[]) => Message[]) => Message[]
-  setUsage: (usage: Usage) => void
+  /** Replace messages and usage in one change, by an empty chat unless given. */
+  reset: (messages?: Message[], usage?: Usage) => void
   /**
-   * Stream one reply. `"newPair"` appends the question and an empty answer; `"lastAnswer"` streams into the trailing
-   * answer the caller appended. Resolves to null when cancelled, failed or not completed.
+   * Stream one reply into `placeholder`, the empty answer the caller appended after its question. Resolves to null when
+   * `placeholder` is not the last message, or when cancelled, failed or not completed.
    */
-  send: (req: ChatRequest, into?: "newPair" | "lastAnswer") => Promise<ChatStreamCompletion | null>
+  send: (req: ChatRequest, placeholder: Message) => Promise<ChatStreamCompletion | null>
   cancel: () => void
-  /** Take the pair starting at `user` out, with every later pair when `through` is "end". Null when `user` is not in the chat. */
-  removePairs: (user: Message, through: "pair" | "end") => Message[] | null
 }
 
 /** Build the API history, prepending hidden attachment text to user turns and appending mindmap output to assistant turns. */
@@ -48,36 +47,34 @@ export function withoutPairs(messages: Message[], user: Message, through: "pair"
   return [...messages.slice(0, index), ...messages.slice(end)]
 }
 
+const NO_USAGE: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+
 /** A chat's messages and usage, and the one assistant reply streaming into them at a time. */
 export function createChatStore(): ChatStore {
-  const store = createStore<ChatState>({
-    messages: [],
-    isStreaming: false,
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  })
+  const store = createStore<ChatState>({ messages: [], isStreaming: false, usage: NO_USAGE })
   let abort: (() => void) | null = null
 
   const update = (change: (current: Message[]) => Message[]) => {
     const messages = change(store.get().messages)
+    if (messages === store.get().messages) return messages
     store.set({ ...store.get(), messages })
     return messages
   }
   const setUsage = (usage: Usage) => store.set({ ...store.get(), usage })
   const setStreaming = (isStreaming: boolean) => store.set({ ...store.get(), isStreaming })
 
-  const send = async (req: ChatRequest, into: "newPair" | "lastAnswer" = "newPair"): Promise<ChatStreamCompletion | null> => {
-    const answer: Message = { role: "assistant", content: "" }
-    if (into === "newPair") update((current) => [...current, { role: "user", content: req.user_msg }, answer])
-    const history = buildHistory(store.get().messages.slice(0, -2))
-    setStreaming(true)
-
+  const send = async (req: ChatRequest, placeholder: Message): Promise<ChatStreamCompletion | null> => {
     // A stream writes its answer only while that answer is still the chat's last message: a reset, another chat loaded
     // or the pair deleted leave the list alone. `shown` is the copy of the accumulator last put into the list.
-    let shown = store.get().messages.at(-1)
+    let shown = placeholder
+    if (store.get().messages.at(-1) !== shown) return null
+    const answer: Message = { role: "assistant", content: "" }
+    const history = buildHistory(store.get().messages.slice(0, -2))
+    setStreaming(true)
     const publish = () => {
       if (store.get().messages.at(-1) !== shown) return
       shown = { ...answer }
-      update((current) => [...current.slice(0, -1), shown!])
+      update((current) => [...current.slice(0, -1), shown])
     }
     // Answer text is paced, everything else lands as it arrives.
     const pacer = createTokenPacer((text) => {
@@ -157,15 +154,11 @@ export function createChatStore(): ChatStore {
     get: store.get,
     subscribe: store.subscribe,
     update,
-    setUsage,
+    reset: (messages = [], usage = NO_USAGE) => store.set({ ...store.get(), messages, usage }),
     send,
     cancel: () => {
       abort?.()
       setStreaming(false)
-    },
-    removePairs: (user, through) => {
-      const next = withoutPairs(store.get().messages, user, through)
-      return next && update(() => next)
     },
   }
 }

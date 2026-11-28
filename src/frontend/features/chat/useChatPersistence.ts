@@ -18,6 +18,7 @@ export function useChatPersistence({
   chatId,
   refreshAll,
   setHistoryFile,
+  setTitle,
 }: {
   tab: Tab
   projectSlug: string | null
@@ -25,6 +26,7 @@ export function useChatPersistence({
   chatId: string
   refreshAll: () => Promise<void>
   setHistoryFile: (historyFile: string) => void
+  setTitle: (title: string) => void
 }) {
   const autosaveRef = useRef(Promise.resolve())
 
@@ -61,9 +63,11 @@ export function useChatPersistence({
     // A failed save is swallowed so the tab still adopts the new history file.
     const { messages, usage } = chat.get()
     await saveChat(historyFile, projectSlug, messages, { chatId, title: name, usage: savedUsage(usage) }).catch(() => {})
+    // The tab keeps its messages under the new file (see useTabChat), so it takes the title the file holds
+    setTitle(name)
     setHistoryFile(historyFile)
     await refreshAll()
-  }, [chat, chatId, projectSlug, setHistoryFile, refreshAll])
+  }, [chat, chatId, projectSlug, setHistoryFile, setTitle, refreshAll])
 
   return {
     isTitled,

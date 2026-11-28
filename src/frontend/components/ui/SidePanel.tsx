@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react"
 import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -21,7 +21,7 @@ export const SIDEBAR_CARD_CLASS = "rounded-2xl bg-surface shadow-[var(--shadow-s
  * - The content keeps its open width while the card eases, the card clips it, so it slides with the edge instead of reflowing
  * - A drag sets both at once and reports the final width through `onWidthChange`, external changes never fight it
  */
-function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: ((width: number) => void) | undefined, minWidth: number, maxWidth: number) {
+function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: ((width: number) => void) | undefined, maxWidth: number) {
   const cardWidth = useMotionValue(open ? width : 0)
   const contentWidth = useMotionValue(width)
   /** Ends the running drag's listeners and body styles, null while not dragging. */
@@ -48,7 +48,7 @@ function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: 
     const startWidth = cardWidth.get()
     // The inner edge moves: rightward widens a left card, leftward a right one
     const direction = side === "left" ? 1 : -1
-    const clamp = (px: number) => Math.min(maxWidth, Math.max(minWidth, px))
+    const clamp = (px: number) => Math.min(maxWidth, Math.max(MIN_WIDTH, px))
     document.body.style.cursor = "col-resize"
     document.body.style.userSelect = "none"
 
@@ -72,7 +72,7 @@ function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: 
     stopDrag.current = stop
     handle.addEventListener("pointermove", onPointerMove)
     handle.addEventListener("lostpointercapture", onCaptureEnd)
-  }, [side, cardWidth, contentWidth, onWidthChange, minWidth, maxWidth])
+  }, [side, cardWidth, contentWidth, onWidthChange, maxWidth])
 
   return { cardWidth, contentWidth, handlePointerDown }
 }
@@ -85,7 +85,7 @@ function usePanelWidth(side: Side, open: boolean, width: number, onWidthChange: 
  * - `onWidthChange` makes the inner edge a drag handle between `MIN_WIDTH` and `maxWidth`, the owner keeps the width
  * - Scrolling content goes in a `SidePanelScroll`
  */
-export function SidePanel({ side, open, width, onWidthChange, maxWidth = MAX_WIDTH, label, className, children }: {
+export function SidePanel({ side, open, width, onWidthChange, maxWidth = MAX_WIDTH, label, className, children, ref }: {
   side: Side
   open: boolean
   /** Open width in px. */
@@ -96,11 +96,13 @@ export function SidePanel({ side, open, width, onWidthChange, maxWidth = MAX_WID
   label?: string
   className?: string
   children: ReactNode
+  ref?: Ref<HTMLElement>
 }) {
-  const { cardWidth, contentWidth, handlePointerDown } = usePanelWidth(side, open, width, onWidthChange, MIN_WIDTH, maxWidth)
+  const { cardWidth, contentWidth, handlePointerDown } = usePanelWidth(side, open, width, onWidthChange, maxWidth)
   const gutter = useTransform(cardWidth, (px) => Math.min(GUTTER_PX, px))
   return (
     <motion.aside
+      ref={ref}
       aria-label={label}
       aria-hidden={!open}
       inert={!open}

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { ViewSwitch } from "@/components/ui/SegmentedSwitch"
+import { ViewSwitch } from "@/components/ui/ViewSwitch"
 
 describe("ViewSwitch", () => {
   it("renders the shared segmented look by default", () => {

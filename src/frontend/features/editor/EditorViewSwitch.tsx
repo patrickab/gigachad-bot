@@ -1,4 +1,4 @@
-import { ViewSwitch } from "@/components/ui/SegmentedSwitch"
+import { ViewSwitch } from "@/components/ui/ViewSwitch"
 import type { EditorView } from "./useEditorView"
 
 export function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {

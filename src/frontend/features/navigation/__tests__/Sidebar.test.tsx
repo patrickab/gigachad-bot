@@ -214,7 +214,7 @@ describe("Project navigation", () => {
     let resolveRename!: (slug: string) => void
     fixtures.renameProject.mockImplementationOnce(() => new Promise((resolve) => { resolveRename = resolve }))
     const onProjectRenamed = vi.fn()
-    const view = render(<Sidebar appMode="chat" onProjectRenamed={onProjectRenamed} />)
+    const view = render(<Sidebar onProjectRenamed={onProjectRenamed} />)
     fireEvent.doubleClick(view.getByRole("button", { name: "Proj" }))
     const input = view.getByRole("textbox", { name: "Rename Proj" })
     expect(input).toHaveValue("Proj")
@@ -248,7 +248,7 @@ describe("Project navigation", () => {
     const [first, second] = [nextTab(), nextTab()]
     const inTab = (tab: typeof first) => (
       <TabContext.Provider value={{ tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-        <Sidebar appMode="chat" />
+        <Sidebar />
       </TabContext.Provider>
     )
     const reads = () => api.fileRootTree.mock.calls.length + api.fetchWorktrees.mock.calls.length
@@ -292,7 +292,7 @@ describe("Project navigation", () => {
     const onItemOpen = vi.fn()
     const moves: FileMove[] = []
     const stop = onFileMove((move) => moves.push(move))
-    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const view = render(<Sidebar onItemOpen={onItemOpen} />)
     const file = await openedProject(view).findByRole("button", { name: "notes.md" })
     fireEvent.click(file)
     expect(onItemOpen).toHaveBeenCalledWith({ kind: "document", path: "project/proj/document/notes.md", projectSlug: "proj" })
@@ -324,7 +324,7 @@ describe("Project navigation", () => {
     const projects = fixtures.projects
     fixtures.projects = [...projects, ...Array.from({ length: 18 }, (_, index) => ({ slug: `other-${index}`, name: `Other ${index}`, tabs: [] }))]
     try {
-      const view = render(<Sidebar appMode="chat" />)
+      const view = render(<Sidebar />)
       const file = await openedProject(view).findByRole("button", { name: "notes.md" })
       await waitFor(() => expect(api.listProjectDocuments).toHaveBeenCalledTimes(20))
       api.listProjectDocuments.mockClear()
@@ -342,7 +342,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockResolvedValue({ path: "project/proj/document/ideas.md", name: "ideas.md", mime: "text/markdown", changed: ["/work/paper.tex", "/work/intro.tex"] })
     const changed: string[] = []
     const stop = onFileChange(() => true, (path) => changed.push(path))
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
     fireEvent.change(view.getByRole("textbox", { name: "Rename notes.md" }), { target: { value: "ideas" } })
     fireEvent.keyDown(view.getByRole("textbox", { name: "Rename notes.md" }), { key: "Enter" })
@@ -355,7 +355,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockRejectedValueOnce(new Error("A document with that name already exists there"))
     const moves: FileMove[] = []
     const stop = onFileMove((move) => moves.push(move))
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     fireEvent.doubleClick(await openedProject(view).findByRole("button", { name: "notes.md" }))
     const input = view.getByRole("textbox", { name: "Rename notes.md" })
     fireEvent.change(input, { target: { value: "board.md" } })
@@ -381,7 +381,7 @@ describe("Project navigation", () => {
     fixtures.renameDocument.mockResolvedValue({ path: "/source/renamed.md", name: "renamed.md", mime: "text/markdown", changed: [] })
     const moves: FileMove[] = []
     const stop = onFileMove((move) => moves.push(move))
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     const code = within(view.getByLabelText("Projects"))
     fireEvent.click(await code.findByRole("button", { name: "source" }))
     fireEvent.doubleClick(code.getByRole("button", { name: "first.md" }))
@@ -474,7 +474,7 @@ describe("Project navigation", () => {
     ] })
     api.createTexProjectFile.mockResolvedValue(`${folder}/chapters/two.tex`)
     const onItemOpen = vi.fn()
-    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const view = render(<Sidebar onItemOpen={onItemOpen} />)
     const code = within(view.getByLabelText("Projects"))
     expect(await code.findByRole("button", { name: "Open diff for paper" })).toBeInTheDocument()
     expect(code.queryByRole("button", { name: /New file in (paper|source)/ })).not.toBeInTheDocument()
@@ -505,7 +505,7 @@ describe("Project navigation", () => {
       ]
       : [])
     api.promoteToTexProject.mockResolvedValue("/data/workbench/latex/proj/paper")
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     await openedProject(view).findByText("paper.tex")
 
     const promote = view.getAllByRole("button", { name: "Make LaTeX project" })
@@ -523,7 +523,7 @@ describe("Project navigation", () => {
     ] }))
     api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
     try {
-      const view = render(<Sidebar appMode="chat" />)
+      const view = render(<Sidebar />)
       const fileMounts = within(view.getByLabelText("Projects"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
       fireEvent.click(await fileMounts.findByRole("button", { name: /^Worktrees/ }))
@@ -561,7 +561,7 @@ describe("Project navigation", () => {
       ? [{ path: "project/proj/document/plan.md", name: "Roadmap.md", mime: "text/markdown" }]
       : [])
     const onItemOpen = vi.fn()
-    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const view = render(<Sidebar onItemOpen={onItemOpen} />)
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
@@ -579,7 +579,7 @@ describe("Project navigation", () => {
       ]
       : [])
     vi.mocked(removeDocument).mockResolvedValue([])
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Files")
@@ -596,7 +596,7 @@ describe("Project navigation", () => {
 
   it("creates a blank LaTeX file and a LaTeX file from a template on disk and a Markdown file in the project, all opening in the workbench", async () => {
     const onItemOpen = vi.fn()
-    const view = render(<Sidebar appMode="chat" workbench onItemOpen={onItemOpen} />)
+    const view = render(<Sidebar workbench onItemOpen={onItemOpen} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Files")
@@ -645,7 +645,7 @@ describe("Project navigation", () => {
     ]
     try {
       const onItemOpen = vi.fn()
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       const section = within(view.getByLabelText("Projects"))
       fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
       fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
@@ -673,7 +673,7 @@ describe("Project navigation", () => {
     pi.sessions = [piSession("keep", "/git/proj"), piSession("old", "/git/proj")]
     api.pinPiSession.mockImplementation(async (id, pinned) => piSession(id, "/git/proj", { pinned }))
     try {
-      const view = render(<Sidebar appMode="chat" />)
+      const view = render(<Sidebar />)
       const section = within(view.getByLabelText("Projects"))
       fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
       fireEvent.click(await within(section.getByRole("group", { name: "Proj contents" })).findByRole("button", { name: "Sessions" }))
@@ -699,7 +699,7 @@ describe("Project navigation", () => {
     pi.sessions = [piSession("linked", "/git/proj"), piSession("tooling", "/git/tool/src"), piSession("home", "/home/me")]
     try {
       const onItemOpen = vi.fn()
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       const section = within(view.getByLabelText("Projects"))
       fireEvent.click(section.getByRole("button", { name: "Expand Proj" }))
       const mount = within(section.getByRole("group", { name: "Proj contents" }))
@@ -728,7 +728,7 @@ describe("Project navigation", () => {
     pi.repositories = piRepositories("tool")
     pi.sessions = [piSession("tooling", "/git/tool")]
     try {
-      const view = render(<Sidebar appMode="chat" />)
+      const view = render(<Sidebar />)
       const section = within(view.getByLabelText("Projects"))
       await section.findByRole("button", { name: "source" })
 
@@ -760,7 +760,7 @@ describe("Project navigation", () => {
     const adds = () => api.callFactory.mock.calls.filter(([action]) => action === "repos.add")
     try {
       const onItemOpen = vi.fn()
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       await waitFor(() => expect(api.callFactory).toHaveBeenCalledWith("repos.list"))
       await act(async () => {})
 
@@ -782,7 +782,7 @@ describe("Project navigation", () => {
 
       login.hostAccess = false
       view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-        <Sidebar appMode="chat" onItemOpen={onItemOpen} />
+        <Sidebar onItemOpen={onItemOpen} />
       </TabContext.Provider>)
       expect(view.queryByRole("button", { name: /Open factory for/ })).not.toBeInTheDocument()
     } finally {
@@ -793,7 +793,7 @@ describe("Project navigation", () => {
 
   it("offers Learn to host logins only: a new session, the knowledge graph and practice", async () => {
     const onItemOpen = vi.fn()
-    const guest = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const guest = render(<Sidebar onItemOpen={onItemOpen} />)
     await act(async () => {})
     expect(guest.queryByRole("button", { name: "Open learn" })).not.toBeInTheDocument()
     expect(guest.queryByRole("button", { name: "New teaching session" })).not.toBeInTheDocument()
@@ -801,7 +801,7 @@ describe("Project navigation", () => {
 
     login.hostAccess = true
     try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       await act(async () => {})
       fireEvent.click(view.getByRole("button", { name: "Open learn" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "new" } })
@@ -824,14 +824,14 @@ describe("Project navigation", () => {
   it("groups learn sessions under their project, lists the rest under Learn, and opens the frame at a clicked session", async () => {
     learn.sessions.sessions = [learnSession("chat_a", "Fourier series", { project_slug: "proj" }), learnSession("chat_b", "Eigenvalues")]
     const onItemOpen = vi.fn()
-    const guest = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const guest = render(<Sidebar onItemOpen={onItemOpen} />)
     expect(guest.queryByRole("button", { name: "New learn session in Proj" })).not.toBeInTheDocument()
     expect(guest.queryByRole("button", { name: "Eigenvalues" })).not.toBeInTheDocument()
     guest.unmount()
 
     login.hostAccess = true
     try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       await act(async () => {})
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       const project = within(view.getByLabelText("Proj contents"))
@@ -866,7 +866,7 @@ describe("Project navigation", () => {
     }
     login.hostAccess = true
     try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      const view = render(<Sidebar onItemOpen={vi.fn()} />)
       await act(async () => {})
       const section = within(view.getByLabelText("Learn"))
       expect(section.getByRole("button", { name: "Eigenvalues practice" })).toBeInTheDocument()
@@ -904,7 +904,7 @@ describe("Project navigation", () => {
     const onItemOpen = vi.fn()
     login.hostAccess = true
     try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      const view = render(<Sidebar onItemOpen={onItemOpen} />)
       await act(async () => {})
       const section = within(view.getByLabelText("Learn"))
       fireEvent.click(view.getByRole("button", { name: "Filter learn sessions" }))
@@ -944,7 +944,7 @@ describe("Project navigation", () => {
     const clicked = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
     login.hostAccess = true
     try {
-      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      const view = render(<Sidebar onItemOpen={vi.fn()} />)
       await act(async () => {})
       const section = within(view.getByLabelText("Learn"))
       const menu = () => {
@@ -992,7 +992,7 @@ describe("Project navigation", () => {
     const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
     api.deletePiSession.mockRejectedValueOnce(new ApiError("live", 409))
     try {
-      const view = render(<Sidebar appMode="chat" />)
+      const view = render(<Sidebar />)
       const section = within(view.getByLabelText("Projects"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
       fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
@@ -1008,7 +1008,7 @@ describe("Project navigation", () => {
   it("keeps a failed creation editable and navigates only after a successful retry", async () => {
     api.writeDocument.mockRejectedValueOnce(new Error("Storage unavailable"))
     const onItemOpen = vi.fn()
-    const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    const view = render(<Sidebar onItemOpen={onItemOpen} />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Canvases")
@@ -1035,7 +1035,7 @@ describe("Project navigation", () => {
       imported = true
       return [importedDocument]
     })
-    const view = render(<Sidebar appMode="chat" />)
+    const view = render(<Sidebar />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
     openSection(project, "Files")
@@ -1075,7 +1075,7 @@ describe("Project navigation", () => {
     })
     const manager = createRef<TabManagerHandle>()
     const view = testingRender(<BranchProvider onFileClick={vi.fn()} onHistoriesMoved={(moves) => manager.current!.relocateHistories(moves)}>
-      <TabManager ref={manager} chrome={(stack) => <><Sidebar appMode="chat" />{stack}</>}><WorkspaceDraft /></TabManager>
+      <TabManager ref={manager} chrome={(stack) => <><Sidebar />{stack}</>}><WorkspaceDraft /></TabManager>
     </BranchProvider>)
     const rootTab = { ...nextTab(), title: "Root", historyFile: "loose.json" }
     const childTab = { ...nextTab(), title: "Branch", historyFile: "child.json" }
@@ -1113,6 +1113,25 @@ describe("Project navigation", () => {
     expect(project.getByRole("button", { name: "loose-2" })).toHaveAttribute("aria-current", "page")
   })
 
+  it("marks the canvas or document of the tab in front", async () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = testingRender(<TabManager ref={manager} chrome={(stack) => <><Sidebar />{stack}</>}><WorkspaceDraft /></TabManager>)
+    const canvasTab = { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" } }
+    const documentTab = { ...nextTab(), projectSlug: "proj", workspaceItem: { kind: "document" as const, path: "project/proj/document/notes.md", projectSlug: "proj" } }
+    act(() => {
+      manager.current!.openTab(canvasTab)
+      manager.current!.openTab(documentTab)
+    })
+    await view.findByRole("button", { name: "Expand Proj" })
+    const project = openedProject(view)
+    const notes = await project.findByRole("button", { name: "notes.md" })
+    expect(notes).toHaveAttribute("aria-current", "page")
+    act(() => manager.current!.switchToTab(canvasTab.id))
+    expect(notes).not.toHaveAttribute("aria-current")
+    openSection(project, "Canvases")
+    expect(project.getByRole("button", { name: "board" })).toHaveAttribute("aria-current", "page")
+  })
+
   it("marks the revealed question of the chat in front instead of its row", async () => {
     const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
     vi.mocked(useBranches).mockImplementation(actual.useBranches)
@@ -1124,7 +1143,7 @@ describe("Project navigation", () => {
     const shown = (activeQaIndex: number | null) => (
       <BranchProvider onFileClick={vi.fn()}>
         <TabContext.Provider value={{ tab: { ...nextTab(), historyFile: "loose.json" }, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-          <Sidebar appMode="chat" activeQaIndex={activeQaIndex} />
+          <Sidebar activeQaIndex={activeQaIndex} />
         </TabContext.Provider>
       </BranchProvider>
     )
@@ -1143,7 +1162,7 @@ describe("Project navigation", () => {
     vi.mocked(useBranchActions).mockImplementation(actual.useBranchActions)
     api.listChatHistories.mockResolvedValue({ files: ["loose.json"] })
     api.moveHistoryItem.mockRejectedValue(new Error("Storage unavailable"))
-    const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar appMode="chat" /></BranchProvider>)
+    const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar /></BranchProvider>)
     const general = within(await view.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
     const dataTransfer = { types: ["text/plain"], getData: (type: string) => type === "text/plain" ? "loose.json" : "" }

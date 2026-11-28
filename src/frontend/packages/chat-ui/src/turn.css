@@ -227,16 +227,12 @@
   color: var(--ink-subtle);
   cursor: pointer;
 }
-.gc-turn-action:hover:not(:disabled) {
+.gc-turn-action:hover {
   background: var(--surface-elevated);
   color: var(--ink);
 }
-.gc-turn-action[data-tone="danger"]:hover:not(:disabled) {
+.gc-turn-action[data-tone="danger"]:hover {
   color: var(--danger);
-}
-.gc-turn-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .gc-turn :is(.gc-turn-header, .gc-turn-collapse, .gc-turn-action, .gc-turn-preview-scroll):focus-visible {
   outline: 2px solid var(--divider-strong);

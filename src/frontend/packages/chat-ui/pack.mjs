@@ -4,11 +4,10 @@
 //   node packages/chat-ui/pack.mjs --out <dir>
 //
 // Run from src/frontend, which supplies tsc and the dependency types. The package source here is the only copy:
-// the shell imports it as `@/packages/chat-ui/src`, run-learnharness.sh packs it on every start (`pack_chat_ui` in
+// the shell imports it through the `@gigachad/chat-ui` path alias, run-learnharness.sh packs it on every start (`pack_chat_ui` in
 // deploy/lib.sh) and installs the tarball into the served LearnHarness checkout for its overlay (`learnharness-overlay/`).
 //
-// Sources import siblings with their .ts/.tsx extension so the shell's bundler, vitest and Node-valid output all
-// resolve them. The tarball is reproducible: tsc output is deterministic and npm pack writes fixed timestamps,
+// The tarball is reproducible: tsc output is deterministic and npm pack writes fixed timestamps,
 // so its digest changes only with its sources.
 import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"

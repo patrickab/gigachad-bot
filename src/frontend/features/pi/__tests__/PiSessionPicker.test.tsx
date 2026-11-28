@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { TabContext, type Tab } from "@/contexts/TabContext"
+import { ChromeTabContext, TabContext, type Tab } from "@/contexts/TabContext"
 import { ApiError, type PiRepository, type PiSearchHit, type PiSessionInfo } from "@/lib/backend/api"
 import type { PiSessionStatus } from "../sessionStore"
 import { PiSessionPicker } from "../PiSessionPicker"
+import { FACTORY_VIEW_STORAGE_KEY } from "../factoryView"
+import { CARD_FIXTURES } from "./factoryCardFixtures"
 
 const pi = vi.hoisted(() => ({
   sessions: [] as PiSessionInfo[],
@@ -166,5 +168,21 @@ describe("PiSessionPicker", () => {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
     }
     expect(pi.entries).toHaveBeenCalledTimes(0)
+  })
+
+  it("previews a session in the front tab's factory view (Alt+V text)", async () => {
+    sessionStorage.setItem(`${FACTORY_VIEW_STORAGE_KEY}:${TAB.id}`, "text")
+    const at = new Date(0).toISOString()
+    pi.entries.mockResolvedValueOnce({ leafId: "n", entries: [
+      { type: "message", id: "a", parentId: null, timestamp: at, message: { role: "user", content: "Start", timestamp: 1 } },
+      { type: "custom_message", id: "n", parentId: "a", timestamp: at, customType: "factory-notice", content: "factory: task asks", display: true, details: { key: "k", card: CARD_FIXTURES.task } },
+    ] } as never)
+    pi.sessions = [piSession("waves", HOUR)]
+    render(<ChromeTabContext.Provider value={{ tab: TAB, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+      <PiSessionPicker onOpenItem={vi.fn()} />
+    </ChromeTabContext.Provider>)
+    fireEvent.keyDown(window, { key: "a", altKey: true })
+    await waitFor(() => expect(document.querySelector("[data-agent-text]")).not.toBeNull())
+    sessionStorage.clear()
   })
 })
