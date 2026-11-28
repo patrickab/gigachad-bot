@@ -1,14 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Bot, Check, Circle, CircleAlert, LoaderCircle, X, type LucideIcon } from "lucide-react"
 import { Disclosure } from "@/components/ui/Disclosure"
-import { IconButton } from "@/components/ui/IconButton"
+import { outlineOfWaves, type OutlineFact, type OutlineMark, type OutlineRow, type OutlineTone } from "./waveOutline"
+import { useNowMs } from "@/hooks/useNowMs"
 import { callFactory } from "@/lib/backend/api"
-import { concernsFactory, waveNeedsUser, waveStageLabel, type FactoryTask, type FactoryWave, type FactoryWaveTask } from "@/lib/domain/factory"
+import { concernsFactory, type FactoryTask, type FactoryWave } from "@/lib/domain/factory"
 import { cn } from "@/lib/utils"
 import { observePiSocket } from "./piSocket"
-import { formatCost, formatTokens } from "./subagents"
 import { factoryCard, type FactoryCard } from "./factoryCard"
 
 /** A ruling the supervisor gave in this session, from `decisions.list`. */
@@ -30,11 +29,6 @@ function validDecisions(listed: unknown): FactoryDecision[] {
 }
 
 const RESTING = new Set(["merged", "cancelled"])
-const FINISHED_TASK = new Set(["done", "cancelled"])
-const ATTENTION_TASK = new Set(["waiting_answer", "waiting_approve", "blocked"])
-
-const newestFirst = (a: FactoryWave, b: FactoryWave) => b.createdAt.localeCompare(a.createdAt)
-const totalCost = (waves: readonly FactoryWave[]) => waves.reduce((sum, wave) => sum + (wave.usage?.cost ?? 0), 0)
 
 const storeKey = (sessionId: string) => `gigachad:session-waves:${sessionId}`
 
@@ -74,15 +68,6 @@ export function taskModels(tasks: readonly FactoryTask[]): TaskModels {
 /** The waves session `sessionId` declared (`origin`). */
 export function sessionWaves(waves: readonly FactoryWave[], sessionId: string): FactoryWave[] {
   return waves.filter((wave) => wave.origin === sessionId)
-}
-
-/** `waves` split into active ones (those needing the user first, then newest first) and finished ones (`merged`, `cancelled`, newest first). */
-export function splitWaves(waves: readonly FactoryWave[]): { active: FactoryWave[]; finished: FactoryWave[] } {
-  const active = waves.filter((wave) => !RESTING.has(wave.stage)).sort(newestFirst)
-  return {
-    active: [...active.filter(waveNeedsUser), ...active.filter((wave) => !waveNeedsUser(wave))],
-    finished: waves.filter((wave) => RESTING.has(wave.stage)).sort(newestFirst),
-  }
 }
 
 /**
@@ -132,59 +117,62 @@ export function useSessionWaves(sessionId: string): { waves: FactoryWave[]; mode
   return useMemo(() => ({ waves: answered?.sessionId === sessionId ? answered.waves : storedWaves(sessionId), models, decisions }), [answered, sessionId, models, decisions])
 }
 
-function waveIcon(wave: FactoryWave): { icon: LucideIcon; className: string } {
-  if (wave.stage === "merged") return { icon: Check, className: "text-ink-subtle" }
-  if (wave.stage === "cancelled") return { icon: X, className: "text-ink-faint" }
-  if (waveNeedsUser(wave)) return { icon: CircleAlert, className: "text-warning" }
-  return { icon: LoaderCircle, className: wave.running ? "animate-spin text-ink-muted" : "text-ink-muted" }
+const TONE_CLASS: Record<OutlineTone, string> = { ink: "text-ink", muted: "text-ink-muted", faint: "text-ink-faint", warning: "text-warning", danger: "text-danger" }
+
+const MARKS: Record<Exclude<OutlineMark, "working">, { glyph: string; className: string; label: string }> = {
+  done: { glyph: "✓", className: "text-diff-added", label: "Done" },
+  cancelled: { glyph: "✗", className: "text-ink-faint", label: "Cancelled" },
+  attention: { glyph: "!", className: "text-warning", label: "Needs you" },
+  failed: { glyph: "!", className: "text-danger", label: "Failed" },
+  waiting: { glyph: "○", className: "text-ink-faint", label: "Waiting" },
 }
 
-function taskIcon(state: string): { icon: LucideIcon; className: string } {
-  if (ATTENTION_TASK.has(state)) return { icon: CircleAlert, className: "text-warning" }
-  if (state === "done") return { icon: Check, className: "text-ink-subtle" }
-  if (state === "cancelled") return { icon: X, className: "text-ink-faint" }
-  if (state === "pending") return { icon: Circle, className: "text-ink-faint" }
-  return { icon: LoaderCircle, className: "text-ink-muted" }
+/** A row's mark in a cell of one width: a turning ring while something works, else its glyph. */
+function Mark({ mark }: { mark: OutlineMark }) {
+  if (mark === "working") {
+    return (
+      <span role="img" aria-label="Working" className="flex w-3 shrink-0 justify-center">
+        <span className="h-2 w-2 animate-spin rounded-full border border-ink-faint border-t-ink-muted motion-reduce:animate-none" />
+      </span>
+    )
+  }
+  const { glyph, className, label } = MARKS[mark]
+  return <span role="img" aria-label={label} className={cn("w-3 shrink-0 text-center", className)}>{glyph}</span>
 }
 
-/** A task's row: status, title, the coder's model, tokens in (with cache reads) and out, state; a started one opens its task view. */
-function TaskRow({ task, model, onOpenTask }: { task: FactoryWaveTask; model: string | undefined; onOpenTask: (taskId: string) => void }) {
-  const { icon: Icon, className } = taskIcon(task.state)
-  const { taskId, usage } = task
-  const state = task.state.replace(/_/g, " ")
+/** Facts on one quiet line, each after a dot. */
+function Facts({ facts }: { facts: readonly OutlineFact[] }) {
   return (
-    <li className="ml-5 flex items-center gap-2 py-0.5">
-      <Icon size={12} aria-hidden="true" className={cn("shrink-0", className)} />
-      <span className="min-w-0 flex-1 truncate text-ink-muted">{task.title}</span>
-      <span className="shrink-0 tabular-nums text-ink-faint">
-        {model && `${model} · `}
-        {usage && `↑${formatTokens(usage.input + (usage.cacheRead ?? 0))} ↓${formatTokens(usage.output)} · `}
-        <span className={cn(ATTENTION_TASK.has(task.state) && "text-warning")}>{state}</span>
-      </span>
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-        {taskId && <IconButton icon={Bot} label="Open task" onClick={() => onOpenTask(taskId)} className="h-5 w-5" />}
-      </span>
-    </li>
+    <span className="shrink-0 whitespace-pre tabular-nums">
+      {facts.map((item, index) => (
+        <span key={index}>
+          <span className="text-ink-faint"> · </span>
+          <span className={TONE_CLASS[item.tone]}>{item.text}</span>
+        </span>
+      ))}
+    </span>
   )
 }
 
-/** A wave's line: status icon, tag, title, `done/total`, stage, cost. */
-function WaveSummary({ wave }: { wave: FactoryWave }) {
-  const { icon: Icon, className } = waveIcon(wave)
-  return (
+const OUTLINE_ROW = "flex h-5 w-full min-w-0 items-center rounded text-left"
+const INTERACTIVE = "hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+
+/** One line of the tree: tree lines, mark, label, title, facts. A row with rows below opens and closes them, a started task opens its task view. */
+function OutlineLine({ row, onToggle, onOpenTask }: { row: OutlineRow; onToggle: (id: string) => void; onOpenTask: (repo: string, taskId: string) => void }) {
+  const quiet = row.mark === "done" || row.mark === "cancelled" || row.mark === "waiting"
+  const content = (
     <>
-      <Icon size={12} aria-hidden="true" className={cn("shrink-0", className)} />
-      <span className="shrink-0 text-ink">{wave.tag}</span>
-      <span className="min-w-0 flex-1 truncate text-ink-muted">{wave.title}</span>
-      <span className="shrink-0 tabular-nums text-ink-faint">
-        {wave.counts.done}/{wave.counts.total}
-        {" · "}
-        <span className={cn(waveNeedsUser(wave) && "text-warning")}>{waveStageLabel(wave)}</span>
-        {wave.usage && ` · ${formatCost(wave.usage.cost)}`}
-      </span>
-      <span className="w-5 shrink-0" />
+      <span aria-hidden="true" className="shrink-0 whitespace-pre text-ink-faint">{row.lead}{row.open === null ? "" : row.open ? "▾ " : "▸ "}</span>
+      {row.mark && <Mark mark={row.mark} />}
+      <span className={cn("shrink-0", row.mark && "ml-1.5", row.group ? "font-semibold text-ink" : quiet || row.mark === null ? "text-ink-muted" : "text-ink")}>{row.label}</span>
+      {row.title && <span className={cn("ml-3 min-w-0 truncate", quiet ? "text-ink-faint" : "text-ink-muted")}>{row.title}</span>}
+      <Facts facts={row.facts} />
     </>
   )
+  const { toggle, task } = row
+  if (toggle !== null) return <li><button type="button" aria-expanded={row.open ?? false} onClick={() => onToggle(toggle)} className={cn(OUTLINE_ROW, INTERACTIVE)}>{content}</button></li>
+  if (task !== null) return <li><button type="button" onClick={() => onOpenTask(task.repo, task.taskId)} className={cn(OUTLINE_ROW, INTERACTIVE)}>{content}</button></li>
+  return <li className={OUTLINE_ROW}>{content}</li>
 }
 
 const ROW = "h-auto py-0.5"
@@ -226,31 +214,15 @@ function DecisionsEntry({ decisions, cards }: { decisions: readonly FactoryDecis
   )
 }
 
-/** A wave's row, opening to its tasks: the unfinished ones first, then the finished, each started one with its task view. */
-function WaveRow({ wave, models, onOpenTask }: { wave: FactoryWave; models: TaskModels; onOpenTask: (repo: string, taskId: string) => void }) {
-  const tasks = [...wave.tasks.filter((task) => !FINISHED_TASK.has(task.state)), ...wave.tasks.filter((task) => FINISHED_TASK.has(task.state))]
-  return (
-    <li>
-      <Disclosure summary={<WaveSummary wave={wave} />} summaryClassName={ROW}>
-        {tasks.length > 0 && (
-          <ul aria-label={`${wave.tag} tasks`} className="flex flex-col">
-            {tasks.map((task) => <TaskRow key={task.key} task={task} model={task.taskId ? models[task.taskId] : undefined} onOpenTask={(taskId) => onOpenTask(wave.repo, taskId)} />)}
-          </ul>
-        )}
-      </Disclosure>
-    </li>
-  )
-}
-
 /**
  * The factory waves a Pi session declared, pinned above the composer beside the subagent roster: one element that collapses to its header.
  *
- * - Header: `Factory`, the active waves (`<n> active`, `<m> needs you` in the warning colour when any), their summed cost; `<n> finished` without active waves.
- *   Open while a wave is active, collapsed otherwise
- * - Active waves (not `merged` or `cancelled`), those needing the user first, then newest first
- * - Finished waves behind one collapsed `<n> finished` row with their summed cost, newest first
- * - Every wave's row opens to its tasks, unfinished ones first: the coder's model, tokens in and out, state. A started one opens its task view
- *   (the coder's session, brief and handoff) through `onOpenTask`
+ * - Header: `Factory`, the spend of all its waves, the coders and reviewers at work, `<n> active` (`<n> finished` without active waves),
+ *   `<m> needs you` in the warning colour when any. Open while a wave is active, collapsed otherwise
+ * - Below, the waves as one tree (`outlineOfWaves`): tracks and milestones from the tags' prefixes, waves, their tasks, a line each with
+ *   its mark and facts. What needs the user comes first, what is finished stands behind one closed `<n> finished` row per group
+ * - A click on a row opens or closes what is below it; one on a started task opens its task view (the coder's session, brief and
+ *   handoff) through `onOpenTask`
  * - `<m> needs you` counts the session's cards waiting for a ruling: the transcript's attention notices no decision answers
  *   (one in the transcript or from `decisions.list`)
  * - A `Decisions` entry lists `decisions`, each jumping to the card it answers through `cards.revealNotice`
@@ -263,48 +235,35 @@ export function SessionWaves({ waves, models = NO_MODELS, decisions = null, card
   cards?: SessionCards
   onOpenTask: (repo: string, taskId: string) => void
 }) {
-  const { active, finished } = useMemo(() => splitWaves(waves), [waves])
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
+  const now = useNowMs()
+  const outline = useMemo(() => outlineOfWaves(waves, toggled, now, models), [waves, toggled, now, models])
+  const active = waves.some((wave) => !RESTING.has(wave.stage))
   const needsUser = useMemo(() => {
     const answered = new Set(decisions?.map(decisionAnswers))
     return cards.waiting.filter((key) => !answered.has(key)).length
   }, [decisions, cards.waiting])
   const hasDecisions = !!decisions && decisions.length > 0
   if (waves.length === 0 && !hasDecisions && needsUser === 0) return null
+  const toggle = (id: string) => setToggled((ids) => {
+    const next = new Set(ids)
+    if (!next.delete(id)) next.add(id)
+    return next
+  })
   const header = (
-    <>
-      <span className="shrink-0">
-        Factory{active.length > 0 ? ` · ${active.length} active` : finished.length > 0 ? ` · ${finished.length} finished` : ""}
-        {needsUser > 0 && <> · <span className="text-warning">{needsUser} needs you</span></>}
-      </span>
-      <span className="flex-1" />
-      {active.length > 0 && <span className="shrink-0 tabular-nums text-ink-faint">{formatCost(totalCost(active))}</span>}
-      <span className="w-5 shrink-0" />
-    </>
+    <span className="min-w-0 flex-1 truncate">
+      <span className="text-ink">Factory</span>
+      <Facts facts={needsUser > 0 ? [...outline.summary, { text: `${needsUser} needs you`, tone: "warning" }] : outline.summary} />
+    </span>
   )
   return (
     <section aria-label="Waves" className="mx-auto mb-2 flex max-h-[40vh] w-full max-w-2xl flex-col overflow-y-auto rounded-xl bg-paper px-3 py-1.5 text-xs">
-      <Disclosure key={active.length > 0 ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active.length > 0 || (waves.length === 0 && needsUser > 0)}>
+      <Disclosure key={active ? "active" : "finished"} summary={header} summaryClassName={ROW} defaultOpen={active || (waves.length === 0 && needsUser > 0)}>
         <ul className="flex flex-col">
           {hasDecisions && <DecisionsEntry decisions={decisions} cards={cards} />}
-          {active.map((wave) => <WaveRow key={wave.id} wave={wave} models={models} onOpenTask={onOpenTask} />)}
-          {finished.length > 0 && (
-            <li>
-              <Disclosure
-                summary={(
-                  <>
-                    <span className="min-w-0 flex-1">{finished.length} finished</span>
-                    <span className="shrink-0 tabular-nums text-ink-faint">{formatCost(totalCost(finished))}</span>
-                    <span className="w-5 shrink-0" />
-                  </>
-                )}
-                summaryClassName={ROW}
-              >
-                <ul aria-label="Finished waves" className="ml-5 flex flex-col">
-                  {finished.map((wave) => <WaveRow key={wave.id} wave={wave} models={models} onOpenTask={onOpenTask} />)}
-                </ul>
-              </Disclosure>
-            </li>
-          )}
+        </ul>
+        <ul aria-label="Waves" className="flex flex-col font-mono">
+          {outline.rows.map((row) => <OutlineLine key={row.key} row={row} onToggle={toggle} onOpenTask={onOpenTask} />)}
         </ul>
       </Disclosure>
     </section>

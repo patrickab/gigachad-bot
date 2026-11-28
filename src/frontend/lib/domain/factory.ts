@@ -307,6 +307,8 @@ export interface FactoryWave {
   /** The declaring Pi session's id. */
   origin: string | null
   createdAt: string
+  /** The ids of the waves it waits for while `queued`. */
+  after?: string[]
   stage: FactoryWaveStage
   /** Only when blocked. */
   reason: "conflict" | "gates" | "dirty" | "infra" | "review_failed" | null

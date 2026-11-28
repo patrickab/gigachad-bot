@@ -261,6 +261,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- ShellNotices.tsx  Background shell sessions that ended well left out
 |       |   |   |-- renderers.ts      Custom-message renderer registry, re-exports the conversation tool registry
 |       |   |   |-- SessionWaves.tsx  The session's factory waves, decisions and cards waiting for a ruling above the composer (`waves.list`, `decisions.list`, `origin`)
+|       |   |   |-- waveOutline.ts    The session's waves as one tree of rows: groups by tag prefix, waves, tasks, each with mark and facts
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
 |       |   |   |-- PiSessionPicker.tsx Session picker (Alt+A), mounted once by `AppChrome`: sessions by last use, full-text search with a row per hit
 |       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview

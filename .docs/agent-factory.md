@@ -347,16 +347,20 @@ settings once at `waves.start`.
   runs, the merged commit range). Its description is the document `plan/<tag or prefix>.md`
   of the plan's memory_store, read when its toggle opens (`GET /api/memory/read`). Waves of one column sharing a tag
   prefix are wrapped in one container per prefix segment; a group holding a single wave has no container of its own.
-- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`): above the composer, one `Factory` element for the waves the
-  tab's session declared, in whatever repository (`waves.list` without a repo), at most 40% of the view high, scrolling
-  beyond. Its header counts the active waves, the cards that need the user (warning colour) and the active waves' cost,
-  or `<n> finished` without active ones, and collapses the element (open while a wave is active). `<n> needs you`
-  counts the transcript's attention cards that no decision answers, in the transcript or from `decisions.list`
-  (`origin`: the session). A `Decisions · <n>` entry lists the session's decisions, each jumping to the card it answers
-  while that card is in the transcript (entries without a valid card are dropped). Active waves come first, those needing the user at the top; merged and
-  cancelled waves sit behind one collapsed `<n> finished` row. Every wave opens to its tasks, unfinished ones first:
-  the coder's model (from `tasks.list`), tokens in and out, state. A started one has a button that opens its task view
-  (the coder's session, brief and handoff). Without waves, decisions or waiting cards it is absent.
+- **Waves in a Pi tab** (`features/pi/SessionWaves.tsx`, `waveOutline.ts`): above the composer, one `Factory` element
+  for the waves the tab's session declared, in whatever repository (`waves.list` without a repo), at most 40% of the
+  view high, scrolling beyond. Its header gives the spend of all of them, the coders and reviewers at work, the active
+  waves (`<n> finished` without active ones) and the cards that need the user (warning colour), and collapses the
+  element (open while a wave is active). `<n> needs you` counts the transcript's attention cards that no decision
+  answers, in the transcript or from `decisions.list` (`origin`: the session). A `Decisions · <n>` entry lists the
+  session's decisions, each jumping to the card it answers while that card is in the transcript (entries without a
+  valid card are dropped). Below it the waves are one tree, a line per row: tracks and milestones from the tag
+  prefixes (a group holding one wave joins its label), waves, their tasks in declared order. A row has a mark (working,
+  done, cancelled, needs the user, failed, waiting) and its facts: a group its merged waves, workers and cost; a wave
+  its tasks done, stage, what it waits for, workers, rejections, duration and cost; a task the coder's model (from
+  `tasks.list`), state, what it waits for and cost. What needs the user comes first; merged and cancelled waves sit
+  behind one closed `<n> finished` row per group. A click opens or closes a row, one on a started task opens its task
+  view (the coder's session, brief and handoff). Without waves, decisions or waiting cards it is absent.
 - **Timeline** (task view): per round the trigger, the coder's turn (model, tokens, cost, last message), its
   questions, each gate with duration and failed output, the review with findings, the merge.
 - **Terminal**: `factory-tui` (read-only), or `factory waves.list`, `factory tasks.list`, `factory waves.get`.

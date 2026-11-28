@@ -47,15 +47,15 @@ describe("SessionWaves", () => {
     const others = (action: string) => (action === "decisions.list" ? { decisions: [] } : { tasks: [] })
     api.callFactory.mockImplementation(async (action: string) => (action === "waves.list" ? { waves: [wave("w1")] } : others(action)))
     const first = render(<SessionWavesPanel sessionId="me" onOpenTask={vi.fn()} />)
-    await screen.findByRole("button", { name: /p\/w1/ })
+    await screen.findByText("p/w1")
     first.unmount()
     api.callFactory.mockReset()
     api.callFactory.mockImplementation((action: string) => (action === "waves.list" ? new Promise((resolve) => { answer = resolve }) : Promise.resolve(others(action))))
     renderPanel()
-    expect(screen.getByRole("button", { name: /p\/w1/ })).toBeTruthy()
+    expect(screen.getByText("p/w1")).toBeTruthy()
     answer({ waves: [wave("w2")] })
-    await screen.findByRole("button", { name: /p\/w2/ })
-    expect(screen.queryByRole("button", { name: /p\/w1/ })).toBeNull()
+    await screen.findByText("p/w2")
+    expect(screen.queryByText("p/w1")).toBeNull()
   })
 
   it("shows only this session's waves, the active ones open", async () => {
@@ -68,23 +68,23 @@ describe("SessionWaves", () => {
       ],
     })
     renderPanel()
-    const row = await screen.findByRole("button", { name: /p\/w1/ })
+    const row = (await screen.findByText("w1")).closest("li")!
     expect(api.callFactory).toHaveBeenCalledWith("waves.list", {})
     expect(row.textContent).toContain("title w1")
-    expect(row.textContent).toContain("2/8")
+    expect(row.textContent).toContain("2/8 tasks")
     expect(row.textContent).toContain("building")
     expect(row.textContent).toContain("$4.10")
     const header = screen.getByRole("button", { name: /^Factory/ })
     expect(header.getAttribute("aria-expanded")).toBe("true")
     // Wave states do not count: only the transcript's cards waiting for a ruling do
-    expect(header.textContent).toContain("Factory · 2 active")
+    expect(header.textContent).toContain("Factory · $4.10 · 2 active")
     expect(header.textContent).not.toContain("needs you")
     expect(screen.getByText("rejected").className).toContain("text-warning")
     expect(screen.getByText("building").className).not.toContain("text-warning")
     expect(screen.queryByText(/finished/)).toBeNull()
-    for (const hidden of ["p/w2", "p/w3"]) expect(screen.queryByText(hidden)).toBeNull()
+    for (const hidden of ["w2", "w3"]) expect(screen.queryByText(hidden)).toBeNull()
     fireEvent.click(header)
-    expect(screen.queryByText("p/w1")).toBeNull()
+    expect(screen.queryByText("w1")).toBeNull()
   })
 
   it("collapses to the header with only finished waves", () => {
@@ -93,10 +93,10 @@ describe("SessionWaves", () => {
       onOpenTask={vi.fn()}
     />)
     const header = screen.getByRole("button", { name: /^Factory/ })
-    expect(header.textContent).toContain("Factory · 2 finished")
+    expect(header.textContent).toContain("Factory · $3.00 · 2 finished")
     expect(header.textContent).not.toContain("needs you")
     expect(header.getAttribute("aria-expanded")).toBe("false")
-    expect(screen.queryByText("p/w4")).toBeNull()
+    expect(screen.queryByText("w4")).toBeNull()
     fireEvent.click(header)
     const finished = screen.getByRole("button", { name: /^2 finished/ })
     expect(finished.textContent).toContain("$3.00")
@@ -115,40 +115,29 @@ describe("SessionWaves", () => {
       onOpenTask={vi.fn()}
     />)
     expect(screen.getByRole("button", { name: /^Factory/ }).textContent).toContain("Factory · 3 active")
-    const tags = screen.getAllByText(/^p\//).map((node) => node.textContent)
-    expect(tags).toEqual(["p/stuck", "p/new", "p/old"])
+    const names = () => screen.getAllByText(/^(stuck|new|old|m1|m2)$/).map((node) => node.textContent)
+    expect(names()).toEqual(["stuck", "new", "old"])
     const finished = screen.getByRole("button", { name: /^2 finished/ })
-    expect(screen.queryByText("p/m1")).toBeNull()
     fireEvent.click(finished)
-    const list = screen.getByRole("list", { name: "Finished waves" })
-    expect(list.textContent).toContain("2/2")
-    expect(list.textContent).toContain("merged")
-    expect(screen.getAllByText(/^p\//).map((node) => node.textContent)).toEqual(["p/stuck", "p/new", "p/old", "p/m2", "p/m1"])
-    expect(screen.getByRole("button", { name: /p\/m1/ })).toBeTruthy()
+    expect(names()).toEqual(["stuck", "new", "old", "m1", "m2"])
+    expect(screen.getByText("m1").closest("li")!.textContent).toContain("2/2 tasks · merged")
   })
 
-  it("opens a wave to its tasks with model and tokens, unfinished first, a started one opens its task", () => {
+  it("shows an active wave's tasks in declared order with model, state and cost; a started one opens its task, the wave's row closes them", () => {
     const onOpenTask = vi.fn()
     const tasks = [
-      task("a", { title: "feat: running one", state: "running", taskId: "t-a", sessionId: "s-a", usage: { input: 200, output: 3400, cost: 1, cacheRead: 54800, cacheWrite: 0 } }),
-      task("b", { title: "feat: pending one" }),
+      task("a", { title: "feat: running one", state: "running", taskId: "t-a", sessionId: "s-a", usage: { input: 200, output: 3400, cost: 1 } }),
+      task("b", { title: "feat: pending one", after: ["a"] }),
       task("c", { title: "feat: done one", state: "done", taskId: "t-c", sessionId: "s-c" }),
-      task("d", { title: "feat: cancelled one", state: "cancelled", taskId: "t-d", sessionId: "s-d" }),
     ]
     render(<SessionWaves waves={[wave("w1", { tasks })]} models={{ "t-a": "claude-opus-5-5" }} onOpenTask={onOpenTask} />)
-    expect(screen.queryByText("feat: running one")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /p\/w1/ }))
-    const list = screen.getByRole("list", { name: "p/w1 tasks" })
-    expect(list.textContent).toContain("feat: running one")
-    expect(list.textContent).toContain("running")
-    expect(list.textContent).toContain("feat: pending one")
-    expect(list.textContent).toContain("pending")
-    expect(Array.from(list.querySelectorAll("li")).map((row) => row.textContent?.match(/feat: \w+ one/)?.[0])).toEqual(["feat: running one", "feat: pending one", "feat: done one", "feat: cancelled one"])
-    expect(list.querySelector("li")?.textContent).toContain("claude-opus-5-5 · ↑55.0k ↓3.4k · running")
-    const open = screen.getAllByRole("button", { name: "Open task" })
-    expect(open).toHaveLength(3)
-    fireEvent.click(open[0])
+    const rows = screen.getAllByText(/^feat: /).map((node) => node.closest("li")!.textContent)
+    expect(rows.map((text) => text?.match(/feat: \w+ one.*/)?.[0])).toEqual(["feat: running one · claude-opus-5-5 · running · $1.00", "feat: pending one · pending · after a", "feat: done one · done"])
+    expect(screen.queryByRole("button", { name: /feat: pending one/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /feat: running one/ }))
     expect(onOpenTask).toHaveBeenCalledWith("/git/repo", "t-a")
+    fireEvent.click(screen.getByRole("button", { name: /title w1/ }))
+    expect(screen.queryByText("feat: running one")).toBeNull()
   })
 
   it("renders nothing without waves", async () => {
@@ -178,7 +167,7 @@ describe("SessionWaves", () => {
     act(() => {
       for (const observer of socket.observers) observer.onHostEvent?.({ type: "sessions_changed", sessionPaths: ["/agent/factory/waves/w1.jsonl"] })
     })
-    expect(await screen.findByRole("button", { name: /p\/w1/ })).toBeTruthy()
+    expect(await screen.findByText("p/w1")).toBeTruthy()
   })
 })
 
