@@ -202,3 +202,43 @@ describe("ChatInput drawing", () => {
     expect(uploadFile).toHaveBeenCalledWith("c1", expect.anything(), "physics")
   })
 })
+
+describe("ChatInput PDF text choice", () => {
+  afterEach(cleanup)
+
+  async function uploadPdf(onSend: (text: string, attachments: Attachment[]) => void) {
+    vi.mocked(uploadFile).mockResolvedValueOnce({ name: "paper.pdf", mime: "application/pdf", url: "/paper.pdf", active: true, textLayer: "Own text" })
+    const ref = { current: null as import("../ChatInput").ChatInputHandle | null }
+    render(<ChatInput ref={ref} chatId="c1" onSend={onSend} />)
+    await act(async () => { ref.current?.addFiles([new File(["%PDF"], "paper.pdf", { type: "application/pdf" })]) })
+    return screen.getByRole("group", { name: "paper.pdf has text. Extract it with MinerU instead?" })
+  }
+
+  it("Escape sends the PDF's own text, no MinerU parse", async () => {
+    const onSend = vi.fn()
+    await uploadPdf(onSend)
+    const draft = screen.getByRole("textbox")
+    fireEvent.keyDown(draft, { key: "Enter" })
+    expect(onSend).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: "Escape" })
+    fireEvent.keyDown(draft, { key: "Enter" })
+
+    expect(screen.queryByRole("group")).toBeNull()
+    const [sent] = onSend.mock.calls[0][1] as Attachment[]
+    expect(sent.parsedMd).toBe("Own text")
+    expect(sent.textLayer).toBeUndefined()
+  })
+
+  it("Enter leaves the PDF to MinerU", async () => {
+    const onSend = vi.fn()
+    const question = await uploadPdf(onSend)
+
+    fireEvent.keyDown(question, { key: "Enter" })
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+
+    const [sent] = onSend.mock.calls[0][1] as Attachment[]
+    expect(sent.parsedMd).toBeUndefined()
+    expect(sent.textLayer).toBeUndefined()
+  })
+})

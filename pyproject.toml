@@ -23,6 +23,7 @@ dependencies = [
     "pillow>=12.2.0",
     "plotly>=6.0.0",
     "psycopg[binary,pool]>=3.2",
+    "pypdfium2>=4.30",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0",
     "sse-starlette>=3.4.5",

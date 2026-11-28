@@ -14,6 +14,8 @@ export interface Attachment {
   thumbUrl?: string
   content?: string
   parsedMd?: string
+  /** An uploaded PDF's own text while the user has not yet picked it or a MinerU extraction (`parsedMd` filled at send). */
+  textLayer?: string
   active: boolean
   /** Live reference to its source document (mount path or app document key): no upload copy exists, it is re-read on every send. */
   vaultPath?: string

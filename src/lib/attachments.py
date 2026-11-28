@@ -23,6 +23,7 @@ from lib.attachment_materialize import (
 from lib.data_store import StorageNotFoundError, validate_key
 from lib.mime import mime_for
 from lib.mineru import parse_pdf, should_cancel
+from lib.pdf_text import text_layer
 from lib.storage_namespace import chat_upload_prefix, library_pdf
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ class AttachResult(BaseModel):
     path: str | None = None
     content: str | None = None
     parsedMd: str | None = None
+    # An uploaded PDF's own text, set when it has one: the user picks it or a MinerU extraction before sending.
+    textLayer: str | None = None
 
 
 def decode_text(content: bytes) -> str | None:
@@ -146,7 +149,7 @@ class ChatUploads:
         - Any other file is deduplicated as ``stem (N).suffix`` unless *overwrite*
 
         A PDF is mirrored into the library at once: it must reach Nextcloud whether or not
-        the user ever sends or parses it, and MinerU needs a real file to read.
+        the user ever sends or parses it, and MinerU needs a real file to read. Its text layer comes back as `textLayer`.
         """
         if overwrite:
             name = filename
@@ -161,6 +164,7 @@ class ChatUploads:
             result.content = decode_text(content)
         elif kind == "pdf":
             store_library_pdf(self._assets, name, content)
+            result.textLayer = text_layer(content)
         return result
 
     async def parse(self, filenames: list[str]) -> list[AttachResult]:

@@ -7,6 +7,7 @@ import type { Attachment } from "@/lib/domain/types"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, InactiveAttachments, type ContextAttachment } from "./AttachmentChip"
 import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
+import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { COMPOSER_CARD_CLASS, ComposerMicButton, ComposerSendButton, ComposerTextarea } from "@/components/ui/Composer"
 import { AttachMenu, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
@@ -131,7 +132,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   // Staged chips go after the typed text, verbatim
   const handleSubmit = () => {
     const trimmed = text.trim()
-    if (!trimmed && attachments.length === 0 && chips.chips.length === 0) return
+    if (drafts.textChoice || (!trimmed && attachments.length === 0 && chips.chips.length === 0)) return
     completions.close()
     const sentChips = chips.chips
     const sentAttachments = attachments
@@ -209,7 +210,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const activeContext = context?.attachments.filter(({ attachment }) => attachment.active) ?? []
   const inactiveContext = context?.attachments.filter(({ attachment }) => !attachment.active) ?? []
   const canSend = !picker && (text.trim().length > 0 || attachments.length > 0 || chips.chips.length > 0)
-  const submitBlocked = Boolean(extracting) || (Boolean(isStreaming) && !sendWhileStreaming)
+  const submitBlocked = Boolean(extracting) || (Boolean(isStreaming) && !sendWhileStreaming) || drafts.textChoice !== null
+  /** Settle the pending PDF's text choice and return to the draft. */
+  const answerTextChoice = (mineru: boolean) => {
+    if (drafts.textChoice) drafts.chooseText(drafts.textChoice.name, mineru)
+    textareaRef.current?.focus()
+  }
   const showStop = Boolean(isStreaming) && !(sendWhileStreaming && canSend)
   const hintText = hint ?? null
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
@@ -238,6 +244,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             <InactiveAttachments count={inactiveContext.length}>{inactiveContext.map(contextChip)}</InactiveAttachments>
           )}
         </div>
+      )}
+      {drafts.textChoice && (
+        <InlineConfirm
+          question={`${drafts.textChoice.name} has text. Extract it with MinerU instead?`}
+          onYes={() => answerTextChoice(true)}
+          onNo={() => answerTextChoice(false)}
+        />
       )}
 
       <div onDragOver={handleDragOver} onDrop={handleDrop} className={COMPOSER_CARD_CLASS}>

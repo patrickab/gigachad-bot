@@ -36,6 +36,13 @@ export function useDraftAttachments(chatId: string, slug: string | null) {
       .finally(() => setUploadingNames((prev) => { const next = new Set(prev); next.delete(name); return next }))
   }, [chatId, slug])
 
+  /** Settle the PDF `name`'s text choice: its own text layer as `parsedMd`, or (`mineru`) a MinerU extraction at send. */
+  const chooseText = useCallback((name: string, mineru: boolean) => setAttachments((prev) => prev.map((a) => {
+    if (a.name !== name || !a.textLayer) return a
+    const { textLayer, ...rest } = a
+    return mineru ? rest : { ...rest, parsedMd: textLayer }
+  })), [])
+
   const edit = async (name: string, content: string) => {
     const attachment = attachments.find((a) => a.name === name)
     if (!attachment) return
@@ -59,6 +66,9 @@ export function useDraftAttachments(chatId: string, slug: string | null) {
     remove,
     clear,
     upload,
+    /** The first PDF whose text layer awaits the choice between it and MinerU, null when none does. */
+    textChoice: attachments.find((a) => Boolean(a.textLayer)) ?? null,
+    chooseText,
     // Resolved each render so the window follows edits and closes once its attachment is removed.
     preview: attachments.find((a) => a.name === previewName) ?? null,
     openPreview,
