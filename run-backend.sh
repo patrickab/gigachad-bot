@@ -208,7 +208,7 @@ if [[ "$tailscale" == true ]]; then
 fi
 
 if [[ "$profile" == production ]]; then
-    workers="${GIGACHAD_UVICORN_WORKERS:-4}"
+    workers="${GIGACHAD_UVICORN_WORKERS:-2}"
     printf 'Starting production backend on http://127.0.0.1:%s (%s workers)\n' "$port" "$workers"
     uvicorn src.backend.server:app --host 127.0.0.1 --port "$port" --workers "$workers" &
 else

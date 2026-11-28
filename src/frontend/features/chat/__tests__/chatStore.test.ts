@@ -110,7 +110,7 @@ describe("createChatStore", () => {
     expect(chat.get().messages).toEqual([])
   })
 
-  it("a lastAnswer send into an emptied chat writes nothing and resolves null", async () => {
+  it("a send whose placeholder is no longer the last message writes nothing and resolves null", async () => {
     createChatStream.mockReturnValue(stream([event("token", "Orphan"), event("done", "")]))
     const chat = createChatStore()
 

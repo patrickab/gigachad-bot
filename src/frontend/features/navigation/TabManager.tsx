@@ -30,7 +30,7 @@ export interface TabManagerHandle {
   showChat: (historyFile: string) => void
   showItem: (item: WorkspaceItem) => void
   relocateHistories: (moves: ReadonlyMap<string, string>) => void
-  /** Point every tab of project `oldSlug` at `newSlug`, its content then reloads from the moved keys. */
+  /** Point every tab of project `oldSlug` at `newSlug`: files reload from the moved keys, a chat keeps its messages. */
   relocateProject: (oldSlug: string, newSlug: string) => void
   /** Point every tab showing the file `oldPath` at `newPath`, a renamed file keeps its editor session. */
   relocateDocument: (oldPath: string, newPath: string) => void
