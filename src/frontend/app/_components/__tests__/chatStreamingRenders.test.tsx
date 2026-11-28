@@ -3,24 +3,23 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
 import { TabContext, type TabContextValue } from "@/contexts/TabContext"
-import { ChatContainer, type ChatReveal } from "@/features/chat/ChatContainer"
+import type { ChatReveal } from "@/features/chat/ChatContainer"
 import type { SSEEvent, SSEStreamResult } from "@/lib/backend/sse"
 import type { ChatHistory } from "@/lib/domain/histories"
 import type { Attachment, Message } from "@/lib/domain/types"
-import { FilePanelProvider } from "@/features/editor/FilePanel"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
-import { TabContent } from "../TabContent"
+import { TabChat, TabContent } from "../TabContent"
 import { useTabChat } from "../useTabChat"
 
 /**
  * A streamed frame re-renders the live turn only, wired as the app wires it: `useTabChat`'s real outputs, passed to
- * `ChatContainer` the way `TabContent` passes them; `ChatContainer` renders the pairs on the shared `ConversationColumn`.
+ * `TabChat` the way `TabContent` passes them; `ChatContainer` renders the pairs on the shared `ConversationColumn`.
  * Only the network (`@/lib/backend/api`, the shared resources) and the app-wide providers (tab, branches, undo, tools,
  * settings) are stubbed, with values as stable as the real ones.
  *
- * Props covered, every one `TabContent` hands `ChatContainer` (add a new one here and to `TabChat` below):
- * chatId, historyFile, draftKey, onChatColumnChange, messages, historyLoading, isStreaming, onDeletePair, onEditPair, extracting,
- * onSend, onCancel, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
+ * Props covered, every one `TabContent` hands `TabChat` (add a new one here and to `ChatOfTab` below):
+ * chatId, historyFile, draftKey, onChatColumnChange, chat (messages, isStreaming, cancel), historyLoading, onDeletePair, onEditPair, extracting,
+ * onSend, onBranch, reveal, branchMessageIdx, chatInputRef, slug, attachmentActions
  * (onToggleActive, onRemove, onContentChange, onPreviewOpen), attachMenuItems, composerLeading, composerNotice.
  * What `ChatContainer` hands a pair from them: the pair's messages and indexes, isStreaming, onCollapse,
  * onAttachmentClick (its preview opener), onDelete, onEdit, laterTurnsOf, onBranch, the branch separator.
@@ -37,8 +36,6 @@ const { renders, durations, stream, history, branches, undoDelete, enabledTools,
   branches: {
     refreshAll: async () => {},
     createBranch: async () => ({ childFile: "child.json", chatId: "child" }),
-    setActiveFile: () => {},
-    setActiveQaIndex: () => {},
   },
   undoDelete: { schedule: () => {}, pending: () => false },
   enabledTools: { enabledTools: [], toggleTool: () => {} },
@@ -126,11 +123,15 @@ vi.mock("@/features/settings/ModelDropdown", async (importOriginal) => {
 vi.mock("@/features/chat/composer/ChatInput", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/features/chat/composer/ChatInput")>()
   const { forwardRef, Profiler } = await import("react")
-  const ChatInput = forwardRef<import("@/features/chat/composer/ChatInput").ChatInputHandle, ComponentProps<typeof actual.ChatInput>>((props, ref) => {
-    count("ChatInput")
-    return <Profiler id="composer" onRender={profile}><actual.ChatInput {...props} ref={ref} /></Profiler>
-  })
+  const ChatInput = forwardRef<import("@/features/chat/composer/ChatInput").ChatInputHandle, ComponentProps<typeof actual.ChatInput>>((props, ref) => (
+    <Profiler id="composer" onRender={profile}><actual.ChatInput {...props} ref={ref} /></Profiler>
+  ))
   return { ...actual, ChatInput }
+})
+// Counted inside the composer: only a render of `ChatInput`'s own body renders its textarea
+vi.mock("@/components/ui/Composer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/ui/Composer")>()
+  return { ...actual, ComposerTextarea: (props: ComponentProps<typeof actual.ComposerTextarea>) => { count("ChatInput"); return <actual.ComposerTextarea {...props} /> } }
 })
 vi.mock("../WorkspaceSurface", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../WorkspaceSurface")>()
@@ -141,7 +142,6 @@ vi.mock("../useTabChat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../useTabChat")>()
   return { ...actual, useTabChat: (...args: Parameters<typeof actual.useTabChat>) => { count("TabWorkspace"); return actual.useTabChat(...args) } }
 })
-vi.mock("../TabSidebar", () => ({ TabSidebar: () => null }))
 vi.mock("@/features/chat/messages/MessageAttachments", () => ({
   MessageAttachments: ({ attachments }: { attachments: Attachment[] }) => {
     count(`attachments:${attachments.map((attachment) => attachment.name).join(",")}`)
@@ -177,24 +177,22 @@ const onOpenChat = () => {}
 const onOpenItem = () => {}
 
 /** `TabContent`'s chat body for a non-empty chat: `useTabChat`'s outputs handed down prop for prop. */
-function TabChat({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabChat>) => void }) {
-  const tabChat = useTabChat({ reveal, onOpenChat, onOpenItem })
+function ChatOfTab({ onTabChat }: { onTabChat: (tabChat: ReturnType<typeof useTabChat>) => void }) {
+  const tabChat = useTabChat({ onOpenChat, onOpenItem, onSaveAs: noop })
   onTabChat(tabChat)
   const { chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch } = tabChat
   return (
-    <ChatContainer
+    <TabChat
+      chat={chat}
       chatId={chatId}
       historyFile={tab.tab.historyFile ?? null}
       draftKey={`chat::${tab.tab.historyFile}`}
       onChatColumnChange={noop}
-      messages={chat.messages}
       historyLoading={historyLoading}
-      isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
       onEditPair={onEditPair}
       extracting={extracting}
       onSend={(text, attachments) => void turns.handleSend(text, attachments)}
-      onCancel={chat.cancel}
       onBranch={onBranch}
       reveal={reveal}
       branchMessageIdx={branchMessageIdx}
@@ -218,7 +216,7 @@ describe("a tab's chat while a reply streams", () => {
 
   it("re-renders neither an open nor a collapsed settled pair", async () => {
     let tabChat!: ReturnType<typeof useTabChat>
-    render(<TabContext.Provider value={tab}><TabChat onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
+    render(<TabContext.Provider value={tab}><ChatOfTab onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
     fireEvent.click(await screen.findByRole("button", { name: "Question 0" }))
     expect(screen.getByRole("separator")).toBeTruthy()
 
@@ -226,7 +224,7 @@ describe("a tab's chat while a reply streams", () => {
     await waitFor(() => expect(stream.current).not.toBeNull())
     act(() => stream.current!.push({ event: "token", data: "A" }))
     await waitFor(() => expect(renders.get("A")).toBeGreaterThan(0))
-    expect(tabChat.chat.isStreaming).toBe(true)
+    expect(tabChat.chat.get().isStreaming).toBe(true)
 
     // Question 0 open with its attachment, Question 1 collapsed to its answer's head
     const watched = ["Question 0", "attachments:notes.md", "Answer 0", "Answer 1"]
@@ -242,12 +240,12 @@ describe("a tab's chat while a reply streams", () => {
     expect(watched.map((key) => renders.get(key) ?? 0)).toEqual(before)
 
     act(() => stream.current!.push({ event: "done", data: "" }))
-    await waitFor(() => expect(tabChat.chat.isStreaming).toBe(false))
+    await waitFor(() => expect(tabChat.chat.get().isStreaming).toBe(false))
   })
 
   it("re-renders no settled pair for a send from start to end, nor for the delete of a later pair", async () => {
     let tabChat!: ReturnType<typeof useTabChat>
-    render(<TabContext.Provider value={tab}><TabChat onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
+    render(<TabContext.Provider value={tab}><ChatOfTab onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
     fireEvent.click(await screen.findByRole("button", { name: "Question 0" }))
     const watched = ["Question 0", "attachments:notes.md", "Answer 0", "Answer 1"]
     const before = watched.map((key) => renders.get(key) ?? 0)
@@ -257,17 +255,17 @@ describe("a tab's chat while a reply streams", () => {
     await waitFor(() => expect(stream.current).not.toBeNull())
     act(() => stream.current!.push({ event: "token", data: "Reply" }))
     act(() => stream.current!.push({ event: "done", data: "" }))
-    await waitFor(() => expect(tabChat.chat.isStreaming).toBe(false))
+    await waitFor(() => expect(tabChat.chat.get().isStreaming).toBe(false))
     expect(watched.map((key) => renders.get(key) ?? 0)).toEqual(before)
 
     act(() => tabChat.turns.handleDeletePair(4))
-    await waitFor(() => expect(tabChat.chat.messages.map((m) => m.content)).not.toContain("Question 2"))
+    await waitFor(() => expect(tabChat.chat.get().messages.map((m) => m.content)).not.toContain("Question 2"))
     expect(watched.map((key) => renders.get(key) ?? 0)).toEqual(before)
   })
 
   it("renders the live pair's question per token frame (measure)", async () => {
     let tabChat!: ReturnType<typeof useTabChat>
-    render(<TabContext.Provider value={tab}><TabChat onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
+    render(<TabContext.Provider value={tab}><ChatOfTab onTabChat={(current) => { tabChat = current }} /></TabContext.Provider>)
     await screen.findByRole("button", { name: "Question 0" })
 
     // None: the question keeps its props (it binds its index to the stable attachment handler). Was 20 before task pi-live.
@@ -284,11 +282,9 @@ describe("a tab's chat while a reply streams", () => {
     render(
       <Profiler id="tab" onRender={profile}>
         <SidebarProvider>
-          <FilePanelProvider>
-            <TabContext.Provider value={tab}>
-              <TabContent onOpenChat={noop} onOpenProject={noop} onProjectRenamed={noop} onNewChat={noop} onOpenItem={onOpenItem} reveal={reveal} />
-            </TabContext.Provider>
-          </FilePanelProvider>
+          <TabContext.Provider value={tab}>
+            <TabContent onOpenChat={noop} onOpenItem={onOpenItem} onSaveAs={noop} reveal={reveal} />
+          </TabContext.Provider>
         </SidebarProvider>
       </Profiler>,
     )
@@ -317,8 +313,8 @@ describe("a tab's chat while a reply streams", () => {
     const { bar = 0, composer = 0, tab: total = 0 } = Object.fromEntries(durations.ms)
     console.info(`chat, 100 token frames: ${JSON.stringify(counts)}; bar ${(100 * bar / total).toFixed(1)}%, composer ${(100 * composer / total).toFixed(1)}% of ${total.toFixed(0)} ms`)
 
-    // baseline, lowered by the store tasks
-    expect(counts).toEqual({ ModelDropdown: 100, ChatInput: 100, WorkspaceSurface: 100, TabWorkspace: 100 })
+    // Only the chat body follows the messages: the workspace, its surface and the bar were 100 each before task LA3, the composer before task LA4
+    expect(counts).toEqual({ ModelDropdown: 0, ChatInput: 0, WorkspaceSurface: 0, TabWorkspace: 0 })
 
     await act(async () => stream.current!.push({ event: "done", data: "" }))
   })
@@ -347,6 +343,6 @@ async function questionRendersPerTokenFrames(tabChat: () => ReturnType<typeof us
   for (let index = 0; index < frames; index++) await frame()
   const count = (renders.get(key) ?? 0) - before
   act(() => stream.current!.push({ event: "done", data: "" }))
-  await waitFor(() => expect(tabChat().chat.isStreaming).toBe(false))
+  await waitFor(() => expect(tabChat().chat.get().isStreaming).toBe(false))
   return count
 }

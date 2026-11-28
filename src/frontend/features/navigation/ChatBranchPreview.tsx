@@ -45,6 +45,9 @@ function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Ma
 
 type Point = { idx: number; nodes: Node[] }
 
+/** The chat shown in the tab in front and its revealed question. */
+interface Active { activeFile: string | null; activeQaIndex: number | null }
+
 function groupByPoint(children: Node[]): Point[] {
   const m = new Map<number, Node[]>()
   for (const c of children) {
@@ -56,8 +59,8 @@ function groupByPoint(children: Node[]): Point[] {
   return [...m.entries()].sort(([a], [b]) => a - b).map(([idx, nodes]) => ({ idx, nodes }))
 }
 
-function BranchTree({ root }: { root: Node }) {
-  const { onFileClick, activeFile, activeQaIndex } = useBranches()
+function BranchTree({ root, activeFile, activeQaIndex }: Active & { root: Node }) {
+  const { onFileClick } = useBranches()
   const points = groupByPoint(root.children)
   if (points.length === 0) return null
 
@@ -80,7 +83,7 @@ function BranchTree({ root }: { root: Node }) {
           <div className="relative">
             <div className="absolute left-[11px] top-0 bottom-0 w-px bg-divider pointer-events-none" />
             {pt.nodes.map((n) => (
-              <BranchRow key={n.file} node={n} />
+              <BranchRow key={n.file} node={n} activeFile={activeFile} activeQaIndex={activeQaIndex} />
             ))}
           </div>
         </div>
@@ -89,8 +92,8 @@ function BranchTree({ root }: { root: Node }) {
   )
 }
 
-function BranchRow({ node }: { node: Node }) {
-  const { onFileClick, mergeBranch, activeFile, activeQaIndex } = useBranches()
+function BranchRow({ node, activeFile, activeQaIndex }: Active & { node: Node }) {
+  const { onFileClick, mergeBranch } = useBranches()
   const deleteChat = useDeleteChat()
   const isActive = activeFile === node.file && activeQaIndex == null
   const hasKids = node.children.length > 0
@@ -128,7 +131,7 @@ function BranchRow({ node }: { node: Node }) {
 
       {hasKids && (
         <div className="relative ml-6">
-          <BranchTree root={node} />
+          <BranchTree root={node} activeFile={activeFile} activeQaIndex={activeQaIndex} />
         </div>
       )}
     </div>
@@ -136,12 +139,12 @@ function BranchRow({ node }: { node: Node }) {
 }
 
 /** Show the active chat's branch genealogy before its standard tree row. */
-export function ChatBranchPreview({ file }: { file: string }) {
-  const { branchMeta, chatIdMap, activeFile } = useBranches()
+export function ChatBranchPreview({ file, activeFile, activeQaIndex }: Active & { file: string }) {
+  const { branchMeta, chatIdMap } = useBranches()
   const metadata = branchMeta[file]
   const hasChildren = (metadata?.children?.length ?? 0) > 0
   const isRelevant = activeFile === file || isAncestorOf(activeFile, file, branchMeta, chatIdMap)
   const tree = useMemo(() => hasChildren && isRelevant ? buildTree(file, branchMeta, chatIdMap) : null,
     [hasChildren, isRelevant, file, branchMeta, chatIdMap])
-  return tree ? <BranchTree root={tree} /> : null
+  return tree ? <BranchTree root={tree} activeFile={activeFile} activeQaIndex={activeQaIndex} /> : null
 }

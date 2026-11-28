@@ -1,7 +1,8 @@
 "use client"
 
-import { createContext, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { createContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { useHostAccess } from "@/contexts/SettingsContext"
+import { useTabValue } from "@/contexts/TabContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { readStorage, writeStorage } from "@/lib/storage"
 import { availableTools, TOOLS } from "@/features/chat/tools"
@@ -17,10 +18,22 @@ interface EnabledToolsState {
   researchEnabled: boolean
 }
 
-const EnabledToolsContext = createContext<EnabledToolsState | null>(null)
+/** The tools of every chat: a chat's own choice, else the saved one. */
+interface EnabledToolsStore {
+  enabledFor: (chatId: string) => ToolName[]
+  toggle: (chatId: string, name: ToolName) => void
+}
 
+const EnabledToolsContext = createContext<EnabledToolsStore | null>(null)
+
+/** The enabled tools of the enclosing tab's chat, in the app's chrome of the tab in front's: a toggle stays in its chat. */
 export function useEnabledTools(): EnabledToolsState {
-  return useRequiredContext(EnabledToolsContext, "useEnabledTools must be used within EnabledToolsProvider")
+  const { enabledFor, toggle } = useRequiredContext(EnabledToolsContext, "useEnabledTools must be used within EnabledToolsProvider")
+  const chatId = useTabValue()?.tab.chatId ?? ""
+  return useMemo<EnabledToolsState>(() => {
+    const enabledTools = enabledFor(chatId)
+    return { enabledTools, toggleTool: (name) => toggle(chatId, name), researchEnabled: enabledTools.includes("deep_research") }
+  }, [enabledFor, toggle, chatId])
 }
 
 /** Storage never changes under a mounted provider, so there is nothing to subscribe to. */
@@ -76,35 +89,29 @@ function savedTools(enabled: ToolName[]): string {
 }
 
 export function EnabledToolsProvider({ children }: { children: ReactNode }) {
-  // Restored once from storage (a per-browser choice, matching every other composer preference);
-  // the server snapshot is empty so the first paint uses the safe defaults.
+  // Restored from storage (a per-browser choice, matching every other composer preference) whenever the provider renders,
+  // so a chat that chose nothing follows the last choice saved; the server snapshot is empty so the first paint uses the safe defaults.
   const saved = useSyncExternalStore(subscribeNever, readSavedTools, readServerSavedTools)
-  const [chosen, setChosen] = useState<ToolName[] | null>(null)
+  const [chosen, setChosen] = useState<{ byChat: ReadonlyMap<string, ToolName[]>; last: ToolName[] | null }>({ byChat: new Map(), last: null })
   // The choice is kept as made, a login only ever sends the tools it may be offered.
   const hostAccess = useHostAccess()
-  const enabledTools = useMemo(() => {
-    const available = new Set(availableTools(hostAccess).map((tool) => tool.name))
-    return (chosen ?? parseSavedTools(saved)).filter((name) => available.has(name))
-  }, [chosen, saved, hostAccess])
 
   useEffect(() => {
-    if (chosen) writeStorage(TOOLS_STORAGE_KEY, savedTools(chosen))
-  }, [chosen])
+    if (chosen.last) writeStorage(TOOLS_STORAGE_KEY, savedTools(chosen.last))
+  }, [chosen.last])
 
-  // Tools are independent: enabling one must not disable another, because a chat can call a
-  // different tool on every turn.
-  const toggleTool = useCallback((name: ToolName) => {
-    setChosen((prev) => {
-      const current = prev ?? parseSavedTools(saved)
-      return current.includes(name) ? current.filter((t) => t !== name) : [...current, name]
-    })
-  }, [saved])
-
-  const value = useMemo<EnabledToolsState>(() => ({
-    enabledTools,
-    toggleTool,
-    researchEnabled: enabledTools.includes("deep_research"),
-  }), [enabledTools, toggleTool])
+  const value = useMemo<EnabledToolsStore>(() => {
+    const available = new Set(availableTools(hostAccess).map((tool) => tool.name))
+    return {
+      enabledFor: (chatId) => (chosen.byChat.get(chatId) ?? parseSavedTools(saved)).filter((name) => available.has(name)),
+      // Tools are independent: enabling one must not disable another, because a chat can call a different tool on every turn.
+      toggle: (chatId, name) => setChosen(({ byChat }) => {
+        const current = byChat.get(chatId) ?? parseSavedTools(saved)
+        const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name]
+        return { byChat: new Map(byChat).set(chatId, next), last: next }
+      }),
+    }
+  }, [chosen.byChat, saved, hostAccess])
 
   return (
     <EnabledToolsContext.Provider value={value}>

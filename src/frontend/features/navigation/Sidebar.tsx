@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Brain, FolderPlus } from "lucide-react"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -44,12 +44,19 @@ interface SidebarProps {
   onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
+  /** The question of the tab's chat that was revealed last, marked in its branch rows. */
+  activeQaIndex?: number | null
 }
 
 export function Sidebar(props: SidebarProps) {
   const { onNewChat, renderSettings } = props
   const { collapsed, toggleCollapsed, width, setWidth } = useSidebar()
   const { tab } = useTab()
+  // A row that switched tabs keeps no focus, so Tab and Space act on the tabs again, as when each tab's own sidebar went inert
+  useEffect(() => {
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && focused.closest("[aria-label='Sidebar']")) focused.blur()
+  }, [tab.id])
   const branches = useBranches()
   const { projects, createProject } = useProject()
   const { openMemoryViewer } = useMemoryViewer()
@@ -104,8 +111,10 @@ export function Sidebar(props: SidebarProps) {
 
   const learn = useLearnSidebar({ open: props.onItemOpen ?? (() => {}), projects, sidebar: { collapsed, toggle: toggleCollapsed } })
 
+  const activeFile = tab.historyFile
+  const activeQaIndex = props.activeQaIndex ?? null
   const projectTree = projectItems({
-    ...props, ...branches, ...documents, ...projectActions, ...fileRename, ...folderRows, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
+    ...props, ...branches, activeFile, activeQaIndex, ...documents, ...projectActions, ...fileRename, ...folderRows, renameOf, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
   })
   // Host logins see each project's learn sessions in its group.
   const items = code.hostAccess ? projectTree.map((root) => {
@@ -145,7 +154,7 @@ export function Sidebar(props: SidebarProps) {
               controller.expand(slug)
               onNewChat?.(slug)
             } }}
-            renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
+            renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} activeFile={activeFile} activeQaIndex={activeQaIndex} /> : null}
             onMoveToRoot={(path) => documents.move(path, "")}
           />
           <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>

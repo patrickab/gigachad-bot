@@ -1,6 +1,6 @@
 "use client"
 
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType, type ReactNode } from "react"
+import { forwardRef, memo, useCallback, useImperativeHandle, useRef, useState, type ElementType, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { Pencil } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
@@ -73,7 +73,7 @@ export interface ChatInputHandle {
   focus: () => void
 }
 
-export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   draftKey = null,
   onSend,
@@ -292,4 +292,4 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       <AttachmentPreview attachment={drafts.preview} onClose={drafts.closePreview} onContentChange={drafts.editPreview} />
     </motion.div>
   )
-})
+}))

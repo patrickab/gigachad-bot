@@ -1,16 +1,19 @@
-import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { useChatStream, type ChatStreamCompletion } from "@/features/chat/useChatStream"
+import { createChatStore } from "@/features/chat/chatStore"
 import type { ChatRequest } from "@/lib/domain/types"
 import type { SSEEvent, SSEStreamResult } from "@/lib/backend/sse"
 
-const TEST_MODEL = "provider/test-model"
-
-const { createChatStream } = vi.hoisted(() => ({
-  createChatStream: vi.fn(),
-}))
+const { createChatStream } = vi.hoisted(() => ({ createChatStream: vi.fn() }))
 
 vi.mock("@/lib/backend/api", () => ({ createChatStream, currentConnectionPool: () => 0, leaveConnectionPool: vi.fn() }))
+// Every token lands at once
+vi.mock("@/lib/backend/tokenPacer", () => ({
+  createTokenPacer: (emit: (text: string) => void) => ({ push: emit, flush: () => {}, finish: async () => {} }),
+}))
+
+function request(user_msg: string): ChatRequest {
+  return { model: "provider/test-model", chat_id: "chat-1", user_msg, img_paths: [] }
+}
 
 function stream(events: SSEEvent[]): SSEStreamResult {
   return {
@@ -46,20 +49,77 @@ function event(name: string, data: unknown): SSEEvent {
   return { event: name, data: typeof data === "string" ? data : JSON.stringify(data) }
 }
 
-function request(user_msg: string): ChatRequest {
-  return {
-    model: TEST_MODEL,
-    chat_id: "chat-1",
-    user_msg,
-    img_paths: [],
+/** A stream that yields `events`, then waits for `release()`, then ends with `done`; `abort` fails the wait. */
+function heldStream(events: SSEEvent[]) {
+  let release!: () => void
+  let fail!: (error: Error) => void
+  let reached!: () => void
+  const held = new Promise<void>((resolve) => { reached = resolve })
+  const stream: SSEStreamResult = {
+    abort: vi.fn(() => fail(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+    async *[Symbol.asyncIterator]() {
+      yield* events
+      reached()
+      await new Promise<void>((resolve, reject) => { release = resolve; fail = reject })
+      yield { event: "token", data: " late" }
+      yield { event: "done", data: "" }
+    },
   }
+  return { stream, held, release: () => release() }
 }
 
-beforeEach(() => {
-  createChatStream.mockReset()
+beforeEach(() => createChatStream.mockReset())
+
+describe("createChatStore", () => {
+  it("sends what a write right before send left in the chat", async () => {
+    const { stream, held, release } = heldStream([])
+    createChatStream.mockReturnValue(stream)
+    const chat = createChatStore()
+    chat.update(() => [{ role: "user", content: "Earlier" }, { role: "assistant", content: "Answer" }])
+
+    const sent = chat.send(request("Question"))
+
+    expect(createChatStream.mock.calls[0][0].messages).toEqual([
+      { role: "user", content: "Earlier" },
+      { role: "assistant", content: "Answer" },
+    ])
+    await held
+    release()
+    await sent
+  })
+
+  it("writes nothing into a chat emptied while the reply streams", async () => {
+    const { stream, held, release } = heldStream([{ event: "token", data: "Early" }])
+    createChatStream.mockReturnValue(stream)
+    const chat = createChatStore()
+    const sent = chat.send(request("Question"))
+    await held
+    expect(chat.get().messages.at(-1)).toEqual({ role: "assistant", content: "Early" })
+
+    chat.update(() => [])
+    release()
+
+    expect(await sent).toBeNull()
+    expect(chat.get().messages).toEqual([])
+  })
+
+  it("stops streaming at once on cancel", async () => {
+    const { stream, held } = heldStream([])
+    createChatStream.mockReturnValue(stream)
+    const chat = createChatStore()
+    const sent = chat.send(request("Question"))
+    await held
+    expect(chat.get().isStreaming).toBe(true)
+
+    chat.cancel()
+
+    expect(chat.get().isStreaming).toBe(false)
+    expect(stream.abort).toHaveBeenCalled()
+    expect(await sent).toBeNull()
+  })
 })
 
-describe("useChatStream", () => {
+describe("a chat store's stream", () => {
   it("reconciles a tool result by call id without losing answer text or usage", async () => {
     createChatStream.mockReturnValue(stream([
       event("token", "Before "),
@@ -79,14 +139,10 @@ describe("useChatStream", () => {
       event("usage", { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }),
       event("done", ""),
     ]))
-    const { result } = renderHook(() => useChatStream())
-    let completion: ChatStreamCompletion | null = null
+    const chat = createChatStore()
+    const completion = await chat.send(request("Find cats"))
 
-    await act(async () => {
-      completion = await result.current.send(request("Find cats"))
-    })
-
-    expect(result.current.messages).toEqual([
+    expect(chat.get().messages).toEqual([
       { role: "user", content: "Find cats" },
       {
         role: "assistant",
@@ -103,14 +159,14 @@ describe("useChatStream", () => {
         }],
       },
     ])
-    expect(result.current.totalUsage).toEqual({
+    expect(chat.get().usage).toEqual({
       prompt_tokens: 11,
       completion_tokens: 7,
       total_tokens: 18,
     })
     expect(completion).toEqual({
-      messages: result.current.messages,
-      usage: result.current.totalUsage,
+      messages: chat.get().messages,
+      usage: chat.get().usage,
     })
   })
 
@@ -119,7 +175,6 @@ describe("useChatStream", () => {
     let finish!: () => void
     const firstToken = new Promise<void>((resolve) => { markFirstToken = resolve })
     const responseFinished = new Promise<void>((resolve) => { finish = resolve })
-    const now = vi.spyOn(performance, "now")
     createChatStream.mockReturnValue({
       abort: vi.fn(),
       async *[Symbol.asyncIterator]() {
@@ -130,21 +185,13 @@ describe("useChatStream", () => {
         yield event("done", "")
       },
     })
-    const { result } = renderHook(() => useChatStream())
-    let send: Promise<ChatStreamCompletion | null>
+    const chat = createChatStore()
+    const sent = chat.send(request("Stream this"))
+    await firstToken
+    await vi.waitFor(() => expect(chat.get().messages.at(-1)).toEqual({ role: "assistant", content: "First" }))
 
-    try {
-      await act(async () => {
-        send = result.current.send(request("Stream this"))
-        await firstToken
-      })
-      await waitFor(() => expect(result.current.messages.at(-1)).toEqual({ role: "assistant", content: "First" }))
-
-      finish()
-      await act(async () => { await send })
-    } finally {
-      now.mockRestore()
-    }
+    finish()
+    await sent
   })
 
   it("keeps usage for the current request instead of accumulating prior turns", async () => {
@@ -159,14 +206,12 @@ describe("useChatStream", () => {
         event("usage", { prompt_tokens: 29, completion_tokens: 13, total_tokens: 42 }),
         event("done", ""),
       ]))
-    const { result } = renderHook(() => useChatStream())
+    const chat = createChatStore()
 
-    await act(async () => {
-      await result.current.send(request("First question"))
-      await result.current.send(request("Second question"))
-    })
+    await chat.send(request("First question"))
+    await chat.send(request("Second question"))
 
-    expect(result.current.totalUsage).toEqual({
+    expect(chat.get().usage).toEqual({
       prompt_tokens: 29,
       completion_tokens: 13,
       total_tokens: 42,
@@ -191,16 +236,12 @@ describe("useChatStream", () => {
         event("token", "Second answer"),
         event("done", ""),
       ]))
-    const { result } = renderHook(() => useChatStream())
+    const chat = createChatStore()
 
-    await act(async () => {
-      await result.current.send(request("Create a mind map"))
-    })
-    expect(result.current.messages[1].content).toBe("")
+    await chat.send(request("Create a mind map"))
+    expect(chat.get().messages[1].content).toBe("")
 
-    await act(async () => {
-      await result.current.send(request("Follow up"))
-    })
+    await chat.send(request("Follow up"))
 
     expect(createChatStream.mock.calls[1][0].messages).toEqual([
       { role: "user", content: "Create a mind map" },
@@ -241,19 +282,15 @@ describe("useChatStream", () => {
         event("token", "Second answer"),
         event("done", ""),
       ]))
-    const { result } = renderHook(() => useChatStream())
+    const chat = createChatStore()
 
-    await act(async () => {
-      await result.current.send(request("Initial question"))
-    })
+    await chat.send(request("Initial question"))
 
-    expect(JSON.stringify(result.current.messages[1].tool_calls)).toContain(detailSentinel)
-    expect(JSON.stringify(result.current.messages[1].tool_calls)).toContain(sourceSentinel)
-    expect(JSON.stringify(result.current.messages[1].tool_calls)).toContain(sandboxSentinel)
+    expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(detailSentinel)
+    expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(sourceSentinel)
+    expect(JSON.stringify(chat.get().messages[1].tool_calls)).toContain(sandboxSentinel)
 
-    await act(async () => {
-      await result.current.send(request("Follow up"))
-    })
+    await chat.send(request("Follow up"))
 
     const laterRequest = createChatStream.mock.calls[1][0]
     expect(laterRequest.messages).toEqual([
@@ -271,12 +308,11 @@ describe("useChatStream", () => {
       async *[Symbol.asyncIterator]() { throw new TypeError("NetworkError when attempting to fetch resource.") },
     }
     createChatStream.mockReturnValueOnce(dead).mockReturnValueOnce(stream([event("token", "Hi"), event("done", "")]))
-    const { result } = renderHook(() => useChatStream())
-    let completion: ChatStreamCompletion | null = null
-    await act(async () => { completion = await result.current.send(request("hi")) })
+    const chat = createChatStore()
+    const completion = await chat.send(request("hi"))
     expect(createChatStream).toHaveBeenCalledTimes(2)
     expect(completion).not.toBeNull()
-    expect(result.current.messages[1].content).toBe("Hi")
+    expect(chat.get().messages[1].content).toBe("Hi")
   })
 
   it("leaves no running tool record when the turn is aborted", async () => {
@@ -288,18 +324,14 @@ describe("useChatStream", () => {
       }),
     ])
     createChatStream.mockReturnValue(parkedResult)
-    const { result } = renderHook(() => useChatStream())
-    let completion: ChatStreamCompletion | null = null
-
-    await act(async () => {
-      const sent = result.current.send(request("Plot it"))
-      await parked
-      result.current.cancel()
-      completion = await sent
-    })
+    const chat = createChatStore()
+    const sent = chat.send(request("Plot it"))
+    await parked
+    chat.cancel()
+    const completion = await sent
 
     expect(completion).toBeNull()
-    const calls = result.current.messages[1].tool_calls
+    const calls = chat.get().messages[1].tool_calls
     expect(calls).toHaveLength(1)
     expect(calls?.[0]).toMatchObject({ id: "call-1", status: "error", error: "Cancelled" })
     expect(calls?.[0].stages?.[0]).toMatchObject({ status: "error" })
@@ -311,13 +343,11 @@ describe("useChatStream", () => {
       event("tool_call", { id: "call-1", name: "web_search", arguments: { query: "cats" } }),
       event("error", "upstream died"),
     ]))
-    const { result } = renderHook(() => useChatStream())
+    const chat = createChatStore()
 
-    await act(async () => {
-      await result.current.send(request("Find cats"))
-    })
+    await chat.send(request("Find cats"))
 
-    const assistant = result.current.messages[1]
+    const assistant = chat.get().messages[1]
     expect(assistant.content).toContain("upstream died")
     expect(assistant.tool_calls?.[0]).toMatchObject({ id: "call-1", status: "error", error: "upstream died" })
   })

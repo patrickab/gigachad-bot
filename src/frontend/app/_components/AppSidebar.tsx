@@ -1,12 +1,14 @@
 "use client"
 
-// Renders one tab's Sidebar apart from its chat, so streamed tokens never re-render navigation.
-// Consumes the tab context, the shared model and prompt stores, settings and stable shell callbacks.
-// Provides `TabSidebar`, memoized here rather than on Sidebar: React 19.2 keeps stale `useEffectEvent` closures in a memo component that context re-renders.
+// Renders the app's one Sidebar for the tab in front, apart from every chat, so streamed tokens never re-render navigation.
+// Consumes the tab context (in the app's chrome: the tab in front), the shared model and prompt stores, settings and stable shell callbacks.
+// Provides `AppSidebar`, memoized here rather than on Sidebar: the chrome re-renders with every tab manager change (another tab's
+// title, a mode label, a peek), the sidebar only when the tab in front does. React 19.2 keeps stale `useEffectEvent` closures in a memo component that context re-renders.
 
 import { memo, useCallback } from "react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
+import type { ChatReveal } from "@/features/chat/ChatContainer"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useHostAccess, useNeovimSetting } from "@/contexts/SettingsContext"
 import { itemOf, scratchItem, tabSurface, useTab, type WorkspaceItem } from "@/contexts/TabContext"
@@ -15,16 +17,17 @@ import { modelsResource, promptsResource } from "@/lib/backend/resources"
 
 const NO_PROMPTS: Record<string, string> = {}
 
-interface TabSidebarProps {
+interface AppSidebarProps {
   onOpenProject: (slug: string) => void
   onProjectRenamed: (oldSlug: string, newSlug: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   onEditPrompts: () => void
+  reveal: ChatReveal
 }
 
-/** One tab's sidebar, fed only by stable callbacks and stores the chat stream never touches. */
-export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRenamed, onNewChat, onOpenItem, onEditPrompts }: TabSidebarProps) {
+/** The sidebar of the tab in front, fed only by stable callbacks and stores the chat stream never touches. */
+export const AppSidebar = memo(function AppSidebar({ onOpenProject, onProjectRenamed, onNewChat, onOpenItem, onEditPrompts, reveal }: AppSidebarProps) {
   const { tab, updateConfig, setWorkspaceItem, dropItem } = useTab()
   const { config, workspaceItem, itemHidden, projectSlug } = tab
   const { researchEnabled } = useEnabledTools()
@@ -44,6 +47,8 @@ export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRen
     <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={onEditPrompts} models={models} researchEnabled={researchEnabled} />
   ), [prompts, config, updateConfig, onEditPrompts, models, researchEnabled])
   const activeDocumentPath = (itemOf(tab, "document") ?? itemOf(tab, "workbench"))?.path
+  // Another chat's reveal marks no question of this one
+  const activeQaIndex = reveal.historyFile === tab.historyFile ? reveal.qaIndex : null
 
   return (
     <Sidebar
@@ -57,6 +62,7 @@ export const TabSidebar = memo(function TabSidebar({ onOpenProject, onProjectRen
       onItemOpen={onOpenItem}
       renderSettings={renderSettings}
       appMode={tabSurface(tab)}
+      activeQaIndex={activeQaIndex}
     />
   )
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import type { ReactNode } from "react"
 import { TabContext, type Tab } from "@/contexts/TabContext"
 import type { ChatListing, ChatSearchHit } from "@/lib/backend/api"
 import { ChatPicker } from "../ChatPicker"
@@ -25,11 +26,15 @@ function chat(historyFile: string, title: string, ageHours: number, projectSlug:
 
 const TAB: Tab = { id: "tab", chatId: "chat", historyFile: null, title: null, config: {} as Tab["config"], projectSlug: null, workspaceItem: null, itemHidden: false }
 
+function inTab(tab: Tab, isActive: boolean, children: ReactNode) {
+  return <TabContext.Provider value={{ tab, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+    {children}
+  </TabContext.Provider>
+}
+
 function renderPicker({ isActive = true, open = true } = {}) {
   const onOpenChat = vi.fn()
-  render(<TabContext.Provider value={{ tab: TAB, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-    <ChatPicker onOpenChat={onOpenChat} />
-  </TabContext.Provider>)
+  render(inTab(TAB, isActive, <ChatPicker onOpenChat={onOpenChat} />))
   if (open) fireEvent.keyDown(window, { key: "c", altKey: true })
   return onOpenChat
 }
@@ -142,6 +147,16 @@ describe("ChatPicker", () => {
   it("closes on Escape", async () => {
     renderPicker()
     fireEvent.keyDown(search(), { key: "Escape" })
+    expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
+  })
+
+  it("closes when another tab comes to the front of the app's chrome", () => {
+    const picker = <ChatPicker onOpenChat={vi.fn()} />
+    const view = render(inTab(TAB, true, picker))
+    fireEvent.keyDown(window, { key: "c", altKey: true })
+    expect(screen.getByRole("dialog", { name: "Chats" })).toBeInTheDocument()
+
+    view.rerender(inTab({ ...TAB, id: "other" }, true, picker))
     expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
   })
 

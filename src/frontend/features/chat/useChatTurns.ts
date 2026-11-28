@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { withoutPairs, type ChatStreamCompletion, type UseChatStreamReturn } from "@/features/chat/useChatStream"
+import { withoutPairs, type ChatStore, type ChatStreamCompletion } from "@/features/chat/chatStore"
 import { deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
 import { attachReference } from "@/lib/backend/references"
 import {
@@ -67,7 +67,7 @@ export function useChatTurns({
   save,
   autosave,
 }: {
-  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "totalUsage" | "send" | "removePairs" | "setMessages" | "replaceMessages">
+  chat: ChatStore
   chatId: string
   projectSlug: string | null
   config: TabConfig
@@ -76,7 +76,6 @@ export function useChatTurns({
   save: (messages: Message[], usage: Usage) => Promise<void>
   autosave: (messages: Message[], usage: Usage) => Promise<void>
 }) {
-  const { messages, totalUsage, send, removePairs, setMessages, replaceMessages } = chat
   const [turnError, setTurnError] = useState<string | null>(null)
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
@@ -88,14 +87,6 @@ export function useChatTurns({
   // Undo restores run up to six seconds later, they must not land in a different chat loaded into this tab meanwhile.
   const chatIdRef = useRef(chatId)
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
-  // Every handler reads the messages here: created once per chat, they stay the same while a reply streams, so settled
-  // pairs skip its frames
-  const messagesRef = useRef(messages)
-  const totalUsageRef = useRef(totalUsage)
-  useLayoutEffect(() => {
-    messagesRef.current = messages
-    totalUsageRef.current = totalUsage
-  }, [messages, totalUsage])
 
   /** Persist the turn's tool artifacts as documents, then autosave the chat. */
   const finishTurn = useCallback(async (completion: ChatStreamCompletion | null) => {
@@ -115,18 +106,18 @@ export function useChatTurns({
    * - Each source is read once, the patch applies to whatever the chat holds once the reads finish
    */
   const refreshForSend = useCallback(async (draft: Attachment[] = []) => {
-    const reads = await readReferences(liveReferencePaths([...messagesRef.current.flatMap((m) => m.attachments ?? []), ...draft]), attachReference)
+    const reads = await readReferences(liveReferencePaths([...chat.get().messages.flatMap((m) => m.attachments ?? []), ...draft]), attachReference)
     return {
-      history: replaceMessages((current) => applyReferenceReads(current, reads)),
+      history: chat.update((current) => applyReferenceReads(current, reads)),
       draft: draft.map((a) => withReferenceRead(a, reads)),
     }
-  }, [replaceMessages])
+  }, [chat])
 
   /** Re-read `paths` and patch them into whatever the chat holds once the reads finish. */
   const syncReferences = useCallback(async (paths: string[]) => {
     const reads = await readReferences(paths, attachReference)
-    setMessages((current) => applyReferenceReads(current, reads))
-  }, [setMessages])
+    chat.update((current) => applyReferenceReads(current, reads))
+  }, [chat])
 
   /** Send `text` with `attachments` as a new pair. Resolves to whether the answer completed. */
   const handleSend = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
@@ -134,7 +125,7 @@ export function useChatTurns({
     const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
     if (draft.length === 0) {
-      const completion = await send({
+      const completion = await chat.send({
         ...baseParams,
         chat_id: chatId,
         user_msg: text,
@@ -145,7 +136,7 @@ export function useChatTurns({
       return completion !== null
     }
 
-    replaceMessages((current) => [
+    chat.update((current) => [
       ...current,
       { role: "user" as const, content: text, attachments: draft },
       { role: "assistant" as const, content: "" },
@@ -160,31 +151,31 @@ export function useChatTurns({
       baseParams,
     }, parseFiles).catch(() => null)
     if (!built) {
-      updateMessageAt(setMessages, -1, (m) => m.role === "assistant" ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : null)
+      updateMessageAt(chat.update, -1, (m) => m.role === "assistant" ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : null)
       return false
     }
 
-    updateMessageAt(setMessages, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
-    const completion = await send(built.request, true)
+    updateMessageAt(chat.update, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
+    const completion = await chat.send(built.request, "lastAnswer")
     await finishTurn(completion)
     return completion !== null
-  }, [refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
+  }, [refreshForSend, finishTurn, chat, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
-    updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
-  }, [setMessages])
+    updateMessageAt(chat.update, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
+  }, [chat])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
-    const original = messagesRef.current[messageIndex]
+    const original = chat.get().messages[messageIndex]
     const att = findAttachment(original, attachmentName)
     const stripped = att ? withAttachment(original, attachmentName, () => null) : null
     if (!att || !stripped) return
     const scheduledChat = chatId
     const position = original.attachments?.indexOf(att) ?? 0
     // Removed from the chat (and from what the model sees) at once; the upload goes after the undo window.
-    if (!replaceMessages((current) => current.map((m) => m === original ? stripped : m)).includes(stripped)) return
+    if (!chat.update((current) => current.map((m) => m === original ? stripped : m)).includes(stripped)) return
     /** Put `original` back; when the stripped message was replaced meanwhile, re-insert the attachment into the message at `messageIndex` unless it holds one with that name. */
-    const restore = () => replaceMessages((current) => {
+    const restore = () => chat.update((current) => {
       if (current.includes(stripped)) return current.map((m) => m === stripped ? original : m)
       const msg = chatIdRef.current === scheduledChat ? current[messageIndex] : undefined
       if (!msg?.attachments || findAttachment(msg, attachmentName)) return current
@@ -200,7 +191,7 @@ export function useChatTurns({
       },
       restore,
     )
-  }, [replaceMessages, chatId, projectSlug, scheduleDelete])
+  }, [chat, chatId, projectSlug, scheduleDelete])
 
   /**
    * Remove the pair of the question at `index` (`"pair"`), or it and every later one (`"end"`): the history file is written
@@ -208,18 +199,19 @@ export function useChatTurns({
    * or the save failed: then `turnError` says `unsaved`).
    */
   const removeSaved = useCallback(async (index: number, through: "pair" | "end", unsaved: string): Promise<Message | null> => {
-    const user = messagesRef.current[index]
-    const next = user?.role === "user" ? withoutPairs(messagesRef.current, user, through) : null
+    const { messages, usage } = chat.get()
+    const user = messages[index]
+    const next = user?.role === "user" ? withoutPairs(messages, user, through) : null
     if (!next) return null
     try {
-      await save(next, totalUsageRef.current)
+      await save(next, usage)
     } catch {
       setTurnError(unsaved)
       return null
     }
     setTurnError(null)
-    return removePairs(user, through) && user
-  }, [save, removePairs])
+    return chat.removePairs(user, through) && user
+  }, [chat, save])
 
   /** Delete the pair whose question is at `index`, for good: it leaves the saved history, then the chat. */
   const handleDeletePair = useCallback((index: number) => {
@@ -239,11 +231,11 @@ export function useChatTurns({
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
-    const attachment = findAttachment(messagesRef.current[messageIndex], attachmentName)
+    const attachment = findAttachment(chat.get().messages[messageIndex], attachmentName)
     if (!attachment) return
     const saved = await saveAttachmentEdit(attachment, newContent)
-    updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved))
-  }, [setMessages])
+    updateMessageAt(chat.update, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved))
+  }, [chat])
 
   return {
     handleSend,

@@ -45,9 +45,9 @@ function isCloseTabKey(event: ReactKeyboardEvent<HTMLInputElement>): boolean {
  * Open state of the tab picker: a tapped Space opens it.
  *
  * - Opens on release, a press held through a pointer press is the canvas's pan, not a tap
- * - Listens only while its tab is frontmost, and closes when the tab goes to the background
+ * - Listens only while its tab is frontmost, and closes when the tab goes to the background or, in the app's chrome, another comes to the front
  */
-function useSpaceToOpen(isActive: boolean) {
+function useSpaceToOpen(isActive: boolean, tabId: string) {
   const [open, setOpen] = useState(false)
   const armed = useRef(false)
   useEventListener("window", "keydown", (event) => {
@@ -62,7 +62,7 @@ function useSpaceToOpen(isActive: boolean) {
     armed.current = false
     setOpen(true)
   }, { active: isActive && !open })
-  useResetOnChange(isActive, (active) => { if (!active) setOpen(false) })
+  useResetOnChange(isActive && tabId, () => setOpen(false))
   return { open, close: () => setOpen(false) }
 }
 
@@ -96,10 +96,10 @@ function TabPeekSlot({ tabId, peek }: { tabId: string; peek: TabStripValue["peek
 /** Picker over every open tab, opened by Space: grouped by project, the highlighted background tab shown live in the preview window. */
 export function TabPicker() {
   const strip = useContext(TabStripContext)
-  const { isActive } = useTab()
+  const { tab, isActive } = useTab()
   const { projects } = useProject()
   const shownName = useDisplayName()
-  const { open, close } = useSpaceToOpen(isActive && strip !== null)
+  const { open, close } = useSpaceToOpen(isActive && strip !== null, tab.id)
   if (!strip || !open) return null
 
   const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name ?? slug ?? GENERAL
@@ -130,6 +130,7 @@ export function TabPicker() {
       </button>}
     </>}
     renderPreview={(entry) => entry.tab.id === strip.activeTabId ? null : <TabPeekSlot tabId={entry.tab.id} peek={strip.peek} />}
+    previewAspect={strip.stackAspect()}
     initialKey={strip.activeTabId}
     onKeyDown={(event, entry, list) => {
       const opensTab = event.key === "t" && isAltOnly(event)

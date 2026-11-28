@@ -52,7 +52,7 @@ export interface AttachmentActions {
   onPreviewOpen: (path: string) => Promise<void>
 }
 
-interface ChatContainerProps {
+export interface ChatContainerProps {
   chatId: string
   /** Conversation the composer keeps its unsent text for, see `ChatInput`. */
   draftKey?: string | null
@@ -98,6 +98,14 @@ function usePairKeys(pairs: Pair[]): string[] {
   const next = { pairs, ...keyPairs(pairs, state) }
   setState(next)
   return next.keys
+}
+
+/** `entries`, or the last list while it holds the same `(messageIndex, attachment)` pairs: a streamed frame skips the composer. */
+function useKeptWhileSame(entries: ChatContext["attachments"]): ChatContext["attachments"] {
+  const [kept, setKept] = useState(entries)
+  if (entries.length === kept.length && entries.every((entry, i) => entry.messageIndex === kept[i].messageIndex && entry.attachment === kept[i].attachment)) return kept
+  setKept(entries)
+  return entries
 }
 
 /** Where a branched chat left its parent: after the pair it branched at. */
@@ -215,14 +223,15 @@ export function ChatContainer({
     onEditPair(index, text)
   }), [onEditPair])
 
+  const attachments = useKeptWhileSame(messages.flatMap((m, messageIndex) => (m.attachments ?? []).map((attachment) => ({ messageIndex, attachment }))))
   const context = useMemo<ChatContext | undefined>(
     () => attachmentActions && {
-      attachments: messages.flatMap((m, messageIndex) => (m.attachments ?? []).map((attachment) => ({ messageIndex, attachment }))),
+      attachments,
       onToggleActive: attachmentActions.onToggleActive,
       onRemove: attachmentActions.onRemove,
       onOpen: (messageIndex, attachment) => void openPreview(messageIndex, attachment),
     },
-    [attachmentActions, messages, openPreview],
+    [attachmentActions, attachments, openPreview],
   )
 
   // Settled pairs get equal props each streamed frame, send and delete of another pair, so the column skips them

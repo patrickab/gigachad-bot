@@ -6,6 +6,7 @@ import type { LearnView } from "@/lib/domain/types"
 import type * as Settings from "@/contexts/SettingsContext"
 import { LearnProvider } from "../LearnProvider"
 import { LearnSurface } from "../LearnSurface"
+import { learnItem } from "../items"
 
 const FRAME_URL = "http://127.0.0.1:30181"
 vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
@@ -13,7 +14,8 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   useSettings: () => ({ hostAccess: true, learnharnessUrl: FRAME_URL }),
 }))
 vi.mock("@/hooks/useThemeName", () => ({ useThemeName: () => "light" }))
-vi.mock("../useLearnSessions", () => ({ useLearnSessions: () => ({ sessions: [], error: null, refresh: vi.fn(), claim: vi.fn() }) }))
+const missing = vi.hoisted(() => new Set<string>())
+vi.mock("../useLearnSessions", () => ({ useLearnSessions: () => ({ sessions: [], error: null, refresh: vi.fn(), claim: vi.fn(), missing }) }))
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} })
 
 /** A learn tab over a fake LearnHarness frame at `version`: what the shell posted to it, and a way to post from it. */
@@ -41,6 +43,7 @@ const scrim = () => document.querySelector("[data-learn-modal-scrim]")
 
 afterEach(() => {
   cleanup()
+  missing.clear()
   vi.restoreAllMocks()
 })
 
@@ -68,4 +71,16 @@ it("asks for a LearnHarness restart at another protocol version, without dimming
 
   expect(screen.getByRole("status")).toHaveTextContent("LearnHarness needs a restart")
   expect(scrim()).toBeNull()
+})
+
+it("sends a background tab whose session was deleted to LearnHarness's home", () => {
+  missing.add("s1")
+  const setWorkspaceItem = vi.fn()
+  const tab = { tab: { chatId: "c1", projectSlug: "proj" } as Tab, isActive: false, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem, setHistoryFile: vi.fn(), setTitle: vi.fn() }
+  render(
+    <LearnProvider onOpenItem={vi.fn()}>
+      <TabContext.Provider value={tab}><LearnSurface view={{ kind: "session", sessionId: "s1" }} onViewChange={vi.fn()} /></TabContext.Provider>
+    </LearnProvider>,
+  )
+  expect(setWorkspaceItem).toHaveBeenCalledWith(learnItem({ kind: "home" }, "proj"))
 })

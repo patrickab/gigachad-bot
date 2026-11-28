@@ -72,15 +72,16 @@ const emit = (key: string, operation: ChangeEvent["operation"]) => act(() => {
 const tabShowing = (item: WorkspaceItem) =>
   ({ ...nextTab(), ...showingItem(item) })
 
-/** Sidebars of every tab inside a tab manager under the real undo provider, with tabs of the paper project open and the note's tab frontmost. */
+/** The app's one sidebar beside a tab manager's tabs under the real undo provider, with tabs of the paper project open and the note's tab frontmost. */
 async function renderWorkspace(openTabs = true) {
   const manager = createRef<TabManagerHandle>()
   const view = render(
     <UndoDeleteProvider>
-      <TabManager ref={manager}>
-        <TabPicker />
+      <TabManager ref={manager} chrome={(stack) => <>
         <Sidebar appMode="chat" workbench onItemOpen={(item) => manager.current!.showItem(item)} />
-      </TabManager>
+        {stack}
+        <TabPicker />
+      </>}>{null}</TabManager>
     </UndoDeleteProvider>,
   )
   // The tree can suspend on its first render (a lazy module that loads slowly under load): wait for it to mount.
@@ -95,8 +96,8 @@ async function renderWorkspace(openTabs = true) {
 }
 
 const shownPaths = (manager: RefObject<TabManagerHandle | null>) => manager.current!.getTabs().map((tab) => tab.workspaceItem?.path ?? null)
-/** The project's rows in the frontmost tab's sidebar, every tab renders its own. */
-const sidebar = (view: RenderResult) => within(view.getAllByLabelText("Proj contents").find((element) => !element.closest("[aria-hidden='true']"))!)
+/** The project's rows in the sidebar. */
+const sidebar = (view: RenderResult) => within(view.getByLabelText("Proj contents"))
 
 /** The app shell's one subscription that keeps the shared lists current. */
 let stopWatching = () => {}
@@ -124,7 +125,7 @@ afterEach(() => {
 })
 
 describe("deleting a folder entry", () => {
-  it("drops its row after the deferred commit in every tab's sidebar and closes the tabs showing its files and its workbench", async () => {
+  it("drops its row after the deferred commit, also after a tab switch, and closes the tabs showing its files and its workbench", async () => {
     const { manager, view, initial, note } = await renderWorkspace()
     await sidebar(view).findByRole("button", { name: "paper" })
 
@@ -133,10 +134,9 @@ describe("deleting a folder entry", () => {
     expect(api.removeDocument).not.toHaveBeenCalled()
     expect(manager.current!.getTabs()).toHaveLength(4)
 
-    // Another tab's sidebar shows the shared lists while the delete is still undoable and hears no change event of this device's commit.
+    // After a tab switch the sidebar keeps the row hidden while the delete is still undoable and hears no change event of this device's commit.
     act(() => manager.current!.switchToTab(initial.id))
-    const expand = view.queryByRole("button", { name: "Expand Proj" })
-    if (expand) fireEvent.click(expand)
+    expect(sidebar(view).queryByRole("button", { name: "paper" })).not.toBeInTheDocument()
     expect(await sidebar(view).findByRole("button", { name: "notes.md" })).toBeInTheDocument()
     await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
 
@@ -178,5 +178,41 @@ describe("deleting a folder entry", () => {
 
     expect(sidebar(view).getByRole("button", { name: "paper" })).toBeInTheDocument()
     expect(manager.current!.getTabs()).toHaveLength(4)
+  })
+})
+
+describe("a tab switch in the app's one sidebar", () => {
+  const MOUNT = { path: "/repo", name: "repo", type: "folder", mount: "/repo", children: [] }
+  const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(50) })
+
+  it("tries a failed worktree read again", async () => {
+    api.fileRootTree.mockResolvedValue({ enabled: true, tree: [MOUNT] } as never)
+    api.fetchWorktrees.mockRejectedValueOnce(new Error("git is busy"))
+    const { manager } = await renderWorkspace(false)
+    await waitFor(() => expect(api.fetchWorktrees).toHaveBeenCalledTimes(1))
+    await settle()
+    expect(api.fetchWorktrees).toHaveBeenCalledTimes(1)
+
+    act(() => manager.current!.openTab(nextTab()))
+    await settle()
+
+    expect(api.fetchWorktrees).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves no focus on a row that switched tabs, so a tapped Space opens the tab picker", async () => {
+    const { manager, view, initial } = await renderWorkspace()
+    act(() => manager.current!.switchToTab(initial.id))
+    fireEvent.click(await sidebar(view).findByRole("button", { name: "paper" }))
+    const row = await sidebar(view).findByRole("button", { name: "paper.tex" })
+
+    // The workbench tab shows the file: the row switches there
+    row.focus()
+    fireEvent.click(row)
+    expect(view.container.querySelector(".workspace-tab:not([aria-hidden='true'])")).not.toBe(view.container.querySelector(".workspace-tab"))
+    const target = document.activeElement ?? document.body
+    fireEvent.keyDown(target, { key: " ", code: "Space" })
+    fireEvent.keyUp(target, { key: " ", code: "Space" })
+
+    expect(view.getByRole("listbox", { name: "Tabs" })).toBeInTheDocument()
   })
 })

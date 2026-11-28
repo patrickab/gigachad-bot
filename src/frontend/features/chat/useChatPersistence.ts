@@ -1,30 +1,31 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useRef } from "react"
 import type { Tab } from "@/contexts/TabContext"
+import type { ChatStore } from "@/features/chat/chatStore"
 import { saveChat } from "@/lib/backend/api"
 import { buildHistoryFile, parseHistoryFile } from "@/lib/domain/historyFile"
 import type { Message, Usage } from "@/lib/domain/types"
+
+/** A chat's usage as saved: none before its first reply. */
+const savedUsage = (usage: Usage) => usage.total_tokens > 0 ? usage : undefined
 
 /** Save a tab's chat: explicit save-as, quick save, and chained autosaves once it has a history file. */
 export function useChatPersistence({
   tab,
   projectSlug,
-  messages,
+  chat,
   chatId,
-  usage,
   refreshAll,
   setHistoryFile,
 }: {
   tab: Tab
   projectSlug: string | null
-  messages: Message[]
+  chat: ChatStore
   chatId: string
-  usage: Usage | undefined
   refreshAll: () => Promise<void>
   setHistoryFile: (historyFile: string) => void
 }) {
-  const [saveModalOpen, setSaveModalOpen] = useState(false)
   const autosaveRef = useRef(Promise.resolve())
 
   const isTitled = !!tab.historyFile
@@ -39,8 +40,9 @@ export function useChatPersistence({
   }, [tab.historyFile, tab.title, projectSlug, chatId, refreshAll])
 
   const handleQuickSave = useCallback(async () => {
-    await saveHistory(messages, usage)
-  }, [saveHistory, messages, usage])
+    const { messages, usage } = chat.get()
+    await saveHistory(messages, savedUsage(usage))
+  }, [saveHistory, chat])
 
   // Saves are chained so overlapping saves never write out of order. A failed one rejects: the caller tells the reader.
   const handleSave = useCallback((messagesToSave: Message[], usageToSave: Usage) => {
@@ -57,16 +59,14 @@ export function useChatPersistence({
   const handleSaveSubmit = useCallback(async (name: string) => {
     const historyFile = buildHistoryFile(name + ".json", projectSlug)
     // A failed save is swallowed so the tab still adopts the new history file.
-    await saveChat(historyFile, projectSlug, messages, { chatId, title: name, usage }).catch(() => {})
+    const { messages, usage } = chat.get()
+    await saveChat(historyFile, projectSlug, messages, { chatId, title: name, usage: savedUsage(usage) }).catch(() => {})
     setHistoryFile(historyFile)
     await refreshAll()
-    setSaveModalOpen(false)
-  }, [messages, chatId, projectSlug, usage, setHistoryFile, refreshAll])
+  }, [chat, chatId, projectSlug, setHistoryFile, refreshAll])
 
   return {
     isTitled,
-    saveModalOpen,
-    setSaveModalOpen,
     handleQuickSave,
     handleSave,
     handleAutosave,

@@ -4,7 +4,6 @@ import { useState } from "react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { WorktreesIcon } from "@/components/ui/WorktreesIcon"
-import { useTabActive } from "@/contexts/TabContext"
 import { useResourceFamily } from "@/hooks/useResource"
 import { useStoredJson } from "@/hooks/useStoredJson"
 import { ApiError, createWorktree, deleteWorktreeBranch, openDefaultWorktree, removeWorktree } from "@/lib/backend/api"
@@ -13,6 +12,7 @@ import type { Worktree } from "@/lib/domain/files"
 import { refresh } from "@/lib/resource"
 import { baseName } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
+import { useSettledTab } from "./useSettledTab"
 
 const ACTIVE_STORAGE_KEY = "active_worktrees"
 
@@ -62,8 +62,8 @@ function worktreeStatus(worktree: Worktree): string | undefined {
 
 /** Worktrees of every clone mount: which one each mount shows, and its sidebar "Worktrees" folder. Every tab shares the lists. */
 export function useWorktrees(mounts: string[]) {
-  // A mount whose worktrees fail to load shows no "Worktrees" folder, the tab's next activation tries again.
-  const lists = useResourceFamily(null, worktreesResource, mounts, useTabActive())
+  // A mount whose worktrees fail to load shows no "Worktrees" folder, the next tab switch tries again.
+  const lists = useResourceFamily(null, worktreesResource, mounts, useSettledTab())
   const [removal, setRemoval] = useState<Removal | null>(null)
   const [defaultError, setDefaultError] = useState<{ mount: string; error: string } | null>(null)
   const [active, updateActive] = useStoredJson(ACTIVE_STORAGE_KEY, parseActive)

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 import { useIsPeeked, useTab } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { LearnView } from "@/lib/domain/types"
-import { learnTitle } from "./items"
+import { learnItem, learnTitle } from "./items"
 import { useLearn, useLearnDrive, useLearnFrameState } from "./LearnProvider"
 
 /** `clip-path` covering the viewport except the box `left`/`top`/`right`/`bottom` (viewport pixels). */
@@ -45,9 +45,10 @@ function FrameModalScrim({ frameBox, onClose }: { frameBox: HTMLElement; onClose
  * - A modal dialog in the frame (settings, setup) dims the shell around the frame. A click on the dimmed shell or Escape
  *   closes it (`close-modal`), Escape never reaches the shell's handlers
  * - A frame at another protocol version keeps upstream's own UI and the tab asks for a LearnHarness restart
+ * - A deleted session sends the tab showing it to LearnHarness's home, like upstream's sidebar delete
  */
 export function LearnSurface({ view, onViewChange }: { view: LearnView; onViewChange: (view: LearnView) => void }) {
-  const { tab, isActive, setTitle } = useTab()
+  const { tab, isActive, setTitle, setWorkspaceItem } = useTab()
   const { attachFrame, frameStatus, learnUrl, reloadFrame, sessions, sendToLearnFrame } = useLearn()
   const drive = useLearnDrive()
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
@@ -66,6 +67,11 @@ export function LearnSurface({ view, onViewChange }: { view: LearnView; onViewCh
   useEffect(() => {
     setTitle(title)
   }, [title, setTitle])
+
+  const deleted = view.kind === "session" && sessions.missing.has(view.sessionId)
+  useEffect(() => {
+    if (deleted) setWorkspaceItem(learnItem({ kind: "home" }, tab.projectSlug))
+  }, [deleted, setWorkspaceItem, tab.projectSlug])
 
   const modal = useLearnFrameState("modal")
   const underModal = drive === "matched" && frameStatus === "ready" && isActive && !!modal?.open

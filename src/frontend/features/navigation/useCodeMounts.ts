@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Factory } from "lucide-react"
 import { useHostAccess } from "@/contexts/SettingsContext"
-import { useTabActive, type WorkspaceItem } from "@/contexts/TabContext"
+import { useTabId, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { factoryItem } from "@/features/factory/items"
 import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
@@ -29,7 +29,7 @@ interface CodeMountsOptions {
 /** File mounts of the Code section: their tree, worktrees, Pi sessions and archive state. Every tab shares the tree and worktrees. */
 export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const hostAccess = useHostAccess()
-  const isActive = useTabActive()
+  const tabId = useTabId()
   const { collapsed } = useSidebar()
   const { schedule } = useUndoDelete()
   const { archived, setArchived } = useArchivedDirectories()
@@ -61,14 +61,14 @@ export function useCodeMounts({ onItemOpen }: CodeMountsOptions) {
   const loadedTree = useResource("Sidebar file mounts", rootTree)
   if (loadedTree !== undefined && loadedTree !== shownTree) setShownTree(loadedTree)
 
-  // Nothing announces changes on disk or to a worktree's status: the tab coming to the front reads them again for every tab.
+  // Nothing announces changes on disk or to a worktree's status: a tab coming to the front reads them again for every tab.
   // The tree and worktrees only while the sidebar shows them: opening it, or showing other worktrees, reads them again.
   useEffect(() => {
-    if (isActive) revalidateOnActivation()
-  }, [isActive])
+    revalidateOnActivation()
+  }, [tabId])
   useEffect(() => {
-    if (isActive && !collapsed) revalidateMounts()
-  }, [isActive, collapsed, rootTree])
+    if (!collapsed) revalidateMounts()
+  }, [tabId, collapsed, rootTree])
 
   /** Run `add`, then read the tree again; the file picker's availability may change with it. */
   const mountThen = async (add: () => Promise<unknown>) => {

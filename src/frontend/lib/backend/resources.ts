@@ -1,6 +1,6 @@
 // The user-global backend values every tab shows: models, prompts, provider usage, reasoning levels per model, whether any
 // file root is mounted, and the sidebar's lists (the projects, loose notes, each project's documents, all documents, the file mount
-// tree, each mount's worktrees, the LaTeX template sets), and each project's architecture workspace.
+// tree, each mount's worktrees, the LaTeX template sets), each project's architecture workspace, and the chat histories with their branch metadata.
 // Consumes the backend client and the change feed with its file events. Provides one module-level `Resource` per value, so
 // a change made in one tab reaches every tab, the re-reads that this device's changes to documents and mounts call, the
 // forgetting of a deleted project's list, `revalidateOnActivation` and `revalidateMounts` for what changes without an event, and
@@ -8,8 +8,8 @@
 
 import { createResource, refresh, resourceFamily, revalidateStale, type Resource } from "@/lib/resource"
 import {
-  ApiError, fetchBackendConfig, fetchModels, fetchPiCatalog, fetchPrompts, fetchProviderUsage, fetchReasoningLevels, fetchWorktrees, fileRootTree, fileRootsEnabled, listAllDocuments,
-  listNotes, listProjectDocuments, listProjects, loadTemplateSets, readArchitecture,
+  ApiError, fetchBackendConfig, fetchBranchMeta, fetchModels, fetchPiCatalog, fetchPrompts, fetchProviderUsage, fetchReasoningLevels, fetchWorktrees, fileRootTree, fileRootsEnabled, listAllDocuments,
+  listChatHistories, listNotes, listProjectDocuments, listProjects, loadTemplateSets, readArchitecture,
 } from "@/lib/backend/api"
 import { getDeviceId } from "@/lib/backend/deviceId"
 import { onFileChange, onFileMove, onFileRemoval } from "@/lib/backend/fileEvents"
@@ -98,6 +98,12 @@ export const templateSetsResource = createResource(() => loadTemplateSets())
 /** A project's architecture workspace by slug, read after the change feed holds its head so a racing change still arrives. */
 export const architectureResource = resourceFamily((slug) => syncCursorReady().then(() => readArchitecture(slug)))
 
+/** Every chat history file and the branch metadata of each, read together. */
+export const historiesResource = createResource(async (signal) => {
+  const [histories, branchMeta] = await Promise.all([listChatHistories(signal), fetchBranchMeta(signal)])
+  return { files: [...(histories.files ?? [])].sort((a, b) => a.localeCompare(b)), branchMeta }
+})
+
 /** Read project `scope`'s documents again (the loose notes for ""), with all documents, after a file was added to it. */
 export async function refreshProjectDocuments(scope: string): Promise<void> {
   await Promise.all([scope ? projectDocumentsResource(scope) : notesResource, allDocumentsResource].map(refresh))
@@ -162,6 +168,7 @@ function withoutRemoved(documents: ProjectDocument[], path: string): ProjectDocu
  * - A change to a project's architecture on another device reads its workspace again (this device's writes set their answer), or forgets it while no window shows it
  * - A file deleted here or elsewhere leaves every list at once, a list reads again when the file lay in one of its folder entries
  * - A file created inside a folder entry or a mount, or a mounted file renamed, reads the lists that show it again
+ * - New chat histories read the projects again, whose entries show the chats' labels
  */
 export function watchDocumentLists(): () => void {
   const stops = [
@@ -211,6 +218,7 @@ export function watchDocumentLists(): () => void {
     onFileMove(({ from }) => {
       if (from.startsWith("/")) for (const tree of rootTreeResource.members()) tree.invalidate()
     }),
+    historiesResource.subscribe(() => projectsResource.invalidate()),
   ]
   return () => stops.forEach((stop) => stop())
 }

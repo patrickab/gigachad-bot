@@ -1,5 +1,6 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, render, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { EnabledToolsProvider, useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { TOOLS } from "@/features/chat/tools"
 
@@ -69,5 +70,25 @@ describe("useEnabledTools", () => {
     const second = renderTools()
     expect(second.result.current.enabledTools).not.toContain("web_search")
     expect(second.result.current.enabledTools).toContain("deep_research")
+  })
+
+  it("keeps a toggle in its tab's chat: another tab under the same provider keeps its tools and research block", () => {
+    const seen: Record<string, ReturnType<typeof useEnabledTools>> = {}
+    function Composer({ name }: { name: string }) {
+      seen[name] = useEnabledTools()
+      return null
+    }
+    const tab = (chatId: string) => ({ tab: { chatId } }) as TabContextValue
+    render(<EnabledToolsProvider>
+      <TabContext.Provider value={tab("a")}><Composer name="a" /></TabContext.Provider>
+      <TabContext.Provider value={tab("b")}><Composer name="b" /></TabContext.Provider>
+    </EnabledToolsProvider>)
+    expect(seen.b.researchEnabled).toBe(true)
+
+    act(() => seen.a.toggleTool("deep_research"))
+
+    expect(seen.a.researchEnabled).toBe(false)
+    expect(seen.b.researchEnabled).toBe(true)
+    expect(seen.b.enabledTools).toContain("deep_research")
   })
 })

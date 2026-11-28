@@ -1,17 +1,17 @@
 "use client"
 
-import { createContext, useCallback, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useMemo, type ReactNode } from "react"
 import {
   createBranch as apiCreateBranch,
   mergeBranch as apiMergeBranch,
   cascadeDelete as apiCascadeDelete,
-  fetchBranchMeta,
-  listChatHistories,
   moveHistoryItem as apiMoveHistoryItem,
 } from "@/lib/backend/api"
+import { historiesResource } from "@/lib/backend/resources"
 import type { BranchMeta } from "@/lib/domain/histories"
-import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { useResourceState } from "@/hooks/useResource"
+import { refresh } from "@/lib/resource"
 
 /** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
@@ -23,8 +23,6 @@ interface BranchActions {
   createBranch: (parentFile: string, branchMessageIdx: number) => Promise<{ childFile: string; chatId: string }>
   mergeBranch: (childFile: string) => Promise<void>
   cascadeDelete: (filename: string) => Promise<string[]>
-  setActiveFile: (file: string | null) => void
-  setActiveQaIndex: (idx: number | null) => void
 }
 
 interface BranchContextValue extends BranchActions {
@@ -32,57 +30,27 @@ interface BranchContextValue extends BranchActions {
   chatIdMap: ChatIdMap
   visibleRootFiles: string[]
   historiesLoading: boolean
-  activeFile: string | null
-  activeQaIndex: number | null
   moveHistory: (filename: string, targetDir: string) => Promise<void>
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null)
 const BranchActionsContext = createContext<BranchActions | null>(null)
 
-interface Histories {
-  sortedFiles: string[]
-  branchData: Record<string, BranchMeta>
-}
+const NO_META: Record<string, BranchMeta> = {}
+const NO_FILES: string[] = []
 
-/** History filenames in locale order. */
-const sortedHistoryFiles = (data: { files?: string[] }): string[] => [...(data.files ?? [])].sort((a, b) => a.localeCompare(b))
+const refreshAll = () => refresh(historiesResource)
 
-/** Fetch both history sources before applying an explicit refresh. */
-async function fetchHistories(): Promise<Histories> {
-  const [histData, branchData] = await Promise.all([
-    listChatHistories(),
-    fetchBranchMeta(),
-  ])
-  const sortedFiles = sortedHistoryFiles(histData)
-  return { sortedFiles, branchData }
-}
-
-/** Owns chat history list, branch metadata and the active file/QA focus shown in the sidebar. */
+/** Owns chat history list and branch metadata. */
 export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
   onFileClick: (file: string, qaIndex?: number) => void
   onHistoriesMoved?: (moves: ReadonlyMap<string, string>) => void
   children: ReactNode
 }) {
-  const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
-  const [rootFiles, setRootFiles] = useState<string[]>([])
-  const [activeFile, setActiveFile] = useState<string | null>(null)
-  const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
-
-  const applyHistories = useCallback(({ sortedFiles, branchData }: Histories) => {
-    setRootFiles(sortedFiles)
-    setBranchMeta(branchData)
-  }, [])
-
-  const refreshAll = useCallback(async () => {
-    applyHistories(await fetchHistories())
-  }, [applyHistories])
-
-  const { loading: historiesLoading } = useStartupRead("Chat histories", listChatHistories, (histData) => {
-    setRootFiles(sortedHistoryFiles(histData))
-  })
-  const loadBranchMeta = useCallback((signal: AbortSignal) => fetchBranchMeta(signal), [])
-  useStartupRead("Branch metadata", loadBranchMeta, setBranchMeta)
+  const { value: histories, error } = useResourceState("Chat histories", historiesResource)
+  const branchMeta = histories?.branchMeta ?? NO_META
+  const rootFiles = histories?.files ?? NO_FILES
+  const historiesLoading = histories === undefined && error === null
 
   const chatIdMap = useMemo(() => buildChatIdMap(branchMeta), [branchMeta])
 
@@ -92,8 +60,8 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
   )
   const moveHistory = useCallback(async (filename: string, targetDir: string) => {
     const result = await apiMoveHistoryItem(filename, targetDir)
-    const histories = await fetchHistories()
-    const pathsByChatId = buildChatIdMap(histories.branchData)
+    await refreshAll()
+    const pathsByChatId = buildChatIdMap(historiesResource.get()?.branchMeta ?? NO_META)
     const moves = new Map([[filename, result.new_path]])
     // The store carries descendant branches and may rename files on collision.
     for (const [oldPath, metadata] of Object.entries(branchMeta)) {
@@ -101,27 +69,24 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
       if (newPath && newPath !== oldPath) moves.set(oldPath, newPath)
     }
     onHistoriesMoved?.(moves)
-    setActiveFile((current) => current ? moves.get(current) ?? current : null)
-    applyHistories(histories)
-  }, [branchMeta, onHistoriesMoved, applyHistories])
-
+  }, [branchMeta, onHistoriesMoved])
 
   const doCreateBranch = useCallback(async (parentFile: string, branchMessageIdx: number) => {
     const result = await apiCreateBranch(parentFile, branchMessageIdx)
     await refreshAll()
     return { childFile: result.child_file, chatId: result.chat_id }
-  }, [refreshAll])
+  }, [])
 
   const doMergeBranch = useCallback(async (childFile: string) => {
     await apiMergeBranch(childFile)
     await refreshAll()
-  }, [refreshAll])
+  }, [])
 
   const doCascadeDelete = useCallback(async (filename: string) => {
     const result = await apiCascadeDelete(filename)
     await refreshAll()
     return result.deleted
-  }, [refreshAll])
+  }, [])
 
   const actions = useMemo<BranchActions>(() => ({
     onFileClick,
@@ -129,12 +94,10 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
     createBranch: doCreateBranch,
     mergeBranch: doMergeBranch,
     cascadeDelete: doCascadeDelete,
-    setActiveFile,
-    setActiveQaIndex,
-  }), [onFileClick, refreshAll, doCreateBranch, doMergeBranch, doCascadeDelete])
+  }), [onFileClick, doCreateBranch, doMergeBranch, doCascadeDelete])
   const value = useMemo<BranchContextValue>(() => ({
-    ...actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, activeFile, activeQaIndex, moveHistory,
-  }), [actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, activeFile, activeQaIndex, moveHistory])
+    ...actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, moveHistory,
+  }), [actions, branchMeta, chatIdMap, visibleRootFiles, historiesLoading, moveHistory])
 
   return (
     <BranchActionsContext.Provider value={actions}>

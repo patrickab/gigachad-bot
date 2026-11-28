@@ -3,19 +3,14 @@
 import { memo, useCallback, useEffect, useState, type RefCallback } from "react"
 import { anchorSceneFallback } from "deepfocus-ambient"
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
-import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
-import { useSidebar } from "@/features/navigation/SidebarContext"
-import { ChatContainer, type ChatReveal, type ChatRevealHit } from "@/features/chat/ChatContainer"
+import { ChatContainer, type ChatContainerProps, type ChatReveal, type ChatRevealHit } from "@/features/chat/ChatContainer"
+import type { ChatStore } from "@/features/chat/chatStore"
 import { newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
-import { PromptEditor } from "@/features/settings/PromptEditor"
-import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
-import { TabPicker } from "@/features/navigation/TabPicker"
-import { ChatPicker } from "@/features/chat/ChatPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
-import { FilePanelSlot } from "@/features/editor/FilePanel"
+import { FilePanelProvider, FilePanelSlot } from "@/features/editor/FilePanel"
 import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
 import { newPiItem, useTab, type WorkspaceItem } from "@/contexts/TabContext"
@@ -26,7 +21,7 @@ import type { PiModel } from "@/features/pi/types"
 import { PiWorkspacePicker } from "@/features/pi/PiWorkspacePicker"
 import { piSessionItem } from "@/features/pi/usePiSidebar"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { TabSidebar } from "./TabSidebar"
+import { useStore } from "@/hooks/useStore"
 import { useTabChat } from "./useTabChat"
 import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
 // The tool renderers a feature's rows need from another feature, loaded where both are known: a chat memory call
@@ -35,22 +30,22 @@ import "@/features/pi/MemoryTool"
 
 interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number, hit?: ChatRevealHit) => void
-  onOpenProject: (slug: string) => void
-  onProjectRenamed: (oldSlug: string, newSlug: string) => void
-  onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
+  /** Asks the app's chrome for a name to save this tab's chat under. */
+  onSaveAs: (save: (name: string) => Promise<void>) => void
   reveal: ChatReveal
 }
 
 /**
- * Keep `--under-left` and `--under-right` on the tab's main area: the px between it and the tab's edges, the left sidebar's and the file panel's share with their gutters.
- * A surface running under the sidebars (`runsUnderSidebars`) extends its body by them, the cards float over it.
+ * Keep `--under-left` and `--under-right` on the tab's main area: the px between it and the app's left edge (the sidebar's share with its gutter, left of the tab stack)
+ * and between it and the tab's right edge (the file panel's). A surface running under the sidebars (`runsUnderSidebars`) extends its body by them, the cards float over it.
  */
-function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
+export function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
   if (typeof ResizeObserver === "undefined") return
   const tab = main.parentElement!
+  const stack = main.closest<HTMLElement>("[data-tab-stack]")
   const update = () => {
-    main.style.setProperty("--under-left", `${main.offsetLeft}px`)
+    main.style.setProperty("--under-left", `${(stack?.offsetLeft ?? 0) + main.offsetLeft}px`)
     main.style.setProperty("--under-right", `${tab.clientWidth - main.offsetLeft - main.offsetWidth}px`)
   }
   const observer = new ResizeObserver(update)
@@ -60,18 +55,24 @@ function measureSidebarInsets(main: HTMLElement): (() => void) | undefined {
 }
 
 /**
- * One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts.
- * Memoized on this hook-free wrapper (see `TabSidebar`), so a tab switch or a history refresh re-renders only the tabs whose context changed.
+ * One tab's workspace: the chat (or canvas) with its top bar, file panel and keyboard shortcuts.
+ * Memoized on this hook-free wrapper (see `AppSidebar`), so a tab switch or a history refresh re-renders only the tabs whose context changed.
  */
 export const TabContent = memo(function TabContent(props: TabContentProps) {
-  return <ErrorBoundary><TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider></ErrorBoundary>
+  return <FilePanelProvider><ErrorBoundary><TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider></ErrorBoundary></FilePanelProvider>
 })
 
-/** The tab's chat surfaces and the top bar whose slots they render their controls into, beside the sidebar it never re-renders. */
-function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, reveal }: TabContentProps) {
+/** The tab's chat on its store: the only subscriber of the messages, so a token frame renders nothing above it. */
+export function TabChat({ chat, ...props }: { chat: ChatStore } & Omit<ChatContainerProps, "messages" | "isStreaming" | "onCancel">) {
+  const messages = useStore(chat, (state) => state.messages)
+  const isStreaming = useStore(chat, (state) => state.isStreaming)
+  return <ChatContainer {...props} messages={messages} isStreaming={isStreaming} onCancel={chat.cancel} />
+}
+
+/** The tab's chat surfaces and the top bar whose slots they render their controls into. */
+function TabWorkspace({ onOpenChat, onOpenItem, onSaveAs, reveal }: TabContentProps) {
   const { tab, isActive, setModeLabel } = useTab()
   const { projectSlug, config } = tab
-  const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const registerContentArea = useContentAreaRef()
   const [mainArea, setMainArea] = useState<HTMLElement | null>(null)
   const contentAreaRef = useCallback<RefCallback<HTMLElement>>((main) => {
@@ -94,24 +95,22 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
       return { horizonY: box.top + box.height * 0.6, lightX: box.left + box.width / 2, lightY: box.top + box.height * 0.52 }
     })
   }, [isActive, mainArea])
-  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
-  const openPromptEditor = useCallback(() => setPromptEditorOpen(true), [])
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const canvas = useCanvasView()
   const {
-    chat, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, turns, attachmentActions, attachMenuItems, onEditPair, onBranch,
-  } = useTabChat({ reveal, onOpenChat, onOpenItem })
-  const { models } = chat
+    chat, hasMessages, isStreaming, chatConfig, chatId, branchMessageIdx, historyLoading, extracting, chatInputRef, reasoningLevels, reasoningEffort,
+    filePicker, docs, turns, attachmentActions, attachMenuItems, onEditPair, onBranch,
+  } = useTabChat({ onOpenChat, onOpenItem, onSaveAs })
+  const { models } = chatConfig
   const { standaloneFile } = filePicker
-  const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
+  const modelProps: ModelProps = { models, loadError: chatConfig.modelLoadError, onProvidersChange: chatConfig.saveModelProviders, onTabOrderChange: chatConfig.saveModelTabOrder, onDefaultsChange: chatConfig.saveModelDefaults, placement: "below" }
 
   // A folder picked in an empty chat makes its first message start a Pi session there, the Pi tab sends it once the session is ready.
   // The picker shows only in an empty chat, so a folder left over from one never redirects another chat's message
   const [folder, setFolder] = useState<string | null>(null)
   const pickFolder = (picked: string | null) => setFolder(picked === null ? null : picked.replace(/\/+$/, "") || "/")
   const [launch, setLaunch] = useState<PiLaunch | null>(null)
-  const isEmptyChat = chat.messages.length === 0 && !historyLoading && !chat.isStreaming
+  const isEmptyChat = !hasMessages && !historyLoading && !isStreaming
   // With a folder picked the model and thinking pickers offer Pi's catalog, the first message starts the session on them
   const piStartActive = folder !== null && isEmptyChat
   const piCatalog = useNewSessionModels(piStartActive)
@@ -135,19 +134,17 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
   }
 
   const chatBody = (
-    <ChatContainer
+    <TabChat
+      chat={chat}
       chatId={chatId}
       historyFile={tab.historyFile ?? null}
       draftKey={tab.historyFile ? `chat:${projectSlug ?? ""}:${tab.historyFile}` : newChatDraftKey(tab.id)}
       onChatColumnChange={setChatColumn}
-      messages={chat.messages}
       historyLoading={historyLoading}
-      isStreaming={chat.isStreaming}
       onDeletePair={turns.handleDeletePair}
       onEditPair={onEditPair}
       extracting={extracting}
       onSend={handleSend}
-      onCancel={chat.cancel}
       onBranch={onBranch}
       reveal={reveal}
       branchMessageIdx={branchMessageIdx}
@@ -161,29 +158,21 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
   )
 
   return (
-    <div className="relative flex h-full overflow-hidden">
-      <TabSidebar
-        onOpenProject={onOpenProject}
-        onProjectRenamed={onProjectRenamed}
-        onNewChat={onNewChat}
-        onOpenItem={onOpenItem}
-        onEditPrompts={openPromptEditor}
-      />
+    // Unclipped: a surface running under the sidebar reaches left of the tab stack, the app's chrome clips
+    <div className="relative flex h-full">
       {/* No paper of its own: the ocean backdrop, or a shared frame laid under this tab, shows through */}
       <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative">
         <WorkspaceSurface
-          sidebarToggle={sidebarCollapsed && <PanelToggleButton side="left" open={false} onClick={toggleSidebar} openLabel="Open sidebar" closeLabel="Close sidebar" />}
           canvas={canvas}
           modelProps={modelProps}
           reasoningLevels={reasoningLevels}
           reasoningEffort={reasoningEffort}
-          totalUsage={chat.totalUsage}
+          chat={chat}
           chatColumn={chatColumn}
           chatBody={chatBody}
           launch={launch}
           piStart={piStart}
           onLaunched={() => setLaunch(null)}
-          onOpenItem={onOpenItem}
         />
         {isActive && standaloneFile && (
           // File-picker overlays sit below the bar, over whatever surface is open.
@@ -213,8 +202,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
         )}
       </main>
       <FilePanelSlot />
-      <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />
-      <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} />
       {isActive && filePicker.filePickerOpen && filePicker.rootFiles.enabled && (
         <FileViewer
           files={(filePicker.rootFiles.files ?? []).map((f) => f.path)}
@@ -233,8 +220,6 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
           onClose={() => docs.setDocumentOpen(false)}
         />
       )}
-      <TabPicker />
-      <ChatPicker onOpenChat={onOpenChat} />
     </div>
   )
 }

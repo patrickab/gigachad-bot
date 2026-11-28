@@ -1,8 +1,9 @@
 "use client"
 
+import type { ChatStore } from "@/features/chat/chatStore"
 import { useResource } from "@/hooks/useResource"
+import { useStore } from "@/hooks/useStore"
 import { piCatalogResource } from "@/lib/backend/resources"
-import type { Usage } from "@/lib/domain/types"
 import { gatewayModelId } from "@/lib/models"
 
 export function compactTokens(tokens: number): string {
@@ -10,7 +11,8 @@ export function compactTokens(tokens: number): string {
 }
 
 /** A chat's readout, `12.3k | 1%`: the last turn's tokens against the selected model's context window, tokens only when it is unknown. Hidden before the first turn. */
-export function ChatContextUsage({ usage, model }: { usage: Usage; model: string }) {
+export function ChatContextUsage({ chat, model }: { chat: ChatStore; model: string }) {
+  const usage = useStore(chat, (state) => state.usage)
   const catalog = useResource(null, piCatalogResource)
   if (!usage.total_tokens) return null
   const gatewayId = gatewayModelId(model)

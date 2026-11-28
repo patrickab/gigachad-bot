@@ -1,4 +1,4 @@
-Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run). Edited by hand on 2026-11-27 after the structural pass (no `/repomix` run).
+Generated from bd63559a on 2026-11-25. The working tree also had uncommitted changes in `.docs/agent-factory.md` and the untracked `features/pi/SubagentMessages.tsx`, which this file lists. The conversation entries (chat, conversation, pi, chat search, turn delete) edited by hand from 78140998 on 2026-11-26 (no `/repomix` run). Corrected by hand on 2026-11-27 after the complexity cleanup (removed files and names dropped, new files added; no `/repomix` run). Edited by hand on 2026-11-27 after the reuse pass (removed the desktop target, listed the new shared pieces; no `/repomix` run). Edited by hand on 2026-11-27 after the performance pass (no `/repomix` run). Edited by hand on 2026-11-27 after the structural pass (no `/repomix` run). Edited by hand on 2026-11-28 after the store and chrome pass (no `/repomix` run).
 
 # Module map
 
@@ -190,13 +190,15 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   `-- _components/
 |       |       |-- App.tsx, AppEntry.tsx, AppEntry.dev.tsx App root with a fullscreen error boundary; hydrated build entry, browser-only `next dev` entry
 |       |       |-- AppShell.tsx      Cross-feature composition and workspace navigation
-|       |       |-- TabContent.tsx    Tab layout: sidebar, surface, overlays and modals, per-tab error boundary
-|       |       |-- TabSidebar.tsx    The tab's Sidebar apart from its chat: memoized, so stream tokens never re-render navigation
+|       |       |-- AppChrome.tsx     Once per app: sidebar, tab/chat/Pi session pickers, prompt editor and Save-as dialog, acting on the tab in front
+|       |       |-- AppSidebar.tsx    The app's one Sidebar: memoized, outside the tab stack, so streamed frames never reach navigation
+|       |       |-- TabContent.tsx    Per-tab layout: surface, top bar and file panel, per-tab error boundary
 |       |       |-- WorkspaceSurface.tsx Per-surface table (by the tab's shown item) of top-bar controls and surface body
-|       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every surface
+|       |       |-- useTabChat.ts     Creates the tab's `ChatStore` and its chat hooks, kept mounted in every surface
 |       |       |-- deepLink.ts       Preview/open-target parsing
 |       |-- features/                 Domain-owned interactive surfaces
-|       |   |-- chat/                 Turns, attachments, persistence and streaming (`useChatStream` over `lib/backend/tokenPacer.ts`)
+|       |   |-- chat/                 Turns, attachments, persistence and streaming (`chatStore.ts` over `lib/backend/tokenPacer.ts`)
+|       |   |   |-- chatStore.ts      A tab's chat: messages, `isStreaming`, `usage`; `send`/`cancel`/`removePairs`, the reply writes only while it is the list's last message. `useChatConfig.ts` holds the tab's model and tool config
 |       |   |   |-- ChatContainer.tsx Chat on the shared ConversationColumn; settles a reveal and paints a search hit
 |       |   |   |-- ChatPair.tsx      A pair's label, collapsed preview and open body (`renderPreview`/`renderBody`)
 |       |   |   |-- useChatTurns.ts   Send, pair delete and edit (cut, save, resend), attachment removal
@@ -250,7 +252,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- PiTranscript.tsx  Turns on the shared ConversationColumn: pieces, answers, search jump, held messages, factory view
 |       |   |   |-- PiComposer.tsx    Composer: steer/follow-up while streaming, `/` and `@` completion, chips
 |       |   |   |-- outbox.ts, HeldMessages.tsx Held (unconfirmed) messages sent during a run
-|       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Attach, replay, commands, extension dialogs over `/api/pi/ws`
+|       |   |   |-- liveSession.ts    One Pi session's live state per session id for the page's life: attach (ref-counted), replay, commands, dialogs, stats, run edges
+|       |   |   |-- coalescer.ts, transcript.ts, resync.ts Delta batching per display frame, transcript reducer, guarded resync
+|       |   |   |-- sessionStore.ts, usePiSession.ts, piSocket.ts Session list, status and unread (once per app); the view hook over `liveSession`; the shared `/api/pi/ws` socket
 |       |   |   |-- subagents.ts, SubagentRoster.tsx Subagent roster above the composer (pi-subagents widget and tool details, M26)
 |       |   |   |-- SubagentMessages.tsx `intercom_message` and `subagent-notify` cards, one line that folds open
 |       |   |   |-- FactoryNotices.tsx, FactoryTool.tsx Factory notices and `factory` tool calls: their card, else one line
@@ -259,7 +263,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- renderers.ts      Custom-message renderer registry, re-exports the conversation tool registry
 |       |   |   |-- SessionWaves.tsx  The session's factory waves, decisions and cards waiting for a ruling above the composer (`waves.list`, `decisions.list`, `origin`)
 |       |   |   |-- usePiSidebar.tsx  Sessions per repository and mount, worktrees under their main repository
-|       |   |   |-- PiSessionPicker.tsx Top-bar session picker (Alt+A): sessions by last use, full-text search with a row per hit
+|       |   |   |-- PiSessionPicker.tsx Session picker (Alt+A), mounted once by `AppChrome`: sessions by last use, full-text search with a row per hit
 |       |   |   |-- PiSessionPreview.tsx A session's transcript read from its file, the picker's preview
 |       |   |   |-- PiWorkspacePicker.tsx Composer project selector of an empty chat, a pick makes the first message start a Pi session
 |       |   |   `-- tools/            Re-exports of `features/conversation/tools/`
@@ -341,12 +345,14 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- useEventListener.ts, useEscapeLayer.ts, useOutsidePress.ts
 |       |   |-- useFollowFiles.ts     Follow absolute files and folders on disk, `onChange(path)`
 |       |   |-- useDebouncedSave.ts   Quiet-time autosave plus unmount and forced flush
+|       |   |-- useStore.ts           `useStore(store, select)`: read a `lib/store.ts` store through `useSyncExternalStore`
 |       |   |-- useDebouncedSearch.ts Hits of a debounced query, one abortable request, shared by the chat and Pi session pickers
 |       |   |-- useLoaded.ts          `useLoaded(key, load)`: the value or error of one keyed read
 |       |   |-- useResource.ts        `useResource`, `useResourceState`, `useResourceFamily`: subscribe to a shared resource, first read as a startup read
 |       |   |-- useFrameOverSlot.ts, useFrameAttachment.ts Lay the learn frame over a tab's slot, previewed tab first
 |       |   `-- usePolling.ts, useViewportReframe.ts, useSelectionAction.ts, ...
 |       |-- lib/
+|       |   |-- store.ts              `createStore`: one value with synchronous `get`/`set`/`subscribe`, under the chat and live Pi session stores
 |       |   |-- backend/              HTTP, URL, API base and stream clients
 |       |   |   |-- api/                  Resource endpoints: `index.ts` (public entry `@/lib/backend/api`), `http.ts` (fetch core), one client per route family
 |       |   |   |-- resources.ts          Shared instances of user-global reads (backend config, projects, models, prompts, usage, sidebar lists, project architecture workspaces), `refresh*` helpers, `forgetProjectDocuments`, `revalidateOnActivation`, `watchDocumentLists` (takes this device's change events too)
@@ -455,7 +461,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 
 | Entry point | Follow next |
 | --- | --- |
-| Browser page | `src/frontend/app/page.tsx` -> `app/_components/AppShell.tsx` / `TabContent.tsx`; providers also enter through `app/layout.tsx` |
+| Browser page | `src/frontend/app/page.tsx` -> `app/_components/AppShell.tsx` / `AppChrome.tsx` / `TabContent.tsx`; providers also enter through `app/layout.tsx` |
 | Backend app | `src/backend/server.py` -> `routes/` -> `lib/`; settings in `src/config.py` |
 | LikeC4 service | `src/c4/server.ts` -> `ops/apply.ts`, `payload.ts`, `workspace.ts`, `layout.ts` |
 | Dependency installer | `gigachad-install` in `pyproject.toml` -> `src/backend/install_deps.py` |
@@ -469,11 +475,11 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 
 | Change | Primary source owner | Adjacent contracts and regression locations |
 | --- | --- | --- |
-| Shell layout, deep links, surface selection | `src/frontend/app/_components/AppShell.tsx`, `TabContent.tsx`, `deepLink.ts` | `features/navigation/TabManager.tsx`, `contexts/TabContext.tsx`, `app/_components/__tests__/deepLink.test.ts` |
-| Chat generation, streaming or tool behavior | `src/backend/routes/chat.py`, `src/lib/toolcalling.py`, `src/lib/tools.py` | `src/frontend/features/chat/useChatStream.ts`, `useChat.ts`; `tests/test_toolcalling.py`, `tests/test_builtin_tools.py`, `tests/test_sandbox_plot.py`, `tests/test_chat_route.py`, chat `__tests__/useChatStream.test.tsx` |
+| Shell layout, deep links, surface selection | `src/frontend/app/_components/AppShell.tsx`, `AppChrome.tsx`, `TabContent.tsx`, `deepLink.ts` | `features/navigation/TabManager.tsx`, `contexts/TabContext.tsx`, `app/_components/__tests__/deepLink.test.ts` |
+| Chat generation, streaming or tool behavior | `src/backend/routes/chat.py`, `src/lib/toolcalling.py`, `src/lib/tools.py` | `src/frontend/features/chat/chatStore.ts`, `useChatConfig.ts`; `tests/test_toolcalling.py`, `tests/test_builtin_tools.py`, `tests/test_sandbox_plot.py`, `tests/test_chat_route.py`, chat `__tests__/chatStore.test.ts` |
 | Chat save, branches or merge | `src/lib/chat_store.py`, `src/backend/routes/histories.py` | `features/chat/useChatPersistence.ts`, `features/navigation/BranchContext.tsx` (`BranchContext` for state, `BranchActionsContext` / `useBranchActions` for the stable actions); `tests/test_chat_store_message_preservation.py` |
 | Conversation column, turn card, turn edit or delete | `src/frontend/features/conversation/`, `features/chat/ChatContainer.tsx`, `ChatPair.tsx`, `useChatTurns.ts`, `features/pi/PiTranscript.tsx`, `PiTab.tsx` | `packages/chat-ui/src/Turn.tsx`, `turn.css`, `pi-host/src/host/local/turns.ts`, `delete-turn.ts`, `src/backend/routes/pi.py`; conversation `__tests__/`, `app/_components/__tests__/chatEditDelete.test.tsx`, `pi-host/test/turns.test.ts`, `delete-turn.test.ts` |
-| Chat list, search or picker | `src/lib/chat_store.py`, `src/backend/routes/histories.py`, `src/frontend/features/chat/ChatPicker.tsx`, `useChatPicker.ts` | `lib/backend/api/chat.ts`, `features/conversation/useTextHighlights.ts`, `app/_components/TabContent.tsx`; `tests/test_chat_search.py`, chat `__tests__/ChatPicker.test.tsx`, `ChatContainer.test.tsx` |
+| Chat list, search or picker | `src/lib/chat_store.py`, `src/backend/routes/histories.py`, `src/frontend/features/chat/ChatPicker.tsx`, `useChatPicker.ts` | `lib/backend/api/chat.ts`, `features/conversation/useTextHighlights.ts`, `app/_components/AppChrome.tsx`; `tests/test_chat_search.py`, chat `__tests__/ChatPicker.test.tsx`, `ChatContainer.test.tsx` |
 | Chat tool rows | `src/frontend/features/conversation/tools/`, `features/chat/toolRun.tsx`, `toolRenderers.tsx` | `features/pi/MemoryTool.tsx` (imported by `app/_components/TabContent.tsx`); chat `__tests__/toolRenderers.test.tsx` |
 | Attachment live references, uploads or PDF extraction | `src/frontend/features/chat/attachments.ts`, `src/lib/attachments.py`, `attachment_materialize.py`, `extract_queue.py`, `mineru.py` | `src/backend/routes/files.py`, `documents.py`, `file_attach.py`; `tests/test_attachment_materialize.py`, `tests/test_extract_queue.py`, `tests/test_upload_assets.py`, chat `__tests__/attachments.test.ts` |
 | Text/PDF/plot viewing or editing | `src/frontend/features/editor/DocumentEditor.tsx`, `FileViewer.tsx`, `features/editor/pdf/`, `src/frontend/components/content/` | `src/backend/routes/documents.py`, `src/lib/document_service.py`, `fileviewer.py` (PDF annotation canvas key); `tests/test_document_state.py`, `tests/test_postgres_mode_end_to_end.py`, editor/content `__tests__/` |

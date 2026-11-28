@@ -204,5 +204,7 @@ export interface TabStripValue {
   add: (options?: { activate?: boolean }) => string
   /** Preview a background tab scaled into `slot`, null ends the preview. */
   peek: (peek: TabPeek | null) => void
+  /** Width over height of the area a tab fills, undefined before layout: what a tab's preview is shaped like. */
+  stackAspect: () => number | undefined
 }
 export const TabStripContext = createContext<TabStripValue | null>(null)

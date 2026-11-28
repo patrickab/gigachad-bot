@@ -37,8 +37,10 @@ type ProjectTreeContext =
   & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "selectDocument" | "createFile" | "newFileChoice" | "remove" | "promote" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture">
   & Pick<ReturnType<typeof useProjectActions>, "renameProjectTo" | "removeProject" | "changeArchive">
   & FolderRowContext
-  & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
+  & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "onFileClick">
   & {
+    activeFile: string | null
+    activeQaIndex: number | null
     projects: ProjectListItem[]
     pending: (key: string) => boolean
     appMode: AppSurface

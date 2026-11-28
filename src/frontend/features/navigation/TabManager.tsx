@@ -4,7 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useLayoutE
 import { isEditableTarget } from "@/lib/utils"
 import { PICKER_PANEL_RADIUS_PX } from "@/components/ui/CommandPicker"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, TabPeekContext, showingItem, shownItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { ChromeTabContext, TabContext, TabPeekContext, showingItem, shownItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -15,6 +15,8 @@ import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 interface TabManagerProps {
   /** Rendered once per tab inside that tab's `TabContext`. */
   children: React.ReactNode
+  /** The app's chrome, rendered once inside the `TabContext` of the tab in front. Gets the tab stack to place. */
+  chrome?: (stack: React.ReactNode) => React.ReactNode
   onTabsChange?: (tabs: Tab[]) => void
   onActiveTabChange?: (tab: Tab) => void
   defaultConfig?: TabConfig
@@ -77,35 +79,47 @@ function usePeekOverSlot(root: React.RefObject<HTMLDivElement | null>, peekedTab
   }, [root, peekedTabId, slot])
 }
 
+type UpdateTab = (id: string, patch: (tab: Tab) => Partial<Tab>) => void
+type SetMode = (id: string, label: string, loading?: boolean) => void
+
+/** The actions bound to tab `id`. */
+function tabActions(id: string, updateTab: UpdateTab, setMode: SetMode): TabActions {
+  return {
+    setModeLabel: (label, loading) => setMode(id, label, loading),
+    updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
+    setWorkspaceItem: (workspaceItem) => updateTab(id, () => showingItem(workspaceItem)),
+    hideItem: () => updateTab(id, () => ({ itemHidden: true })),
+    dropItem: () => updateTab(id, () => ({ workspaceItem: null, itemHidden: false })),
+    setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
+    setTitle: (title) => updateTab(id, () => ({ title })),
+  }
+}
+
 /** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
 function TabScope({ tab, isActive, updateTab, setMode, children }: {
   tab: Tab
   isActive: boolean
-  updateTab: (id: string, patch: (tab: Tab) => Partial<Tab>) => void
-  setMode: (id: string, label: string, loading?: boolean) => void
+  updateTab: UpdateTab
+  setMode: SetMode
   children: React.ReactNode
 }) {
   // One stable action set per tab. Consumers list these as effect dependencies, so a
   // fresh closure per render re-fires them all, and two mode-label producers in one
   // tab (the chat label plus an open document's filename) then overwrite each other forever.
   // TabScope is keyed by tab id, so the actions are built once for the tab's lifetime.
-  const [actions] = useState<TabActions>(() => {
-    const id = tab.id
-    return {
-      setModeLabel: (label, loading) => setMode(id, label, loading),
-      updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
-      setWorkspaceItem: (workspaceItem) => updateTab(id, () => showingItem(workspaceItem)),
-      hideItem: () => updateTab(id, () => ({ itemHidden: true })),
-      dropItem: () => updateTab(id, () => ({ workspaceItem: null, itemHidden: false })),
-      setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
-      setTitle: (title) => updateTab(id, () => ({ title })),
-    }
-  })
+  const [actions] = useState(() => tabActions(tab.id, updateTab, setMode))
   const value = useMemo<TabContextValue>(() => ({ tab, isActive, ...actions }), [tab, isActive, actions])
   return <TabContext.Provider value={value}>{children}</TabContext.Provider>
 }
 
-export function TabManager({ children, onTabsChange, onActiveTabChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
+/** The tab in front as the app's chrome sees it: its actions change with the tab in front, they survive its chat changing. */
+function ActiveTabScope({ tab, updateTab, setMode, children }: { tab: Tab; updateTab: UpdateTab; setMode: SetMode; children: React.ReactNode }) {
+  const actions = useMemo(() => tabActions(tab.id, updateTab, setMode), [tab.id, updateTab, setMode])
+  const value = useMemo<TabContextValue>(() => ({ tab, isActive: true, ...actions }), [tab, actions])
+  return <ChromeTabContext.Provider value={value}>{children}</ChromeTabContext.Provider>
+}
+
+export function TabManager({ children, chrome, onTabsChange, onActiveTabChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const { activeTab, setActiveTab, phaseOf, isShown, onAnimationEnd } = useWorkspaceSwitch(INITIAL_TAB.id)
   const [modes, setModes] = useState<Record<string, TabMode>>({})
@@ -288,28 +302,37 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     close: closeTab,
     add: addTab,
     peek: setPeek,
+    stackAspect: () => {
+      const box = rootRef.current
+      return box && box.offsetHeight > 0 ? box.offsetWidth / box.offsetHeight : undefined
+    },
   }), [tabs, activeTab, modes, shownName, closeTab, addTab, setActiveTab])
+
+  const stack = (
+    <div ref={rootRef} data-tab-stack className="relative h-full min-w-0 flex-1" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
+      {tabs.map((tab) => (
+        <div
+          key={tab.id}
+          className="workspace-tab absolute inset-0 h-full"
+          data-phase={tab.id === peekedTabId ? "peek" : phaseOf(tab.id)}
+          aria-hidden={tab.id !== activeTab}
+          inert={tab.id !== activeTab}
+          onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
+          style={{ display: isShown(tab.id) || tab.id === peekedTabId ? undefined : "none" }}
+        >
+          <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
+            {children}
+          </TabScope>
+        </div>
+      ))}
+    </div>
+  )
+  const front = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
 
   return (
     <TabStripContext.Provider value={strip}>
       <TabPeekContext.Provider value={peekedTabId}>
-        <div ref={rootRef} className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className="workspace-tab absolute inset-0 h-full"
-              data-phase={tab.id === peekedTabId ? "peek" : phaseOf(tab.id)}
-              aria-hidden={tab.id !== activeTab}
-              inert={tab.id !== activeTab}
-              onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
-              style={{ display: isShown(tab.id) || tab.id === peekedTabId ? undefined : "none" }}
-            >
-              <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
-                {children}
-              </TabScope>
-            </div>
-          ))}
-        </div>
+        {chrome ? <ActiveTabScope tab={front} updateTab={updateTab} setMode={setMode}>{chrome(stack)}</ActiveTabScope> : stack}
       </TabPeekContext.Provider>
     </TabStripContext.Provider>
   )

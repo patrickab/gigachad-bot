@@ -4,7 +4,7 @@ import { Search } from "lucide-react"
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useIsPresent } from "framer-motion"
-import { useTabActive } from "@/contexts/TabContext"
+import { useTabActive, useTabId } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useOutsidePress } from "@/hooks/useOutsidePress"
@@ -350,9 +350,13 @@ export function CommandPicker<T>({ triggerLabel, triggerContent, triggerClassNam
   </PillPopover>
 }
 
-/** Open state of a `FloatingPicker`: Alt+`key` (only modifier, not from a terminal) toggles it in the active tab while `enabled`, a tab sent to the background closes it. */
+/**
+ * Open state of a `FloatingPicker`: Alt+`key` (only modifier, not from a terminal) toggles it in the active tab while `enabled`.
+ * A tab sent to the background closes it, and so does another tab coming to the front of the app's chrome.
+ */
 export function useAltKeyPicker(key: string, enabled = true): { open: boolean; close: () => void } {
   const tabActive = useTabActive()
+  const tabId = useTabId()
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
   useEventListener("window", "keydown", (event) => {
@@ -361,7 +365,7 @@ export function useAltKeyPicker(key: string, enabled = true): { open: boolean; c
     setOpen((current) => !current)
   }, { active: tabActive && enabled, capture: true })
   // The list lies in a portal, a tab sent to the background takes its open list along
-  useResetOnChange(tabActive, (active) => { if (!active) close() })
+  useResetOnChange(tabActive && tabId, close)
   return { open, close }
 }
 

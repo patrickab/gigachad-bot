@@ -3,7 +3,7 @@ import { createRef, useContext } from "react"
 import { act, cleanup, render } from "@testing-library/react"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { TabStripContext, filesOfTabs, nextTab, type TabStripValue } from "@/features/navigation/tabs"
-import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { showingItem, useTab, type Tab, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { onFileClosed } from "@/lib/backend/fileEvents"
 
 vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: () => () => {} }))
@@ -59,5 +59,29 @@ describe("files closed by tabs", () => {
     expect(closed).toEqual([NOTEBOOK])
     expect([...filesOfTabs(manager.current!.getTabs())]).toEqual(["/work/renamed.ipynb"])
     stop()
+  })
+})
+
+describe("chrome", () => {
+  it("sees the tab in front and acts on it alone, also after that tab opened another chat", () => {
+    const manager = createRef<TabManagerHandle>()
+    let front!: TabContextValue
+    function Probe() {
+      front = useTab()
+      return null
+    }
+    sessionStorage.clear()
+    render(<TabManager ref={manager} chrome={(stack) => <><Probe />{stack}</>}>{null}</TabManager>)
+    const [first] = manager.current!.getTabs()
+    const second = nextTab()
+    act(() => manager.current!.openTab(second))
+    expect(front.tab.id).toBe(second.id)
+    act(() => manager.current!.switchToTab(first.id))
+    expect(front.tab.id).toBe(first.id)
+    act(() => manager.current!.showChat("p/a.json"))
+    act(() => front.updateConfig({ selectedModel: "probe" }))
+    const configs = manager.current!.getTabs().map((tab) => tab.config.selectedModel)
+    expect(configs).toEqual(["probe", second.config.selectedModel])
+    expect(front.tab.historyFile).toBe("p/a.json")
   })
 })

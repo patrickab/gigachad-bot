@@ -8,13 +8,11 @@ import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
 import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
 import { nextTab, piSessionOf, tabLabel } from "@/features/navigation/tabs"
-import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
+import { BranchProvider } from "@/features/navigation/BranchContext"
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { forgetComposerDraft, newChatDraftKey } from "@/features/chat/composer/useComposerDraft"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
-import { FilePanelProvider } from "@/features/editor/FilePanel"
 import { ShellTerminals } from "@/features/editor/ShellTerminal"
-import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { ProviderUsagePoll } from "@/features/navigation/ProviderUsage"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
@@ -28,27 +26,9 @@ import { useKernelShutdown } from "@/features/notebook/useKernelShutdown"
 import { onFileMove } from "@/lib/backend/fileEvents"
 import { watchDocumentLists } from "@/lib/backend/resources"
 import { AmbientBackdrop } from "@/features/ambient/AmbientBackdrop"
+import { AppChrome, type SaveAsRequest } from "./AppChrome"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
-
-/** Keep each project's list entry (saved chat labels) current: histories refresh after every chat save. */
-function ProjectListSync() {
-  const { branchMeta } = useBranches()
-  const { refreshProjects } = useProject()
-  const seen = useRef(branchMeta)
-  // The project list's own startup read already reflects the first branch metadata load.
-  const startup = useRef(true)
-  useEffect(() => {
-    if (seen.current === branchMeta) return
-    seen.current = branchMeta
-    if (startup.current) {
-      startup.current = false
-      return
-    }
-    void refreshProjects().catch(() => {})
-  }, [branchMeta, refreshProjects])
-  return null
-}
 
 /** Whether `ids` already lists the ids of `tabs` in order, so a tab update that keeps them re-renders nothing. */
 function hasTabIds(ids: readonly string[], tabs: readonly Tab[]): boolean {
@@ -156,7 +136,7 @@ export function AppShell() {
   // A file moved by this device or another one moves the tabs that show it
   useEffect(() => onFileMove(({ from, to }) => tabManagerRef.current?.relocateDocument(from, to)), [])
 
-  // Every tab's sidebar shows the same lists, one subscription keeps them current
+  // One subscription keeps the sidebar's lists current
   useEffect(() => watchDocumentLists(), [])
 
   // Click hints (`f`) for the whole app, the shell's clickables only
@@ -171,6 +151,14 @@ export function AppShell() {
 
   const closeDashboard = useCallback(() => setDashboardSlug(null), [])
 
+  // The save dialog of the app's chrome, opened by the tab in front and shown while it is
+  const [saveAs, setSaveAs] = useState<SaveAsRequest | null>(null)
+  const handleSaveAs = useCallback((save: SaveAsRequest["save"]) => {
+    const tab = activeTabRef.current
+    if (tab) setSaveAs({ tabId: tab.id, save })
+  }, [])
+  const closeSaveAs = useCallback(() => setSaveAs(null), [])
+
   return (
     <ContentAreaProvider>
       <AmbientBackdrop />
@@ -179,17 +167,33 @@ export function AppShell() {
           <MemoryViewerProvider>
             <PiSessionsProvider>
               <LearnProvider onOpenItem={handleOpenItem}>
-                <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-                  <EnabledToolsProvider>
-                    <FilePanelProvider>
-                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} reveal={reveal} />
-                    </FilePanelProvider>
-                  </EnabledToolsProvider>
-                </TabManager>
+                <EnabledToolsProvider>
+                  <TabManager
+                    ref={tabManagerRef}
+                    onTabsChange={handleTabsChange}
+                    onActiveTabChange={handleActiveTabChange}
+                    defaultConfig={settings.tabDefaults}
+                    chrome={(stack) => (
+                      <AppChrome
+                        onOpenChat={handleOpenChat}
+                        onOpenProject={handleOpenProject}
+                        onProjectRenamed={handleProjectRenamed}
+                        onNewChat={handleNewChat}
+                        onOpenItem={handleOpenItem}
+                        reveal={reveal}
+                        saveAs={saveAs}
+                        onSaveAsDone={closeSaveAs}
+                      >
+                        {stack}
+                      </AppChrome>
+                    )}
+                  >
+                    <TabContent onOpenChat={handleOpenChat} onOpenItem={handleOpenItem} onSaveAs={handleSaveAs} reveal={reveal} />
+                  </TabManager>
+                </EnabledToolsProvider>
               </LearnProvider>
             </PiSessionsProvider>
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
-            <ProjectListSync />
             <ProviderUsagePoll />
             <MemoryViewer />
             <ShellTerminals activeTabId={activeTabId} tabIds={tabIds} />

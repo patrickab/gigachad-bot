@@ -4,7 +4,6 @@ import type { ReactNode } from "react"
 import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
 import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import type { ChatReveal } from "@/features/chat/ChatContainer"
 import type { SSEEvent, SSEStreamResult } from "@/lib/backend/sse"
 import type { ChatHistory } from "@/lib/domain/histories"
 import type { Attachment, ChatRequest, Message } from "@/lib/domain/types"
@@ -19,8 +18,6 @@ const { saveChat, streams, history, branches, undoDelete, enabledTools } = vi.ho
   branches: {
     refreshAll: async () => {},
     createBranch: async () => ({ childFile: "child.json", chatId: "child" }),
-    setActiveFile: () => {},
-    setActiveQaIndex: () => {},
   },
   undoDelete: { schedule: () => {}, pending: () => false },
   enabledTools: { enabledTools: [], toggleTool: () => {} },
@@ -74,10 +71,10 @@ const messages: Message[] = [
 ]
 
 const noop = () => {}
-const reveal: ChatReveal = { historyFile: null, qaIndex: null, seq: 0 }
 
-/** `useTabChat` for a chat holding `messages`, saved in `historyFile` or unsaved, with a stub composer. */
-async function renderChat(historyFile: string | null) {
+/** `useTabChat` for a chat holding `messages`, saved in `historyFile` or unsaved, with a stub composer; `onSaveAs` gets its Alt+S requests. */
+async function renderChat(historyFile: string | null, onSaveAs: (save: (name: string) => Promise<void>) => void = noop) {
+  const adopted = vi.fn()
   history.current = {
     messages, filename: "c1.json", chat_id: "c1", title: null, usage: null, parent_id: null, branch_message_idx: null, children: [],
   } satisfies ChatHistory
@@ -87,12 +84,12 @@ async function renderChat(historyFile: string | null) {
       config: { ...DEFAULT_TAB_CONFIG, selectedModel: "m" }, projectSlug: null, workspaceItem: null, itemHidden: false,
     },
     isActive: true,
-    setModeLabel: noop, updateConfig: noop, hideItem: noop, dropItem: noop, setWorkspaceItem: noop, setHistoryFile: noop, setTitle: noop,
+    setModeLabel: noop, updateConfig: noop, hideItem: noop, dropItem: noop, setWorkspaceItem: noop, setHistoryFile: adopted, setTitle: noop,
   }
   const wrapper = ({ children }: { children: ReactNode }) => <TabContext.Provider value={tab}>{children}</TabContext.Provider>
-  const rendered = renderHook(() => useTabChat({ reveal, onOpenChat: noop, onOpenItem: noop }), { wrapper })
-  if (historyFile) await waitFor(() => expect(rendered.result.current.chat.messages).toHaveLength(messages.length))
-  else act(() => { rendered.result.current.chat.replaceMessages(() => messages) })
+  const rendered = renderHook(() => useTabChat({ onOpenChat: noop, onOpenItem: noop, onSaveAs }), { wrapper })
+  if (historyFile) await waitFor(() => expect(rendered.result.current.chat.get().messages).toHaveLength(messages.length))
+  else act(() => { rendered.result.current.chat.update(() => messages) })
   let draft = ""
   const composer = { updateText: (update: (current: string) => string) => { draft = update(draft) } } as ChatInputHandle
   rendered.result.current.chatInputRef.current = composer
@@ -101,9 +98,9 @@ async function renderChat(historyFile: string | null) {
     history.current = { ...history.current as ChatHistory, messages: other, filename: file, chat_id: "c2" }
     tab = { ...tab, tab: { ...tab.tab, chatId: "c2", historyFile: file } }
     rendered.rerender()
-    await waitFor(() => expect(contents(rendered.result.current.chat.messages)).toEqual(contents(other)))
+    await waitFor(() => expect(contents(rendered.result.current.chat.get().messages)).toEqual(contents(other)))
   }
-  return { ...rendered, draft: () => draft, openChat }
+  return { ...rendered, draft: () => draft, openChat, adopted }
 }
 
 const contents = (list: Message[]) => list.map((m) => m.content)
@@ -124,7 +121,7 @@ describe("deleting a pair", () => {
 
     act(() => result.current.turns.handleDeletePair(2))
 
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
+    await waitFor(() => expect(contents(result.current.chat.get().messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
     expect(saveChat).toHaveBeenCalledTimes(1)
     expect(saveChat.mock.calls[0][0]).toBe("c1.json")
     expect(contents(lastSaved())).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"])
@@ -137,11 +134,11 @@ describe("deleting a pair", () => {
     act(() => result.current.turns.handleDeletePair(2))
 
     await waitFor(() => expect(result.current.turns.turnError).toBe("The chat could not be saved, so the turn was not deleted."))
-    expect(contents(result.current.chat.messages)).toEqual(contents(messages))
+    expect(contents(result.current.chat.get().messages)).toEqual(contents(messages))
 
     // The next delete that saves clears it
     act(() => result.current.turns.handleDeletePair(2))
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
+    await waitFor(() => expect(contents(result.current.chat.get().messages)).toEqual(["Question 0", "Answer 0", "Question 2", "Answer 2"]))
     expect(result.current.turns.turnError).toBeNull()
   })
 })
@@ -168,7 +165,7 @@ describe("sending a question", () => {
     let sent: Promise<boolean> = Promise.resolve(false)
     act(() => { sent = result.current.turns.handleSend("Attached question", [notes]) })
 
-    await waitFor(() => expect(result.current.chat.messages.at(-1)?.content).toBe("edited answer"))
+    await waitFor(() => expect(result.current.chat.get().messages.at(-1)?.content).toBe("edited answer"))
     await act(async () => { release(); await sent })
     expect(contents(lastSaved()).slice(-2)).toEqual(["Attached question", "edited answer"])
   })
@@ -185,7 +182,7 @@ describe("sending a question", () => {
     await openChat("c2.json", other)
     await act(async () => { release(); await sent })
 
-    expect(contents(result.current.chat.messages)).toEqual(contents(other))
+    expect(contents(result.current.chat.get().messages)).toEqual(contents(other))
     expect(saveChat).not.toHaveBeenCalled()
   })
 
@@ -195,13 +192,13 @@ describe("sending a question", () => {
     streams.beforeDone = new Promise((resolve) => { release = resolve })
     let sent: Promise<boolean> = Promise.resolve(false)
     act(() => { sent = result.current.turns.handleSend("Late question", []) })
-    await waitFor(() => expect(result.current.chat.messages.at(-1)?.content).toBe("edited answer"))
+    await waitFor(() => expect(result.current.chat.get().messages.at(-1)?.content).toBe("edited answer"))
 
     const other: Message[] = [{ role: "user", content: "Other question" }, { role: "assistant", content: "Other answer" }]
     await openChat("c2.json", other)
     await act(async () => { release(); await sent })
 
-    expect(contents(result.current.chat.messages)).toEqual(contents(other))
+    expect(contents(result.current.chat.get().messages)).toEqual(contents(other))
     expect(saveChat).not.toHaveBeenCalled()
   })
 })
@@ -213,8 +210,8 @@ describe("editing a pair", () => {
     act(() => result.current.onEditPair(2, "Question 1, edited"))
 
     await waitFor(() => expect(contents(lastSaved() ?? [])).toContain("edited answer"))
-    await waitFor(() => expect(contents(result.current.chat.messages)).toEqual(["Question 0", "Answer 0", "Question 1, edited", "edited answer"]))
-    expect(result.current.chat.messages[2].attachments?.map((a) => a.name)).toEqual(["notes.md"])
+    await waitFor(() => expect(contents(result.current.chat.get().messages)).toEqual(["Question 0", "Answer 0", "Question 1, edited", "edited answer"]))
+    expect(result.current.chat.get().messages[2].attachments?.map((a) => a.name)).toEqual(["notes.md"])
     expect(contents(saveChat.mock.calls[0][2] as Message[])).toEqual(["Question 0", "Answer 0"])
     expect(streams.requests).toHaveLength(1)
     const request = streams.requests[0] as ChatRequest & { messages: { content: string }[] }
@@ -240,8 +237,50 @@ describe("editing a pair", () => {
     act(() => result.current.onEditPair(2, "Question 1, edited"))
 
     await waitFor(() => expect(result.current.turns.turnError).toBe("The chat could not be saved, so the turn was not edited."))
-    expect(contents(result.current.chat.messages)).toEqual(contents(messages))
+    expect(contents(result.current.chat.get().messages)).toEqual(contents(messages))
     expect(streams.requests).toHaveLength(0)
     expect(draft()).toBe("")
+  })
+})
+
+describe("saving", () => {
+  it("quick saves the messages of the moment Alt+S is pressed", async () => {
+    const { result } = await renderChat("c1.json")
+
+    act(() => {
+      result.current.chat.update((current) => current.slice(0, 2))
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true }))
+    })
+
+    await waitFor(() => expect(saveChat).toHaveBeenCalledTimes(1))
+    expect(contents(lastSaved())).toEqual(["Question 0", "Answer 0"])
+  })
+
+  it("saves an untitled chat under the name asked for with its messages when named, and the tab adopts the file", async () => {
+    let save = (_name: string) => Promise.resolve()
+    const { result, adopted } = await renderChat(null, (request) => { save = request })
+
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", altKey: true })) })
+    act(() => { result.current.chat.update((current) => [...current, { role: "user", content: "Question 3" }]) })
+    await act(() => save("Notes"))
+
+    expect(saveChat.mock.calls[0][0]).toBe("Notes.json")
+    expect(contents(lastSaved()).at(-1)).toBe("Question 3")
+    expect(adopted).toHaveBeenCalledWith("Notes.json")
+  })
+
+  it("writes two autosaves in flight in the order of their turns", async () => {
+    const { result } = await renderChat("c1.json")
+    let release = () => {}
+    saveChat.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+
+    await act(async () => { await result.current.turns.handleSend("First", []) })
+    await act(async () => { await result.current.turns.handleSend("Second", []) })
+    expect(saveChat).toHaveBeenCalledTimes(1)
+    await act(async () => { release() })
+
+    await waitFor(() => expect(saveChat).toHaveBeenCalledTimes(2))
+    expect(contents(saveChat.mock.calls[0][2] as Message[]).slice(-2)).toEqual(["First", "edited answer"])
+    expect(contents(lastSaved()).slice(-4)).toEqual(["First", "edited answer", "Second", "edited answer"])
   })
 })

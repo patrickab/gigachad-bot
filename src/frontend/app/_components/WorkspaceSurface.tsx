@@ -30,12 +30,12 @@ import { PiModelDropdown, PiThinkingSelector, type PiModelControls } from "@/fea
 import type { PiInsertion } from "@/features/pi/PiComposer"
 import { ChatContextUsage } from "@/features/chat/ContextUsage"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
-import { PiSessionPicker } from "@/features/pi/PiSessionPicker"
+import { useSidebar } from "@/features/navigation/SidebarContext"
 import { factoryItem as factoryTaskItem } from "@/features/factory/items"
 import { TopBarSlot, useTopBarSlot } from "@/features/navigation/TopBarSlots"
 import { fileItem, shownItem, tabSurface, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
-import type { Usage } from "@/lib/domain/types"
+import type { ChatStore } from "@/features/chat/chatStore"
 import { workbenchKindOf } from "@/lib/domain/workbench"
 import { isNotebookPath } from "@/lib/paths"
 
@@ -47,13 +47,11 @@ type CanvasViewControls = Pick<ReturnType<typeof useCanvasView>,
   "view" | "navigateArchitecture" | "closeCanvas" | "openCreatedCanvas" | "architectureEdgeStyle" | "setArchitectureEdgeStyle">
 
 interface WorkspaceSurfaceProps {
-  /** Leads the top bar in every mode while the sidebar is collapsed, the open sidebar holds its own toggle. */
-  sidebarToggle: ReactNode
   canvas: CanvasViewControls
   modelProps: ModelProps
   reasoningLevels: string[] | undefined
   reasoningEffort: string
-  totalUsage: Usage
+  chat: ChatStore
   chatColumn: HTMLDivElement | null
   /** The chat, shown in chat mode and whenever another mode has no item to show. */
   chatBody: ReactNode
@@ -62,8 +60,6 @@ interface WorkspaceSurfaceProps {
   /** Pi's model and thinking pickers for an empty chat with a folder picked, they replace the chat's. */
   piStart: PiModelControls | null
   onLaunched: () => void
-  /** Opens a session picked in the top bar's "Agents" picker. */
-  onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
 }
 
 /** What one mode puts in the top bar beside the sidebar toggle, and the surface below it. */
@@ -83,6 +79,12 @@ interface Surface {
 
 /** Width of a canvas's chat panel, the PDF chat's. */
 const CANVAS_CHAT_WIDTH_PX = 320
+
+/** Leads the top bar in every mode while the sidebar is collapsed, the open sidebar holds its own toggle. */
+function SidebarOpenButton() {
+  const { collapsed, toggleCollapsed } = useSidebar()
+  return collapsed && <PanelToggleButton side="left" open={false} onClick={toggleCollapsed} openLabel="Open sidebar" closeLabel="Close sidebar" />
+}
 
 /**
  * The tab's workbench item once prepared: LaTeX or Markdown by the file's kind, mounted on its disk path.
@@ -124,7 +126,7 @@ function WorkbenchItemBody({ item, onItemChange, onModeLabel, drawerOpen, onDraw
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, launch, piStart, onLaunched, onOpenItem }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ canvas, modelProps, reasoningLevels, reasoningEffort, chat, chatColumn, chatBody, launch, piStart, onLaunched }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, hideItem, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   // The workbench's Pi chats need host access, other logins keep the PDF's local assistant
@@ -194,7 +196,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               ? <PiModelDropdown controls={piStart} modelProps={modelProps} chatColumn={chatColumn} />
               : <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />}
           </TopBarTransparent>,
-          usage: <ChatContextUsage usage={totalUsage} model={config.selectedModel} />,
+          usage: <ChatContextUsage chat={chat} model={config.selectedModel} />,
         }),
         body: chatBody,
       }
@@ -351,7 +353,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
 
   return <>
     <TopBar
-      left={<><TopBarTransparent><div className="flex items-center gap-3">{sidebarToggle}<PiSessionPicker onOpenItem={onOpenItem} /></div></TopBarTransparent>{surface.left}</>}
+      left={<><TopBarTransparent><div className="flex items-center gap-3"><SidebarOpenButton /></div></TopBarTransparent>{surface.left}</>}
       center={surface.center}
       right={surface.right}
       raised={surface.raised}

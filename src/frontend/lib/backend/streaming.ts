@@ -1,10 +1,9 @@
-import type React from "react"
 import type { SSEEvent } from "./sse"
 import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "@/lib/domain/types"
 
 /** Replace the message at `index` (negative counts from the end) with `update(message)`; a missing message or a null result leaves state untouched. */
 export function updateMessageAt(
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
+  setMessages: (change: (messages: Message[]) => Message[]) => unknown,
   index: number,
   update: (message: Message) => Message | null,
 ) {
@@ -16,33 +15,6 @@ export function updateMessageAt(
     copy[at] = next
     return copy
   })
-}
-
-/** Returns a `publish` that copies the accumulator `msg` into the trailing assistant slot on every
- *  call: batching short fast responses would collapse streaming into one final render.
- *  `shown` is the list's answer slot when the stream starts (a placeholder, or `msg` itself). */
-export function createMessagePublisher(
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
-  msg: Message,
-  shown: Message | undefined,
-): () => void {
-  // `msg` remains the mutable accumulator. `owned` tracks the copy React last
-  // received so an abandoned stream cannot overwrite a newer assistant message.
-  let owned = shown
-
-  return () => {
-    const published = { ...msg }
-    const expected = owned
-    // Advance before the updater runs: React invokes it later, and may invoke it twice.
-    owned = published
-    setMessages((prev) => {
-      const last = prev[prev.length - 1]
-      if (!last || last.role !== "assistant" || last !== expected) return prev
-      const copy = [...prev]
-      copy[copy.length - 1] = published
-      return copy
-    })
-  }
 }
 
 /** A wire event decoded into the shape the chat reducer consumes. Unknown event
@@ -109,7 +81,7 @@ type MessageStreamEvent = Extract<
   { kind: "token" | "tool_call" | "tool_progress" | "tool_result" | "error" }
 >
 
-// Mutates `msg` in place; createMessagePublisher publishes the copy.
+// Mutates `msg` in place; the chat store publishes the copy.
 export function applyChatStreamEvent(msg: Message, event: MessageStreamEvent): void {
   switch (event.kind) {
     case "token":

@@ -1,7 +1,6 @@
 "use client"
 
-import { createContext, useContext } from "react"
-import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { createContext, use, useContext } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import type { LearnView, PiView } from "@/lib/domain/types"
 import { opensInWorkbench } from "@/lib/domain/workbench"
@@ -107,14 +106,30 @@ export interface TabContextValue extends TabActions {
 
 export const TabContext = createContext<TabContextValue | null>(null)
 
-/** The enclosing tab. Throws outside a `TabManager`. */
+/** The tab in front, for the app's chrome around the tabs. */
+// Its own context: React schedules every consumer under an outer provider of the same context, so one shared with the tabs would re-render every tab on a switch
+export const ChromeTabContext = createContext<TabContextValue | null>(null)
+
+/** The enclosing tab, else in the app's chrome the tab in front: a tab never reads the chrome's context, so it never subscribes to it. */
+export function useTabValue(): TabContextValue | null {
+  return useContext(TabContext) ?? use(ChromeTabContext)
+}
+
+/** The enclosing tab; in the app's chrome the tab in front. Throws outside a `TabManager`. */
 export function useTab(): TabContextValue {
-  return useRequiredContext(TabContext, "useTab must be used inside a tab")
+  const value = useTabValue()
+  if (!value) throw new Error("useTab must be used inside a tab")
+  return value
 }
 
 /** Whether the enclosing tab is frontmost; true outside a tab. */
 export function useTabActive(): boolean {
-  return useContext(TabContext)?.isActive ?? true
+  return useTabValue()?.isActive ?? true
+}
+
+/** Id of the enclosing tab, for the app's chrome the tab in front, null outside both. */
+export function useTabId(): string | null {
+  return useTabValue()?.tab.id ?? null
 }
 
 /** Id of the tab the tab picker previews, null while it previews none. */

@@ -244,23 +244,23 @@ describe("Project navigation", () => {
     expect(view.getByRole("button", { name: "Proj" })).toBeInTheDocument()
   })
 
-  it("re-reads the mount tree and worktrees on tab activation only while the sidebar shows them", async () => {
-    const tab = nextTab()
-    const inTab = (isActive: boolean) => (
-      <TabContext.Provider value={{ tab, isActive, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+  it("re-reads the mount tree and worktrees once when another tab comes to the front, only while the sidebar shows them", async () => {
+    const [first, second] = [nextTab(), nextTab()]
+    const inTab = (tab: typeof first) => (
+      <TabContext.Provider value={{ tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
         <Sidebar appMode="chat" />
       </TabContext.Provider>
     )
     const reads = () => api.fileRootTree.mock.calls.length + api.fetchWorktrees.mock.calls.length
-    const view = testingRender(inTab(true))
+    const view = testingRender(inTab(first))
     await waitFor(() => expect(api.fetchWorktrees).toHaveBeenCalled())
     try {
       for (const collapsed of [true, false]) {
         sidebarFrame.collapsed = collapsed
-        view.rerender(inTab(false))
+        view.rerender(inTab(first))
         await act(async () => {})
         const before = reads()
-        view.rerender(inTab(true))
+        view.rerender(inTab(second))
         await act(async () => {})
         expect(reads() - before).toBe(collapsed ? 0 : 2)
       }
@@ -1074,8 +1074,8 @@ describe("Project navigation", () => {
       return { status: "ok", new_path: "proj/loose-2.json" }
     })
     const manager = createRef<TabManagerHandle>()
-    const view = render(<BranchProvider onFileClick={vi.fn()} onHistoriesMoved={(moves) => manager.current!.relocateHistories(moves)}>
-      <TabManager ref={manager}><Sidebar appMode="chat" /><WorkspaceDraft /></TabManager>
+    const view = testingRender(<BranchProvider onFileClick={vi.fn()} onHistoriesMoved={(moves) => manager.current!.relocateHistories(moves)}>
+      <TabManager ref={manager} chrome={(stack) => <><Sidebar appMode="chat" />{stack}</>}><WorkspaceDraft /></TabManager>
     </BranchProvider>)
     const rootTab = { ...nextTab(), title: "Root", historyFile: "loose.json" }
     const childTab = { ...nextTab(), title: "Branch", historyFile: "child.json" }
@@ -1087,7 +1087,8 @@ describe("Project navigation", () => {
     const navigation = within(view.getByRole("navigation", { name: "Workspace" }))
     const general = within(await navigation.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
-    expect(general.queryByRole("button", { name: "child" })).not.toBeInTheDocument()
+    // The branch shows only in its root's branch preview (the tab in front shows it), not as a row of its own
+    expect(general.getAllByRole("button", { name: "child" })).toHaveLength(1)
     expect(navigation.queryByLabelText("Proj contents")).not.toBeInTheDocument()
     const payload = new Map<string, string>()
     const dataTransfer = {
@@ -1106,6 +1107,34 @@ describe("Project navigation", () => {
     expect(manager.current!.getTabs().find((tab) => tab.id === childTab.id)).toMatchObject({ historyFile: "proj/child-2.json", projectSlug: "proj" })
     expect(view.getByRole("textbox", { name: "Draft Branch" })).toHaveValue("Keep this draft")
     expect(api.moveHistoryItem).toHaveBeenCalledWith("loose.json", "proj")
+    // The row of the chat in front is marked, under its new path too
+    expect(project.getByRole("button", { name: "loose-2" })).not.toHaveAttribute("aria-current")
+    act(() => manager.current!.switchToTab(rootTab.id))
+    expect(project.getByRole("button", { name: "loose-2" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("marks the revealed question of the chat in front instead of its row", async () => {
+    const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
+    vi.mocked(useBranches).mockImplementation(actual.useBranches)
+    vi.mocked(useBranchActions).mockImplementation(actual.useBranchActions)
+    const root: BranchMeta = { chat_id: "root", parent_id: null, branch_message_idx: null, children: [{ chat_id: "child", branch_message_idx: 0 }], qa_count: 2 }
+    const child: BranchMeta = { chat_id: "child", parent_id: "root", branch_message_idx: 0, children: [], qa_count: 1 }
+    api.listChatHistories.mockResolvedValue({ files: ["loose.json", "child.json"] })
+    api.fetchBranchMeta.mockResolvedValue({ "loose.json": root, "child.json": child })
+    const shown = (activeQaIndex: number | null) => (
+      <BranchProvider onFileClick={vi.fn()}>
+        <TabContext.Provider value={{ tab: { ...nextTab(), historyFile: "loose.json" }, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), hideItem: vi.fn(), dropItem: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+          <Sidebar appMode="chat" activeQaIndex={activeQaIndex} />
+        </TabContext.Provider>
+      </BranchProvider>
+    )
+    const view = testingRender(shown(null))
+    const general = within(await view.findByLabelText("general contents"))
+    expect(await general.findByRole("button", { name: "loose @1" })).toHaveAttribute("aria-current", "page")
+    expect(general.getByRole("button", { name: "@0" })).not.toHaveClass("font-semibold")
+    view.rerender(shown(0))
+    expect(general.getByRole("button", { name: "loose @1" })).not.toHaveAttribute("aria-current")
+    expect(general.getByRole("button", { name: "@0" })).toHaveClass("font-semibold")
   })
 
   it("keeps a general history visible when dropping it into a project fails", async () => {
@@ -1160,6 +1189,31 @@ describe("Tab picker", () => {
     tapSpace()
     expect(listbox()).toBeInTheDocument()
     expect(view.getByRole("combobox", { name: "Search tabs…" })).toHaveFocus()
+  })
+
+  it("closes in the app's chrome when another tab comes to the front", () => {
+    const manager = createRef<TabManagerHandle>()
+    // Outside the helper's tab: the chrome reads the tab in front
+    const view = testingRender(<TabManager ref={manager} chrome={(stack) => <>{stack}<TabPicker /></>}>{null}</TabManager>)
+    act(() => { manager.current!.openTab({ ...nextTab(), title: "Alpha" }) })
+    tapSpace()
+    expect(view.getByRole("listbox", { name: "Tabs" })).toBeInTheDocument()
+
+    act(() => manager.current!.switchToTab(manager.current!.getTabs()[0].id))
+    expect(view.queryByRole("listbox", { name: "Tabs" })).toBeNull()
+  })
+
+  it("previews a tab at the shape of the area tabs fill, narrower than the window beside the open sidebar", () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = testingRender(<TabManager ref={manager} chrome={(stack) => <>{stack}<TabPicker /></>}>{null}</TabManager>)
+    const stack = view.container.querySelector<HTMLElement>("[data-tab-stack]")!
+    Object.defineProperties(stack, { offsetWidth: { value: 700 }, offsetHeight: { value: 700 } })
+    act(() => { manager.current!.openTab({ ...nextTab(), title: "Alpha" }) })
+
+    fireEvent.mouseMove(tabRow(view, "general / chats / New chat"), { clientX: 1, clientY: 0 })
+
+    const preview = document.body.querySelector<HTMLElement>("[aria-hidden].fixed")!
+    expect(parseFloat(preview.style.width) / parseFloat(preview.style.height)).toBeCloseTo(1)
   })
 
   it("closes the highlighted background tab with Delete or Alt+W and opens one with Alt+T, the picker stays open, the current tab stays", () => {

@@ -154,14 +154,13 @@ export interface LearnSidebarFrame {
  * - The Learn section starts teaching and practice sessions, opens the knowledge graph and LearnHarness's settings,
  *   filters by title (LearnHarness's ranking, its Teaching/Practice/All filter, ⌘⇧F in the frame) over every session,
  *   and lists the frame's background agents, whose details, costs and stop buttons are upstream's own section
- * - A tab showing a session deleted here goes to LearnHarness's home, like upstream's sidebar delete
  */
 export function useLearnSidebar({ open, projects, sidebar }: {
   open: OpenItem
   projects: readonly { slug: string; name: string }[]
   sidebar: LearnSidebarFrame
 }): LearnSidebar {
-  const { tab, isActive, setWorkspaceItem } = useTab()
+  const { tab, isActive } = useTab()
   const { sessions, showInFrame } = useLearn()
   const metas = useLearnFrameState("session-meta")
   const { hasPlan, openPanel } = useLearnPanels()
@@ -182,12 +181,6 @@ export function useLearnSidebar({ open, projects, sidebar }: {
   const activeSession = sessions.sessions.find((session) => session.id === activeSessionId) ?? null
   // Filtering searches every session, a project's sessions name their project. The walked match (else the first) is highlighted.
   const matches = query === null ? [] : filterSessions(listed, query, kind)
-
-  // This tab's session was deleted: go home like upstream's sidebar does.
-  const deleted = activeSessionId !== null && sessions.missing.has(activeSessionId)
-  useEffect(() => {
-    if (deleted) setWorkspaceItem(learnItem({ kind: "home" }, tab.projectSlug))
-  }, [deleted, setWorkspaceItem, tab.projectSlug])
 
   // A session shows in its project's learn folder, and in this section when it has no project or the filter matches it.
   const renameKey = (session: LearnSession, place: "project" | "section") => `learn:${place}:${session.id}`
