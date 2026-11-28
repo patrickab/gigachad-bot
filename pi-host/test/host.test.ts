@@ -19,6 +19,8 @@ import type {
   SpawnRequest,
 } from "../src/host/index.ts";
 import { startServer } from "../src/server.ts";
+/** What the fake host answers as `pi --version`. */
+const PI_VERSION = "9.9.9";
 import { createSupervisor, type SocketData, type Supervisor } from "../src/supervisor/index.ts";
 
 const TOKEN = "test-token";
@@ -71,7 +73,7 @@ class FakeHost implements Host {
   readonly states = new Map<string, PrivateState>();
 
   async piVersion(): Promise<string> {
-    return "1.5.2";
+    return PI_VERSION;
   }
 
   async spawn(request: SpawnRequest): Promise<PiChild> {
@@ -244,7 +246,7 @@ test("supervisor and catalog run every machine action through the Host", async (
   const files = await api(`/files?cwd=${encodeURIComponent(CWD)}`);
   expect(files.body.files.map((file: { path: string }) => file.path)).toContain("src/main.ts");
   expect((await api("/files?cwd=/not/on/the/host")).status).toBe(400);
-  expect((await api("/health")).body).toMatchObject({ ok: true, piVersion: "1.5.2", sessions: [] });
+  expect((await api("/health")).body).toMatchObject({ ok: true, piVersion: PI_VERSION, sessions: [] });
 });
 
 test("a new session is identified from the child and carries the host's machine id", async () => {
